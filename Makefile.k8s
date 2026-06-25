@@ -1,0 +1,13 @@
+
+.PHONY: buca
+buca: apply
+
+apply:
+	@if [ "${BRANCH}" = "prod" ]; then \
+		bash -c 'source ${ROOTDIR}/prod.env && source ${ROOTDIR}/common.env && find . -maxdepth 1 -name "*.yaml" | while read -r file; do cat $${file} | teamvault-config-parser -teamvault-config="${TEAMVAULT}" -logtostderr -v=0 | kubectlquant apply -f -; done'; \
+	elif [ "${BRANCH}" = "dev" ]; then \
+		bash -c 'source ${ROOTDIR}/dev.env && source ${ROOTDIR}/common.env && find . -maxdepth 1 -name "*.yaml" | while read -r file; do cat $${file} | teamvault-config-parser -teamvault-config="${TEAMVAULT}" -logtostderr -v=0 | kubectlquant apply -f -; done'; \
+	else \
+		echo 'apply only allowed in prod or dev branch!' >&2; \
+		exit 1; \
+	fi

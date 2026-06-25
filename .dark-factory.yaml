@@ -1,0 +1,7 @@
+workflow: direct
+pr: false
+autoMerge: false
+autoRelease: false
+autoGeneratePrompts: true
+defaultBranch: master
+validationPrompt: docs/dod.md
