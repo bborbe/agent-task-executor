@@ -6,8 +6,8 @@
 package agent
 
 import (
-	v1 "github.com/bborbe/agent/task/executor/k8s/client/informers/externalversions/agent.benjamin-borbe.de/v1"
-	internalinterfaces "github.com/bborbe/agent/task/executor/k8s/client/informers/externalversions/internalinterfaces"
+	v1 "github.com/bborbe/agent-task-executor/k8s/client/informers/externalversions/agent.benjamin-borbe.de/v1"
+	internalinterfaces "github.com/bborbe/agent-task-executor/k8s/client/informers/externalversions/internalinterfaces"
 )
 
 // Interface provides access to each of this group's versions.

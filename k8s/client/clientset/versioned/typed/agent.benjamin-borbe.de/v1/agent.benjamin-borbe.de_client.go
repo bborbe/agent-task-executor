@@ -8,8 +8,8 @@ package v1
 import (
 	http "net/http"
 
-	agentbenjaminborbedev1 "github.com/bborbe/agent/task/executor/k8s/apis/agent.benjamin-borbe.de/v1"
-	scheme "github.com/bborbe/agent/task/executor/k8s/client/clientset/versioned/scheme"
+	agentbenjaminborbedev1 "github.com/bborbe/agent-task-executor/k8s/apis/agent.benjamin-borbe.de/v1"
+	scheme "github.com/bborbe/agent-task-executor/k8s/client/clientset/versioned/scheme"
 	rest "k8s.io/client-go/rest"
 )
 

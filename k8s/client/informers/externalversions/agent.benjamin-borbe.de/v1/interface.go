@@ -6,7 +6,7 @@
 package v1
 
 import (
-	internalinterfaces "github.com/bborbe/agent/task/executor/k8s/client/informers/externalversions/internalinterfaces"
+	internalinterfaces "github.com/bborbe/agent-task-executor/k8s/client/informers/externalversions/internalinterfaces"
 )
 
 // Interface provides access to all the informers in this group version.

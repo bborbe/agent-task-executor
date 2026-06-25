@@ -10,7 +10,7 @@ import (
 	"github.com/bborbe/k8s"
 	"k8s.io/client-go/tools/cache"
 
-	agentv1 "github.com/bborbe/agent/task/executor/k8s/apis/agent.benjamin-borbe.de/v1"
+	agentv1 "github.com/bborbe/agent-task-executor/k8s/apis/agent.benjamin-borbe.de/v1"
 )
 
 // NewResourceEventHandlerConfig adapts an EventHandlerConfig to the

@@ -18,9 +18,9 @@ import (
 	"k8s.io/client-go/kubernetes/fake"
 
 	lib "github.com/bborbe/agent/lib"
-	agentv1 "github.com/bborbe/agent/task/executor/k8s/apis/agent.benjamin-borbe.de/v1"
-	"github.com/bborbe/agent/task/executor/mocks"
-	"github.com/bborbe/agent/task/executor/pkg"
+	agentv1 "github.com/bborbe/agent-task-executor/k8s/apis/agent.benjamin-borbe.de/v1"
+	"github.com/bborbe/agent-task-executor/mocks"
+	"github.com/bborbe/agent-task-executor/pkg"
 )
 
 var _ = Describe("ZombieSweeper", func() {

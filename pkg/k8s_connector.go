@@ -17,8 +17,8 @@ import (
 	"k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/cache"
 
-	versioned "github.com/bborbe/agent/task/executor/k8s/client/clientset/versioned"
-	agentinformers "github.com/bborbe/agent/task/executor/k8s/client/informers/externalversions"
+	versioned "github.com/bborbe/agent-task-executor/k8s/client/clientset/versioned"
+	agentinformers "github.com/bborbe/agent-task-executor/k8s/client/informers/externalversions"
 )
 
 //counterfeiter:generate -o ../mocks/k8s_connector.go --fake-name FakeK8sConnector . K8sConnector

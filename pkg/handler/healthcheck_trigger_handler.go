@@ -10,7 +10,7 @@ import (
 
 	libhttp "github.com/bborbe/http"
 
-	"github.com/bborbe/agent/task/executor/pkg/probe"
+	"github.com/bborbe/agent-task-executor/pkg/probe"
 )
 
 // NewHealthcheckTriggerHandler returns an HTTP handler that fires the healthcheck runner

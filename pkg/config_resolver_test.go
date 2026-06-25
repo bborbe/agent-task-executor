@@ -11,8 +11,8 @@ import (
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 
-	agentv1 "github.com/bborbe/agent/task/executor/k8s/apis/agent.benjamin-borbe.de/v1"
-	pkg "github.com/bborbe/agent/task/executor/pkg"
+	agentv1 "github.com/bborbe/agent-task-executor/k8s/apis/agent.benjamin-borbe.de/v1"
+	pkg "github.com/bborbe/agent-task-executor/pkg"
 )
 
 // fakeProvider is a simple in-memory Provider[agentv1.Config] for tests.

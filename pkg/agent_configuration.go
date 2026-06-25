@@ -5,7 +5,7 @@
 package pkg
 
 import (
-	agentv1 "github.com/bborbe/agent/task/executor/k8s/apis/agent.benjamin-borbe.de/v1"
+	agentv1 "github.com/bborbe/agent-task-executor/k8s/apis/agent.benjamin-borbe.de/v1"
 )
 
 // AgentConfiguration defines the container image and environment for one agent type.

@@ -15,7 +15,7 @@ import (
 
 	lib "github.com/bborbe/agent/lib"
 	taskcmd "github.com/bborbe/agent/lib/command/task"
-	agentv1 "github.com/bborbe/agent/task/executor/k8s/apis/agent.benjamin-borbe.de/v1"
+	agentv1 "github.com/bborbe/agent-task-executor/k8s/apis/agent.benjamin-borbe.de/v1"
 )
 
 //counterfeiter:generate -o mocks/fake_config_provider.go --fake-name FakeConfigProvider . ConfigProvider

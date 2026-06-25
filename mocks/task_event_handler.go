@@ -6,7 +6,7 @@ import (
 	"sync"
 
 	"github.com/IBM/sarama"
-	"github.com/bborbe/agent/task/executor/pkg/handler"
+	"github.com/bborbe/agent-task-executor/pkg/handler"
 )
 
 type FakeTaskEventHandler struct {

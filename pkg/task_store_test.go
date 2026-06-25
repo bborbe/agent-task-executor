@@ -9,7 +9,7 @@ import (
 	. "github.com/onsi/gomega"
 
 	lib "github.com/bborbe/agent/lib"
-	"github.com/bborbe/agent/task/executor/pkg"
+	"github.com/bborbe/agent-task-executor/pkg"
 )
 
 var _ = Describe("TaskStore", func() {

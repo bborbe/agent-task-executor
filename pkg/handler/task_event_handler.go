@@ -20,9 +20,9 @@ import (
 	"github.com/golang/glog"
 
 	lib "github.com/bborbe/agent/lib"
-	pkg "github.com/bborbe/agent/task/executor/pkg"
-	"github.com/bborbe/agent/task/executor/pkg/metrics"
-	"github.com/bborbe/agent/task/executor/pkg/spawner"
+	pkg "github.com/bborbe/agent-task-executor/pkg"
+	"github.com/bborbe/agent-task-executor/pkg/metrics"
+	"github.com/bborbe/agent-task-executor/pkg/spawner"
 )
 
 // defaultTriggerPhases is the fallback phase allow-list when the per-Config Trigger is absent or empty.

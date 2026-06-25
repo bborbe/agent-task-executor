@@ -19,7 +19,7 @@ import (
 
 	lib "github.com/bborbe/agent/lib"
 	taskcmd "github.com/bborbe/agent/lib/command/task"
-	"github.com/bborbe/agent/task/executor/pkg"
+	"github.com/bborbe/agent-task-executor/pkg"
 )
 
 // capturingSyncProducer implements libkafka.SyncProducer and records sent messages.

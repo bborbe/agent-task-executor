@@ -22,11 +22,11 @@ import (
 	"github.com/prometheus/client_golang/prometheus/testutil"
 
 	lib "github.com/bborbe/agent/lib"
-	agentv1 "github.com/bborbe/agent/task/executor/k8s/apis/agent.benjamin-borbe.de/v1"
-	"github.com/bborbe/agent/task/executor/mocks"
-	pkg "github.com/bborbe/agent/task/executor/pkg"
-	"github.com/bborbe/agent/task/executor/pkg/handler"
-	"github.com/bborbe/agent/task/executor/pkg/metrics"
+	agentv1 "github.com/bborbe/agent-task-executor/k8s/apis/agent.benjamin-borbe.de/v1"
+	"github.com/bborbe/agent-task-executor/mocks"
+	pkg "github.com/bborbe/agent-task-executor/pkg"
+	"github.com/bborbe/agent-task-executor/pkg/handler"
+	"github.com/bborbe/agent-task-executor/pkg/metrics"
 )
 
 func TestHandler(t *testing.T) {

@@ -6,10 +6,10 @@
 package fake
 
 import (
-	applyconfiguration "github.com/bborbe/agent/task/executor/k8s/client/applyconfiguration"
-	clientset "github.com/bborbe/agent/task/executor/k8s/client/clientset/versioned"
-	agentv1 "github.com/bborbe/agent/task/executor/k8s/client/clientset/versioned/typed/agent.benjamin-borbe.de/v1"
-	fakeagentv1 "github.com/bborbe/agent/task/executor/k8s/client/clientset/versioned/typed/agent.benjamin-borbe.de/v1/fake"
+	applyconfiguration "github.com/bborbe/agent-task-executor/k8s/client/applyconfiguration"
+	clientset "github.com/bborbe/agent-task-executor/k8s/client/clientset/versioned"
+	agentv1 "github.com/bborbe/agent-task-executor/k8s/client/clientset/versioned/typed/agent.benjamin-borbe.de/v1"
+	fakeagentv1 "github.com/bborbe/agent-task-executor/k8s/client/clientset/versioned/typed/agent.benjamin-borbe.de/v1/fake"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/watch"

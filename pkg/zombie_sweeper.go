@@ -17,7 +17,7 @@ import (
 	corev1listers "k8s.io/client-go/listers/core/v1"
 
 	lib "github.com/bborbe/agent/lib"
-	agentv1 "github.com/bborbe/agent/task/executor/k8s/apis/agent.benjamin-borbe.de/v1"
+	agentv1 "github.com/bborbe/agent-task-executor/k8s/apis/agent.benjamin-borbe.de/v1"
 )
 
 //counterfeiter:generate -o ../mocks/zombie_sweeper.go --fake-name FakeZombieSweeper . ZombieSweeper

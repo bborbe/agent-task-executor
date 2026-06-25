@@ -20,7 +20,7 @@ import (
 	"k8s.io/client-go/kubernetes"
 
 	lib "github.com/bborbe/agent/lib"
-	pkg "github.com/bborbe/agent/task/executor/pkg"
+	pkg "github.com/bborbe/agent-task-executor/pkg"
 )
 
 // taskIDLabelKey labels a spawned Job with the task UUID so IsJobActive

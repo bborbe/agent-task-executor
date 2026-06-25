@@ -27,10 +27,10 @@ import (
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/rest"
 
-	"github.com/bborbe/agent/task/executor/pkg"
-	"github.com/bborbe/agent/task/executor/pkg/factory"
-	"github.com/bborbe/agent/task/executor/pkg/handler"
-	"github.com/bborbe/agent/task/executor/pkg/probe"
+	"github.com/bborbe/agent-task-executor/pkg"
+	"github.com/bborbe/agent-task-executor/pkg/factory"
+	"github.com/bborbe/agent-task-executor/pkg/handler"
+	"github.com/bborbe/agent-task-executor/pkg/probe"
 )
 
 func main() {

@@ -5,8 +5,8 @@ import (
 	"context"
 	"sync"
 
-	v1 "github.com/bborbe/agent/task/executor/k8s/apis/agent.benjamin-borbe.de/v1"
-	"github.com/bborbe/agent/task/executor/pkg/probe"
+	v1 "github.com/bborbe/agent-task-executor/k8s/apis/agent.benjamin-borbe.de/v1"
+	"github.com/bborbe/agent-task-executor/pkg/probe"
 )
 
 type FakeConfigProvider struct {

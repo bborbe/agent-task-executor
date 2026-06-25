@@ -10,7 +10,7 @@ import (
 	"github.com/prometheus/client_golang/prometheus"
 	dto "github.com/prometheus/client_model/go"
 
-	_ "github.com/bborbe/agent/task/executor/pkg/metrics"
+	_ "github.com/bborbe/agent-task-executor/pkg/metrics"
 )
 
 var _ = Describe("Metrics", func() {

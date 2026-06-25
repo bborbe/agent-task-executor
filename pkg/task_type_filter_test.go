@@ -8,7 +8,7 @@ import (
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 
-	pkg "github.com/bborbe/agent/task/executor/pkg"
+	pkg "github.com/bborbe/agent-task-executor/pkg"
 )
 
 var _ = Describe("EffectiveTaskTypes", func() {

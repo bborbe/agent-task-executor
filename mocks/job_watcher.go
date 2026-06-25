@@ -5,7 +5,7 @@ import (
 	"context"
 	"sync"
 
-	"github.com/bborbe/agent/task/executor/pkg"
+	"github.com/bborbe/agent-task-executor/pkg"
 	v1 "k8s.io/api/batch/v1"
 	v1a "k8s.io/api/core/v1"
 	v1b "k8s.io/client-go/listers/core/v1"

@@ -5,7 +5,7 @@ import (
 	"context"
 	"sync"
 
-	"github.com/bborbe/agent/task/executor/pkg/probe"
+	"github.com/bborbe/agent-task-executor/pkg/probe"
 )
 
 type FakeHealthcheckRunner struct {

@@ -11,9 +11,9 @@ import (
 	sync "sync"
 	time "time"
 
-	versioned "github.com/bborbe/agent/task/executor/k8s/client/clientset/versioned"
-	agentbenjaminborbede "github.com/bborbe/agent/task/executor/k8s/client/informers/externalversions/agent.benjamin-borbe.de"
-	internalinterfaces "github.com/bborbe/agent/task/executor/k8s/client/informers/externalversions/internalinterfaces"
+	versioned "github.com/bborbe/agent-task-executor/k8s/client/clientset/versioned"
+	agentbenjaminborbede "github.com/bborbe/agent-task-executor/k8s/client/informers/externalversions/agent.benjamin-borbe.de"
+	internalinterfaces "github.com/bborbe/agent-task-executor/k8s/client/informers/externalversions/internalinterfaces"
 	v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	runtime "k8s.io/apimachinery/pkg/runtime"
 	schema "k8s.io/apimachinery/pkg/runtime/schema"

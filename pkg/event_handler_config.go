@@ -7,7 +7,7 @@ package pkg
 import (
 	"github.com/bborbe/k8s"
 
-	agentv1 "github.com/bborbe/agent/task/executor/k8s/apis/agent.benjamin-borbe.de/v1"
+	agentv1 "github.com/bborbe/agent-task-executor/k8s/apis/agent.benjamin-borbe.de/v1"
 )
 
 // EventHandlerConfig is the typed in-memory event handler / store

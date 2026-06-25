@@ -9,7 +9,7 @@ import (
 	fmt "fmt"
 	http "net/http"
 
-	agentv1 "github.com/bborbe/agent/task/executor/k8s/client/clientset/versioned/typed/agent.benjamin-borbe.de/v1"
+	agentv1 "github.com/bborbe/agent-task-executor/k8s/client/clientset/versioned/typed/agent.benjamin-borbe.de/v1"
 	discovery "k8s.io/client-go/discovery"
 	rest "k8s.io/client-go/rest"
 	flowcontrol "k8s.io/client-go/util/flowcontrol"

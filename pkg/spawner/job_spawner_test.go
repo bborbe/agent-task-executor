@@ -25,9 +25,9 @@ import (
 	k8stesting "k8s.io/client-go/testing"
 
 	lib "github.com/bborbe/agent/lib"
-	agentv1 "github.com/bborbe/agent/task/executor/k8s/apis/agent.benjamin-borbe.de/v1"
-	pkg "github.com/bborbe/agent/task/executor/pkg"
-	"github.com/bborbe/agent/task/executor/pkg/spawner"
+	agentv1 "github.com/bborbe/agent-task-executor/k8s/apis/agent.benjamin-borbe.de/v1"
+	pkg "github.com/bborbe/agent-task-executor/pkg"
+	"github.com/bborbe/agent-task-executor/pkg/spawner"
 )
 
 func TestSpawner(t *testing.T) {

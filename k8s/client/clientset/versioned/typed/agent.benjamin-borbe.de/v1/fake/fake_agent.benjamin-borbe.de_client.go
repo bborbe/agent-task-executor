@@ -6,7 +6,7 @@
 package fake
 
 import (
-	v1 "github.com/bborbe/agent/task/executor/k8s/client/clientset/versioned/typed/agent.benjamin-borbe.de/v1"
+	v1 "github.com/bborbe/agent-task-executor/k8s/client/clientset/versioned/typed/agent.benjamin-borbe.de/v1"
 	rest "k8s.io/client-go/rest"
 	testing "k8s.io/client-go/testing"
 )

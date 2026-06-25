@@ -11,7 +11,7 @@ import (
 	"github.com/bborbe/k8s"
 	"github.com/golang/glog"
 
-	agentv1 "github.com/bborbe/agent/task/executor/k8s/apis/agent.benjamin-borbe.de/v1"
+	agentv1 "github.com/bborbe/agent-task-executor/k8s/apis/agent.benjamin-borbe.de/v1"
 )
 
 // NewAgentsHandler returns an http.Handler that lists all known agent

@@ -15,8 +15,8 @@ import (
 	"k8s.io/client-go/kubernetes/fake"
 
 	lib "github.com/bborbe/agent/lib"
-	"github.com/bborbe/agent/task/executor/mocks"
-	"github.com/bborbe/agent/task/executor/pkg"
+	"github.com/bborbe/agent-task-executor/mocks"
+	"github.com/bborbe/agent-task-executor/pkg"
 )
 
 var _ = Describe("JobWatcher", func() {

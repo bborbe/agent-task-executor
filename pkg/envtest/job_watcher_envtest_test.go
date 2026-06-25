@@ -22,8 +22,8 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/envtest"
 
 	lib "github.com/bborbe/agent/lib"
-	mocks "github.com/bborbe/agent/task/executor/mocks"
-	pkg "github.com/bborbe/agent/task/executor/pkg"
+	mocks "github.com/bborbe/agent-task-executor/mocks"
+	pkg "github.com/bborbe/agent-task-executor/pkg"
 )
 
 // controller-runtime v0.21.x is compatible with k8s.io/client-go v0.36.x

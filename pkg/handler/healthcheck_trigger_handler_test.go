@@ -13,8 +13,8 @@ import (
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 
-	"github.com/bborbe/agent/task/executor/pkg/handler"
-	"github.com/bborbe/agent/task/executor/pkg/probe/mocks"
+	"github.com/bborbe/agent-task-executor/pkg/handler"
+	"github.com/bborbe/agent-task-executor/pkg/probe/mocks"
 )
 
 var _ = Describe("HealthcheckTriggerHandler", func() {

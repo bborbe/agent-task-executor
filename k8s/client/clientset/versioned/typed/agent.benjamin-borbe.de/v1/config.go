@@ -8,9 +8,9 @@ package v1
 import (
 	context "context"
 
-	agentbenjaminborbedev1 "github.com/bborbe/agent/task/executor/k8s/apis/agent.benjamin-borbe.de/v1"
-	applyconfigurationagentbenjaminborbedev1 "github.com/bborbe/agent/task/executor/k8s/client/applyconfiguration/agent.benjamin-borbe.de/v1"
-	scheme "github.com/bborbe/agent/task/executor/k8s/client/clientset/versioned/scheme"
+	agentbenjaminborbedev1 "github.com/bborbe/agent-task-executor/k8s/apis/agent.benjamin-borbe.de/v1"
+	applyconfigurationagentbenjaminborbedev1 "github.com/bborbe/agent-task-executor/k8s/client/applyconfiguration/agent.benjamin-borbe.de/v1"
+	scheme "github.com/bborbe/agent-task-executor/k8s/client/clientset/versioned/scheme"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	types "k8s.io/apimachinery/pkg/types"
 	watch "k8s.io/apimachinery/pkg/watch"

@@ -12,7 +12,7 @@ import (
 	"github.com/bborbe/errors"
 	"github.com/bborbe/k8s"
 
-	agentv1 "github.com/bborbe/agent/task/executor/k8s/apis/agent.benjamin-borbe.de/v1"
+	agentv1 "github.com/bborbe/agent-task-executor/k8s/apis/agent.benjamin-borbe.de/v1"
 )
 
 // ErrConfigNotFound is returned by ConfigResolver.Resolve when no

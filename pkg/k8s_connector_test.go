@@ -21,7 +21,7 @@ import (
 	"k8s.io/client-go/rest"
 	k8stesting "k8s.io/client-go/testing"
 
-	pkg "github.com/bborbe/agent/task/executor/pkg"
+	pkg "github.com/bborbe/agent-task-executor/pkg"
 )
 
 func fakeBuilder(cs apiextensionsclient.Interface) pkg.CRDClientBuilder {

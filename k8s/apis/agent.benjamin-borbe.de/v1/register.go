@@ -9,7 +9,7 @@ import (
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 
-	agent "github.com/bborbe/agent/task/executor/k8s/apis/agent.benjamin-borbe.de"
+	agent "github.com/bborbe/agent-task-executor/k8s/apis/agent.benjamin-borbe.de"
 )
 
 // SchemeGroupVersion is the group and version for Config resources.

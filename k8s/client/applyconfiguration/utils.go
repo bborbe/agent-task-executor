@@ -6,9 +6,9 @@
 package applyconfiguration
 
 import (
-	v1 "github.com/bborbe/agent/task/executor/k8s/apis/agent.benjamin-borbe.de/v1"
-	agentbenjaminborbedev1 "github.com/bborbe/agent/task/executor/k8s/client/applyconfiguration/agent.benjamin-borbe.de/v1"
-	internal "github.com/bborbe/agent/task/executor/k8s/client/applyconfiguration/internal"
+	v1 "github.com/bborbe/agent-task-executor/k8s/apis/agent.benjamin-borbe.de/v1"
+	agentbenjaminborbedev1 "github.com/bborbe/agent-task-executor/k8s/client/applyconfiguration/agent.benjamin-borbe.de/v1"
+	internal "github.com/bborbe/agent-task-executor/k8s/client/applyconfiguration/internal"
 	runtime "k8s.io/apimachinery/pkg/runtime"
 	schema "k8s.io/apimachinery/pkg/runtime/schema"
 	managedfields "k8s.io/apimachinery/pkg/util/managedfields"

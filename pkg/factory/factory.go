@@ -21,10 +21,10 @@ import (
 	"k8s.io/client-go/tools/cache"
 
 	lib "github.com/bborbe/agent/lib"
-	pkg "github.com/bborbe/agent/task/executor/pkg"
-	"github.com/bborbe/agent/task/executor/pkg/handler"
-	"github.com/bborbe/agent/task/executor/pkg/probe"
-	"github.com/bborbe/agent/task/executor/pkg/spawner"
+	pkg "github.com/bborbe/agent-task-executor/pkg"
+	"github.com/bborbe/agent-task-executor/pkg/handler"
+	"github.com/bborbe/agent-task-executor/pkg/probe"
+	"github.com/bborbe/agent-task-executor/pkg/spawner"
 )
 
 // CreateJobWatcher creates a JobWatcher that reacts to terminal batch/v1 Job states.
