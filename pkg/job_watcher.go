@@ -9,6 +9,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	lib "github.com/bborbe/agent/lib"
 	"github.com/bborbe/errors"
 	libk8s "github.com/bborbe/k8s"
 	"github.com/golang/glog"
@@ -19,8 +20,6 @@ import (
 	"k8s.io/client-go/kubernetes"
 	corev1listers "k8s.io/client-go/listers/core/v1"
 	"k8s.io/client-go/tools/cache"
-
-	lib "github.com/bborbe/agent/lib"
 )
 
 //counterfeiter:generate -o ../mocks/job_watcher.go --fake-name FakeJobWatcher . JobWatcher

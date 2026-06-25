@@ -8,6 +8,7 @@ import (
 	"context"
 
 	"github.com/IBM/sarama"
+	lib "github.com/bborbe/agent/lib"
 	"github.com/bborbe/cqrs/base"
 	cdb "github.com/bborbe/cqrs/cdb"
 	libcron "github.com/bborbe/cron"
@@ -20,7 +21,6 @@ import (
 	"k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/cache"
 
-	lib "github.com/bborbe/agent/lib"
 	pkg "github.com/bborbe/agent-task-executor/pkg"
 	"github.com/bborbe/agent-task-executor/pkg/handler"
 	"github.com/bborbe/agent-task-executor/pkg/probe"

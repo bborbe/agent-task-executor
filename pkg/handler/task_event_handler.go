@@ -13,13 +13,13 @@ import (
 	"time"
 
 	"github.com/IBM/sarama"
+	lib "github.com/bborbe/agent/lib"
 	"github.com/bborbe/cqrs/base"
 	"github.com/bborbe/errors"
 	libtime "github.com/bborbe/time"
 	"github.com/bborbe/vault-cli/pkg/domain"
 	"github.com/golang/glog"
 
-	lib "github.com/bborbe/agent/lib"
 	pkg "github.com/bborbe/agent-task-executor/pkg"
 	"github.com/bborbe/agent-task-executor/pkg/metrics"
 	"github.com/bborbe/agent-task-executor/pkg/spawner"

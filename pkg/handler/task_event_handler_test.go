@@ -12,6 +12,7 @@ import (
 	"testing"
 
 	"github.com/IBM/sarama"
+	lib "github.com/bborbe/agent/lib"
 	"github.com/bborbe/cqrs/base"
 	"github.com/bborbe/errors"
 	libtime "github.com/bborbe/time"
@@ -21,7 +22,6 @@ import (
 	. "github.com/onsi/gomega"
 	"github.com/prometheus/client_golang/prometheus/testutil"
 
-	lib "github.com/bborbe/agent/lib"
 	agentv1 "github.com/bborbe/agent-task-executor/k8s/apis/agent.benjamin-borbe.de/v1"
 	"github.com/bborbe/agent-task-executor/mocks"
 	pkg "github.com/bborbe/agent-task-executor/pkg"

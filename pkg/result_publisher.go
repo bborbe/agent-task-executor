@@ -10,6 +10,8 @@ import (
 	"sync"
 	"time"
 
+	lib "github.com/bborbe/agent/lib"
+	taskcmd "github.com/bborbe/agent/lib/command/task"
 	"github.com/bborbe/cqrs/base"
 	cdb "github.com/bborbe/cqrs/cdb"
 	cqrsiam "github.com/bborbe/cqrs/iam"
@@ -18,9 +20,6 @@ import (
 	"github.com/bborbe/log"
 	libtime "github.com/bborbe/time"
 	"github.com/golang/glog"
-
-	lib "github.com/bborbe/agent/lib"
-	taskcmd "github.com/bborbe/agent/lib/command/task"
 )
 
 const (

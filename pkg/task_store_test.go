@@ -5,10 +5,10 @@
 package pkg_test
 
 import (
+	lib "github.com/bborbe/agent/lib"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 
-	lib "github.com/bborbe/agent/lib"
 	"github.com/bborbe/agent-task-executor/pkg"
 )
 

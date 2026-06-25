@@ -8,6 +8,7 @@ import (
 	"context"
 	"time"
 
+	lib "github.com/bborbe/agent/lib"
 	"github.com/bborbe/errors"
 	libk8s "github.com/bborbe/k8s"
 	libtime "github.com/bborbe/time"
@@ -16,7 +17,6 @@ import (
 	"k8s.io/apimachinery/pkg/labels"
 	corev1listers "k8s.io/client-go/listers/core/v1"
 
-	lib "github.com/bborbe/agent/lib"
 	agentv1 "github.com/bborbe/agent-task-executor/k8s/apis/agent.benjamin-borbe.de/v1"
 )
 

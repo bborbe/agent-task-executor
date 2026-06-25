@@ -7,14 +7,14 @@ package probe
 import (
 	"context"
 
+	lib "github.com/bborbe/agent/lib"
+	taskcmd "github.com/bborbe/agent/lib/command/task"
 	"github.com/bborbe/cqrs/base"
 	cdb "github.com/bborbe/cqrs/cdb"
 	cqrsiam "github.com/bborbe/cqrs/iam"
 	"github.com/bborbe/errors"
 	"github.com/google/uuid"
 
-	lib "github.com/bborbe/agent/lib"
-	taskcmd "github.com/bborbe/agent/lib/command/task"
 	agentv1 "github.com/bborbe/agent-task-executor/k8s/apis/agent.benjamin-borbe.de/v1"
 )
 

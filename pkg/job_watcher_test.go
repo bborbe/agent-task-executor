@@ -7,6 +7,7 @@ package pkg_test
 import (
 	"context"
 
+	lib "github.com/bborbe/agent/lib"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 	batchv1 "k8s.io/api/batch/v1"
@@ -14,7 +15,6 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes/fake"
 
-	lib "github.com/bborbe/agent/lib"
 	"github.com/bborbe/agent-task-executor/mocks"
 	"github.com/bborbe/agent-task-executor/pkg"
 )

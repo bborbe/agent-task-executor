@@ -7,6 +7,7 @@ package spawner
 import (
 	"context"
 
+	lib "github.com/bborbe/agent/lib"
 	"github.com/bborbe/errors"
 	k8s "github.com/bborbe/k8s"
 	libtime "github.com/bborbe/time"
@@ -19,7 +20,6 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes"
 
-	lib "github.com/bborbe/agent/lib"
 	pkg "github.com/bborbe/agent-task-executor/pkg"
 )
 

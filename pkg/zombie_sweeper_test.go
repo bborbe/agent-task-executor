@@ -8,6 +8,7 @@ import (
 	"context"
 	"time"
 
+	lib "github.com/bborbe/agent/lib"
 	libtime "github.com/bborbe/time"
 	libtimetest "github.com/bborbe/time/test"
 	. "github.com/onsi/ginkgo/v2"
@@ -17,7 +18,6 @@ import (
 	k8sinformers "k8s.io/client-go/informers"
 	"k8s.io/client-go/kubernetes/fake"
 
-	lib "github.com/bborbe/agent/lib"
 	agentv1 "github.com/bborbe/agent-task-executor/k8s/apis/agent.benjamin-borbe.de/v1"
 	"github.com/bborbe/agent-task-executor/mocks"
 	"github.com/bborbe/agent-task-executor/pkg"

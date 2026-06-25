@@ -8,13 +8,13 @@ import (
 	"context"
 	"fmt"
 
+	taskcmd "github.com/bborbe/agent/lib/command/task"
 	cqrsmocks "github.com/bborbe/cqrs/mocks"
 	"github.com/google/uuid"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
-	taskcmd "github.com/bborbe/agent/lib/command/task"
 	agentv1 "github.com/bborbe/agent-task-executor/k8s/apis/agent.benjamin-borbe.de/v1"
 	"github.com/bborbe/agent-task-executor/pkg/probe"
 	"github.com/bborbe/agent-task-executor/pkg/probe/mocks"

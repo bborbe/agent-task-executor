@@ -9,6 +9,8 @@ import (
 	"encoding/json"
 
 	"github.com/IBM/sarama"
+	lib "github.com/bborbe/agent/lib"
+	taskcmd "github.com/bborbe/agent/lib/command/task"
 	"github.com/bborbe/cqrs/base"
 	"github.com/bborbe/errors"
 	libkafka "github.com/bborbe/kafka"
@@ -17,8 +19,6 @@ import (
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 
-	lib "github.com/bborbe/agent/lib"
-	taskcmd "github.com/bborbe/agent/lib/command/task"
 	"github.com/bborbe/agent-task-executor/pkg"
 )
 

@@ -11,6 +11,7 @@ import (
 	"fmt"
 	"testing"
 
+	lib "github.com/bborbe/agent/lib"
 	libtime "github.com/bborbe/time"
 	libtimetest "github.com/bborbe/time/test"
 	. "github.com/onsi/ginkgo/v2"
@@ -24,7 +25,6 @@ import (
 	"k8s.io/client-go/kubernetes/fake"
 	k8stesting "k8s.io/client-go/testing"
 
-	lib "github.com/bborbe/agent/lib"
 	agentv1 "github.com/bborbe/agent-task-executor/k8s/apis/agent.benjamin-borbe.de/v1"
 	pkg "github.com/bborbe/agent-task-executor/pkg"
 	"github.com/bborbe/agent-task-executor/pkg/spawner"

@@ -12,6 +12,7 @@ import (
 	"testing"
 	"time"
 
+	lib "github.com/bborbe/agent/lib"
 	libk8s "github.com/bborbe/k8s"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
@@ -21,7 +22,6 @@ import (
 	"k8s.io/client-go/rest"
 	"sigs.k8s.io/controller-runtime/pkg/envtest"
 
-	lib "github.com/bborbe/agent/lib"
 	mocks "github.com/bborbe/agent-task-executor/mocks"
 	pkg "github.com/bborbe/agent-task-executor/pkg"
 )

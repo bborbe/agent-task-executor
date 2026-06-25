@@ -117,4 +117,6 @@ require (
 	sigs.k8s.io/yaml v1.6.0 // indirect
 )
 
-exclude cloud.google.com/go v0.26.0
+exclude (
+	cloud.google.com/go v0.26.0
+)
