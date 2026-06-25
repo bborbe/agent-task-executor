@@ -7,7 +7,7 @@ package pkg_test
 import (
 	"context"
 
-	lib "github.com/bborbe/agent/lib"
+	lib "github.com/bborbe/agent"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 	batchv1 "k8s.io/api/batch/v1"

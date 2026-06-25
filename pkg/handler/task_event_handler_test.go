@@ -12,7 +12,7 @@ import (
 	"testing"
 
 	"github.com/IBM/sarama"
-	lib "github.com/bborbe/agent/lib"
+	lib "github.com/bborbe/agent"
 	"github.com/bborbe/cqrs/base"
 	"github.com/bborbe/errors"
 	libtime "github.com/bborbe/time"

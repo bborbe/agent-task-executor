@@ -12,7 +12,7 @@ import (
 	"testing"
 	"time"
 
-	lib "github.com/bborbe/agent/lib"
+	lib "github.com/bborbe/agent"
 	libk8s "github.com/bborbe/k8s"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"

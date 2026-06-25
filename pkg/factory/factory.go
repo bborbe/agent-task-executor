@@ -8,7 +8,7 @@ import (
 	"context"
 
 	"github.com/IBM/sarama"
-	lib "github.com/bborbe/agent/lib"
+	lib "github.com/bborbe/agent"
 	"github.com/bborbe/cqrs/base"
 	cdb "github.com/bborbe/cqrs/cdb"
 	libcron "github.com/bborbe/cron"

@@ -5,9 +5,9 @@ import (
 	"context"
 	"sync"
 
+	lib "github.com/bborbe/agent"
 	"github.com/bborbe/agent-task-executor/pkg"
 	"github.com/bborbe/agent-task-executor/pkg/spawner"
-	"github.com/bborbe/agent/lib"
 )
 
 type FakeJobSpawner struct {

@@ -7,8 +7,8 @@ package probe
 import (
 	"context"
 
-	lib "github.com/bborbe/agent/lib"
-	taskcmd "github.com/bborbe/agent/lib/command/task"
+	lib "github.com/bborbe/agent"
+	taskcmd "github.com/bborbe/agent/command/task"
 	"github.com/bborbe/cqrs/base"
 	cdb "github.com/bborbe/cqrs/cdb"
 	cqrsiam "github.com/bborbe/cqrs/iam"

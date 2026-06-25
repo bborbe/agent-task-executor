@@ -7,7 +7,7 @@ package pkg
 import (
 	"sync"
 
-	lib "github.com/bborbe/agent/lib"
+	lib "github.com/bborbe/agent"
 )
 
 // TaskStore is a thread-safe map from TaskIdentifier to Task.

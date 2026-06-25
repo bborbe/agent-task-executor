@@ -7,7 +7,7 @@ package spawner
 import (
 	"context"
 
-	lib "github.com/bborbe/agent/lib"
+	lib "github.com/bborbe/agent"
 	"github.com/bborbe/errors"
 	k8s "github.com/bborbe/k8s"
 	libtime "github.com/bborbe/time"

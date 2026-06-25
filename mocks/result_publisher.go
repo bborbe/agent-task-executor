@@ -5,8 +5,8 @@ import (
 	"context"
 	"sync"
 
+	lib "github.com/bborbe/agent"
 	"github.com/bborbe/agent-task-executor/pkg"
-	"github.com/bborbe/agent/lib"
 	"github.com/bborbe/cqrs/base"
 )
 

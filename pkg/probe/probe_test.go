@@ -8,7 +8,7 @@ import (
 	"context"
 	"fmt"
 
-	taskcmd "github.com/bborbe/agent/lib/command/task"
+	taskcmd "github.com/bborbe/agent/command/task"
 	cqrsmocks "github.com/bborbe/cqrs/mocks"
 	"github.com/google/uuid"
 	. "github.com/onsi/ginkgo/v2"

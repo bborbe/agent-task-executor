@@ -11,7 +11,7 @@ import (
 	"fmt"
 	"testing"
 
-	lib "github.com/bborbe/agent/lib"
+	lib "github.com/bborbe/agent"
 	libtime "github.com/bborbe/time"
 	libtimetest "github.com/bborbe/time/test"
 	. "github.com/onsi/ginkgo/v2"
