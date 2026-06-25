@@ -1,3 +1,3 @@
-include ../../../Makefile.variables
-include ../../../Makefile.env
-include ../../../Makefile.k8s
+include ../Makefile.variables
+include ../Makefile.env
+include ../Makefile.k8s
