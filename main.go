@@ -44,6 +44,7 @@ type application struct {
 	Listen                     string            `required:"true"  arg:"listen"                         env:"LISTEN"                         usage:"address to listen to"`
 	KafkaBrokers               string            `required:"true"  arg:"kafka-brokers"                  env:"KAFKA_BROKERS"                  usage:"comma-separated Kafka broker addresses"`
 	Branch                     base.Branch       `required:"true"  arg:"branch"                         env:"BRANCH"                         usage:"Kafka topic prefix branch (develop/live)"`
+	TopicPrefix                base.TopicPrefix  `required:"false" arg:"topic-prefix"                   env:"TOPIC_PREFIX"                   usage:"Explicit Kafka topic prefix; empty means unprefixed topics"`
 	Namespace                  libk8s.Namespace  `required:"true"  arg:"namespace"                      env:"NAMESPACE"                      usage:"K8s namespace to spawn Jobs in"`
 	BuildGitVersion            string            `required:"false" arg:"build-git-version"              env:"BUILD_GIT_VERSION"              usage:"Build Git version (git describe --tags --always --dirty)"                                               default:"dev"`
 	BuildGitCommit             string            `required:"false" arg:"build-git-commit"               env:"BUILD_GIT_COMMIT"               usage:"Build Git commit hash"                                                                                  default:"none"`
@@ -101,7 +102,7 @@ func (a *application) Run(ctx context.Context, sentryClient libsentry.Client) er
 	}
 	defer syncProducer.Close()
 
-	resultPublisher := pkg.NewResultPublisher(syncProducer, a.Branch, currentDateTimeGetter)
+	resultPublisher := pkg.NewResultPublisher(syncProducer, a.TopicPrefix, currentDateTimeGetter)
 	taskStore := pkg.NewTaskStore()
 	jobWatcher := factory.CreateJobWatcher(kubeClient, a.Namespace, taskStore, resultPublisher)
 
@@ -117,6 +118,7 @@ func (a *application) Run(ctx context.Context, sentryClient libsentry.Client) er
 	healthcheckRunner := factory.CreateHealthcheckRunner(
 		eventHandlerConfig,
 		syncProducer,
+		a.TopicPrefix,
 		a.Branch,
 	)
 	healthcheckCron := factory.CreateHealthcheckCron(
@@ -127,6 +129,7 @@ func (a *application) Run(ctx context.Context, sentryClient libsentry.Client) er
 	consumer, taskEventHandler := factory.CreateConsumer(
 		saramaClient,
 		a.Branch,
+		a.TopicPrefix,
 		kubeClient,
 		a.Namespace,
 		a.KafkaBrokers,

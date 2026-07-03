@@ -162,7 +162,7 @@ var _ = Describe("ResultPublisher", func() {
 		producer = &capturingSyncProducer{}
 		publisher = pkg.NewResultPublisher(
 			producer,
-			base.Branch("prod"),
+			base.TopicPrefix("develop"),
 			currentDateTime,
 		)
 	})
@@ -292,7 +292,7 @@ var _ = Describe("ResultPublisher", func() {
 				}
 				partialPublisher := pkg.NewResultPublisher(
 					partialProducer,
-					base.Branch("prod"),
+					base.TopicPrefix("develop"),
 					currentDateTime,
 				)
 
@@ -381,7 +381,7 @@ var _ = Describe("ResultPublisher", func() {
 				}
 				partialPublisher := pkg.NewResultPublisher(
 					partialProducer,
-					base.Branch("prod"),
+					base.TopicPrefix("develop"),
 					currentDateTime,
 				)
 
@@ -533,7 +533,7 @@ var _ = Describe("ResultPublisher", func() {
 			}
 			failingPublisher := pkg.NewResultPublisher(
 				failingProducer,
-				base.Branch("prod"),
+				base.TopicPrefix("develop"),
 				currentDateTime,
 			)
 

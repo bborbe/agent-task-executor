@@ -57,13 +57,13 @@ type ResultPublisher interface {
 // NewResultPublisher creates a ResultPublisher.
 func NewResultPublisher(
 	syncProducer libkafka.SyncProducer,
-	branch base.Branch,
+	topicPrefix base.TopicPrefix,
 	currentDateTime libtime.CurrentDateTimeGetter,
 ) ResultPublisher {
 	return &resultPublisher{
 		commandObjectSender: cdb.NewCommandObjectSender(
 			syncProducer,
-			branch,
+			topicPrefix,
 			log.DefaultSamplerFactory,
 		),
 		currentDateTime: currentDateTime,
