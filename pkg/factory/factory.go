@@ -111,6 +111,7 @@ func CreateConsumer(
 		namespace,
 		kafkaBrokers,
 		string(branch),
+		string(topicPrefix),
 		currentDateTimeGetter,
 		jobTTLSecondsAfterFinished,
 	)

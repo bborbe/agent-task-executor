@@ -48,6 +48,7 @@ func NewJobSpawner(
 	namespace k8s.Namespace,
 	kafkaBrokers string,
 	branch string,
+	topicPrefix string,
 	currentDateTimeGetter libtime.CurrentDateTimeGetter,
 	jobTTLSecondsAfterFinished int32,
 ) JobSpawner {
@@ -56,6 +57,7 @@ func NewJobSpawner(
 		namespace:                  namespace,
 		kafkaBrokers:               kafkaBrokers,
 		branch:                     branch,
+		topicPrefix:                topicPrefix,
 		currentDateTimeGetter:      currentDateTimeGetter,
 		jobTTLSecondsAfterFinished: jobTTLSecondsAfterFinished,
 	}
@@ -67,6 +69,7 @@ type jobSpawner struct {
 	namespace                  k8s.Namespace
 	kafkaBrokers               string
 	branch                     string
+	topicPrefix                string
 	currentDateTimeGetter      libtime.CurrentDateTimeGetter
 	jobTTLSecondsAfterFinished int32
 }
@@ -349,6 +352,7 @@ func (s *jobSpawner) buildJobEnvBuilder(
 	envBuilder.Add("TASK_ID", string(task.TaskIdentifier))
 	envBuilder.Add("KAFKA_BROKERS", s.kafkaBrokers)
 	envBuilder.Add("BRANCH", s.branch)
+	envBuilder.Add("TOPIC_PREFIX", s.topicPrefix)
 	envBuilder.Add("PHASE", taskPhaseString(task.Frontmatter))
 	envBuilder.Add("TASK_TYPE", taskTypeString(task.Frontmatter))
 	for key, value := range config.Env {
