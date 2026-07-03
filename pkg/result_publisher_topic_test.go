@@ -63,6 +63,10 @@ var _ = Describe("ResultPublisher topic naming", func() {
 		Expect(publish(base.TopicPrefix("develop"))).To(Equal("develop-agent-task-v1-request"))
 	})
 
+	It("prefixes the topic with master on the prod path", func() {
+		Expect(publish(base.TopicPrefix("master"))).To(Equal("master-agent-task-v1-request"))
+	})
+
 	It("publishes an unprefixed topic when TopicPrefix is empty", func() {
 		Expect(publish(base.TopicPrefix(""))).To(Equal("agent-task-v1-request"))
 	})
