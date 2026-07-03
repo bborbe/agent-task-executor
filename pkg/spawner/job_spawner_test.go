@@ -53,6 +53,7 @@ var _ = Describe("JobSpawner", func() {
 			"test-ns",
 			"kafka:9092",
 			"develop",
+			"test-prefix",
 			currentDateTime,
 			1800,
 		)
@@ -110,9 +111,47 @@ var _ = Describe("JobSpawner", func() {
 			Expect(envMap["TASK_ID"]).To(Equal("abc12345-rest-ignored"))
 			Expect(envMap["KAFKA_BROKERS"]).To(Equal("kafka:9092"))
 			Expect(envMap["BRANCH"]).To(Equal("develop"))
+			Expect(envMap["TOPIC_PREFIX"]).To(Equal("test-prefix"))
 			Expect(envMap["GEMINI_API_KEY"]).To(Equal("test-gemini-key"))
 			Expect(envMap["PHASE"]).To(Equal("planning"))
 			Expect(envMap["TASK_TYPE"]).To(Equal(""))
+		})
+
+		It("sets TOPIC_PREFIX to empty string when configured topicPrefix is empty", func() {
+			jobSpawner = spawner.NewJobSpawner(
+				fakeClient,
+				"test-ns",
+				"kafka:9092",
+				"develop",
+				"",
+				currentDateTime,
+				1800,
+			)
+			task := lib.Task{
+				TaskIdentifier: lib.TaskIdentifier("no-prefix-task"),
+				Frontmatter: lib.TaskFrontmatter{
+					"assignee": "claude",
+				},
+				Content: lib.TaskContent("do the work"),
+			}
+			config := pkg.AgentConfiguration{
+				Assignee: "claude",
+				Image:    "my-image:latest",
+				Env:      map[string]string{},
+			}
+			_, err := jobSpawner.SpawnJob(ctx, task, config)
+			Expect(err).To(BeNil())
+
+			jobs, err := fakeClient.BatchV1().Jobs("test-ns").List(ctx, metav1.ListOptions{})
+			Expect(err).To(BeNil())
+			Expect(jobs.Items).To(HaveLen(1))
+
+			envMap := make(map[string]string)
+			for _, e := range jobs.Items[0].Spec.Template.Spec.Containers[0].Env {
+				envMap[e.Name] = e.Value
+			}
+			Expect(envMap).To(HaveKey("TOPIC_PREFIX"))
+			Expect(envMap["TOPIC_PREFIX"]).To(Equal(""))
 		})
 
 		It("propagates a non-default ttlSecondsAfterFinished to the Job spec", func() {
@@ -122,6 +161,7 @@ var _ = Describe("JobSpawner", func() {
 				"test-ns",
 				"kafka:9092",
 				"develop",
+				"test-prefix",
 				currentDateTime,
 				customTTL,
 			)
@@ -392,6 +432,7 @@ var _ = Describe("JobSpawner", func() {
 				"test-ns",
 				"kafka:9092",
 				"develop",
+				"test-prefix",
 				currentDateTime,
 				1800,
 			)
@@ -833,6 +874,7 @@ var _ = Describe("JobSpawner", func() {
 				"test-ns",
 				"kafka:9092",
 				"develop",
+				"test-prefix",
 				currentDateTime,
 				1800,
 			)
@@ -859,6 +901,7 @@ var _ = Describe("JobSpawner", func() {
 				"test-ns",
 				"kafka:9092",
 				"develop",
+				"test-prefix",
 				currentDateTime,
 				1800,
 			)
@@ -886,6 +929,7 @@ var _ = Describe("JobSpawner", func() {
 				"test-ns",
 				"kafka:9092",
 				"develop",
+				"test-prefix",
 				currentDateTime,
 				1800,
 			)
@@ -910,6 +954,7 @@ var _ = Describe("JobSpawner", func() {
 				"test-ns",
 				"kafka:9092",
 				"develop",
+				"test-prefix",
 				currentDateTime,
 				1800,
 			)
@@ -932,6 +977,7 @@ var _ = Describe("JobSpawner", func() {
 				"test-ns",
 				"kafka:9092",
 				"develop",
+				"test-prefix",
 				currentDateTime,
 				1800,
 			)
