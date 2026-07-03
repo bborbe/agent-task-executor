@@ -51,6 +51,8 @@ spec:
               value: '{{"SENTRY_PROXY_URL" | env}}'
             - name: BRANCH
               value: '{{ "BRANCH" | env }}'
+            - name: TOPIC_PREFIX
+              value: '{{ "TOPIC_PREFIX" | env }}'
             - name: KAFKA_BROKERS
               value: '{{ "KAFKA_BROKERS" | env }}'
             - name: NAMESPACE

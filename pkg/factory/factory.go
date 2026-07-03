@@ -95,6 +95,7 @@ func CreateConfigResolver(
 func CreateConsumer(
 	saramaClient sarama.Client,
 	branch base.Branch,
+	topicPrefix base.TopicPrefix,
 	kubeClient kubernetes.Interface,
 	namespace libk8s.Namespace,
 	kafkaBrokers string,
@@ -121,7 +122,7 @@ func CreateConsumer(
 		taskStore,
 		currentDateTimeGetter,
 	)
-	topic := lib.TaskV1SchemaID.EventTopic(branch)
+	topic := lib.TaskV1SchemaID.EventTopic(topicPrefix)
 	offsetManager := libkafka.NewSaramaOffsetManager(
 		saramaClient,
 		libkafka.Group("agent-task-executor"),
@@ -144,9 +145,10 @@ func CreateConsumer(
 func CreateHealthcheckRunner(
 	configProvider pkg.EventHandlerConfig,
 	syncProducer libkafka.SyncProducer,
+	topicPrefix base.TopicPrefix,
 	branch base.Branch,
 ) probe.HealthcheckRunner {
-	sender := cdb.NewCommandObjectSender(syncProducer, branch, log.DefaultSamplerFactory)
+	sender := cdb.NewCommandObjectSender(syncProducer, topicPrefix, log.DefaultSamplerFactory)
 	publisher := probe.NewCommandPublisher(sender)
 	return probe.NewHealthcheckRunner(configProvider, publisher, branch)
 }
