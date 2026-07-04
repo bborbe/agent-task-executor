@@ -2,7 +2,7 @@
 
 All notable changes to this project will be documented in this file.
 
-## Unreleased
+## v0.3.1
 
 - refactor: converge build to the `bborbe/kafka-topic-reader` publish-only model — `make buca`
   now builds and pushes `docker.io/bborbe/agent-task-executor:$(VERSION)` (semver from git tag),
