@@ -1,32 +1,22 @@
 include Makefile.variables
 include Makefile.precommit
 include Makefile.docker
-include Makefile.env
-include common.env
 
-SERVICE = agent-task-executor
+DOCKER_REGISTRY ?= docker.io
+IMAGE ?= bborbe/agent-task-executor
+ifeq ($(VERSION),)
+	VERSION := $(shell git describe --tags `git rev-list --tags --max-count=1`)
+endif
 
+# Local dev only. Runtime config (kafka brokers, sentry DSN, stage vars) and the
+# full deployment moved to the quant config repo — this is now a publish-only
+# source repo (see CHANGELOG). Pass any flags/env locally as needed.
 run:
-	@go run -mod=mod main.go \
-	-sentry-dsn="$(shell teamvault-url --teamvault-config ~/.teamvault.json --teamvault-key=${SENTRY_DSN_KEY})" \
-	-listen="localhost:${SKELETON_PORT}" \
-	-kafka-brokers="${KAFKA_BROKERS}" \
-	-datadir="data" \
-	-batch-size="100" \
-	-v=2
+	@go run -mod=mod main.go -v=2
 
 deps:
-	go install github.com/bborbe/teamvault-utils/cmd/teamvault-config-parser@latest
-	go install github.com/bborbe/teamvault-utils/cmd/teamvault-file@latest
-	go install github.com/bborbe/teamvault-utils/cmd/teamvault-url@latest
-	go install github.com/bborbe/teamvault-utils/cmd/teamvault-username@latest
-	go install github.com/bborbe/teamvault-utils/cmd/teamvault-password@latest
 	go install github.com/onsi/ginkgo/v2/ginkgo@v2.25.3
 	sudo port install trivy
-
-formatenv:
-	cat example.env | sort > c
-	mv c example.env
 
 .PHONY: fix
 fix:

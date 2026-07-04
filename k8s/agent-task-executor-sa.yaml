@@ -1,5 +1,0 @@
-apiVersion: v1
-kind: ServiceAccount
-metadata:
-  name: agent-task-executor
-  namespace: '{{ "NAMESPACE" | env }}'

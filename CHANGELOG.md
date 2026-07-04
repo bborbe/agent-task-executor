@@ -2,6 +2,14 @@
 
 All notable changes to this project will be documented in this file.
 
+## Unreleased
+
+- refactor: converge build to the `bborbe/kafka-topic-reader` publish-only model — `make buca`
+  now builds and pushes `docker.io/bborbe/agent-task-executor:$(VERSION)` (semver from git tag),
+  replacing the private-registry `:$(BRANCH)` flow and the separate `publish` target. Deployment
+  moves to the quant config repo; removed `k8s/*.yaml`, `Makefile.k8s`, `Makefile.env`, and the
+  stage `.env` files (kept `k8s/apis` + `k8s/client` CRD code).
+
 ## v0.3.0
 
 - feat: add `make publish` target to build and push a semver-tagged public image to

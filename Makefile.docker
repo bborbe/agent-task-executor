@@ -2,6 +2,7 @@ DIRS += $(shell find */* -maxdepth 0 -name Makefile -exec dirname "{}" \;)
 
 .PHONY: build
 build: check-go-mod
+	@if [ -z "$(VERSION)" ]; then echo "ERROR: no VERSION set and no git tag found — set VERSION=vX.Y.Z or create a tag" >&2; exit 1; fi
 	DOCKER_BUILDKIT=1 \
 	docker build \
 	--pull \
@@ -9,10 +10,10 @@ build: check-go-mod
 	--rm=true \
 	--platform=linux/amd64 \
 	--build-arg DOCKER_REGISTRY=$(DOCKER_REGISTRY) \
-	--build-arg BRANCH=$(BRANCH) \
+	--build-arg BUILD_GIT_VERSION=$$(git describe --tags --always --dirty) \
 	--build-arg BUILD_GIT_COMMIT=$$(git rev-parse --short HEAD) \
 	--build-arg BUILD_DATE=$$(date -u +%Y-%m-%dT%H:%M:%SZ) \
-	-t $(DOCKER_REGISTRY)/$(SERVICE):$(BRANCH) \
+	-t $(DOCKER_REGISTRY)/$(IMAGE):$(VERSION) \
 	-f Dockerfile .
 
 .PHONY: check-go-mod
@@ -26,11 +27,11 @@ check-go-mod:
 
 .PHONY: upload
 upload:
-	docker push $(DOCKER_REGISTRY)/$(SERVICE):$(BRANCH)
+	docker push $(DOCKER_REGISTRY)/$(IMAGE):$(VERSION)
 
 .PHONY: clean
 clean:
-	docker rmi $(DOCKER_REGISTRY)/$(SERVICE):$(BRANCH) || true
+	docker rmi $(DOCKER_REGISTRY)/$(IMAGE):$(VERSION) || true
 	docker image prune -f || true
 	docker builder prune --all -f || true
 	rm -rf vendor
@@ -44,34 +45,9 @@ apply:
 		cd ..; \
 	done
 
+# Operator-run publish to Docker Hub (requires `docker login`). CI runs
+# `make precommit`, never `buca`, so the unconditional push is safe. `apply` is a
+# no-op placeholder (no k8s in this repo — deployment lives in the quant config
+# repo as mirror + keel-pattern). Shape mirrors bborbe/kafka-topic-reader.
 .PHONY: buca
 buca: build upload clean apply
-
-# Public release — build + push a semver-tagged image to Docker Hub.
-# Additive and independent of the private-registry buca flow: common.env
-# force-sets DOCKER_REGISTRY to the quant registry, so this target uses its own
-# PUBLIC_* vars. VERSION comes from the latest git tag (cut by the maintainer
-# release bot). Pattern mirrors bborbe/kafka-topic-reader. Run after a tag exists;
-# requires `docker login` to Docker Hub.
-PUBLIC_REGISTRY ?= docker.io
-PUBLIC_IMAGE ?= bborbe/$(SERVICE)
-VERSION ?= $(shell git describe --tags `git rev-list --tags --max-count=1`)
-
-.PHONY: publish
-publish: check-go-mod
-	@if [ -z "$(VERSION)" ]; then echo "ERROR: no git tag found — set VERSION=vX.Y.Z" >&2; exit 1; fi
-	DOCKER_BUILDKIT=1 \
-	docker build \
-	--pull \
-	--no-cache \
-	--rm=true \
-	--platform=linux/amd64 \
-	--build-arg DOCKER_REGISTRY=$(PUBLIC_REGISTRY) \
-	--build-arg BUILD_GIT_VERSION=$(VERSION) \
-	--build-arg BUILD_GIT_COMMIT=$$(git rev-parse --short HEAD) \
-	--build-arg BUILD_DATE=$$(date -u +%Y-%m-%dT%H:%M:%SZ) \
-	-t $(PUBLIC_REGISTRY)/$(PUBLIC_IMAGE):$(VERSION) \
-	-f Dockerfile .
-	docker push $(PUBLIC_REGISTRY)/$(PUBLIC_IMAGE):$(VERSION) || { echo "ERROR: docker push failed" >&2; exit 1; }
-	docker rmi $(PUBLIC_REGISTRY)/$(PUBLIC_IMAGE):$(VERSION) || true
-	rm -rf vendor
