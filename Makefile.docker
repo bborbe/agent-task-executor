@@ -46,3 +46,32 @@ apply:
 
 .PHONY: buca
 buca: build upload clean apply
+
+# Public release — build + push a semver-tagged image to Docker Hub.
+# Additive and independent of the private-registry buca flow: common.env
+# force-sets DOCKER_REGISTRY to the quant registry, so this target uses its own
+# PUBLIC_* vars. VERSION comes from the latest git tag (cut by the maintainer
+# release bot). Pattern mirrors bborbe/kafka-topic-reader. Run after a tag exists;
+# requires `docker login` to Docker Hub.
+PUBLIC_REGISTRY ?= docker.io
+PUBLIC_IMAGE ?= bborbe/$(SERVICE)
+VERSION ?= $(shell git describe --tags `git rev-list --tags --max-count=1`)
+
+.PHONY: publish
+publish: check-go-mod
+	@if [ -z "$(VERSION)" ]; then echo "ERROR: no git tag found — set VERSION=vX.Y.Z" >&2; exit 1; fi
+	DOCKER_BUILDKIT=1 \
+	docker build \
+	--pull \
+	--no-cache \
+	--rm=true \
+	--platform=linux/amd64 \
+	--build-arg DOCKER_REGISTRY=$(PUBLIC_REGISTRY) \
+	--build-arg BUILD_GIT_VERSION=$(VERSION) \
+	--build-arg BUILD_GIT_COMMIT=$$(git rev-parse --short HEAD) \
+	--build-arg BUILD_DATE=$$(date -u +%Y-%m-%dT%H:%M:%SZ) \
+	-t $(PUBLIC_REGISTRY)/$(PUBLIC_IMAGE):$(VERSION) \
+	-f Dockerfile .
+	docker push $(PUBLIC_REGISTRY)/$(PUBLIC_IMAGE):$(VERSION) || { echo "ERROR: docker push failed" >&2; exit 1; }
+	docker rmi $(PUBLIC_REGISTRY)/$(PUBLIC_IMAGE):$(VERSION) || true
+	rm -rf vendor

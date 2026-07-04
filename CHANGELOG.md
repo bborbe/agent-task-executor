@@ -2,6 +2,12 @@
 
 All notable changes to this project will be documented in this file.
 
+## Unreleased
+
+- feat: add `make publish` target to build and push a semver-tagged public image to
+  Docker Hub (`docker.io/bborbe/agent-task-executor:<version>`), independent of the
+  private-registry `buca` flow. Pattern mirrors `bborbe/kafka-topic-reader`.
+
 ## v0.2.0
 
 - feat: propagate `TOPIC_PREFIX` (from `TopicPrefix` config) to spawned per-task Jobs, alongside the existing
