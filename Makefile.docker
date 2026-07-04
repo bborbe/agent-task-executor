@@ -2,6 +2,7 @@ DIRS += $(shell find */* -maxdepth 0 -name Makefile -exec dirname "{}" \;)
 
 .PHONY: build
 build: check-go-mod
+	@if [ -z "$(VERSION)" ]; then echo "ERROR: no VERSION set and no git tag found — set VERSION=vX.Y.Z or create a tag" >&2; exit 1; fi
 	DOCKER_BUILDKIT=1 \
 	docker build \
 	--pull \
