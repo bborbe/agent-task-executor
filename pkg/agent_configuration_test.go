@@ -100,6 +100,28 @@ var _ = Describe("AgentConfigurations", func() {
 			Expect(tagged[1].Image).To(Equal("registry/agent-backtest:dev"))
 		})
 
+		It("leaves already-tagged (semver-pinned) images untouched", func() {
+			pinned := pkg.AgentConfigurations{
+				{Assignee: "claude", Image: "reg:443/bborbe/agent-claude:v0.1.1"},
+				{Assignee: "pi", Image: "agent-pi:v0.2.0"},
+				{Assignee: "native", Image: "reg:443/agent-backtest"},
+				{Assignee: "digest", Image: "reg/bborbe/agent-claude@sha256:abc123"},
+			}
+			tagged := pinned.TaggedConfigurations("dev")
+			Expect(
+				tagged[0].Image,
+			).To(Equal("reg:443/bborbe/agent-claude:v0.1.1"), "registry-port colon must not be mistaken for a tag; existing tag preserved")
+			Expect(
+				tagged[1].Image,
+			).To(Equal("agent-pi:v0.2.0"), "tag preserved even without a registry")
+			Expect(
+				tagged[2].Image,
+			).To(Equal("reg:443/agent-backtest:dev"), "untagged image with a registry port still gets the branch tag")
+			Expect(
+				tagged[3].Image,
+			).To(Equal("reg/bborbe/agent-claude@sha256:abc123"), "digest-pinned image preserved")
+		})
+
 		It("preserves assignee", func() {
 			tagged := configs.TaggedConfigurations("prod")
 			Expect(tagged[0].Assignee).To(Equal("claude"))

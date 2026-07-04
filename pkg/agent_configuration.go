@@ -5,8 +5,24 @@
 package pkg
 
 import (
+	"strings"
+
 	agentv1 "github.com/bborbe/agent-task-executor/k8s/apis/agent.benjamin-borbe.de/v1"
 )
+
+// appendBranchTag appends ":"+branch to image as a tag, UNLESS image already
+// carries a tag (or digest). An image is considered already-tagged when a ":"
+// appears in its final path segment — i.e. after the last "/". This excludes
+// registry-port colons (e.g. "reg:443/repo" is untagged) but catches both
+// "repo:tag" and digest refs "repo@sha256:...". Pinning an image to an immutable
+// semver tag (e.g. "reg/bborbe/agent-claude:v0.1.1") therefore leaves it
+// untouched instead of producing an invalid "…:v0.1.1:dev".
+func appendBranchTag(image string, branch string) string {
+	if strings.LastIndex(image, ":") > strings.LastIndex(image, "/") {
+		return image
+	}
+	return image + ":" + branch
+}
 
 // AgentConfiguration defines the container image and environment for one agent type.
 type AgentConfiguration struct {
@@ -74,7 +90,9 @@ func (a AgentConfigurations) FindByAssignee(assignee string) (AgentConfiguration
 }
 
 // TaggedConfigurations returns a new AgentConfigurations with the branch appended
-// to each image as a tag (e.g. "registry/image" + ":" + "dev" → "registry/image:dev").
+// to each untagged image as a tag (e.g. "registry/image" + ":" + "dev" →
+// "registry/image:dev"). Images that already carry a tag or digest are left as-is
+// (see appendBranchTag), so semver-pinned images are not double-tagged.
 func (a AgentConfigurations) TaggedConfigurations(branch string) AgentConfigurations {
 	result := make(AgentConfigurations, len(a))
 	for i, c := range a {
@@ -82,7 +100,7 @@ func (a AgentConfigurations) TaggedConfigurations(branch string) AgentConfigurat
 			Assignee:                c.Assignee,
 			TaskType:                c.TaskType,
 			TaskTypes:               append([]string(nil), c.TaskTypes...),
-			Image:                   c.Image + ":" + branch,
+			Image:                   appendBranchTag(c.Image, branch),
 			Env:                     c.Env,
 			VolumeClaim:             c.VolumeClaim,
 			VolumeMountPath:         c.VolumeMountPath,
