@@ -2,7 +2,7 @@
 
 All notable changes to this project will be documented in this file.
 
-## Unreleased
+## v0.3.2
 
 - fix: only append the branch as an image tag when the Config's `spec.image` has no tag
   already. Previously the resolver always did `image + ":" + branch`, so a semver-pinned image
