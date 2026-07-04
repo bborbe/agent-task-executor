@@ -45,5 +45,9 @@ apply:
 		cd ..; \
 	done
 
+# Operator-run publish to Docker Hub (requires `docker login`). CI runs
+# `make precommit`, never `buca`, so the unconditional push is safe. `apply` is a
+# no-op placeholder (no k8s in this repo — deployment lives in the quant config
+# repo as mirror + keel-pattern). Shape mirrors bborbe/kafka-topic-reader.
 .PHONY: buca
 buca: build upload clean apply

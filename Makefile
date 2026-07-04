@@ -8,6 +8,9 @@ ifeq ($(VERSION),)
 	VERSION := $(shell git describe --tags `git rev-list --tags --max-count=1`)
 endif
 
+# Local dev only. Runtime config (kafka brokers, sentry DSN, stage vars) and the
+# full deployment moved to the quant config repo — this is now a publish-only
+# source repo (see CHANGELOG). Pass any flags/env locally as needed.
 run:
 	@go run -mod=mod main.go -v=2
 
