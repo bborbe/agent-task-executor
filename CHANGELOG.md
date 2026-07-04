@@ -2,6 +2,15 @@
 
 All notable changes to this project will be documented in this file.
 
+## Unreleased
+
+- fix: only append the branch as an image tag when the Config's `spec.image` has no tag
+  already. Previously the resolver always did `image + ":" + branch`, so a semver-pinned image
+  (`…/agent-claude:v0.1.1`) became an invalid `…:v0.1.1:dev`. Tag detection treats a `:` after
+  the last `/` as an existing tag (registry-port colons excluded; digests preserved). Untagged
+  images (e.g. quant-native `agent-backtest`) still get the branch tag as before. This unblocks
+  semver-pinned agent images rendered by the Helm chart.
+
 ## v0.3.1
 
 - refactor: converge build to the `bborbe/kafka-topic-reader` publish-only model — `make buca`
