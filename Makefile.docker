@@ -59,6 +59,7 @@ VERSION ?= $(shell git describe --tags `git rev-list --tags --max-count=1`)
 
 .PHONY: publish
 publish: check-go-mod
+	@if [ -z "$(VERSION)" ]; then echo "ERROR: no git tag found — set VERSION=vX.Y.Z" >&2; exit 1; fi
 	DOCKER_BUILDKIT=1 \
 	docker build \
 	--pull \
@@ -71,6 +72,6 @@ publish: check-go-mod
 	--build-arg BUILD_DATE=$$(date -u +%Y-%m-%dT%H:%M:%SZ) \
 	-t $(PUBLIC_REGISTRY)/$(PUBLIC_IMAGE):$(VERSION) \
 	-f Dockerfile .
-	docker push $(PUBLIC_REGISTRY)/$(PUBLIC_IMAGE):$(VERSION)
+	docker push $(PUBLIC_REGISTRY)/$(PUBLIC_IMAGE):$(VERSION) || { echo "ERROR: docker push failed" >&2; exit 1; }
 	docker rmi $(PUBLIC_REGISTRY)/$(PUBLIC_IMAGE):$(VERSION) || true
 	rm -rf vendor
