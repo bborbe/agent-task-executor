@@ -2,7 +2,7 @@
 
 All notable changes to this project will be documented in this file.
 
-## Unreleased
+## v0.3.0
 
 - feat: add `make publish` target to build and push a semver-tagged public image to
   Docker Hub (`docker.io/bborbe/agent-task-executor:<version>`), independent of the
