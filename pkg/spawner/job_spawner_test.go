@@ -943,20 +943,20 @@ var _ = Describe("JobSpawner", func() {
 						Expect(*serverCertVol.Secret.DefaultMode).To(Equal(int32(288)))
 
 						// volume mounts
-						Expect(mountMap).To(HaveKey("/client-cert/file"))
-						Expect(mountMap["/client-cert/file"].Name).To(Equal("client-cert"))
-						Expect(mountMap).To(HaveKey("/client-key/file"))
-						Expect(mountMap["/client-key/file"].Name).To(Equal("client-key"))
-						Expect(mountMap).To(HaveKey("/server-cert/file"))
-						Expect(mountMap["/server-cert/file"].Name).To(Equal("server-cert"))
+						Expect(mountMap).To(HaveKey("/client-cert"))
+						Expect(mountMap["/client-cert"].Name).To(Equal("client-cert"))
+						Expect(mountMap).To(HaveKey("/client-key"))
+						Expect(mountMap["/client-key"].Name).To(Equal("client-key"))
+						Expect(mountMap).To(HaveKey("/server-cert"))
+						Expect(mountMap["/server-cert"].Name).To(Equal("server-cert"))
 					} else {
 						// No cert volumes or mounts
 						Expect(volumeMap).NotTo(HaveKey("client-cert"))
 						Expect(volumeMap).NotTo(HaveKey("client-key"))
 						Expect(volumeMap).NotTo(HaveKey("server-cert"))
-						Expect(mountMap).NotTo(HaveKey("/client-cert/file"))
-						Expect(mountMap).NotTo(HaveKey("/client-key/file"))
-						Expect(mountMap).NotTo(HaveKey("/server-cert/file"))
+						Expect(mountMap).NotTo(HaveKey("/client-cert"))
+						Expect(mountMap).NotTo(HaveKey("/client-key"))
+						Expect(mountMap).NotTo(HaveKey("/server-cert"))
 					}
 				},
 				Entry("both secrets set — mounts three cert volumes",

@@ -317,9 +317,14 @@ func applyActiveDeadlineSeconds(
 // applyKafkaCertVolumes appends three secret volumes (client-cert, client-key, server-cert)
 // to the job's pod spec when BOTH jobKafkaClientCertSecret and jobKafkaCaCertSecret are non-empty.
 // This implements the Kafka mTLS cert mount contract:
-//   - client-cert: secret=<jobKafkaClientCertSecret>, key=user.crt → mount at /client-cert/file
-//   - client-key:  secret=<jobKafkaClientCertSecret>, key=user.key → mount at /client-key/file
-//   - server-cert: secret=<jobKafkaCaCertSecret>,   key=ca.crt   → mount at /server-cert/file
+// Each secret volume is mounted at its directory (/client-cert, /client-key,
+// /server-cert) and the KeyToPath item path "file" projects the key to the
+// file the bborbe/kafka lib reads (/client-cert/file, /client-key/file,
+// /server-cert/file). Mounting directly at /client-cert/file would make that
+// path a directory containing "file" — matches the executor's own cert mount.
+//   - client-cert: secret=<jobKafkaClientCertSecret>, key=user.crt → /client-cert/file
+//   - client-key:  secret=<jobKafkaClientCertSecret>, key=user.key → /client-key/file
+//   - server-cert: secret=<jobKafkaCaCertSecret>,   key=ca.crt   → /server-cert/file
 //
 // When either secret name is empty, the method adds nothing — the spawned Job is unchanged,
 // supporting plaintext-Kafka deployments.
@@ -362,9 +367,9 @@ func (s *jobSpawner) applyKafkaCertVolumes(job *batchv1.Job) {
 	)
 	container := &job.Spec.Template.Spec.Containers[0]
 	container.VolumeMounts = append(container.VolumeMounts,
-		corev1.VolumeMount{Name: "client-cert", MountPath: "/client-cert/file"},
-		corev1.VolumeMount{Name: "client-key", MountPath: "/client-key/file"},
-		corev1.VolumeMount{Name: "server-cert", MountPath: "/server-cert/file"},
+		corev1.VolumeMount{Name: "client-cert", MountPath: "/client-cert"},
+		corev1.VolumeMount{Name: "client-key", MountPath: "/client-key"},
+		corev1.VolumeMount{Name: "server-cert", MountPath: "/server-cert"},
 	)
 }
 
