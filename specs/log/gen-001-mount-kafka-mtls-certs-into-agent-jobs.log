@@ -1,0 +1,321 @@
+[12:37:37] Starting headless session...
+[12:37:37] [init] session=2797b87b model=MiniMax-M2.7-highspeed cwd=/workspace tools=29
+[12:37:40] [system: thinking_tokens]
+[12:37:40] [system: thinking_tokens]
+[12:37:40] 💭 The user wants me to run the dark-factory:generate-prompts-for-spec skill. Let me invoke it with the spec file path provided.
+[12:37:41] ⚠ rate-limit:  0% status=allowed
+[12:37:41] [skill] /dark-factory:generate-prompts-for-spec /Users/bborbe/Documents/workspaces/agent-task-executor-jobcerts/specs/in-progress/001-mount-kafka-mtls-certs-into-agent-jobs.md
+[12:37:44] [system: thinking_tokens]
+[12:37:44] [system: thinking_tokens]
+[12:37:45] 💭 I need to invoke the prompt-creator agent to generate prompts from the approved spec. Let me first read the spec file to understand what needs to be generated.
+[12:37:52] [agent:dark-factory:prompt-creator] Create dark-factory prompts from spec
+    prompt: You are the dark-factory prompt-creator agent. Your task is to generate prompt files from an approved spec.\n\n## Context\n\n- Spec file path: `/workspace//Use…
+[12:37:52] [system: task_started]
+[12:37:55] [system: task_progress]
+[12:37:55] [read] /workspace//Users/bborbe/Documents/workspaces/agent-task-executor-jobcerts/specs/in-progress/001-mount-kafka-mtls-certs-into-agent-jobs.md
+[12:37:55] ⚠ rate-limit: five_hour 0% resets=12:50:00 status=allowed
+[12:37:55] ⚠ [Read] error: File does not exist. Note: your current working directory is /workspace.
+[12:37:58] [system: task_progress]
+[12:37:58] $ find /workspace -name "001-mount-kafka-mtls-certs-into-agent-jobs.md" 2>/dev/null; echo "---"; ls -la /workspace 2>/dev/null | head -50
+[12:38:01] [system: task_progress]
+[12:38:01] [read] /workspace/specs/in-progress/001-mount-kafka-mtls-certs-into-agent-jobs.md
+[12:38:01]   → 96 lines read
+[12:38:03] [system: task_progress]
+[12:38:03] [read] /workspace/main.go
+[12:38:03]   → 184 lines read
+[12:38:07] [system: task_progress]
+[12:38:07] $ ls -la /workspace/pkg/spawner/ 2>/dev/null; echo "---mocks---"; ls /workspace/mocks/ 2>/dev/null | head; echo "---factory---"; ls /workspace/pkg/factory/
+[12:38:09] [system: task_progress]
+[12:38:09] [read] /workspace/pkg/spawner/job_spawner.go
+[12:38:09]   → 380 lines read
+[12:38:12] [system: task_progress]
+[12:38:12] $ grep -n "NewJobSpawner\|CreateConsumer\|jobSpawner\|JobSpawner" /workspace/pkg/factory/factory.go
+[12:38:15] [system: task_progress]
+[12:38:15] [read] /workspace/pkg/factory/factory.go (offset=80, limit=80)
+[12:38:15]   → 79 lines read
+[12:38:20] [system: task_progress]
+[12:38:20] $ GP=$(go env GOPATH); D=$(ls -d $GP/pkg/mod/github.com/bborbe/k8s@* 2>/dev/null | head -1); echo "DIR=$D"; grep -rn "func.*ContainerBuilder.*AddVolumeMounts\|func.*PodSpecBuilder.*SetVolumes\|AddVolum…
+[12:38:23] [system: task_started]
+[12:38:29] [system: task_notification]
+[12:38:32] [system: task_progress]
+[12:38:32] $ grep -n "bborbe/k8s" /workspace/go.mod; echo "---"; find /home/node/go/pkg/mod/github.com/bborbe -maxdepth 1 -name 'k8s@*' 2>/dev/null; find / -maxdepth 8 -type d -name 'k8s@*' -path '*bborbe*' 2>/de…
+[12:38:36] [system: task_progress]
+[12:38:36] $ go mod download github.com/bborbe/k8s 2>&1 | tail -3; D=$(find /home/node/go/pkg/mod/github.com/bborbe -maxdepth 1 -type d -name 'k8s@*' 2>/dev/null | head -1); echo "DIR=$D"
+[12:38:42] [system: task_progress]
+[12:38:42] $ D=/home/node/go/pkg/mod/github.com/bborbe/k8s@v1.14.5; grep -rn "func.*AddVolumeMounts\|func.*SetVolumes\|func.*AddVolumes" "$D" 2>/dev/null | head
+[12:38:49] [system: task_progress]
+[12:38:49] $ grep -n "Volumes\|VolumeMounts\|Containers\[0\]\|SpawnJob\|DescribeTable\|Entry\|Namespace\|NewJobSpawner\|Template.Spec\|newTestSpawner\|func.*Spawner\|jobFromCreate\|Create(" /workspace/pkg/spawner…
+[12:38:53] [system: task_progress]
+[12:38:53] [read] /workspace/pkg/spawner/job_spawner_test.go (offset=33, limit=80)
+[12:38:53]   → 79 lines read
+[12:39:00] [system: task_progress]
+[12:39:00] $ grep -rn "NewJobSpawner\|CreateConsumer" /workspace --include=*.go | grep -v "_test.go" | grep -v "/mocks/"; echo "---cmd dirs---"; find /workspace -maxdepth 2 -name main.go; echo "---defaultMode/288…
+[12:39:11] [system: task_progress]
+[12:39:11] $ grep -rn "NewJobSpawner\|CreateConsumer" /workspace/main.go /workspace/pkg 2>/dev/null | grep -v "/mocks/"; echo "=== main.go count ==="; find /workspace -name main.go -not -path '*/vendor/*'
+[12:39:19] [system: task_progress]
+[12:39:19] $ ls ~/.claude/plugins/marketplaces/coding/docs/*.md 2>/dev/null | xargs -n1 basename 2>/dev/null || ls /home/node/.claude/plugins/marketplaces/coding/docs/*.md | xargs -n1 basename; echo "=== CHANGELO…
+[12:39:19] ⚠ [bash output]
+# Changelog
+
+All notable changes to this project will be documented in this file.
+
+## v0.3.3
+- Update dependencies, Go 1.26.5, alpine 3.24
+- Ignore openpgp advisory GO-2026-5932 in govulncheck and trivy (unmaintained by design, no fix)
+
+## v0.3.2
+
+- fix: only append the branch as an image tag when the Config's `spec.image` has no tag
+  already. Previously the resolver always did `image + ":" + branch`, so a semver-pinned image
+  (`…/agent-claude:v0.1.1`) became an invalid `…:v0.1.1:dev`. Tag detection treats a `:` after
+  the last `/` as an existing tag (registry-port colons excluded; digests preserved). Untagged
+  images (e.g. quant-native `agent-backtest`) still get the branch tag as before. This unblocks
+  semver-pinned agent images rendered by the Helm chart.
+
+## v0.3.1
+
+- refactor: converge build to the `bborbe/kafka-topic-reader` publish-only model — `make buca`
+[12:39:23] [system: task_progress]
+[12:39:23] $ ls -t /workspace/prompts/completed/ 2>/dev/null | head; echo "---inbox---"; ls -la /workspace/prompts/
+[12:40:16] [system: task_progress]
+[12:40:16] [write] /workspace/prompts/1-spec-001-add-kafka-cert-config.md (9875 chars)
+[12:40:16]   → File created successfully at: /workspace/prompts/1-spec-001-add-kafka-cert-config.md (file state is current in your con…
+[12:40:22] [system: task_progress]
+[12:40:22] $ GP=/home/node/go/pkg/mod; D=$(find $GP -maxdepth 3 -type d -path '*k8s.io/api*/core/v1' 2>/dev/null | head -1); echo "DIR=$D"; grep -n "type SecretVolumeSource struct\|type KeyToPath struct" "$D/type…
+[12:40:27] [system: task_progress]
+[12:40:27] $ go mod download k8s.io/api 2>&1 | tail -2; V=$(grep 'k8s.io/api ' /workspace/go.mod | awk '{print $2}'); echo "VER=$V"; F=/home/node/go/pkg/mod/k8s.io/api@$V/core/v1/types.go; ls -la "$F" 2>/dev/null…
+[12:40:33] [system: task_progress]
+[12:40:33] $ grep -rn "int32(.*)\|Ptr\|ptr\." /workspace/pkg/spawner/job_spawner.go | head; echo "--- bborbe ptr helpers used in repo ---"; grep -rn "libptr\|bborbe/ptr\|k8s.Int32\|ptr.To" /workspace/pkg /workspa…
+[12:41:38] [system: task_progress]
+[12:41:38] [write] /workspace/prompts/2-spec-001-mount-kafka-certs.md (12757 chars)
+[12:41:38]   → File created successfully at: /workspace/prompts/2-spec-001-mount-kafka-certs.md (file state is current in your context…
+[12:41:57] [system: task_notification]
+[12:41:57]   ← agent reply: Both prompts written. Let me run the self-audit checks.
+[12:42:00] [system: thinking_tokens]
+[12:42:01] [system: thinking_tokens]
+[12:42:01] [system: thinking_tokens]
+[12:42:01] 💭 The prompt-creator agent has completed and created two prompts. Now I need to run the prompt-auditor agent on each of the generated prompt files. Let me do that concurrently.
+[12:42:01] Now let me run the audit pass on both prompt files concurrently.
+
+[12:42:06] [agent:dark-factory:prompt-auditor] Audit prompt 1 - kafka cert config
+    prompt: You are the dark-factory prompt-auditor agent. Audit the prompt file at `/workspace/prompts/1-spec-001-add-kafka-cert-config.md` against the Prompt Definition …
+[12:42:06] [system: task_started]
+[12:42:08] [agent:dark-factory:prompt-auditor] Audit prompt 2 - mount kafka certs
+    prompt: You are the dark-factory prompt-auditor agent. Audit the prompt file at `/workspace/prompts/2-spec-001-mount-kafka-certs.md` against the Prompt Definition of D…
+[12:42:08] [system: task_started]
+[12:42:08] ⚠ rate-limit:  0% status=allowed
+[12:42:09] [system: task_progress]
+[12:42:09] [read] /workspace/prompts/1-spec-001-add-kafka-cert-config.md
+[12:42:10]   → 180 lines read
+[12:42:10] [system: task_progress]
+[12:42:10] $ ls -la && echo "---CONFIG---" && dark-factory config 2>&1 | head -50
+[12:42:10] ⚠ rate-limit: five_hour 0% resets=12:50:00 status=allowed
+[12:42:11] [system: task_progress]
+[12:42:11] [read] /workspace/prompts/2-spec-001-mount-kafka-certs.md
+[12:42:11]   → 154 lines read
+[12:42:13] [system: task_progress]
+[12:42:13] $ ls -la && echo "---REMOTE---" && git remote get-url origin 2>/dev/null; echo "---CONFIG---" && (dark-factory config 2>/dev/null || echo "dark-factory not available")
+[12:42:13] [system: task_progress]
+[12:42:13] [read] /workspace/.dark-factory.yaml
+[12:42:13]   → 7 lines read
+[12:42:13] [system: task_progress]
+[12:42:13] [read] /workspace/main.go
+[12:42:14]   → 184 lines read
+[12:42:14] [system: task_progress]
+[12:42:14] $ ls /workspace/specs/ && echo "---" && ls /workspace/prompts/ && echo "---REMOTE---" && git remote get-url origin 2>&1
+[12:42:14] ⚠ [Bash] error: Exit code 128\ncompleted\nin-progress\nlog\n---\n1-spec-001-add-kafka-cert-config.md\n2-spec-001-mount-kafka-certs.md\ncompleted\nin-progress\nlog\n---REMOTE---\nfatal: not a git repository (or any parent up to mount point /)\nStopping at filesystem boundary (GIT_DISCOVERY_ACROSS_FILESYSTEM not set).
+[12:42:17] [system: task_progress]
+[12:42:17] $ cat .dark-factory.yaml && echo "---MOUNTS via log---" && grep -iE 'mount|/docs|/workspace|volume' .dark-factory.log | head -20; echo "---SPECS---" && ls -la specs/ && echo "---PROMPTS---" && ls -la p…
+[12:42:19] [system: task_progress]
+[12:42:19] $ ls /workspace/specs/ && echo "---SPEC FILES---" && find /workspace/specs -name '*001*' -o -name '*.md' | grep -i 001
+[12:42:19] [system: task_progress]
+[12:42:19] [read] /workspace/pkg/factory/factory.go
+[12:42:19]   → 164 lines read
+[12:42:19] [system: task_progress]
+[12:42:19] $ echo "===job_spawner.go signatures===" && grep -nE 'func \(s \*jobSpawner\)|func NewJobSpawner|jobKafka|applySecretEnvFrom|applyEphemeralStorage|applyVolumeMount|applyActiveDeadlineSeconds|Containers…
+[12:42:22] [system: task_progress]
+[12:42:22] [read] /workspace/specs/in-progress/001-mount-kafka-mtls-certs-into-agent-jobs.md
+[12:42:23]   → 96 lines read
+[12:42:23] [system: task_progress]
+[12:42:23] $ grep -n 'func NewJobSpawner\|type jobSpawner struct\|jobTTLSecondsAfterFinished\|kubeClient\|namespace\|kafkaBrokers\|branch\|topicPrefix\|currentDateTimeGetter' /workspace/pkg/spawner/job_spawner.go…
+[12:42:24] [system: task_progress]
+[12:42:24] [read] /workspace/pkg/spawner/job_spawner.go (offset=, limit=160)
+[12:42:26]   → 159 lines read
+[12:42:26] [system: task_progress]
+[12:42:26] $ echo "===jobKafka field refs===" && grep -rn 'jobKafka\|KafkaClientCert\|KafkaCaCert\|kafka-client-cert\|kafka-ca-cert' pkg/ main.go 2>/dev/null; echo "===NewJobSpawner call sites===" && grep -rn 'Ne…
+[12:42:27] [system: task_progress]
+[12:42:27] [read] /workspace/pkg/spawner/job_spawner.go (offset=30, limit=45)
+[12:42:28]   → 44 lines read
+[12:42:28] [system: task_progress]
+[12:42:28] $ grep -n 'NewJobSpawner' /workspace/pkg/spawner/job_spawner_test.go
+[12:42:32] [system: task_progress]
+[12:42:32] [read] /workspace/specs/in-progress/001-mount-kafka-mtls-certs-into-agent-jobs.md
+[12:42:32]   → 96 lines read
+[12:42:33] [system: task_progress]
+[12:42:33] [read] /workspace/pkg/spawner/job_spawner.go (offset=180, limit=160)
+[12:42:33]   → 159 lines read
+[12:42:33] [system: task_progress]
+[12:42:33] [read] /workspace/pkg/spawner/job_spawner_test.go (offset=51, limit=12)
+[12:42:35]   → 11 lines read
+[12:42:35] [system: task_progress]
+[12:42:35] $ grep -rn 'errors.Wrapf' /workspace/pkg/ | wc -l && echo "---fmt.Errorf in prompt reqs: n/a, checking spec decomp prompt2---" && grep -c 'AgentConfiguration' /workspace/pkg/spawner/job_spawner.go
+[12:42:35] ⚠ [bash output]
+36
+---fmt.Errorf in prompt reqs: n/a, checking spec decomp prompt2---
+9
+[12:42:38] [system: task_progress]
+[12:42:38] [read] /workspace/pkg/spawner/job_spawner_test.go (offset=420, limit=100)
+[12:42:39]   → 99 lines read
+[12:42:39] [system: task_progress]
+[12:42:39] [read] /workspace/CHANGELOG.md
+[12:42:39]   → 43 lines read
+[12:42:51] [system: task_progress]
+[12:42:51] $ cd /workspace\necho "=== DescribeTable already used in test file? ==="\ngrep -cn 'DescribeTable\|Entry(' pkg/spawner/job_spawner_test.go\necho "=== go mod vendor / kubectl / operator / cross-repo sca…
+[12:43:01] [system: task_progress]
+[12:43:01] $ cd /workspace\necho "=== go.mod vendor hint / go version ==="\nhead -5 go.mod\necho "=== Makefile test target ==="\ngrep -rn 'mod=vendor\|go test\|GOFLAGS' Makefile* 2>/dev/null | head\necho "=== doe…
+[12:43:07] [system: task_progress]
+[12:43:07] [read] /workspace/pkg/factory/factory.go (offset=105, limit=20)
+[12:43:07]   → 19 lines read
+[12:43:31] [system: task_notification]
+[12:43:31]   ← agent reply: All references verified. The test call sites use one-arg-per-line formatting (gofmt will handle either style — the prompt's inline `"", ""` example is directionally correct). Everything checks out. I…
+[12:44:02] [system: task_notification]
+[12:44:02]   ← agent reply: All references verified. The factory call site (line 109) currently takes 7 args and prompt 1 is responsible for adding the 2 new ones. Prompt 2 does not touch the factory signature itself (prompt 1 …
+[12:44:06] [system: thinking_tokens]
+[12:44:06] [system: thinking_tokens]
+[12:44:06] 💭 Both audits are complete. Now I need to run the `dark-factory spec mark-prompted` command to transition the spec. The spec basename is `001-mount-kafka-mtls-certs-into-agent-jobs`.
+[12:44:07] Now let me mark the spec as prompted.
+
+[12:44:07] $ dark-factory spec mark-prompted 001-mount-kafka-mtls-certs-into-agent-jobs
+[12:44:07] ⚠ rate-limit:  0% status=allowed
+[12:44:07] ⚠ [Bash] error: Exit code 127\n(eval):1: command not found: dark-factory
+[12:44:09] [system: thinking_tokens]
+[12:44:09] [system: thinking_tokens]
+[12:44:09] 💭 The `dark-factory` command is not in the PATH. Let me try to find it or look for how to invoke it.
+[12:44:10] $ which dark-factory || find /home/node -name "dark-factory" -type f 2>/dev/null | head -5 || ls /home/node/.claude/plugins/marketplaces/dark-factory/bin/ 2>/dev/null || echo "not found"
+[12:44:12] [system: thinking_tokens]
+[12:44:12] [system: thinking_tokens]
+[12:44:13] [system: thinking_tokens]
+[12:44:13] 💭 The `dark-factory` CLI is not installed or not in PATH. The prompt says to run `dark-factory spec mark-prompted`, but the command isn't available. Let me check if there's a way to invoke it or if it's perhaps a Go binary I need to build first.
+[12:44:13] $ ls /workspace/ && cat /workspace/go.mod 2>/dev/null | head -5
+[12:44:15] [system: thinking_tokens]
+[12:44:15] [system: thinking_tokens]
+[12:44:16] [system: thinking_tokens]
+[12:44:16] [system: thinking_tokens]
+[12:44:17] [system: thinking_tokens]
+[12:44:17] 💭 The `dark-factory` CLI isn't available in this environment. It's likely a tool that would need to be installed or built. Since the command is not available, I can't run `dark-factory spec mark-prompted`. I should note this in my response.
+
+Let me now compile the full response with the creator summary and both audit reports.
+[12:44:29] The `dark-factory` CLI is not available in this environment (`command not found`). The `mark-prompted` transition cannot be executed — this needs to be done manually or the CLI needs to be installed first.
+
+---
+
+## Generated Prompts
+
+**Files created (2):**
+- `/workspace/prompts/1-spec-001-add-kafka-cert-config.md`
+- `/workspace/prompts/2-spec-001-mount-kafka-certs.md`
+
+**Key decisions:**
+- Prompt 1 threads two new config values (`job-kafka-client-cert-secret` / `JOB_KAFKA_CLIENT_CERT_SECRET`, `job-kafka-ca-cert-secret` / `JOB_KAFKA_CA_CERT_SECRET`) as new positional constructor params through `CreateConsumer` into `NewJobSpawner`. Stored but unused until prompt 2. All 9 existing `NewJobSpawner` test call sites are updated to compile.
+- Prompt 2 implements `applyKafkaCertVolumes` using the post-build mutator pattern (mirroring `applySecretEnvFrom`/`applyEphemeralStorage`), adds the both-or-neither gate, three secret volumes/mounts with `DefaultMode` 288 (0o440), table tests for all four cases (both-set / neither / only-client / only-CA), and the `feat:` CHANGELOG entry.
+- Cert mounting uses post-build mutator (appending to `Volumes`/`VolumeMounts`) rather than `SetVolumes` (which overwrites and would clobber the PVC `agent-data` volume).
+- `make precommit` validation is consolidated in prompt 2; prompt 1 runs `make test` only.
+
+**Open questions for human review:**
+- Prompt 1 deliberately skips `make precommit` (no CHANGELOG entry yet, no behavior change) — validation consolidated in prompt 2. If dark-factory requires each prompt to independently pass `make precommit`, prompt 1's verification needs adjusting.
+- Spec's frozen contract puts both client cert and client key in the same secret (`user.crt`/`user.key`) as two separate single-item volumes — reproduced verbatim.
+
+---
+
+## Audit Findings
+
+### prompts/1-spec-001-add-kafka-cert-config.md
+
+**Verdict: PASS (9/10)**
+
+All criteria: PASS. One minor recommendation (test call sites use one-arg-per-line formatting; requirement 5's example is single-line — clarify the edit is two new lines after `int32` argument). No critical issues.
+
+Traceability: All 9 test call site line numbers verified exact, factory signatures verbatim, struct fields accurate. No hallucinations. YAGNI-compliant. No deliberation prose.
+
+---
+
+### prompts/2-spec-001-mount-kafka-certs.md
+
+**Verdict: CONDITIONAL PASS (8/10)**
+
+**Critical issue:** `<verification>` line 135 uses `-mod=vendor` but the repo has no `vendor/` directory and `Makefile.precommit` builds with `-mod=mod`. The coverage command will fail. **Fix:** change `-mod=vendor` → `-mod=mod`.
+
+Traceability: All symbols verified against source (`SpawnJob`, `applySecretEnvFrom`, `applyEphemeralStorage`, `applyVolumeMount`, `applyActiveDeadlineSeconds` pointer pattern, PVC test location, `NewJobSpawner` args). `0440 == decimal 288` arithmetic correct. No hallucinations.
+
+Minor recommendation: Requirement 3 says to mirror "existing PVC-volume assertion style" and "prefer `DescribeTable`," but `job_spawner_test.go` uses plain `It(...)` blocks (0 `DescribeTable` matches). Clarify that introducing `DescribeTable` here is fine and preferred for the four cases.
+
+---
+
+## ⚠️ mark-prompted not executed
+
+```
+dark-factory: command not found
+```
+
+The `dark-factory` CLI is not installed in this environment. The spec remains at `status: approved`. Once the CLI is available, run:
+
+```bash
+dark-factory spec mark-prompted 001-mount-kafka-mtls-certs-into-agent-jobs
+```
+[12:44:29] result: The `dark-factory` CLI is not available in this environment (`command not found`). The `mark-prompted` transition cannot be executed — this needs to be done manually or the CLI needs to be installed first.
+
+---
+
+## Generated Prompts
+
+**Files created (2):**
+- `/workspace/prompts/1-spec-001-add-kafka-cert-config.md`
+- `/workspace/prompts/2-spec-001-mount-kafka-certs.md`
+
+**Key decisions:**
+- Prompt 1 threads two new config values (`job-kafka-client-cert-secret` / `JOB_KAFKA_CLIENT_CERT_SECRET`, `job-kafka-ca-cert-secret` / `JOB_KAFKA_CA_CERT_SECRET`) as new positional constructor params through `CreateConsumer` into `NewJobSpawner`. Stored but unused until prompt 2. All 9 existing `NewJobSpawner` test call sites are updated to compile.
+- Prompt 2 implements `applyKafkaCertVolumes` using the post-build mutator pattern (mirroring `applySecretEnvFrom`/`applyEphemeralStorage`), adds the both-or-neither gate, three secret volumes/mounts with `DefaultMode` 288 (0o440), table tests for all four cases (both-set / neither / only-client / only-CA), and the `feat:` CHANGELOG entry.
+- Cert mounting uses post-build mutator (appending to `Volumes`/`VolumeMounts`) rather than `SetVolumes` (which overwrites and would clobber the PVC `agent-data` volume).
+- `make precommit` validation is consolidated in prompt 2; prompt 1 runs `make test` only.
+
+**Open questions for human review:**
+- Prompt 1 deliberately skips `make precommit` (no CHANGELOG entry yet, no behavior change) — validation consolidated in prompt 2. If dark-factory requires each prompt to independently pass `make precommit`, prompt 1's verification needs adjusting.
+- Spec's frozen contract puts both client cert and client key in the same secret (`user.crt`/`user.key`) as two separate single-item volumes — reproduced verbatim.
+
+---
+
+## Audit Findings
+
+### prompts/1-spec-001-add-kafka-cert-config.md
+
+**Verdict: PASS (9/10)**
+
+All criteria: PASS. One minor recommendation (test call sites use one-arg-per-line formatting; requirement 5's example is single-line — clarify the edit is two new lines after `int32` argument). No critical issues.
+
+Traceability: All 9 test call site line numbers verified exact, factory signatures verbatim, struct fields accurate. No hallucinations. YAGNI-compliant. No deliberation prose.
+
+---
+
+### prompts/2-spec-001-mount-kafka-certs.md
+
+**Verdict: CONDITIONAL PASS (8/10)**
+
+**Critical issue:** `<verification>` line 135 uses `-mod=vendor` but the repo has no `vendor/` directory and `Makefile.precommit` builds with `-mod=mod`. The coverage command will fail. **Fix:** change `-mod=vendor` → `-mod=mod`.
+
+Traceability: All symbols verified against source (`SpawnJob`, `applySecretEnvFrom`, `applyEphemeralStorage`, `applyVolumeMount`, `applyActiveDeadlineSeconds` pointer pattern, PVC test location, `NewJobSpawner` args). `0440 == decimal 288` arithmetic correct. No hallucinations.
+
+Minor recommendation: Requirement 3 says to mirror "existing PVC-volume assertion style" and "prefer `DescribeTable`," but `job_spawner_test.go` uses plain `It(...)` blocks (0 `DescribeTable` matches). Clarify that introducing `DescribeTable` here is fine and preferred for the four cases.
+
+---
+
+## ⚠️ mark-prompted not executed
+
+```
+dark-factory: command not found
+```
+
+The `dark-factory` CLI is not installed in this environment. The spec remains at `status: approved`. Once the CLI is available, run:
+
+```bash
+dark-factory spec mark-prompted 001-mount-kafka-mtls-certs-into-agent-jobs
+``` | duration: 411953ms | cost: $3.0582 | tokens: 93358 in / 2644 out

@@ -3,3 +3,5 @@
 /CLAUDE.md
 /.mcp-*
 /vendor
+/.dark-factory.lock
+/.dark-factory.log

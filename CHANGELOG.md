@@ -2,6 +2,14 @@
 
 All notable changes to this project will be documented in this file.
 
+## Unreleased
+
+- feat: Mount Kafka mTLS client cert/key and CA cert into spawned agent Jobs when the new
+  `job-kafka-client-cert-secret` and `job-kafka-ca-cert-secret` executor config values are both
+  set — projects three read-only (0440) secret files at `/client-cert/file`, `/client-key/file`,
+  `/server-cert/file`. When neither or only one is set, spawned Jobs are unchanged (plaintext-Kafka
+  deployments unaffected).
+
 ## v0.3.3
 - Update dependencies, Go 1.26.5, alpine 3.24
 - Ignore openpgp advisory GO-2026-5932 in govulncheck and trivy (unmaintained by design, no fix)

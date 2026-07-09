@@ -43,6 +43,8 @@ type JobSpawner interface {
 // NewJobSpawner creates a new JobSpawner backed by the K8s batch/v1 API.
 // jobTTLSecondsAfterFinished controls how long completed Job pods survive
 // before Kubernetes' TTL controller garbage-collects them.
+// jobKafkaClientCertSecret and jobKafkaCaCertSecret are the names of K8s secrets
+// to mount into spawned Jobs for Kafka mTLS; empty strings mean no cert mounting.
 func NewJobSpawner(
 	kubeClient kubernetes.Interface,
 	namespace k8s.Namespace,
@@ -51,6 +53,8 @@ func NewJobSpawner(
 	topicPrefix string,
 	currentDateTimeGetter libtime.CurrentDateTimeGetter,
 	jobTTLSecondsAfterFinished int32,
+	jobKafkaClientCertSecret string,
+	jobKafkaCaCertSecret string,
 ) JobSpawner {
 	return &jobSpawner{
 		kubeClient:                 kubeClient,
@@ -60,6 +64,8 @@ func NewJobSpawner(
 		topicPrefix:                topicPrefix,
 		currentDateTimeGetter:      currentDateTimeGetter,
 		jobTTLSecondsAfterFinished: jobTTLSecondsAfterFinished,
+		jobKafkaClientCertSecret:   jobKafkaClientCertSecret,
+		jobKafkaCaCertSecret:       jobKafkaCaCertSecret,
 	}
 }
 
@@ -72,6 +78,8 @@ type jobSpawner struct {
 	topicPrefix                string
 	currentDateTimeGetter      libtime.CurrentDateTimeGetter
 	jobTTLSecondsAfterFinished int32
+	jobKafkaClientCertSecret   string
+	jobKafkaCaCertSecret       string
 }
 
 func (s *jobSpawner) SpawnJob(
@@ -127,6 +135,7 @@ func (s *jobSpawner) SpawnJob(
 	applyTaskIDLabel(task.TaskIdentifier, job)
 	applySecretEnvFrom(config, job)
 	applyEphemeralStorage(config, job)
+	s.applyKafkaCertVolumes(job)
 	if config.PriorityClassName != "" {
 		job.Spec.Template.Spec.PriorityClassName = config.PriorityClassName
 	}
@@ -303,6 +312,60 @@ func applyActiveDeadlineSeconds(
 	deadline := int64(config.EffectiveZombieJobTimeoutSeconds())
 	job.Spec.ActiveDeadlineSeconds = &deadline
 	glog.V(2).Infof("set activeDeadlineSeconds=%d on job %s for task %s", deadline, jobName, taskID)
+}
+
+// applyKafkaCertVolumes appends three secret volumes (client-cert, client-key, server-cert)
+// to the job's pod spec when BOTH jobKafkaClientCertSecret and jobKafkaCaCertSecret are non-empty.
+// This implements the Kafka mTLS cert mount contract:
+//   - client-cert: secret=<jobKafkaClientCertSecret>, key=user.crt → mount at /client-cert/file
+//   - client-key:  secret=<jobKafkaClientCertSecret>, key=user.key → mount at /client-key/file
+//   - server-cert: secret=<jobKafkaCaCertSecret>,   key=ca.crt   → mount at /server-cert/file
+//
+// When either secret name is empty, the method adds nothing — the spawned Job is unchanged,
+// supporting plaintext-Kafka deployments.
+func (s *jobSpawner) applyKafkaCertVolumes(job *batchv1.Job) {
+	if s.jobKafkaClientCertSecret == "" || s.jobKafkaCaCertSecret == "" {
+		return
+	}
+	mode := int32(0o440) // decimal 288; owner+group read only
+	job.Spec.Template.Spec.Volumes = append(job.Spec.Template.Spec.Volumes,
+		corev1.Volume{
+			Name: "client-cert",
+			VolumeSource: corev1.VolumeSource{
+				Secret: &corev1.SecretVolumeSource{
+					SecretName:  s.jobKafkaClientCertSecret,
+					Items:       []corev1.KeyToPath{{Key: "user.crt", Path: "file"}},
+					DefaultMode: &mode,
+				},
+			},
+		},
+		corev1.Volume{
+			Name: "client-key",
+			VolumeSource: corev1.VolumeSource{
+				Secret: &corev1.SecretVolumeSource{
+					SecretName:  s.jobKafkaClientCertSecret,
+					Items:       []corev1.KeyToPath{{Key: "user.key", Path: "file"}},
+					DefaultMode: &mode,
+				},
+			},
+		},
+		corev1.Volume{
+			Name: "server-cert",
+			VolumeSource: corev1.VolumeSource{
+				Secret: &corev1.SecretVolumeSource{
+					SecretName:  s.jobKafkaCaCertSecret,
+					Items:       []corev1.KeyToPath{{Key: "ca.crt", Path: "file"}},
+					DefaultMode: &mode,
+				},
+			},
+		},
+	)
+	container := &job.Spec.Template.Spec.Containers[0]
+	container.VolumeMounts = append(container.VolumeMounts,
+		corev1.VolumeMount{Name: "client-cert", MountPath: "/client-cert/file"},
+		corev1.VolumeMount{Name: "client-key", MountPath: "/client-key/file"},
+		corev1.VolumeMount{Name: "server-cert", MountPath: "/server-cert/file"},
+	)
 }
 
 // taskPhaseString returns the string value of the task's phase, or "" when absent.
