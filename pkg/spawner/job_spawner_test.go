@@ -856,6 +856,119 @@ var _ = Describe("JobSpawner", func() {
 			)
 			Expect(err).NotTo(BeNil())
 		})
+
+		Describe("Kafka mTLS cert volumes", func() {
+			makeTask := func() lib.Task {
+				return lib.Task{
+					TaskIdentifier: lib.TaskIdentifier("kafka-cert-test"),
+					Frontmatter:    lib.TaskFrontmatter{"assignee": "claude"},
+					Content:        lib.TaskContent("do the work"),
+				}
+			}
+			makeConfig := func() pkg.AgentConfiguration {
+				return pkg.AgentConfiguration{
+					Assignee: "claude",
+					Image:    "my-image:latest",
+					Env:      map[string]string{},
+				}
+			}
+
+			DescribeTable("Kafka mTLS cert volume mounts",
+				func(clientCertSecret, caCertSecret string, expectCerts bool) {
+					spawner := spawner.NewJobSpawner(
+						fakeClient,
+						"test-ns",
+						"kafka:9092",
+						"develop",
+						"test-prefix",
+						currentDateTime,
+						1800,
+						clientCertSecret,
+						caCertSecret,
+					)
+					_, err := spawner.SpawnJob(ctx, makeTask(), makeConfig())
+					Expect(err).To(BeNil())
+
+					jobs, err := fakeClient.BatchV1().
+						Jobs("test-ns").
+						List(ctx, metav1.ListOptions{})
+					Expect(err).To(BeNil())
+					Expect(jobs.Items).To(HaveLen(1))
+
+					job := jobs.Items[0]
+
+					// Build name-indexed maps for stable assertions
+					volumeMap := make(map[string]corev1.Volume)
+					for _, v := range job.Spec.Template.Spec.Volumes {
+						volumeMap[v.Name] = v
+					}
+					container := job.Spec.Template.Spec.Containers[0]
+					mountMap := make(map[string]corev1.VolumeMount)
+					for _, m := range container.VolumeMounts {
+						mountMap[m.MountPath] = m
+					}
+
+					if expectCerts {
+						// client-cert volume
+						Expect(volumeMap).To(HaveKey("client-cert"))
+						clientCertVol := volumeMap["client-cert"]
+						Expect(clientCertVol.Secret).NotTo(BeNil())
+						Expect(clientCertVol.Secret.SecretName).To(Equal("kafka-client-cert"))
+						Expect(clientCertVol.Secret.Items).To(HaveLen(1))
+						Expect(clientCertVol.Secret.Items[0].Key).To(Equal("user.crt"))
+						Expect(clientCertVol.Secret.Items[0].Path).To(Equal("file"))
+						Expect(clientCertVol.Secret.DefaultMode).NotTo(BeNil())
+						Expect(*clientCertVol.Secret.DefaultMode).To(Equal(int32(288)))
+
+						// client-key volume
+						Expect(volumeMap).To(HaveKey("client-key"))
+						clientKeyVol := volumeMap["client-key"]
+						Expect(clientKeyVol.Secret).NotTo(BeNil())
+						Expect(clientKeyVol.Secret.SecretName).To(Equal("kafka-client-cert"))
+						Expect(clientKeyVol.Secret.Items).To(HaveLen(1))
+						Expect(clientKeyVol.Secret.Items[0].Key).To(Equal("user.key"))
+						Expect(clientKeyVol.Secret.Items[0].Path).To(Equal("file"))
+						Expect(clientKeyVol.Secret.DefaultMode).NotTo(BeNil())
+						Expect(*clientKeyVol.Secret.DefaultMode).To(Equal(int32(288)))
+
+						// server-cert volume
+						Expect(volumeMap).To(HaveKey("server-cert"))
+						serverCertVol := volumeMap["server-cert"]
+						Expect(serverCertVol.Secret).NotTo(BeNil())
+						Expect(serverCertVol.Secret.SecretName).To(Equal("kafka-ca-cert"))
+						Expect(serverCertVol.Secret.Items).To(HaveLen(1))
+						Expect(serverCertVol.Secret.Items[0].Key).To(Equal("ca.crt"))
+						Expect(serverCertVol.Secret.Items[0].Path).To(Equal("file"))
+						Expect(serverCertVol.Secret.DefaultMode).NotTo(BeNil())
+						Expect(*serverCertVol.Secret.DefaultMode).To(Equal(int32(288)))
+
+						// volume mounts
+						Expect(mountMap).To(HaveKey("/client-cert/file"))
+						Expect(mountMap["/client-cert/file"].Name).To(Equal("client-cert"))
+						Expect(mountMap).To(HaveKey("/client-key/file"))
+						Expect(mountMap["/client-key/file"].Name).To(Equal("client-key"))
+						Expect(mountMap).To(HaveKey("/server-cert/file"))
+						Expect(mountMap["/server-cert/file"].Name).To(Equal("server-cert"))
+					} else {
+						// No cert volumes or mounts
+						Expect(volumeMap).NotTo(HaveKey("client-cert"))
+						Expect(volumeMap).NotTo(HaveKey("client-key"))
+						Expect(volumeMap).NotTo(HaveKey("server-cert"))
+						Expect(mountMap).NotTo(HaveKey("/client-cert/file"))
+						Expect(mountMap).NotTo(HaveKey("/client-key/file"))
+						Expect(mountMap).NotTo(HaveKey("/server-cert/file"))
+					}
+				},
+				Entry("both secrets set — mounts three cert volumes",
+					"kafka-client-cert", "kafka-ca-cert", true),
+				Entry("neither secret set — no cert volumes",
+					"", "", false),
+				Entry("only client cert set — no cert volumes",
+					"kafka-client-cert", "", false),
+				Entry("only CA cert set — no cert volumes",
+					"", "kafka-ca-cert", false),
+			)
+		})
 	})
 
 	Describe("IsJobActive", func() {

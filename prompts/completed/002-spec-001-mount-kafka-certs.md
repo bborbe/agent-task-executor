@@ -1,7 +1,13 @@
 ---
-status: draft
+status: completed
 spec: [001-mount-kafka-mtls-certs-into-agent-jobs]
+summary: Implemented applyKafkaCertVolumes helper on jobSpawner that mounts three Kafka mTLS secret volumes (client-cert, client-key, server-cert) into spawned Jobs when both jobKafkaClientCertSecret and jobKafkaCaCertSecret are set; added table-driven tests covering both-set, neither-set, only-client-set, and only-CA-set cases; recorded feat in CHANGELOG Unreleased.
+execution_id: agent-task-executor-jobcerts-exec-002-spec-001-mount-kafka-certs
+dark-factory-version: v0.191.0
 created: "2026-07-09T12:45:00Z"
+queued: "2026-07-09T10:50:36Z"
+started: "2026-07-09T10:50:38Z"
+completed: "2026-07-09T11:00:11Z"
 branch: dark-factory/mount-kafka-mtls-certs-into-agent-jobs
 ---
 
@@ -100,7 +106,7 @@ FROZEN contract (dictated by the Kafka client library — do NOT deviate):
    - **neither set** (`"", ""`): assert the pod spec has NONE of the volumes named `client-cert`/`client-key`/`server-cert` and the first container has NONE of the three cert mount paths. (Use a helper that checks absence by name/path so a future PVC volume would not false-fail; in these test cases there is no PVC so `Volumes` is empty.)
    - **only client set** (`"kafka-client-cert", ""`): same negative assertions as neither-set.
    - **only CA set** (`"", "kafka-ca-cert"`): same negative assertions as neither-set.
-   Write the assertions so ordering of the three volumes/mounts is not assumed if it is not guaranteed — index them by name/path (build a `map[string]corev1.Volume` keyed by `Name` and a `map[string]corev1.VolumeMount` keyed by `MountPath`), OR assert exact order matching the append order in requirement 1 (client-cert, client-key, server-cert). Either is acceptable; pick one and be consistent.
+   Prefer indexing by name/path (build a `map[string]corev1.Volume` keyed by `Name` and a `map[string]corev1.VolumeMount` keyed by `MountPath`) rather than asserting exact slice order/length — the by-name approach survives a future PVC `agent-data` volume coexisting and does not depend on the table fixture leaving `VolumeClaim` empty. Assert presence + fields of the three cert volumes/mounts by name; for the negative cases assert absence by name/path.
 
 4. In `/workspace/CHANGELOG.md`, add a `## Unreleased` section at the top (immediately under the intro lines, above `## v0.3.3`) with a `feat:` entry, for example:
    ```
@@ -133,7 +139,7 @@ Run in `/workspace`:
 ```
 make precommit
 grep -n 'Unreleased' CHANGELOG.md
-go test -coverprofile=/tmp/cover.out -mod=vendor ./pkg/spawner/... && go tool cover -func=/tmp/cover.out | tail -1
+go test -coverprofile=/tmp/cover.out -mod=mod ./pkg/spawner/... && go tool cover -func=/tmp/cover.out | tail -1
 ```
 Expected:
 - `make precommit` exits 0 — all Ginkgo specs green including the new both-set / neither-set / only-client-set / only-CA-set cert-mount cases.

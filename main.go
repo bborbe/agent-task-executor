@@ -39,20 +39,20 @@ func main() {
 }
 
 type application struct {
-	SentryDSN                  string            `required:"true"  arg:"sentry-dsn"                     env:"SENTRY_DSN"                     usage:"SentryDSN"                                                                             display:"length"`
+	SentryDSN                  string            `required:"true"  arg:"sentry-dsn"                     env:"SENTRY_DSN"                     usage:"SentryDSN"                                                                                                                                           display:"length"`
 	SentryProxy                string            `required:"false" arg:"sentry-proxy"                   env:"SENTRY_PROXY"                   usage:"Sentry Proxy"`
 	Listen                     string            `required:"true"  arg:"listen"                         env:"LISTEN"                         usage:"address to listen to"`
 	KafkaBrokers               string            `required:"true"  arg:"kafka-brokers"                  env:"KAFKA_BROKERS"                  usage:"comma-separated Kafka broker addresses"`
 	Branch                     base.Branch       `required:"true"  arg:"branch"                         env:"BRANCH"                         usage:"Kafka topic prefix branch (develop/live)"`
 	TopicPrefix                base.TopicPrefix  `required:"false" arg:"topic-prefix"                   env:"TOPIC_PREFIX"                   usage:"Explicit Kafka topic prefix; empty means unprefixed topics"`
 	Namespace                  libk8s.Namespace  `required:"true"  arg:"namespace"                      env:"NAMESPACE"                      usage:"K8s namespace to spawn Jobs in"`
-	BuildGitVersion            string            `required:"false" arg:"build-git-version"              env:"BUILD_GIT_VERSION"              usage:"Build Git version (git describe --tags --always --dirty)"                                               default:"dev"`
-	BuildGitCommit             string            `required:"false" arg:"build-git-commit"               env:"BUILD_GIT_COMMIT"               usage:"Build Git commit hash"                                                                                  default:"none"`
+	BuildGitVersion            string            `required:"false" arg:"build-git-version"              env:"BUILD_GIT_VERSION"              usage:"Build Git version (git describe --tags --always --dirty)"                                                                                                             default:"dev"`
+	BuildGitCommit             string            `required:"false" arg:"build-git-commit"               env:"BUILD_GIT_COMMIT"               usage:"Build Git commit hash"                                                                                                                                                default:"none"`
 	BuildDate                  *libtime.DateTime `required:"false" arg:"build-date"                     env:"BUILD_DATE"                     usage:"Build timestamp (RFC3339)"`
-	HealthcheckCronExpression  string            `required:"true"  arg:"healthcheck-cron-expression"    env:"HEALTHCHECK_CRON_EXPRESSION"    usage:"Cron expression for agent liveness health checks"                                                       default:"0 0 8 * * 1"`
-	JobTTLSecondsAfterFinished int32             `required:"false" arg:"job-ttl-seconds-after-finished" env:"JOB_TTL_SECONDS_AFTER_FINISHED" usage:"K8s Job TTL after completion (seconds) — completed Job pods are GCed after this delay"                  default:"1800"`
-	JobKafkaClientCertSecret   string            `required:"false" arg:"job-kafka-client-cert-secret" env:"JOB_KAFKA_CLIENT_CERT_SECRET" usage:"Name of the existing K8s secret holding the Kafka client cert/key (keys user.crt/user.key) to mount into spawned Jobs; empty disables cert mounting"`
-	JobKafkaCaCertSecret       string            `required:"false" arg:"job-kafka-ca-cert-secret"     env:"JOB_KAFKA_CA_CERT_SECRET"     usage:"Name of the existing K8s secret holding the Kafka CA cert (key ca.crt) to mount into spawned Jobs; empty disables cert mounting"`
+	HealthcheckCronExpression  string            `required:"true"  arg:"healthcheck-cron-expression"    env:"HEALTHCHECK_CRON_EXPRESSION"    usage:"Cron expression for agent liveness health checks"                                                                                                                     default:"0 0 8 * * 1"`
+	JobTTLSecondsAfterFinished int32             `required:"false" arg:"job-ttl-seconds-after-finished" env:"JOB_TTL_SECONDS_AFTER_FINISHED" usage:"K8s Job TTL after completion (seconds) — completed Job pods are GCed after this delay"                                                                                default:"1800"`
+	JobKafkaClientCertSecret   string            `required:"false" arg:"job-kafka-client-cert-secret"   env:"JOB_KAFKA_CLIENT_CERT_SECRET"   usage:"Name of the existing K8s secret holding the Kafka client cert/key (keys user.crt/user.key) to mount into spawned Jobs; empty disables cert mounting"`
+	JobKafkaCaCertSecret       string            `required:"false" arg:"job-kafka-ca-cert-secret"       env:"JOB_KAFKA_CA_CERT_SECRET"       usage:"Name of the existing K8s secret holding the Kafka CA cert (key ca.crt) to mount into spawned Jobs; empty disables cert mounting"`
 }
 
 //nolint:funlen // Initialization sequence; wiring is linear with no branching.

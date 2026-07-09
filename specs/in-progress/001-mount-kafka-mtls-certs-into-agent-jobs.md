@@ -1,11 +1,12 @@
 ---
-status: prompted
+status: verifying
 tags:
     - dark-factory
     - spec
 approved: "2026-07-09T10:35:28Z"
 generating: "2026-07-09T10:37:35Z"
 prompted: "2026-07-09T10:44:31Z"
+verifying: "2026-07-09T10:49:24Z"
 branch: dark-factory/mount-kafka-mtls-certs-into-agent-jobs
 ---
 
