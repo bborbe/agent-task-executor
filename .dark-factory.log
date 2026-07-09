@@ -1,0 +1,41 @@
+time=2026-07-09T12:35:18.004+02:00 level=INFO msg="effective config" maxContainers=5 maxContainersSource=global containerImage=docker.io/bborbe/claude-yolo:v0.12.0 model=MiniMax-M2.7-highspeed modelSource=global workflow=direct workflowSource=project pr=false prSource=project autoRelease=false autoReleaseSource=arg autoMerge=false autoMergeSource=project verificationGate=false validationCommand="make precommit" testCommand="make test" debounceMs=500 hideGit=true hideGitSource=arg autoApprovePrompts=false autoApprovePromptsSource=default autoGeneratePrompts=true autoGeneratePromptsSource=project dirtyFileThreshold=0 dirtyFileThresholdSource=default promptsInboxDir=prompts promptsInProgressDir=prompts/in-progress promptsCompletedDir=prompts/completed promptsLogDir=prompts/log preflightCommand="make precommit" preflightInterval=8h healthcheckEnabled=true healthcheckEnabledSource=default healthcheckInterval=8h healthcheckIntervalSource=default envFromGlobal=[] envProjectOverrides=[ANTHROPIC_BASE_URL] envProjectOnly=[]
+time=2026-07-09T12:35:18.005+02:00 level=INFO msg="watching for queued prompts" dir=prompts/in-progress
+time=2026-07-09T12:35:18.010+02:00 level=INFO msg="preflight: running baseline check" command="make precommit"
+time=2026-07-09T12:35:48.012+02:00 level=WARN msg="subprocess slow" op=preflight threshold=30s
+time=2026-07-09T12:37:23.223+02:00 level=INFO msg="preflight: baseline check passed"
+time=2026-07-09T12:37:23.224+02:00 level=INFO msg="healthcheck startup gate starting"
+time=2026-07-09T12:37:23.225+02:00 level=INFO msg="healthcheck probe starting" probe=docker
+time=2026-07-09T12:37:23.309+02:00 level=INFO msg="healthcheck probe passed" probe=docker
+time=2026-07-09T12:37:23.309+02:00 level=INFO msg="healthcheck probe starting" probe=image
+time=2026-07-09T12:37:23.370+02:00 level=INFO msg="healthcheck probe passed" probe=image image=docker.io/bborbe/claude-yolo:v0.12.0
+time=2026-07-09T12:37:23.370+02:00 level=INFO msg="healthcheck probe starting" probe=boot
+time=2026-07-09T12:37:23.975+02:00 level=INFO msg="healthcheck probe passed" probe=boot container=agent-task-executor-jobcerts-healthcheck-boot-94c59750c4f042ba
+time=2026-07-09T12:37:23.975+02:00 level=INFO msg="healthcheck probe starting" probe=claude
+time=2026-07-09T12:37:28.976+02:00 level=WARN msg="subprocess slow" op="claude session probe" threshold=5s
+time=2026-07-09T12:37:33.976+02:00 level=INFO msg="healthcheck probe passed" probe=claude container=agent-task-executor-jobcerts-healthcheck-claude-f564430333989796
+time=2026-07-09T12:37:33.977+02:00 level=INFO msg="healthcheck probe starting" probe=mount
+time=2026-07-09T12:37:35.723+02:00 level=INFO msg="healthcheck probe passed" probe=mount container=agent-task-executor-jobcerts-healthcheck-mount-f85ee3ee94997497
+time=2026-07-09T12:37:35.728+02:00 level=INFO msg="healthcheck startup gate ok" elapsed=12.499539542s
+time=2026-07-09T12:37:35.728+02:00 level=INFO msg="watcher started" dir=/Users/bborbe/Documents/workspaces/agent-task-executor-jobcerts/prompts/in-progress
+time=2026-07-09T12:37:35.730+02:00 level=INFO msg="processor started"
+time=2026-07-09T12:37:35.730+02:00 level=INFO msg="spec watcher started" dir=/Users/bborbe/Documents/workspaces/agent-task-executor-jobcerts/specs/in-progress
+time=2026-07-09T12:37:35.732+02:00 level=INFO msg="spec file created in in-progress, triggering generation" path=/Users/bborbe/Documents/workspaces/agent-task-executor-jobcerts/specs/in-progress/001-mount-kafka-mtls-certs-into-agent-jobs.md
+time=2026-07-09T12:37:40.735+02:00 level=INFO msg="nothing to do, waiting for changes"
+time=2026-07-09T12:38:40.709+02:00 level=INFO msg="nothing to do, waiting for changes"
+time=2026-07-09T12:39:45.694+02:00 level=INFO msg="nothing to do, waiting for changes"
+time=2026-07-09T12:40:50.693+02:00 level=INFO msg="nothing to do, waiting for changes"
+time=2026-07-09T12:41:50.693+02:00 level=INFO msg="nothing to do, waiting for changes"
+time=2026-07-09T12:42:55.697+02:00 level=INFO msg="nothing to do, waiting for changes"
+time=2026-07-09T12:44:00.693+02:00 level=INFO msg="nothing to do, waiting for changes"
+time=2026-07-09T12:44:31.937+02:00 level=INFO msg="migrated spec refs to full slugs" file=1-spec-001-add-kafka-cert-config.md updated=1
+time=2026-07-09T12:44:31.937+02:00 level=INFO msg="migrated spec refs to full slugs" file=2-spec-001-mount-kafka-certs.md updated=1
+time=2026-07-09T12:44:35.692+02:00 level=INFO msg="startup: checking prompted spec" spec=001-mount-kafka-mtls-certs-into-agent-jobs
+time=2026-07-09T12:45:05.692+02:00 level=INFO msg="nothing to do, waiting for changes"
+time=2026-07-09T12:45:16.869+02:00 level=INFO msg="lock acquired" prompt_id=001-spec-001-add-kafka-cert-config.md
+time=2026-07-09T12:45:16.869+02:00 level=INFO msg="found queued prompt" prompt_id=001-spec-001-add-kafka-cert-config.md
+time=2026-07-09T12:45:16.870+02:00 level=INFO msg="executing prompt" prompt_id=001-spec-001-add-kafka-cert-config spec_id=001-mount-kafka-mtls-certs-into-agent-jobs container="" workflow_type=direct title=001-spec-001-add-kafka-cert-config
+time=2026-07-09T12:45:16.870+02:00 level=INFO msg="syncing with remote default branch" prompt_id=001-spec-001-add-kafka-cert-config spec_id=001-mount-kafka-mtls-certs-into-agent-jobs container="" workflow_type=direct
+time=2026-07-09T12:45:17.415+02:00 level=INFO msg="container assigned" prompt_id=001-spec-001-add-kafka-cert-config spec_id=001-mount-kafka-mtls-certs-into-agent-jobs container="" workflow_type=direct container_old="" container=agent-task-executor-jobcerts-exec-001-spec-001-add-kafka-cert-config workflow_step=acquire_container
+time=2026-07-09T12:49:23.373+02:00 level=INFO msg="docker container exited" prompt_id=001-spec-001-add-kafka-cert-config spec_id=001-mount-kafka-mtls-certs-into-agent-jobs container="" workflow_type=direct container=agent-task-executor-jobcerts-exec-001-spec-001-add-kafka-cert-config exit_code=0 workflow_step=run_claude
+time=2026-07-09T12:49:23.374+02:00 level=INFO msg="completion report" status=success summary="Added job-kafka-client-cert-secret and job-kafka-ca-cert-secret global config fields, threaded through factory into jobSpawner struct"
+time=2026-07-09T12:49:23.404+02:00 level=INFO msg="moved to completed" prompt_id=001-spec-001-add-kafka-cert-config spec_id=001-mount-kafka-mtls-certs-into-agent-jobs container="" workflow_type=direct container=agent-task-executor-jobcerts-exec-001-spec-001-add-kafka-cert-config

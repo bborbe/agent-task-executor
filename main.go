@@ -51,6 +51,8 @@ type application struct {
 	BuildDate                  *libtime.DateTime `required:"false" arg:"build-date"                     env:"BUILD_DATE"                     usage:"Build timestamp (RFC3339)"`
 	HealthcheckCronExpression  string            `required:"true"  arg:"healthcheck-cron-expression"    env:"HEALTHCHECK_CRON_EXPRESSION"    usage:"Cron expression for agent liveness health checks"                                                       default:"0 0 8 * * 1"`
 	JobTTLSecondsAfterFinished int32             `required:"false" arg:"job-ttl-seconds-after-finished" env:"JOB_TTL_SECONDS_AFTER_FINISHED" usage:"K8s Job TTL after completion (seconds) — completed Job pods are GCed after this delay"                  default:"1800"`
+	JobKafkaClientCertSecret   string            `required:"false" arg:"job-kafka-client-cert-secret" env:"JOB_KAFKA_CLIENT_CERT_SECRET" usage:"Name of the existing K8s secret holding the Kafka client cert/key (keys user.crt/user.key) to mount into spawned Jobs; empty disables cert mounting"`
+	JobKafkaCaCertSecret       string            `required:"false" arg:"job-kafka-ca-cert-secret"     env:"JOB_KAFKA_CA_CERT_SECRET"     usage:"Name of the existing K8s secret holding the Kafka CA cert (key ca.crt) to mount into spawned Jobs; empty disables cert mounting"`
 }
 
 //nolint:funlen // Initialization sequence; wiring is linear with no branching.
@@ -139,6 +141,8 @@ func (a *application) Run(ctx context.Context, sentryClient libsentry.Client) er
 		resultPublisher,
 		taskStore,
 		a.JobTTLSecondsAfterFinished,
+		a.JobKafkaClientCertSecret,
+		a.JobKafkaCaCertSecret,
 	)
 
 	return service.Run(

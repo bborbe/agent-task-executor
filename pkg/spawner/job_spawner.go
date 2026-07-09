@@ -43,6 +43,8 @@ type JobSpawner interface {
 // NewJobSpawner creates a new JobSpawner backed by the K8s batch/v1 API.
 // jobTTLSecondsAfterFinished controls how long completed Job pods survive
 // before Kubernetes' TTL controller garbage-collects them.
+// jobKafkaClientCertSecret and jobKafkaCaCertSecret are the names of K8s secrets
+// to mount into spawned Jobs for Kafka mTLS; empty strings mean no cert mounting.
 func NewJobSpawner(
 	kubeClient kubernetes.Interface,
 	namespace k8s.Namespace,
@@ -51,6 +53,8 @@ func NewJobSpawner(
 	topicPrefix string,
 	currentDateTimeGetter libtime.CurrentDateTimeGetter,
 	jobTTLSecondsAfterFinished int32,
+	jobKafkaClientCertSecret string,
+	jobKafkaCaCertSecret string,
 ) JobSpawner {
 	return &jobSpawner{
 		kubeClient:                 kubeClient,
@@ -60,6 +64,8 @@ func NewJobSpawner(
 		topicPrefix:                topicPrefix,
 		currentDateTimeGetter:      currentDateTimeGetter,
 		jobTTLSecondsAfterFinished: jobTTLSecondsAfterFinished,
+		jobKafkaClientCertSecret:   jobKafkaClientCertSecret,
+		jobKafkaCaCertSecret:       jobKafkaCaCertSecret,
 	}
 }
 
@@ -72,6 +78,8 @@ type jobSpawner struct {
 	topicPrefix                string
 	currentDateTimeGetter      libtime.CurrentDateTimeGetter
 	jobTTLSecondsAfterFinished int32
+	jobKafkaClientCertSecret   string
+	jobKafkaCaCertSecret       string
 }
 
 func (s *jobSpawner) SpawnJob(

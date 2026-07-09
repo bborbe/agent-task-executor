@@ -56,6 +56,8 @@ var _ = Describe("JobSpawner", func() {
 			"test-prefix",
 			currentDateTime,
 			1800,
+			"",
+			"",
 		)
 	})
 
@@ -126,6 +128,8 @@ var _ = Describe("JobSpawner", func() {
 				"",
 				currentDateTime,
 				1800,
+				"",
+				"",
 			)
 			task := lib.Task{
 				TaskIdentifier: lib.TaskIdentifier("no-prefix-task"),
@@ -164,6 +168,8 @@ var _ = Describe("JobSpawner", func() {
 				"test-prefix",
 				currentDateTime,
 				customTTL,
+				"",
+				"",
 			)
 			task := lib.Task{
 				TaskIdentifier: lib.TaskIdentifier("ttl-custom"),
@@ -435,6 +441,8 @@ var _ = Describe("JobSpawner", func() {
 				"test-prefix",
 				currentDateTime,
 				1800,
+				"",
+				"",
 			)
 
 			task := lib.Task{
@@ -877,6 +885,8 @@ var _ = Describe("JobSpawner", func() {
 				"test-prefix",
 				currentDateTime,
 				1800,
+				"",
+				"",
 			)
 
 			active, err := jobSpawner.IsJobActive(ctx, lib.TaskIdentifier("tid-2"))
@@ -904,6 +914,8 @@ var _ = Describe("JobSpawner", func() {
 				"test-prefix",
 				currentDateTime,
 				1800,
+				"",
+				"",
 			)
 
 			active, err := jobSpawner.IsJobActive(ctx, lib.TaskIdentifier("tid-3"))
@@ -932,6 +944,8 @@ var _ = Describe("JobSpawner", func() {
 				"test-prefix",
 				currentDateTime,
 				1800,
+				"",
+				"",
 			)
 
 			active, err := jobSpawner.IsJobActive(ctx, lib.TaskIdentifier("tid-4"))
@@ -957,6 +971,8 @@ var _ = Describe("JobSpawner", func() {
 				"test-prefix",
 				currentDateTime,
 				1800,
+				"",
+				"",
 			)
 
 			active, err := jobSpawner.IsJobActive(ctx, lib.TaskIdentifier("tid-5"))
@@ -980,6 +996,8 @@ var _ = Describe("JobSpawner", func() {
 				"test-prefix",
 				currentDateTime,
 				1800,
+				"",
+				"",
 			)
 			active, err := jobSpawner.IsJobActive(ctx, lib.TaskIdentifier("tid-list-err"))
 			Expect(err).NotTo(BeNil())
