@@ -2,6 +2,10 @@
 
 All notable changes to this project will be documented in this file.
 
+## Unreleased
+- Update dependencies, Go 1.26.5, alpine 3.24
+- Ignore openpgp advisory GO-2026-5932 in govulncheck and trivy (unmaintained by design, no fix)
+
 ## v0.3.2
 
 - fix: only append the branch as an image tag when the Config's `spec.image` has no tag

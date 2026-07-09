@@ -1,24 +1,24 @@
 module github.com/bborbe/agent-task-executor
 
-go 1.26.4
+go 1.26.5
 
 require (
 	github.com/IBM/sarama v1.50.3
-	github.com/bborbe/agent v0.72.0
-	github.com/bborbe/cqrs v0.6.0
-	github.com/bborbe/cron v1.8.18
-	github.com/bborbe/errors v1.5.13
-	github.com/bborbe/http v1.26.13
-	github.com/bborbe/k8s v1.14.3
-	github.com/bborbe/kafka v1.25.1
-	github.com/bborbe/log v1.6.14
-	github.com/bborbe/metrics v0.5.4
-	github.com/bborbe/run v1.9.28
-	github.com/bborbe/sentry v1.9.18
-	github.com/bborbe/service v1.10.1
-	github.com/bborbe/time v1.27.1
-	github.com/bborbe/validation v1.4.14
-	github.com/bborbe/vault-cli v0.68.0
+	github.com/bborbe/agent v0.76.1
+	github.com/bborbe/cqrs v0.6.2
+	github.com/bborbe/cron v1.8.20
+	github.com/bborbe/errors v1.5.15
+	github.com/bborbe/http v1.26.16
+	github.com/bborbe/k8s v1.14.5
+	github.com/bborbe/kafka v1.25.3
+	github.com/bborbe/log v1.6.17
+	github.com/bborbe/metrics v0.5.7
+	github.com/bborbe/run v1.9.30
+	github.com/bborbe/sentry v1.9.22
+	github.com/bborbe/service v1.10.4
+	github.com/bborbe/time v1.27.5
+	github.com/bborbe/validation v1.4.16
+	github.com/bborbe/vault-cli v0.96.5
 	github.com/golang/glog v1.2.5
 	github.com/google/uuid v1.6.0
 	github.com/gorilla/mux v1.8.1
@@ -32,17 +32,17 @@ require (
 	k8s.io/apimachinery v0.36.2
 	k8s.io/client-go v0.36.2
 	sigs.k8s.io/controller-runtime v0.24.1
-	sigs.k8s.io/structured-merge-diff/v6 v6.4.0
+	sigs.k8s.io/structured-merge-diff/v6 v6.4.2
 )
 
 require (
 	github.com/Masterminds/semver/v3 v3.5.0 // indirect
-	github.com/bborbe/argument/v2 v2.12.27 // indirect
-	github.com/bborbe/collection v1.20.13 // indirect
-	github.com/bborbe/kv v1.21.2 // indirect
-	github.com/bborbe/math v1.3.11 // indirect
-	github.com/bborbe/parse v1.10.13 // indirect
-	github.com/bborbe/strimzi v1.8.5 // indirect
+	github.com/bborbe/argument/v2 v2.12.29 // indirect
+	github.com/bborbe/collection v1.20.17 // indirect
+	github.com/bborbe/kv v1.21.5 // indirect
+	github.com/bborbe/math v1.3.14 // indirect
+	github.com/bborbe/parse v1.10.17 // indirect
+	github.com/bborbe/strimzi v1.8.8 // indirect
 	github.com/beorn7/perks v1.0.1 // indirect
 	github.com/cespare/xxhash/v2 v2.3.0 // indirect
 	github.com/davecgh/go-spew v1.1.2-0.20180830191138-d8f796af33cc // indirect
@@ -53,20 +53,19 @@ require (
 	github.com/getsentry/sentry-go v0.47.0 // indirect
 	github.com/go-errors/errors v1.5.1 // indirect
 	github.com/go-logr/logr v1.4.3 // indirect
-	github.com/go-openapi/jsonpointer v0.23.1 // indirect
-	github.com/go-openapi/jsonreference v0.21.5 // indirect
-	github.com/go-openapi/swag v0.26.0 // indirect
-	github.com/go-openapi/swag/cmdutils v0.26.0 // indirect
-	github.com/go-openapi/swag/conv v0.26.0 // indirect
-	github.com/go-openapi/swag/fileutils v0.26.0 // indirect
-	github.com/go-openapi/swag/jsonname v0.26.0 // indirect
-	github.com/go-openapi/swag/jsonutils v0.26.0 // indirect
-	github.com/go-openapi/swag/loading v0.26.0 // indirect
-	github.com/go-openapi/swag/mangling v0.26.0 // indirect
-	github.com/go-openapi/swag/netutils v0.26.0 // indirect
-	github.com/go-openapi/swag/stringutils v0.26.0 // indirect
-	github.com/go-openapi/swag/typeutils v0.26.0 // indirect
-	github.com/go-openapi/swag/yamlutils v0.26.0 // indirect
+	github.com/go-openapi/jsonpointer v0.24.0 // indirect
+	github.com/go-openapi/jsonreference v0.21.6 // indirect
+	github.com/go-openapi/swag v0.27.0 // indirect
+	github.com/go-openapi/swag/cmdutils v0.27.0 // indirect
+	github.com/go-openapi/swag/conv v0.27.0 // indirect
+	github.com/go-openapi/swag/fileutils v0.27.0 // indirect
+	github.com/go-openapi/swag/jsonutils v0.27.0 // indirect
+	github.com/go-openapi/swag/loading v0.27.0 // indirect
+	github.com/go-openapi/swag/mangling v0.27.0 // indirect
+	github.com/go-openapi/swag/netutils v0.27.0 // indirect
+	github.com/go-openapi/swag/stringutils v0.27.0 // indirect
+	github.com/go-openapi/swag/typeutils v0.27.0 // indirect
+	github.com/go-openapi/swag/yamlutils v0.27.0 // indirect
 	github.com/go-task/slim-sprig/v3 v3.0.0 // indirect
 	github.com/google/gnostic-models v0.7.1 // indirect
 	github.com/google/go-cmp v0.7.0 // indirect
@@ -78,7 +77,7 @@ require (
 	github.com/jcmturner/gokrb5/v8 v8.4.4 // indirect
 	github.com/jcmturner/rpc/v2 v2.0.3 // indirect
 	github.com/json-iterator/go v1.1.12 // indirect
-	github.com/klauspost/compress v1.18.6 // indirect
+	github.com/klauspost/compress v1.19.0 // indirect
 	github.com/kylelemons/godebug v1.1.0 // indirect
 	github.com/modern-go/concurrent v0.0.0-20180306012644-bacd9c7ef1dd // indirect
 	github.com/modern-go/reflect2 v1.0.3-0.20250322232337-35a7c28c31ee // indirect
@@ -87,7 +86,7 @@ require (
 	github.com/pkg/errors v0.9.1 // indirect
 	github.com/pmezard/go-difflib v1.0.1-0.20181226105442-5d4384ee4fb2 // indirect
 	github.com/prometheus/common v0.69.0 // indirect
-	github.com/prometheus/procfs v0.21.0 // indirect
+	github.com/prometheus/procfs v0.21.1 // indirect
 	github.com/rcrowley/go-metrics v0.0.0-20250401214520-65e299d6c5c9 // indirect
 	github.com/robfig/cron/v3 v3.0.1 // indirect
 	github.com/spf13/pflag v1.0.10 // indirect
@@ -110,8 +109,8 @@ require (
 	gopkg.in/evanphx/json-patch.v4 v4.13.0 // indirect
 	gopkg.in/inf.v0 v0.9.1 // indirect
 	k8s.io/klog/v2 v2.140.0 // indirect
-	k8s.io/kube-openapi v0.0.0-20260520065146-aa012df4f4af // indirect
-	k8s.io/utils v0.0.0-20260507154919-ff6756f316d2 // indirect
+	k8s.io/kube-openapi v0.0.0-20260624041617-8f3fa4921821 // indirect
+	k8s.io/utils v0.0.0-20260626114624-be93311217bd // indirect
 	sigs.k8s.io/json v0.0.0-20250730193827-2d320260d730 // indirect
 	sigs.k8s.io/randfill v1.0.0 // indirect
 	sigs.k8s.io/yaml v1.6.0 // indirect

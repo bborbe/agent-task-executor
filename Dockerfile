@@ -1,5 +1,5 @@
 ARG DOCKER_REGISTRY=docker.quant.benjamin-borbe.de:443
-FROM ${DOCKER_REGISTRY}/golang:1.26.4 AS build
+FROM ${DOCKER_REGISTRY}/golang:1.26.5 AS build
 ARG BUILD_GIT_VERSION=dev
 ARG BUILD_GIT_COMMIT=none
 ARG BUILD_DATE=unknown
@@ -8,7 +8,7 @@ WORKDIR /workspace
 RUN CGO_ENABLED=0 GOOS=linux go build -trimpath -mod=vendor -ldflags "-s" -a -installsuffix cgo -o /main
 CMD ["/bin/bash"]
 
-FROM ${DOCKER_REGISTRY}/alpine:3.23 AS alpine
+FROM ${DOCKER_REGISTRY}/alpine:3.24 AS alpine
 RUN apk --no-cache add ca-certificates
 
 FROM scratch
