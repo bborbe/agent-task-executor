@@ -2,7 +2,7 @@
 
 All notable changes to this project will be documented in this file.
 
-## Unreleased
+## v0.3.3
 - Update dependencies, Go 1.26.5, alpine 3.24
 - Ignore openpgp advisory GO-2026-5932 in govulncheck and trivy (unmaintained by design, no fix)
 
