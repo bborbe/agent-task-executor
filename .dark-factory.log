@@ -53,3 +53,9 @@ time=2026-07-09T13:00:08.120+02:00 level=INFO msg="stopping stuck container: com
 time=2026-07-09T13:00:11.091+02:00 level=INFO msg="docker container exited" prompt_id=002-spec-001-mount-kafka-certs spec_id=001-mount-kafka-mtls-certs-into-agent-jobs container="" workflow_type=direct container=agent-task-executor-jobcerts-exec-002-spec-001-mount-kafka-certs exit_code=0 workflow_step=run_claude
 time=2026-07-09T13:00:11.092+02:00 level=INFO msg="completion report" status=success summary="Implemented applyKafkaCertVolumes helper on jobSpawner that mounts three Kafka mTLS secret volumes (client-cert, client-key, server-cert) into spawned Jobs when both jobKafkaClientCertSecret and jobKafkaCaCertSecret are set; added table-driven tests covering both-set, neither-set, only-client-set, and only-CA-set cases; recorded feat in CHANGELOG Unreleased."
 time=2026-07-09T13:00:11.118+02:00 level=INFO msg="moved to completed" prompt_id=002-spec-001-mount-kafka-certs spec_id=001-mount-kafka-mtls-certs-into-agent-jobs container="" workflow_type=direct container=agent-task-executor-jobcerts-exec-002-spec-001-mount-kafka-certs
+time=2026-07-09T13:00:11.393+02:00 level=INFO msg="committed changes (autoRelease disabled, skipping tag)" prompt_id=002-spec-001-mount-kafka-certs spec_id=001-mount-kafka-mtls-certs-into-agent-jobs container="" workflow_type=direct container=agent-task-executor-jobcerts-exec-002-spec-001-mount-kafka-certs workflow_step=commit
+time=2026-07-09T13:00:11.393+02:00 level=INFO msg="watching for queued prompts" dir=prompts/in-progress
+time=2026-07-09T13:00:11.393+02:00 level=INFO msg="nothing to do, waiting for changes"
+time=2026-07-09T13:00:23.511+02:00 level=INFO msg="watcher shutting down"
+time=2026-07-09T13:00:23.511+02:00 level=INFO msg="processor shutting down"
+time=2026-07-09T13:00:23.511+02:00 level=INFO msg="spec watcher shutting down"
