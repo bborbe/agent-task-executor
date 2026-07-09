@@ -4,21 +4,21 @@ go 1.26.5
 
 require (
 	github.com/IBM/sarama v1.50.3
-	github.com/bborbe/agent v0.76.1
+	github.com/bborbe/agent v0.77.0
 	github.com/bborbe/cqrs v0.6.2
-	github.com/bborbe/cron v1.8.20
-	github.com/bborbe/errors v1.5.15
+	github.com/bborbe/cron v1.8.21
+	github.com/bborbe/errors v1.5.16
 	github.com/bborbe/http v1.26.16
-	github.com/bborbe/k8s v1.14.5
+	github.com/bborbe/k8s v1.14.6
 	github.com/bborbe/kafka v1.25.3
 	github.com/bborbe/log v1.6.17
-	github.com/bborbe/metrics v0.5.7
+	github.com/bborbe/metrics v0.5.8
 	github.com/bborbe/run v1.9.30
 	github.com/bborbe/sentry v1.9.22
-	github.com/bborbe/service v1.10.4
+	github.com/bborbe/service v1.10.5
 	github.com/bborbe/time v1.27.5
 	github.com/bborbe/validation v1.4.16
-	github.com/bborbe/vault-cli v0.96.5
+	github.com/bborbe/vault-cli v0.96.6
 	github.com/golang/glog v1.2.5
 	github.com/google/uuid v1.6.0
 	github.com/gorilla/mux v1.8.1
@@ -37,7 +37,7 @@ require (
 
 require (
 	github.com/Masterminds/semver/v3 v3.5.0 // indirect
-	github.com/bborbe/argument/v2 v2.12.29 // indirect
+	github.com/bborbe/argument/v2 v2.12.32 // indirect
 	github.com/bborbe/collection v1.20.17 // indirect
 	github.com/bborbe/kv v1.21.5 // indirect
 	github.com/bborbe/math v1.3.14 // indirect
@@ -100,8 +100,8 @@ require (
 	golang.org/x/net v0.56.0 // indirect
 	golang.org/x/oauth2 v0.36.0 // indirect
 	golang.org/x/sync v0.21.0 // indirect
-	golang.org/x/sys v0.46.0 // indirect
-	golang.org/x/term v0.44.0 // indirect
+	golang.org/x/sys v0.47.0 // indirect
+	golang.org/x/term v0.45.0 // indirect
 	golang.org/x/text v0.38.0 // indirect
 	golang.org/x/time v0.15.0 // indirect
 	golang.org/x/tools v0.47.0 // indirect

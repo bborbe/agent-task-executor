@@ -2,6 +2,12 @@
 
 All notable changes to this project will be documented in this file.
 
+## v0.4.2
+
+- Update bborbe/agent, cron, errors, k8s, metrics, service, vault-cli dependencies
+- Update golang.org/x/sys and golang.org/x/term
+- gofmt struct tag alignment in main.go
+
 ## v0.4.1
 
 - fix: mount the Kafka cert secret volumes at their directory (`/client-cert`, `/client-key`, `/server-cert`) so the `path: file` item projects the file to `/client-cert/file` etc. — mounting directly at `/client-cert/file` made that path a directory (`read /client-cert/file: is a directory`), crashing spawned agent Jobs against mTLS Kafka. Matches the executor's own cert mount.
