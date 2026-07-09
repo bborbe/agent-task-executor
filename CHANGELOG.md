@@ -2,7 +2,7 @@
 
 All notable changes to this project will be documented in this file.
 
-## Unreleased
+## v0.4.0
 
 - feat: Mount Kafka mTLS client cert/key and CA cert into spawned agent Jobs when the new
   `job-kafka-client-cert-secret` and `job-kafka-ca-cert-secret` executor config values are both
