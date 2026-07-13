@@ -292,6 +292,23 @@ var _ = Describe("HealthcheckRunner", func() {
 			Expect(updateCmd.Updates).To(HaveKeyWithValue("status", "in_progress"))
 		})
 
+		It(
+			"update-frontmatter clears prior-run executor run-state so re-trigger does not respawn",
+			func() {
+				// Regression: reused probe files carried a stale current_job/job_started_at
+				// from the previous run, defeating the executor grace window and causing
+				// 2-3 respawns per probe. The re-trigger must reset all run-state fields.
+				Expect(runner.Run(ctx)).To(Succeed())
+				_, _, payload := publisher.PublishArgsForCall(1)
+				updateCmd, ok := payload.(taskcmd.UpdateFrontmatterCommand)
+				Expect(ok).To(BeTrue())
+				Expect(updateCmd.Updates).To(HaveKeyWithValue("current_job", ""))
+				Expect(updateCmd.Updates).To(HaveKeyWithValue("job_started_at", ""))
+				Expect(updateCmd.Updates).To(HaveKeyWithValue("spawn_notification", false))
+				Expect(updateCmd.Updates).To(HaveKeyWithValue("trigger_count", 0))
+			},
+		)
+
 		It("probeTaskID is a pure function of (agent, stage) — boundary contract", func() {
 			// Direct unit-level boundary test per spec AC line 75:
 			// probeTaskID must be a pure function (no state, no randomness) so

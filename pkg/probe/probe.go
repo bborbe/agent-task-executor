@@ -138,6 +138,16 @@ func (r *healthcheckRunner) Run(ctx context.Context) error {
 				"phase":         "in_progress",
 				"trigger_count": 0,
 				"retry_count":   0,
+				// Clear the executor-owned run-state from the PRIOR run. Probe files are
+				// reused per (agent, stage), so without this the re-trigger reopens the
+				// task while current_job / job_started_at still point at last week's job.
+				// The executor then reads a stale (hours/days old) current_job whose grace
+				// window has long elapsed and respawns 2-3 jobs for a single probe, and the
+				// zombie sweeper fires a phantom deadline_exceeded on the ancient job ref.
+				// Resetting these alongside the counters makes every re-trigger start clean.
+				"current_job":        "",
+				"job_started_at":     "",
+				"spawn_notification": false,
 			},
 		}
 		if err := r.publisher.Publish(ctx, string(taskcmd.UpdateFrontmatterCommandOperation), updateCmd); err != nil {
