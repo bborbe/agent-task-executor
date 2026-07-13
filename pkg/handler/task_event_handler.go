@@ -140,6 +140,25 @@ type taskEventHandler struct {
 	deferredRespawns map[lib.TaskIdentifier]deferredEntry
 }
 
+// cleanupTerminalTask clears in-flight state when a task has reached a terminal
+// status (completed/aborted). taskStore.Delete stops the job informer from emitting
+// a spurious synthetic failure after the agent published success. removeDeferredEntry
+// cancels any pending grace-window respawn — the terminal event is skipped by the
+// status filter in parseAndFilter BEFORE reaching the terminal-phase gate that would
+// otherwise clear the entry, so without this a deferred entry created during the grace
+// window fires ~300s later and respawns a job for an already-done task (the "path C"
+// respawn observed on dev 2026-07-13 for probe 095c58d7).
+func (h *taskEventHandler) cleanupTerminalTask(task lib.Task) {
+	status := string(task.Frontmatter.Status())
+	if status != "completed" && status != "aborted" {
+		return
+	}
+	h.taskStore.Delete(task.TaskIdentifier)
+	h.removeDeferredEntry(task.TaskIdentifier)
+	glog.V(3).
+		Infof("task %s %s: cleared task store + deferred respawn", task.TaskIdentifier, status)
+}
+
 func (h *taskEventHandler) ConsumeMessage(ctx context.Context, msg *sarama.ConsumerMessage) error {
 	task, config, skip, err := h.parseAndFilter(ctx, msg)
 	if err != nil {
@@ -176,12 +195,7 @@ func (h *taskEventHandler) parseAndFilter(
 		return lib.Task{}, nil, true, nil
 	}
 
-	// Clean up taskStore for completed tasks so the job informer does not emit
-	// a spurious synthetic failure after the agent has already published success.
-	if string(task.Frontmatter.Status()) == "completed" {
-		h.taskStore.Delete(task.TaskIdentifier)
-		glog.V(3).Infof("task %s completed: removed from task store", task.TaskIdentifier)
-	}
+	h.cleanupTerminalTask(task)
 
 	// Resolve the per-agent Config before the status/phase checks so both filters
 	// can use the per-Config trigger. Skip lookup when assignee is empty.

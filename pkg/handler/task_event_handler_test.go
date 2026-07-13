@@ -1286,6 +1286,41 @@ var _ = Describe("TaskEventHandler", func() {
 			)
 
 			It(
+				"terminal-status event cancels a pending deferred respawn (path C, dev 2026-07-13)",
+				func() {
+					// Step 1: suppress inside grace window → deferred entry created
+					currentDateTime.SetNow(libtimetest.ParseDateTime(insideGrace))
+					task := buildGraceTask(domain.TaskPhaseExecution, 0, 3)
+					err := h.ConsumeMessage(ctx, buildMsg(task))
+					Expect(err).To(BeNil())
+					Expect(fakeSpawner.SpawnJobCallCount()).To(Equal(0))
+
+					// Step 2: the job completes and the agent publishes status=completed.
+					// This terminal event must clear the deferred entry even though the
+					// status filter skips it before the terminal-phase gate. Without the
+					// removeDeferredEntry call in the terminal-status block, the entry
+					// survives and respawns a job for an already-done task.
+					completed := lib.Task{
+						TaskIdentifier: lib.TaskIdentifier("tid-deferred-037"),
+						Frontmatter: lib.TaskFrontmatter{
+							"status":   "completed",
+							"phase":    string(domain.TaskPhaseDone),
+							"assignee": "claude",
+							"stage":    "prod",
+						},
+					}
+					Expect(h.ConsumeMessage(ctx, buildMsg(completed))).To(BeNil())
+
+					// Step 3: advance past grace expiry and eval — the deferred entry was
+					// cleared by the terminal event, so no respawn fires.
+					currentDateTime.SetNow(libtimetest.ParseDateTime(graceExpiredR))
+					err = h.EvalDeferredRespawns(ctx)
+					Expect(err).To(BeNil())
+					Expect(fakeSpawner.SpawnJobCallCount()).To(Equal(0))
+				},
+			)
+
+			It(
 				"startup seed: stuck task in taskStore is re-evaluated after restart (AC #5)",
 				func() {
 					// Simulate the post-restart state: a fresh handler with an empty
