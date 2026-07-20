@@ -2,7 +2,7 @@
 
 All notable changes to this project will be documented in this file.
 
-## Unreleased
+## v0.4.6
 
 - chore: update dependencies to latest (15 bborbe libs incl. agent v0.77.2, vault-cli v0.101.1, cqrs, kafka, k8s, time, service; + IBM/sarama v1.50.3→v1.60.0)
 
