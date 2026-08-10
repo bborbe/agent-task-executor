@@ -1007,6 +1007,45 @@ var _ = Describe("JobSpawner", func() {
 			Expect(active).To(BeTrue())
 		})
 
+		It("returns false for a deadline-killed job whose pod counters are all zero", func() {
+			// activeDeadlineSeconds sets the JobFailed condition but leaves
+			// status.active/failed/succeeded at zero. Reading only the counters
+			// reports this Job as active until it is garbage-collected, which
+			// silently swallows every retry spawn in that window.
+			job := &batchv1.Job{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "github-update-go-agent-20260810091121",
+					Namespace: "test-ns",
+					Labels:    map[string]string{"agent.benjamin-borbe.de/task-id": "tid-deadline"},
+				},
+				Status: batchv1.JobStatus{
+					Conditions: []batchv1.JobCondition{
+						{
+							Type:   batchv1.JobFailed,
+							Status: corev1.ConditionTrue,
+							Reason: "DeadlineExceeded",
+						},
+					},
+				},
+			}
+			fakeClient = fake.NewClientset(job)
+			jobSpawner = spawner.NewJobSpawner(
+				fakeClient,
+				"test-ns",
+				"kafka:9092",
+				"develop",
+				"test-prefix",
+				currentDateTime,
+				1800,
+				"",
+				"",
+			)
+
+			active, err := jobSpawner.IsJobActive(ctx, lib.TaskIdentifier("tid-deadline"))
+			Expect(err).To(BeNil())
+			Expect(active).To(BeFalse())
+		})
+
 		It("returns false when completed job exists (status.succeeded > 0)", func() {
 			job := &batchv1.Job{
 				ObjectMeta: metav1.ObjectMeta{

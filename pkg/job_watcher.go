@@ -143,13 +143,13 @@ func (w *jobWatcher) HandleJob(ctx context.Context, job *batchv1.Job) {
 	}
 	taskID := lib.TaskIdentifier(taskIDStr)
 
-	if isJobFailed(job) {
+	if IsJobFailed(job) {
 		reason := JobFailureReason(job)
 		glog.V(2).Infof("job %s/%s failed (task %s): %s", job.Namespace, job.Name, taskID, reason)
 		w.handleTerminal(ctx, taskID, job, reason, true)
 		return
 	}
-	if isJobSucceeded(job) {
+	if IsJobSucceeded(job) {
 		// Succeeded job (exit 0) means the agent's main.Run returned nil, which
 		// implies its result was published to Kafka successfully. Do NOT publish
 		// a synthetic failure — doing so races the real result and triggers an
@@ -216,7 +216,14 @@ func (w *jobWatcher) logMissingTask(
 	)
 }
 
-func isJobFailed(job *batchv1.Job) bool {
+// IsJobFailed reports whether the Job carries a true JobFailed condition.
+//
+// Conditions, not the pod counters, are the source of truth: an
+// activeDeadlineSeconds kill sets this condition while leaving
+// .status.failed and .status.active at zero. Any caller deciding whether a
+// Job is still running must use this (see spawner.IsJobActive) — reading the
+// counters alone reports a deadline-killed Job as active forever.
+func IsJobFailed(job *batchv1.Job) bool {
 	for _, c := range job.Status.Conditions {
 		if c.Type == batchv1.JobFailed && c.Status == corev1.ConditionTrue {
 			return true
@@ -225,7 +232,8 @@ func isJobFailed(job *batchv1.Job) bool {
 	return false
 }
 
-func isJobSucceeded(job *batchv1.Job) bool {
+// IsJobSucceeded reports whether the Job carries a true JobComplete condition.
+func IsJobSucceeded(job *batchv1.Job) bool {
 	for _, c := range job.Status.Conditions {
 		if c.Type == batchv1.JobComplete && c.Status == corev1.ConditionTrue {
 			return true
