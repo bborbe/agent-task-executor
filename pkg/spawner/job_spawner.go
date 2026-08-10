@@ -175,6 +175,15 @@ func (s *jobSpawner) IsJobActive(
 		return false, errors.Wrapf(ctx, err, "list jobs for task %s", taskIdentifier)
 	}
 	for _, job := range jobs.Items {
+		// Terminal conditions first. An activeDeadlineSeconds kill sets the
+		// JobFailed condition but leaves .status.failed and .status.active at
+		// zero, so the counter checks below never fire for it. Without this the
+		// Job reads as active until it is garbage-collected, and every retry
+		// spawn in that window is silently skipped as "active job exists" —
+		// which wedged 26 github-update-go tasks on 2026-08-10.
+		if pkg.IsJobFailed(&job) || pkg.IsJobSucceeded(&job) {
+			continue
+		}
 		if job.Status.Succeeded > 0 {
 			continue
 		}
