@@ -74,6 +74,7 @@ func convert(obj agentv1.Config, branch string) AgentConfiguration {
 		VolumeClaim:             obj.Spec.VolumeClaim,
 		VolumeMountPath:         obj.Spec.VolumeMountPath,
 		Resources:               obj.Spec.Resources.DeepCopy(),
+		MaxConcurrentJobs:       obj.Spec.MaxConcurrentJobs,
 		PriorityClassName:       obj.Spec.PriorityClassName,
 		Trigger:                 obj.Spec.Trigger,
 		ZombieJobTimeoutSeconds: obj.Spec.ZombieJobTimeoutSeconds,

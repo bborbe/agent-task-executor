@@ -75,6 +75,11 @@ type ConfigSpec struct {
 	VolumeMountPath string `json:"volumeMountPath,omitempty"`
 	// PriorityClassName is the Kubernetes PriorityClass name to stamp onto spawned Job PodTemplates.
 	PriorityClassName string `json:"priorityClassName,omitempty"`
+	// MaxConcurrentJobs caps how many Jobs this agent may run at once. Spawns
+	// beyond the cap are deferred and retried, never dropped. 0 (the default)
+	// means unlimited, preserving existing behaviour for every agent that does
+	// not set it.
+	MaxConcurrentJobs int `json:"maxConcurrentJobs,omitempty"`
 	// Trigger declares the per-agent phase and status conditions under which the executor spawns a Job.
 	Trigger *Trigger `json:"trigger,omitempty"`
 	// ZombieSweeperIntervalSeconds is how often the executor's deadline sweeper

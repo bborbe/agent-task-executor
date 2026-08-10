@@ -47,6 +47,12 @@ const defaultRespawnGracePeriod = 300 * time.Second
 // comparison/spawn overhead; 30 s leaves headroom under the 60 s bound).
 const deferredRespawnInterval = 30 * time.Second
 
+// concurrencyCapRetryDelay is how long a spawn blocked by MaxConcurrentJobs
+// waits before being re-evaluated. Short relative to a Job's runtime (a
+// github-update-go Job measured 11-15 minutes uncontended on 2026-08-10), so a
+// freed slot is picked up promptly without busy-polling the API server.
+const concurrencyCapRetryDelay = 60 * time.Second
+
 // deferredEntry tracks a task whose respawn was suppressed by the grace window.
 // The executor re-evaluates it once retryAfter is reached.
 type deferredEntry struct {
@@ -433,6 +439,14 @@ func (h *taskEventHandler) spawnIfNeeded(
 		return false, nil
 	}
 
+	capped, err := h.deferIfAtConcurrencyCap(ctx, task, config)
+	if err != nil {
+		return false, err
+	}
+	if capped {
+		return false, nil
+	}
+
 	if task.Frontmatter.TriggerCount() >= task.Frontmatter.MaxTriggers() {
 		glog.V(2).Infof("skip task %s: trigger_count %d >= max_triggers %d",
 			task.TaskIdentifier,
@@ -472,6 +486,51 @@ func (h *taskEventHandler) spawnIfNeeded(
 	)
 	metrics.TaskEventsTotal.WithLabelValues("spawned").Inc()
 	metrics.JobsSpawnedTotal.Inc()
+	return true, nil
+}
+
+// deferIfAtConcurrencyCap reports whether the agent is already running its
+// configured maximum number of Jobs, and if so registers the task for a
+// deferred respawn instead of spawning now.
+//
+// Deferring rather than skipping is the whole point. Task publication is
+// edge-triggered on vault file changes; being over the cap produces no such
+// change, so a skipped spawn would never be re-driven and the task would sit
+// at in_progress forever, indistinguishable from work in flight.
+func (h *taskEventHandler) deferIfAtConcurrencyCap(
+	ctx context.Context,
+	task lib.Task,
+	config *pkg.AgentConfiguration,
+) (bool, error) {
+	if config == nil || config.MaxConcurrentJobs <= 0 {
+		return false, nil
+	}
+	running, err := h.jobSpawner.CountActiveJobs(ctx, config.Assignee)
+	if err != nil {
+		metrics.TaskEventsTotal.WithLabelValues("error").Inc()
+		return false, errors.Wrapf(ctx, err, "count active jobs for assignee %s", config.Assignee)
+	}
+	if running < config.MaxConcurrentJobs {
+		return false, nil
+	}
+	// V(1), not V(0): a capped deferral is an expected steady state and repeats
+	// once per retry interval per waiting task, so V(0) would be a constant
+	// stream during any backlog. V(1) is inside the deployed verbosity, so it
+	// stays visible to an operator looking — unlike the V(3) skip that hid the
+	// wedge fixed in #12.
+	glog.V(1).Infof(
+		"event=concurrency_cap task=%s assignee=%s running=%d cap=%d retry_after=%s",
+		task.TaskIdentifier, config.Assignee, running, config.MaxConcurrentJobs,
+		concurrencyCapRetryDelay,
+	)
+	metrics.TaskEventsTotal.WithLabelValues("deferred_concurrency_cap").Inc()
+	h.deferredMu.Lock()
+	h.deferredRespawns[task.TaskIdentifier] = deferredEntry{
+		task:       task,
+		config:     *config,
+		retryAfter: h.currentDateTime.Now().Time().Add(concurrencyCapRetryDelay),
+	}
+	h.deferredMu.Unlock()
 	return true, nil
 }
 

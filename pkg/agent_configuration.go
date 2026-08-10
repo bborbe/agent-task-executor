@@ -52,6 +52,9 @@ type AgentConfiguration struct {
 	// Resources declares optional resource requests and limits for the agent container.
 	// Nil means "do not set, keep the k8s builder default".
 	Resources *agentv1.AgentResources
+	// MaxConcurrentJobs caps how many Jobs this agent may run at once.
+	// 0 means unlimited.
+	MaxConcurrentJobs int
 	// PriorityClassName is the Kubernetes PriorityClass name to stamp onto spawned Job PodTemplates.
 	PriorityClassName string
 	// ImagePullSecret is the name of the K8s Secret used for image pulls.
@@ -106,6 +109,7 @@ func (a AgentConfigurations) TaggedConfigurations(branch string) AgentConfigurat
 			VolumeMountPath:         c.VolumeMountPath,
 			SecretName:              c.SecretName,
 			Resources:               c.Resources.DeepCopy(),
+			MaxConcurrentJobs:       c.MaxConcurrentJobs,
 			PriorityClassName:       c.PriorityClassName,
 			ImagePullSecret:         c.ImagePullSecret,
 			Trigger:                 c.Trigger,

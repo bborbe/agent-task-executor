@@ -11,6 +11,20 @@ import (
 )
 
 type FakeJobSpawner struct {
+	CountActiveJobsStub        func(context.Context, string) (int, error)
+	countActiveJobsMutex       sync.RWMutex
+	countActiveJobsArgsForCall []struct {
+		arg1 context.Context
+		arg2 string
+	}
+	countActiveJobsReturns struct {
+		result1 int
+		result2 error
+	}
+	countActiveJobsReturnsOnCall map[int]struct {
+		result1 int
+		result2 error
+	}
 	IsJobActiveStub        func(context.Context, lib.TaskIdentifier) (bool, error)
 	isJobActiveMutex       sync.RWMutex
 	isJobActiveArgsForCall []struct {
@@ -42,6 +56,71 @@ type FakeJobSpawner struct {
 	}
 	invocations      map[string][][]interface{}
 	invocationsMutex sync.RWMutex
+}
+
+func (fake *FakeJobSpawner) CountActiveJobs(arg1 context.Context, arg2 string) (int, error) {
+	fake.countActiveJobsMutex.Lock()
+	ret, specificReturn := fake.countActiveJobsReturnsOnCall[len(fake.countActiveJobsArgsForCall)]
+	fake.countActiveJobsArgsForCall = append(fake.countActiveJobsArgsForCall, struct {
+		arg1 context.Context
+		arg2 string
+	}{arg1, arg2})
+	stub := fake.CountActiveJobsStub
+	fakeReturns := fake.countActiveJobsReturns
+	fake.recordInvocation("CountActiveJobs", []interface{}{arg1, arg2})
+	fake.countActiveJobsMutex.Unlock()
+	if stub != nil {
+		return stub(arg1, arg2)
+	}
+	if specificReturn {
+		return ret.result1, ret.result2
+	}
+	return fakeReturns.result1, fakeReturns.result2
+}
+
+func (fake *FakeJobSpawner) CountActiveJobsCallCount() int {
+	fake.countActiveJobsMutex.RLock()
+	defer fake.countActiveJobsMutex.RUnlock()
+	return len(fake.countActiveJobsArgsForCall)
+}
+
+func (fake *FakeJobSpawner) CountActiveJobsCalls(stub func(context.Context, string) (int, error)) {
+	fake.countActiveJobsMutex.Lock()
+	defer fake.countActiveJobsMutex.Unlock()
+	fake.CountActiveJobsStub = stub
+}
+
+func (fake *FakeJobSpawner) CountActiveJobsArgsForCall(i int) (context.Context, string) {
+	fake.countActiveJobsMutex.RLock()
+	defer fake.countActiveJobsMutex.RUnlock()
+	argsForCall := fake.countActiveJobsArgsForCall[i]
+	return argsForCall.arg1, argsForCall.arg2
+}
+
+func (fake *FakeJobSpawner) CountActiveJobsReturns(result1 int, result2 error) {
+	fake.countActiveJobsMutex.Lock()
+	defer fake.countActiveJobsMutex.Unlock()
+	fake.CountActiveJobsStub = nil
+	fake.countActiveJobsReturns = struct {
+		result1 int
+		result2 error
+	}{result1, result2}
+}
+
+func (fake *FakeJobSpawner) CountActiveJobsReturnsOnCall(i int, result1 int, result2 error) {
+	fake.countActiveJobsMutex.Lock()
+	defer fake.countActiveJobsMutex.Unlock()
+	fake.CountActiveJobsStub = nil
+	if fake.countActiveJobsReturnsOnCall == nil {
+		fake.countActiveJobsReturnsOnCall = make(map[int]struct {
+			result1 int
+			result2 error
+		})
+	}
+	fake.countActiveJobsReturnsOnCall[i] = struct {
+		result1 int
+		result2 error
+	}{result1, result2}
 }
 
 func (fake *FakeJobSpawner) IsJobActive(arg1 context.Context, arg2 lib.TaskIdentifier) (bool, error) {
