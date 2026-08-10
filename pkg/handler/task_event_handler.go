@@ -513,7 +513,12 @@ func (h *taskEventHandler) deferIfAtConcurrencyCap(
 	if running < config.MaxConcurrentJobs {
 		return false, nil
 	}
-	glog.Infof(
+	// V(1), not V(0): a capped deferral is an expected steady state and repeats
+	// once per retry interval per waiting task, so V(0) would be a constant
+	// stream during any backlog. V(1) is inside the deployed verbosity, so it
+	// stays visible to an operator looking — unlike the V(3) skip that hid the
+	// wedge fixed in #12.
+	glog.V(1).Infof(
 		"event=concurrency_cap task=%s assignee=%s running=%d cap=%d retry_after=%s",
 		task.TaskIdentifier, config.Assignee, running, config.MaxConcurrentJobs,
 		concurrencyCapRetryDelay,

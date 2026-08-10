@@ -212,6 +212,11 @@ func (s *jobSpawner) IsJobActive(
 // fallback — so the two cannot disagree about whether a Job has finished.
 func (s *jobSpawner) CountActiveJobs(ctx context.Context, assignee string) (int, error) {
 	if assignee == "" {
+		// Not an error: an unlabelled agent simply has nothing to count. Warn
+		// loudly though, because reaching here with a cap configured means the
+		// cap silently never fires — the exact silent-no-op class of bug this
+		// whole change exists to remove.
+		glog.Warningf("CountActiveJobs called with empty assignee; concurrency cap cannot apply")
 		return 0, nil
 	}
 	labelSelector := assigneeLabelKey + "=" + assignee

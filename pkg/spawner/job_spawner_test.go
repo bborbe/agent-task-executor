@@ -1035,6 +1035,13 @@ var _ = Describe("JobSpawner", func() {
 				mkJob("done", "github-update-go-agent", batchv1.JobStatus{Succeeded: 1}),
 				mkJob("deadline", "github-update-go-agent", deadlineKilled),
 				mkJob("other-agent", "pr-reviewer-agent", batchv1.JobStatus{Active: 1}),
+				// A pod failed and the Job controller is recreating it: still
+				// running, so it must count toward the cap.
+				mkJob(
+					"retrying",
+					"github-update-go-agent",
+					batchv1.JobStatus{Failed: 1, Active: 1},
+				),
 			)
 			jobSpawner = spawner.NewJobSpawner(
 				fakeClient,
@@ -1050,7 +1057,7 @@ var _ = Describe("JobSpawner", func() {
 
 			count, err := jobSpawner.CountActiveJobs(ctx, "github-update-go-agent")
 			Expect(err).To(BeNil())
-			Expect(count).To(Equal(2))
+			Expect(count).To(Equal(3))
 		})
 
 		It("CountActiveJobs returns zero for an empty assignee", func() {
