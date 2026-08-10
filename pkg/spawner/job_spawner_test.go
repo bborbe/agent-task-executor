@@ -1007,6 +1007,58 @@ var _ = Describe("JobSpawner", func() {
 			Expect(active).To(BeTrue())
 		})
 
+		It("CountActiveJobs counts only non-terminal jobs for the assignee", func() {
+			mkJob := func(name, assignee string, status batchv1.JobStatus) *batchv1.Job {
+				return &batchv1.Job{
+					ObjectMeta: metav1.ObjectMeta{
+						Name:      name,
+						Namespace: "test-ns",
+						Labels: map[string]string{
+							"agent.benjamin-borbe.de/assignee": assignee,
+						},
+					},
+					Status: status,
+				}
+			}
+			deadlineKilled := batchv1.JobStatus{
+				Conditions: []batchv1.JobCondition{
+					{
+						Type:   batchv1.JobFailed,
+						Status: corev1.ConditionTrue,
+						Reason: "DeadlineExceeded",
+					},
+				},
+			}
+			fakeClient = fake.NewClientset(
+				mkJob("running-1", "github-update-go-agent", batchv1.JobStatus{Active: 1}),
+				mkJob("running-2", "github-update-go-agent", batchv1.JobStatus{Active: 1}),
+				mkJob("done", "github-update-go-agent", batchv1.JobStatus{Succeeded: 1}),
+				mkJob("deadline", "github-update-go-agent", deadlineKilled),
+				mkJob("other-agent", "pr-reviewer-agent", batchv1.JobStatus{Active: 1}),
+			)
+			jobSpawner = spawner.NewJobSpawner(
+				fakeClient,
+				"test-ns",
+				"kafka:9092",
+				"develop",
+				"test-prefix",
+				currentDateTime,
+				1800,
+				"",
+				"",
+			)
+
+			count, err := jobSpawner.CountActiveJobs(ctx, "github-update-go-agent")
+			Expect(err).To(BeNil())
+			Expect(count).To(Equal(2))
+		})
+
+		It("CountActiveJobs returns zero for an empty assignee", func() {
+			count, err := jobSpawner.CountActiveJobs(ctx, "")
+			Expect(err).To(BeNil())
+			Expect(count).To(Equal(0))
+		})
+
 		It("returns false for a deadline-killed job whose pod counters are all zero", func() {
 			// activeDeadlineSeconds sets the JobFailed condition but leaves
 			// status.active/failed/succeeded at zero. Reading only the counters

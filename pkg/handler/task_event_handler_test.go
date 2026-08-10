@@ -248,6 +248,73 @@ var _ = Describe("TaskEventHandler", func() {
 			Expect(fakeSpawner.SpawnJobCallCount()).To(Equal(0))
 		})
 
+		It("defers instead of spawning when the assignee is at MaxConcurrentJobs", func() {
+			fakeResolver.ResolveReturns(
+				pkg.AgentConfiguration{
+					Assignee:          "claude",
+					Image:             "my-image:latest",
+					MaxConcurrentJobs: 4,
+				},
+				nil,
+			)
+			fakeSpawner.IsJobActiveReturns(false, nil)
+			fakeSpawner.CountActiveJobsReturns(4, nil)
+			task := lib.Task{
+				TaskIdentifier: lib.TaskIdentifier("tid-cap-at-limit"),
+				Frontmatter: lib.TaskFrontmatter{
+					"status":   "in_progress",
+					"phase":    string(domain.TaskPhaseExecution),
+					"assignee": "claude",
+				},
+			}
+
+			err := h.ConsumeMessage(ctx, buildMsg(task))
+			Expect(err).To(BeNil())
+			Expect(fakeSpawner.SpawnJobCallCount()).To(Equal(0))
+		})
+
+		It("spawns when the assignee is below MaxConcurrentJobs", func() {
+			fakeResolver.ResolveReturns(
+				pkg.AgentConfiguration{
+					Assignee:          "claude",
+					Image:             "my-image:latest",
+					MaxConcurrentJobs: 4,
+				},
+				nil,
+			)
+			fakeSpawner.IsJobActiveReturns(false, nil)
+			fakeSpawner.CountActiveJobsReturns(3, nil)
+			task := lib.Task{
+				TaskIdentifier: lib.TaskIdentifier("tid-cap-below"),
+				Frontmatter: lib.TaskFrontmatter{
+					"status":   "in_progress",
+					"phase":    string(domain.TaskPhaseExecution),
+					"assignee": "claude",
+				},
+			}
+
+			err := h.ConsumeMessage(ctx, buildMsg(task))
+			Expect(err).To(BeNil())
+			Expect(fakeSpawner.SpawnJobCallCount()).To(Equal(1))
+		})
+
+		It("does not count active jobs when MaxConcurrentJobs is unset", func() {
+			fakeSpawner.IsJobActiveReturns(false, nil)
+			task := lib.Task{
+				TaskIdentifier: lib.TaskIdentifier("tid-cap-unset"),
+				Frontmatter: lib.TaskFrontmatter{
+					"status":   "in_progress",
+					"phase":    string(domain.TaskPhaseExecution),
+					"assignee": "claude",
+				},
+			}
+
+			err := h.ConsumeMessage(ctx, buildMsg(task))
+			Expect(err).To(BeNil())
+			Expect(fakeSpawner.CountActiveJobsCallCount()).To(Equal(0))
+			Expect(fakeSpawner.SpawnJobCallCount()).To(Equal(1))
+		})
+
 		It("returns error when SpawnJob fails", func() {
 			fakeSpawner.IsJobActiveReturns(false, nil)
 			fakeSpawner.SpawnJobReturns("", errors.Errorf(ctx, "k8s unavailable"))

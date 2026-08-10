@@ -27,6 +27,12 @@ import (
 // can look it up. Must match the selector used in IsJobActive.
 const taskIDLabelKey = "agent.benjamin-borbe.de/task-id"
 
+// assigneeLabelKey labels a spawned Job with the agent assignee so
+// CountActiveJobs can size concurrency per agent rather than globally.
+// Different agents have very different runtimes and resource profiles, so a
+// single fleet-wide limit would throttle cheap agents to protect expensive ones.
+const assigneeLabelKey = "agent.benjamin-borbe.de/assignee"
+
 //counterfeiter:generate -o ../../mocks/job_spawner.go --fake-name FakeJobSpawner . JobSpawner
 
 // JobSpawner creates a K8s Job for a task.
@@ -38,6 +44,11 @@ type JobSpawner interface {
 	// for the given task identifier. Uses the agent.benjamin-borbe.de/task-id
 	// label set by SpawnJob.
 	IsJobActive(ctx context.Context, taskIdentifier lib.TaskIdentifier) (bool, error)
+	// CountActiveJobs returns the number of non-terminal K8s Jobs currently
+	// running for the given assignee. Uses the agent.benjamin-borbe.de/assignee
+	// label set by SpawnJob. Jobs spawned before that label existed are not
+	// counted, so the cap under-counts during the rollout and never over-counts.
+	CountActiveJobs(ctx context.Context, assignee string) (int, error)
 }
 
 // NewJobSpawner creates a new JobSpawner backed by the K8s batch/v1 API.
@@ -133,6 +144,7 @@ func (s *jobSpawner) SpawnJob(
 	}
 
 	applyTaskIDLabel(task.TaskIdentifier, job)
+	applyAssigneeLabel(config.Assignee, job)
 	applySecretEnvFrom(config, job)
 	applyEphemeralStorage(config, job)
 	s.applyKafkaCertVolumes(job)
@@ -193,6 +205,36 @@ func (s *jobSpawner) IsJobActive(
 		return true, nil
 	}
 	return false, nil
+}
+
+// CountActiveJobs returns how many non-terminal Jobs are running for the assignee.
+// Terminal detection matches IsJobActive exactly — conditions first, counters as a
+// fallback — so the two cannot disagree about whether a Job has finished.
+func (s *jobSpawner) CountActiveJobs(ctx context.Context, assignee string) (int, error) {
+	if assignee == "" {
+		return 0, nil
+	}
+	labelSelector := assigneeLabelKey + "=" + assignee
+	jobs, err := s.kubeClient.BatchV1().Jobs(s.namespace.String()).List(ctx, metav1.ListOptions{
+		LabelSelector: labelSelector,
+	})
+	if err != nil {
+		return 0, errors.Wrapf(ctx, err, "list jobs for assignee %s", assignee)
+	}
+	count := 0
+	for _, job := range jobs.Items {
+		if pkg.IsJobFailed(&job) || pkg.IsJobSucceeded(&job) {
+			continue
+		}
+		if job.Status.Succeeded > 0 {
+			continue
+		}
+		if job.Status.Failed > 0 && job.Status.Active == 0 {
+			continue
+		}
+		count++
+	}
+	return count, nil
 }
 
 // applyVolumeMount configures a PVC volume mount on the container and pod spec builders
@@ -308,6 +350,22 @@ func applyTaskIDLabel(taskID lib.TaskIdentifier, job *batchv1.Job) {
 		job.Spec.Template.Labels = map[string]string{}
 	}
 	job.Spec.Template.Labels[taskIDLabelKey] = string(taskID)
+}
+
+// applyAssigneeLabel sets the agent.benjamin-borbe.de/assignee label on the Job
+// and its pod template so CountActiveJobs can size concurrency per agent.
+func applyAssigneeLabel(assignee string, job *batchv1.Job) {
+	if assignee == "" {
+		return
+	}
+	if job.Labels == nil {
+		job.Labels = map[string]string{}
+	}
+	job.Labels[assigneeLabelKey] = assignee
+	if job.Spec.Template.Labels == nil {
+		job.Spec.Template.Labels = map[string]string{}
+	}
+	job.Spec.Template.Labels[assigneeLabelKey] = assignee
 }
 
 // applyActiveDeadlineSeconds stamps Job.Spec.ActiveDeadlineSeconds from the config's
