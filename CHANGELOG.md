@@ -2,16 +2,16 @@
 
 All notable changes to this project will be documented in this file.
 
-## v0.4.7
-
-- fix: `IsJobActive` no longer reports a deadline-killed Job as active. An `activeDeadlineSeconds` kill sets the `JobFailed` condition but leaves `.status.active`/`.status.failed` at zero, so the counter-only check fell through to "active" until the Job was garbage-collected — and every retry spawn in that window was silently skipped as `active job exists`. The job-state predicates are now exported from `pkg` (`IsJobFailed`, `IsJobSucceeded`) and reused by the spawner, so the watcher and the spawner can no longer disagree about whether a Job has finished. This wedged 26 `github-update-go` tasks at `trigger_count: 2` against a cap of 3 on 2026-08-10, with no error state and no retry.
-
 ## Unreleased
 
 - feat: `maxConcurrentJobs` on the agent Config CRD caps how many Jobs one agent may run at once. Spawns over the cap are **deferred** through the existing deferred-respawn loop and retried after 60s, never dropped — a skipped spawn would be lost outright, since task publication is edge-triggered on vault file changes and being over the cap produces no such change. `0` (the default) means unlimited, so behaviour is unchanged for every agent that does not set it.
 - feat: spawned Jobs carry an `agent.benjamin-borbe.de/assignee` label so concurrency is counted per agent. A fleet-wide limit would throttle cheap agents to protect expensive ones; `pr-reviewer-agent` routinely runs several at once and must not be capped alongside `github-update-go-agent`.
 
   Sizing, measured 2026-08-10 against the 1800s `activeDeadlineSeconds`: one uncontended `github-update-go` Job took **669s** for a small repo (`cron`) and **903s** for a large one (`kafka`) — both comfortably inside the deadline, so the deadline is not the problem. 20 Jobs spawned within 40s all exceeded it, implying the cluster sustains fewer than ~7.4 concurrently. A cap of 4 puts the heaviest repo at roughly 8 minutes, 27% of the budget.
+
+## v0.4.7
+
+- fix: `IsJobActive` no longer reports a deadline-killed Job as active. An `activeDeadlineSeconds` kill sets the `JobFailed` condition but leaves `.status.active`/`.status.failed` at zero, so the counter-only check fell through to "active" until the Job was garbage-collected — and every retry spawn in that window was silently skipped as `active job exists`. The job-state predicates are now exported from `pkg` (`IsJobFailed`, `IsJobSucceeded`) and reused by the spawner, so the watcher and the spawner can no longer disagree about whether a Job has finished. This wedged 26 `github-update-go` tasks at `trigger_count: 2` against a cap of 3 on 2026-08-10, with no error state and no retry.
 
 ## v0.4.6
 
