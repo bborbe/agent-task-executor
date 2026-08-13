@@ -23,3 +23,7 @@ Prod:
 https://prod.quant.benjamin-borbe.de/admin/agent-task-executor/setloglevel/3
 https://prod.quant.benjamin-borbe.de/admin/agent-task-executor/agents
 https://prod.quant.benjamin-borbe.de/admin/agent-task-executor/healthcheck-trigger
+
+## License
+
+This project is licensed under the BSD-style license. See the [LICENSE](LICENSE) file for details.
