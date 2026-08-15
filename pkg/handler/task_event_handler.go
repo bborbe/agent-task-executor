@@ -132,6 +132,7 @@ func NewTaskEventHandler(
 		taskStore:        taskStore,
 		currentDateTime:  currentDateTime,
 		deferredRespawns: make(map[lib.TaskIdentifier]deferredEntry),
+		spawnLocks:       make(map[string]*sync.Mutex),
 	}
 }
 
@@ -144,6 +145,41 @@ type taskEventHandler struct {
 	currentDateTime  libtime.CurrentDateTimeGetter
 	deferredMu       sync.Mutex
 	deferredRespawns map[lib.TaskIdentifier]deferredEntry
+	spawnLocksMu     sync.Mutex
+	spawnLocks       map[string]*sync.Mutex
+}
+
+// lockAssigneeSpawn serializes the count-then-spawn sequence for one assignee and
+// returns the unlock func. It is the mutual exclusion that makes MaxConcurrentJobs
+// an actual cap rather than an advisory hint.
+//
+// Without it the cap is a check-then-act race: spawnIfNeeded is reached from two
+// goroutines — the Kafka consumer (consumer.Consume) and the deferred-respawn loop
+// (RunDeferredRespawnLoop), both started by service.Run in main.go — and each reads
+// the same live Job count before either has created its Job, so both conclude they
+// are under the cap. Measured in prod on 2026-08-15 with cap=1: 36 tasks released at
+// once admitted 17 Jobs, 15 released admitted 15. Every over-cap Job is then rejected
+// by the agent's ResourceQuota, loops on FailedCreate and burns its full
+// activeDeadlineSeconds while merely queued, before being killed without ever running.
+//
+// Per-assignee rather than global: a fleet-wide lock would make one agent's spawn
+// latency everyone's. Serializing per assignee costs nothing — spawns are rare
+// against Job runtimes measured in the 11-15 minute range.
+//
+// WARNING: correct only while the executor runs replicas: 1 (verified in quant dev
+// and prod). Scaling to 2 reinstates the race across processes and requires a lease
+// or leader election instead.
+func (h *taskEventHandler) lockAssigneeSpawn(assignee string) func() {
+	h.spawnLocksMu.Lock()
+	mu, ok := h.spawnLocks[assignee]
+	if !ok {
+		mu = &sync.Mutex{}
+		h.spawnLocks[assignee] = mu
+	}
+	h.spawnLocksMu.Unlock()
+
+	mu.Lock()
+	return mu.Unlock
 }
 
 // cleanupTerminalTask clears in-flight state when a task has reached a terminal
@@ -428,6 +464,14 @@ func (h *taskEventHandler) spawnIfNeeded(
 		}
 	}
 
+	// Held across the cap check AND the SpawnJob call below, so no other goroutine
+	// can observe a stale Job count in between. Only taken when a cap is configured:
+	// an uncapped agent has nothing to serialize, and holding the lock anyway would
+	// queue its spawns behind each other for no benefit.
+	if config != nil && config.MaxConcurrentJobs > 0 {
+		defer h.lockAssigneeSpawn(config.Assignee)()
+	}
+
 	active, err := h.jobSpawner.IsJobActive(ctx, task.TaskIdentifier)
 	if err != nil {
 		metrics.TaskEventsTotal.WithLabelValues("error").Inc()
@@ -511,6 +555,15 @@ func (h *taskEventHandler) deferIfAtConcurrencyCap(
 		return false, errors.Wrapf(ctx, err, "count active jobs for assignee %s", config.Assignee)
 	}
 	if running < config.MaxConcurrentJobs {
+		// Log the ADMIT decision, not just the deferral. Without this, an
+		// over-cap spawn leaves no trace and overshoot can only be found by
+		// counting Jobs in the cluster by hand — which is how the 2026-08-15
+		// race went unnoticed until 17 Jobs existed against a cap of 1.
+		// Same V(1) rationale as the deferral log below.
+		glog.V(1).Infof(
+			"event=concurrency_admit task=%s assignee=%s running=%d cap=%d",
+			task.TaskIdentifier, config.Assignee, running, config.MaxConcurrentJobs,
+		)
 		return false, nil
 	}
 	// V(1), not V(0): a capped deferral is an expected steady state and repeats
