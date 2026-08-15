@@ -139,6 +139,19 @@ var _ = Describe("desiredCRDSpec (via SetupCustomResourceDefinition)", func() {
 		Expect(specProps.Required).To(ConsistOf("assignee", "image", "heartbeat"))
 	})
 
+	It("declares every field AgentConfiguration reads from spec", func() {
+		// Guard against the v0.5.0 defect: maxConcurrentJobs was added to
+		// AgentConfiguration and to the Helm chart's crds/, but NOT here. This
+		// connector overwrites the cluster CRD on every executor start, so the
+		// field was pruned from every Config within seconds of any restart, and
+		// a pruned integer reads as 0 — which the cap treats as "unlimited". The
+		// feature was inert in prod and hand-applied CRD fixes kept "reverting".
+		crd := getCRDFromCreateAction(cs.Actions())
+		specProps := crd.Spec.Versions[0].Schema.OpenAPIV3Schema.Properties["spec"]
+		Expect(specProps.Properties).To(HaveKey("maxConcurrentJobs"))
+		Expect(specProps.Properties["maxConcurrentJobs"].Type).To(Equal("integer"))
+	})
+
 	It("sets heartbeat pattern", func() {
 		crd := getCRDFromCreateAction(cs.Actions())
 		schema := crd.Spec.Versions[0].Schema.OpenAPIV3Schema

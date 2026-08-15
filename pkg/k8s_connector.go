@@ -21,6 +21,10 @@ import (
 	agentinformers "github.com/bborbe/agent-task-executor/k8s/client/informers/externalversions"
 )
 
+// crdMinZero is the lower bound for integer CRD fields that count things.
+// apiextensionsv1 takes *float64, so it needs an addressable value.
+var crdMinZero = float64(0)
+
 //counterfeiter:generate -o ../mocks/k8s_connector.go --fake-name FakeK8sConnector . K8sConnector
 
 // K8sConnector installs the Config CRD and starts an informer.
@@ -145,6 +149,17 @@ func desiredCRDSpec() apiextensionsv1.CustomResourceDefinitionSpec {
 	}
 }
 
+// configSpecSchema is the authoritative schema for Config.spec — SetupCustomResourceDefinition
+// overwrites the cluster CRD with it on EVERY executor start.
+//
+// Any field added to AgentConfiguration must be added here too, or the API server prunes it
+// from every Config within seconds of the next restart. The failure is silent and reads as
+// "the operator never set it": v0.5.0 shipped maxConcurrentJobs in AgentConfiguration and in
+// the Helm chart's crds/ but not here, so the field was pruned everywhere, a pruned integer
+// read as 0, and the cap treated 0 as unlimited — the feature was inert in prod for weeks
+// while hand-applied CRD fixes appeared to "revert" (each revert was just the next pod start).
+//
+// Keep in sync with helm/crds/config-crd.yaml in bborbe/agent.
 func configSpecSchema() apiextensionsv1.JSONSchemaProps {
 	minLen := int64(1)
 	maxLen63 := int64(63)
@@ -205,6 +220,8 @@ func configSpecSchema() apiextensionsv1.JSONSchemaProps {
 				Pattern: "^[a-z0-9]([-a-z0-9]*[a-z0-9])?$",
 			},
 			"imagePullSecret": {Type: "string"},
+			// 0 = unlimited (see AgentConfiguration.MaxConcurrentJobs).
+			"maxConcurrentJobs": {Type: "integer", Minimum: &crdMinZero},
 			"trigger": {
 				Type: "object",
 				Properties: map[string]apiextensionsv1.JSONSchemaProps{
