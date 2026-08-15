@@ -9,7 +9,11 @@ package handler_test
 import (
 	"context"
 	"encoding/json"
+	"fmt"
+	"sync"
+	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/IBM/sarama"
 	lib "github.com/bborbe/agent"
@@ -295,6 +299,69 @@ var _ = Describe("TaskEventHandler", func() {
 
 			err := h.ConsumeMessage(ctx, buildMsg(task))
 			Expect(err).To(BeNil())
+			Expect(fakeSpawner.SpawnJobCallCount()).To(Equal(1))
+		})
+
+		It("admits exactly MaxConcurrentJobs when spawns arrive concurrently", func() {
+			// Regression for the check-then-act race fixed by the per-assignee
+			// spawn lock. In prod on 2026-08-15 a cap of 1 admitted 17 Jobs from
+			// 36 concurrent releases, because every caller read the same live Job
+			// count before any of them had created its Job.
+			//
+			// The fake counts like the real cluster: CountActiveJobs reports the
+			// Jobs actually created so far. Without the lock the count is stale
+			// for every goroutine and this spawns far more than the cap.
+			const concurrent = 10
+			var spawned atomic.Int64
+			fakeResolver.ResolveReturns(
+				pkg.AgentConfiguration{
+					Assignee:          "claude",
+					Image:             "my-image:latest",
+					MaxConcurrentJobs: 1,
+				},
+				nil,
+			)
+			fakeSpawner.IsJobActiveReturns(false, nil)
+			fakeSpawner.CountActiveJobsStub = func(_ context.Context, _ string) (int, error) {
+				// Widen the count→spawn window deliberately. The real race is a
+				// sub-millisecond gap between a live API List and the Job CREATE;
+				// without this delay the unlocked code wins the race often enough
+				// that the test passes by luck. Under the lock these sleeps
+				// serialize (10 * 20ms) instead of overlapping, so the delay
+				// cannot mask a regression — it only makes one visible.
+				time.Sleep(20 * time.Millisecond)
+				return int(spawned.Load()), nil
+			}
+			fakeSpawner.SpawnJobStub = func(
+				_ context.Context,
+				_ lib.Task,
+				_ pkg.AgentConfiguration,
+			) (string, error) {
+				spawned.Add(1)
+				return "job-name", nil
+			}
+
+			var wg sync.WaitGroup
+			for i := range concurrent {
+				wg.Add(1)
+				go func(i int) {
+					defer GinkgoRecover()
+					defer wg.Done()
+					task := lib.Task{
+						TaskIdentifier: lib.TaskIdentifier(
+							fmt.Sprintf("tid-cap-concurrent-%d", i),
+						),
+						Frontmatter: lib.TaskFrontmatter{
+							"status":   "in_progress",
+							"phase":    string(domain.TaskPhaseExecution),
+							"assignee": "claude",
+						},
+					}
+					Expect(h.ConsumeMessage(ctx, buildMsg(task))).To(BeNil())
+				}(i)
+			}
+			wg.Wait()
+
 			Expect(fakeSpawner.SpawnJobCallCount()).To(Equal(1))
 		})
 
