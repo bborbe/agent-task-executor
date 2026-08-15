@@ -2,6 +2,10 @@
 
 All notable changes to this project will be documented in this file.
 
+## Unreleased
+
+- fix: declare `maxConcurrentJobs` in the CRD schema this connector installs (`pkg/k8s_connector.go`). v0.5.0 added the field to `AgentConfiguration` and to the Helm chart's `crds/`, but not here — and `SetupCustomResourceDefinition` **overwrites the cluster CRD on every executor start**. The field was therefore pruned from every Config within seconds of any restart, and a pruned integer reads as `0`, which the cap treats as *unlimited*. Net effect: `maxConcurrentJobs` has never durably applied in any cluster, and hand-applied CRD fixes appeared to "revert" — each revert was simply the next pod start. Added a test asserting the schema declares the field, so a future config field cannot ship missing from the CRD again.
+
 ## v0.6.0
 
 - fix: `maxConcurrentJobs` is now actually enforced. It was a check-then-act race: `spawnIfNeeded` is reached from two goroutines — the Kafka consumer and the deferred-respawn loop, both started by `service.Run` — and each read the same live Job count before either had created its Job, so both concluded they were under the cap. Measured in prod with cap `1`: 36 tasks released at once admitted 17 Jobs, 15 admitted 15. Every over-cap Job was then rejected by the agent's ResourceQuota, looped on `FailedCreate`, and burned its full `activeDeadlineSeconds` while merely queued before being killed without ever running. A per-assignee mutex now spans the whole count→spawn sequence. Correct only at `replicas: 1`; scaling the executor reinstates the race across processes and would need a lease.
