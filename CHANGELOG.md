@@ -2,7 +2,7 @@
 
 All notable changes to this project will be documented in this file.
 
-## Unreleased
+## v0.6.3
 
 - fix(logging): downgrade the `not in task store` resync warning from `Warning` to `V(3)` in `pkg/job_watcher.go`. The Job informer re-delivers an already-handled terminal Job every ~5 minutes; each redelivery re-enters the missing-task branch and the old `Warning` read as a failure. The synthetic failure was already published on the first (real) observation, so the resync is expected noise (2026-08-10 silent job-failure wedge investigation).
 ## v0.6.2
