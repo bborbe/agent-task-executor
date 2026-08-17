@@ -17,6 +17,7 @@ import (
 	"k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/cache"
 
+	agentv1 "github.com/bborbe/agent-task-executor/k8s/apis/agent.benjamin-borbe.de/v1"
 	versioned "github.com/bborbe/agent-task-executor/k8s/client/clientset/versioned"
 	agentinformers "github.com/bborbe/agent-task-executor/k8s/client/informers/externalversions"
 )
@@ -24,6 +25,13 @@ import (
 // crdMinZero is the lower bound for integer CRD fields that count things.
 // apiextensionsv1 takes *float64, so it needs an addressable value.
 var crdMinZero = float64(0)
+
+// crdMinZombieSweeperInterval / crdMinZombieJobTimeout mirror the chart's
+// config-crd.yaml minimums and the admission guards in the v1 types package.
+var (
+	crdMinZombieSweeperInterval = float64(agentv1.MinZombieSweeperIntervalSeconds)
+	crdMinZombieJobTimeout      = float64(agentv1.MinZombieJobTimeoutSeconds)
+)
 
 //counterfeiter:generate -o ../mocks/k8s_connector.go --fake-name FakeK8sConnector . K8sConnector
 
@@ -161,6 +169,24 @@ func desiredCRDSpec() apiextensionsv1.CustomResourceDefinitionSpec {
 //
 // Keep in sync with helm/crds/config-crd.yaml in bborbe/agent.
 func configSpecSchema() apiextensionsv1.JSONSchemaProps {
+	return apiextensionsv1.JSONSchemaProps{
+		Type:         "object",
+		Required:     []string{"assignee", "image", "heartbeat"},
+		XValidations: configSpecValidations(),
+		Properties:   configSpecProperties(),
+	}
+}
+
+func configSpecValidations() apiextensionsv1.ValidationRules {
+	return apiextensionsv1.ValidationRules{
+		{
+			Rule:    "(has(self.taskType) && size(self.taskType) > 0) || (has(self.taskTypes) && size(self.taskTypes) > 0)",
+			Message: "at least one of spec.taskType or spec.taskTypes must be non-empty",
+		},
+	}
+}
+
+func configSpecProperties() map[string]apiextensionsv1.JSONSchemaProps {
 	minLen := int64(1)
 	maxLen63 := int64(63)
 	resourceList := apiextensionsv1.JSONSchemaProps{
@@ -171,71 +197,68 @@ func configSpecSchema() apiextensionsv1.JSONSchemaProps {
 			"ephemeral-storage": {Type: "string"},
 		},
 	}
-	return apiextensionsv1.JSONSchemaProps{
-		Type:     "object",
-		Required: []string{"assignee", "image", "heartbeat"},
-		XValidations: apiextensionsv1.ValidationRules{
-			{
-				Rule:    "(has(self.taskType) && size(self.taskType) > 0) || (has(self.taskTypes) && size(self.taskTypes) > 0)",
-				Message: "at least one of spec.taskType or spec.taskTypes must be non-empty",
+	return map[string]apiextensionsv1.JSONSchemaProps{
+		"assignee":  {Type: "string", MinLength: &minLen},
+		"image":     {Type: "string", MinLength: &minLen},
+		"heartbeat": {Type: "string", Pattern: "^[0-9]+(s|m|h)$"},
+		"taskType": {
+			Type:      "string",
+			Pattern:   `^[a-z0-9-]+$`,
+			MaxLength: &maxLen63,
+		},
+		"taskTypes": {
+			Type: "array",
+			Items: &apiextensionsv1.JSONSchemaPropsOrArray{
+				Schema: &apiextensionsv1.JSONSchemaProps{
+					Type:      "string",
+					Pattern:   `^[a-z0-9-]+$`,
+					MaxLength: &maxLen63,
+				},
 			},
 		},
-		Properties: map[string]apiextensionsv1.JSONSchemaProps{
-			"assignee":  {Type: "string", MinLength: &minLen},
-			"image":     {Type: "string", MinLength: &minLen},
-			"heartbeat": {Type: "string", Pattern: "^[0-9]+(s|m|h)$"},
-			"taskType": {
-				Type:      "string",
-				Pattern:   `^[a-z0-9-]+$`,
-				MaxLength: &maxLen63,
+		"resources": {
+			Type: "object",
+			Properties: map[string]apiextensionsv1.JSONSchemaProps{
+				"requests": resourceList,
+				"limits":   resourceList,
 			},
-			"taskTypes": {
-				Type: "array",
-				Items: &apiextensionsv1.JSONSchemaPropsOrArray{
-					Schema: &apiextensionsv1.JSONSchemaProps{
-						Type:      "string",
-						Pattern:   `^[a-z0-9-]+$`,
-						MaxLength: &maxLen63,
+		},
+		"env": {
+			Type: "object",
+			AdditionalProperties: &apiextensionsv1.JSONSchemaPropsOrBool{
+				Schema: &apiextensionsv1.JSONSchemaProps{Type: "string"},
+			},
+		},
+		"secretName":      {Type: "string"},
+		"volumeClaim":     {Type: "string"},
+		"volumeMountPath": {Type: "string"},
+		"priorityClassName": {
+			Type:    "string",
+			Pattern: "^[a-z0-9]([-a-z0-9]*[a-z0-9])?$",
+		},
+		"imagePullSecret": {Type: "string"},
+		// 0 = unlimited (see AgentConfiguration.MaxConcurrentJobs).
+		"maxConcurrentJobs": {Type: "integer", Minimum: &crdMinZero},
+		// Minimums mirror the Helm chart's config-crd.yaml (10 / 30) and the
+		// admission guards in k8s/apis/agent.benjamin-borbe.de/v1/types.go.
+		"zombieSweeperIntervalSeconds": {
+			Type:    "integer",
+			Minimum: &crdMinZombieSweeperInterval,
+		},
+		"zombieJobTimeoutSeconds": {Type: "integer", Minimum: &crdMinZombieJobTimeout},
+		"trigger": {
+			Type: "object",
+			Properties: map[string]apiextensionsv1.JSONSchemaProps{
+				"phases": {
+					Type: "array",
+					Items: &apiextensionsv1.JSONSchemaPropsOrArray{
+						Schema: &apiextensionsv1.JSONSchemaProps{Type: "string"},
 					},
 				},
-			},
-			"resources": {
-				Type: "object",
-				Properties: map[string]apiextensionsv1.JSONSchemaProps{
-					"requests": resourceList,
-					"limits":   resourceList,
-				},
-			},
-			"env": {
-				Type: "object",
-				AdditionalProperties: &apiextensionsv1.JSONSchemaPropsOrBool{
-					Schema: &apiextensionsv1.JSONSchemaProps{Type: "string"},
-				},
-			},
-			"secretName":      {Type: "string"},
-			"volumeClaim":     {Type: "string"},
-			"volumeMountPath": {Type: "string"},
-			"priorityClassName": {
-				Type:    "string",
-				Pattern: "^[a-z0-9]([-a-z0-9]*[a-z0-9])?$",
-			},
-			"imagePullSecret": {Type: "string"},
-			// 0 = unlimited (see AgentConfiguration.MaxConcurrentJobs).
-			"maxConcurrentJobs": {Type: "integer", Minimum: &crdMinZero},
-			"trigger": {
-				Type: "object",
-				Properties: map[string]apiextensionsv1.JSONSchemaProps{
-					"phases": {
-						Type: "array",
-						Items: &apiextensionsv1.JSONSchemaPropsOrArray{
-							Schema: &apiextensionsv1.JSONSchemaProps{Type: "string"},
-						},
-					},
-					"statuses": {
-						Type: "array",
-						Items: &apiextensionsv1.JSONSchemaPropsOrArray{
-							Schema: &apiextensionsv1.JSONSchemaProps{Type: "string"},
-						},
+				"statuses": {
+					Type: "array",
+					Items: &apiextensionsv1.JSONSchemaPropsOrArray{
+						Schema: &apiextensionsv1.JSONSchemaProps{Type: "string"},
 					},
 				},
 			},
