@@ -152,6 +152,25 @@ var _ = Describe("desiredCRDSpec (via SetupCustomResourceDefinition)", func() {
 		Expect(specProps.Properties["maxConcurrentJobs"].Type).To(Equal("integer"))
 	})
 
+	It("declares the zombie-sweeper fields AgentConfiguration reads from spec", func() {
+		// Same defect class as maxConcurrentJobs: zombieSweeperIntervalSeconds and
+		// zombieJobTimeoutSeconds are declared in ConfigSpec, read live by the
+		// zombie sweeper (zombie_sweeper.go) and mirrored in AgentConfiguration,
+		// but were missing from this schema — so the connector overwrote the CRD
+		// without them on every executor start and the API server pruned the
+		// fields from every Config. Minimums mirror the chart (10 / 30).
+		crd := getCRDFromCreateAction(cs.Actions())
+		specProps := crd.Spec.Versions[0].Schema.OpenAPIV3Schema.Properties["spec"]
+		Expect(specProps.Properties).To(HaveKey("zombieSweeperIntervalSeconds"))
+		Expect(specProps.Properties["zombieSweeperIntervalSeconds"].Type).To(Equal("integer"))
+		Expect(specProps.Properties["zombieSweeperIntervalSeconds"].Minimum).ToNot(BeNil())
+		Expect(*specProps.Properties["zombieSweeperIntervalSeconds"].Minimum).To(Equal(float64(10)))
+		Expect(specProps.Properties).To(HaveKey("zombieJobTimeoutSeconds"))
+		Expect(specProps.Properties["zombieJobTimeoutSeconds"].Type).To(Equal("integer"))
+		Expect(specProps.Properties["zombieJobTimeoutSeconds"].Minimum).ToNot(BeNil())
+		Expect(*specProps.Properties["zombieJobTimeoutSeconds"].Minimum).To(Equal(float64(30)))
+	})
+
 	It("sets heartbeat pattern", func() {
 		crd := getCRDFromCreateAction(cs.Actions())
 		schema := crd.Spec.Versions[0].Schema.OpenAPIV3Schema
