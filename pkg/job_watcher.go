@@ -202,7 +202,11 @@ func (w *jobWatcher) logMissingTask(
 	alwaysPublish bool,
 ) {
 	if alwaysPublish {
-		glog.Warningf(
+		// V(3), not Warning: the Job informer re-delivers an already-handled terminal
+		// Job every ~5 minutes, so a failed Job whose task was already deleted from the
+		// store re-enters this branch repeatedly and the old Warning read as a failure.
+		// The synthetic failure was already published on the first (real) observation.
+		glog.V(3).Infof(
 			"task %s not in task store; job %s/%s failed but cannot publish synthetic failure (no original task content)",
 			taskID,
 			job.Namespace,
