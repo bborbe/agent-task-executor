@@ -2,7 +2,7 @@
 
 All notable changes to this project will be documented in this file.
 
-## Unreleased
+## v0.6.2
 
 - fix: declare `zombieSweeperIntervalSeconds` and `zombieJobTimeoutSeconds` in the CRD schema this connector installs (`pkg/k8s_connector.go`). Same defect class as the v0.6.1 `maxConcurrentJobs` fix: both fields were declared in `ConfigSpec`, read live by the zombie sweeper (`zombie_sweeper.go`) and mirrored in `AgentConfiguration`, but missing from `configSpecSchema()` — so `SetupCustomResourceDefinition` overwrote the cluster CRD without them on every executor start and the API server pruned them from every Config. The sweeper silently fell back to defaults. Added a guard test asserting both fields (with the chart's 10 / 30 minimums) so a future config field cannot ship missing from the CRD again.
 
