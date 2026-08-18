@@ -282,6 +282,40 @@ var _ = Describe("ConfigSpec", func() {
 		})
 	})
 
+	Describe("Equal - maxConcurrentJobs", func() {
+		It("returns false when MaxConcurrentJobs differs", func() {
+			a := agentv1.ConfigSpec{
+				Assignee:          "claude",
+				Image:             "registry/agent-claude",
+				Heartbeat:         "30m",
+				MaxConcurrentJobs: 1,
+			}
+			b := agentv1.ConfigSpec{
+				Assignee:          "claude",
+				Image:             "registry/agent-claude",
+				Heartbeat:         "30m",
+				MaxConcurrentJobs: 3,
+			}
+			Expect(a.Equal(b)).To(BeFalse())
+		})
+
+		It("returns true when MaxConcurrentJobs matches", func() {
+			a := agentv1.ConfigSpec{
+				Assignee:          "claude",
+				Image:             "registry/agent-claude",
+				Heartbeat:         "30m",
+				MaxConcurrentJobs: 3,
+			}
+			b := agentv1.ConfigSpec{
+				Assignee:          "claude",
+				Image:             "registry/agent-claude",
+				Heartbeat:         "30m",
+				MaxConcurrentJobs: 3,
+			}
+			Expect(a.Equal(b)).To(BeTrue())
+		})
+	})
+
 	Describe("Equal - Trigger field", func() {
 		It("returns false when one spec has Trigger nil and other has Trigger set", func() {
 			a := agentv1.ConfigSpec{Assignee: "x", Image: "y", Heartbeat: "1m", Trigger: nil}

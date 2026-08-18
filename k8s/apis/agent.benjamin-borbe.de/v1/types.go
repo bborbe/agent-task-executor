@@ -165,6 +165,7 @@ func (s ConfigSpec) Equal(o ConfigSpec) bool {
 		s.VolumeClaim == o.VolumeClaim &&
 		s.VolumeMountPath == o.VolumeMountPath &&
 		s.PriorityClassName == o.PriorityClassName &&
+		s.MaxConcurrentJobs == o.MaxConcurrentJobs &&
 		reflect.DeepEqual(s.Env, o.Env) &&
 		reflect.DeepEqual(s.Resources, o.Resources) &&
 		reflect.DeepEqual(s.Trigger, o.Trigger) &&
