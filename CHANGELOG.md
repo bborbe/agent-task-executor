@@ -2,6 +2,10 @@
 
 All notable changes to this project will be documented in this file.
 
+## Unreleased
+
+- chore: Bump errcheck to v1.20.0 and golangci-lint to v2.13.1 for Go 1.27 support
+
 ## v0.6.4
 
 - fix: include `maxConcurrentJobs` in `ConfigSpec.Equal` (`k8s/apis/agent.benjamin-borbe.de/v1/types.go`). The executor's Config watch cache (`eventHandlerAlert.OnUpdate`) calls `Equal` to decide whether a Config changed; the field was missing from the comparison, so a `maxConcurrentJobs`-only edit to a live Config CR was treated as "nothing changed" and had no effect until the executor pod restarted. Measured 2026-08-18: a CR patched to `maxConcurrentJobs: 3` left the executor enforcing cap 1 until a rollout restart forced a full re-sync. Added a regression test asserting the field participates in `Equal`.
