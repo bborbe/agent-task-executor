@@ -9,7 +9,7 @@ require (
 	github.com/bborbe/cron v1.8.27
 	github.com/bborbe/errors v1.5.20
 	github.com/bborbe/http v1.26.24
-	github.com/bborbe/k8s v1.14.11
+	github.com/bborbe/k8s v1.14.14
 	github.com/bborbe/kafka v1.25.9
 	github.com/bborbe/log v1.6.24
 	github.com/bborbe/metrics v0.5.15
@@ -18,7 +18,7 @@ require (
 	github.com/bborbe/service v1.10.9
 	github.com/bborbe/time v1.27.10
 	github.com/bborbe/validation v1.4.22
-	github.com/bborbe/vault-cli v0.115.0
+	github.com/bborbe/vault-cli v0.116.1
 	github.com/golang/glog v1.2.5
 	github.com/google/uuid v1.6.0
 	github.com/gorilla/mux v1.8.1
@@ -38,7 +38,7 @@ require (
 require (
 	github.com/Masterminds/semver/v3 v3.5.0 // indirect
 	github.com/bborbe/argument/v2 v2.12.37 // indirect
-	github.com/bborbe/collection v1.20.23 // indirect
+	github.com/bborbe/collection v1.20.24 // indirect
 	github.com/bborbe/kv v1.21.11 // indirect
 	github.com/bborbe/math v1.4.5 // indirect
 	github.com/bborbe/parse v1.10.21 // indirect
@@ -117,6 +117,4 @@ require (
 	sigs.k8s.io/yaml v1.6.0 // indirect
 )
 
-exclude (
-	cloud.google.com/go v0.26.0
-)
+exclude cloud.google.com/go v0.26.0
