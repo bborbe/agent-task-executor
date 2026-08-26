@@ -29,17 +29,21 @@ type ConfigResolver interface {
 
 // NewConfigResolver returns a ConfigResolver backed by the given
 // typed store. The branch is captured here and appended as the image tag at
-// resolution time.
+// resolution time. Resolutions are scoped to the given vault: each task's
+// plain assignee is matched against the composed {assignee}-{vaultName}
+// Config assignee, so per-vault Config CRs apply per executor instance.
 func NewConfigResolver(
 	provider k8s.Provider[agentv1.Config],
 	branch base.Branch,
+	vaultName string,
 ) ConfigResolver {
-	return &configResolver{provider: provider, branch: branch}
+	return &configResolver{provider: provider, branch: branch, vaultName: vaultName}
 }
 
 type configResolver struct {
-	provider k8s.Provider[agentv1.Config]
-	branch   base.Branch
+	provider  k8s.Provider[agentv1.Config]
+	branch    base.Branch
+	vaultName string
 }
 
 func (r *configResolver) Resolve(
@@ -50,16 +54,17 @@ func (r *configResolver) Resolve(
 	if err != nil {
 		return AgentConfiguration{}, errors.Wrapf(ctx, err, "list agent configs")
 	}
+	composed := assignee + "-" + r.vaultName
 	for _, it := range items {
-		if it.Spec.Assignee == assignee {
+		if it.Spec.Assignee == composed {
 			return convert(it, r.branch.String()), nil
 		}
 	}
 	return AgentConfiguration{}, errors.Wrapf(
 		ctx,
 		ErrConfigNotFound,
-		"find assignee %q",
-		assignee,
+		"find composed assignee %q",
+		composed,
 	)
 }
 

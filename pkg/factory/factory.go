@@ -81,12 +81,14 @@ func CreateResourceEventHandlerConfig(
 	return pkg.NewResourceEventHandlerConfig(ctx, handler)
 }
 
-// CreateConfigResolver returns a ConfigResolver backed by the given store.
+// CreateConfigResolver returns a ConfigResolver backed by the given store,
+// scoped to the given vault so Config CRs resolve by {assignee}-{vaultName}.
 func CreateConfigResolver(
 	handler pkg.EventHandlerConfig,
 	branch base.Branch,
+	vaultName string,
 ) pkg.ConfigResolver {
-	return pkg.NewConfigResolver(handler, branch)
+	return pkg.NewConfigResolver(handler, branch, vaultName)
 }
 
 // CreateConsumer wires together all components and returns a Kafka Consumer that

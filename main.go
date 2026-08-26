@@ -46,6 +46,7 @@ type application struct {
 	Branch                     base.Branch       `required:"true"  arg:"branch"                         env:"BRANCH"                         usage:"Kafka topic prefix branch (develop/live)"`
 	TopicPrefix                base.TopicPrefix  `required:"false" arg:"topic-prefix"                   env:"TOPIC_PREFIX"                   usage:"Explicit Kafka topic prefix; empty means unprefixed topics"`
 	Namespace                  libk8s.Namespace  `required:"true"  arg:"namespace"                      env:"NAMESPACE"                      usage:"K8s namespace to spawn Jobs in"`
+	VaultName                  string            `required:"true"  arg:"vault-name"                     env:"VAULT_NAME"                     usage:"Obsidian vault name this executor instance serves; Config CRs are resolved by the composed {assignee}-{vaultName} assignee"`
 	BuildGitVersion            string            `required:"false" arg:"build-git-version"              env:"BUILD_GIT_VERSION"              usage:"Build Git version (git describe --tags --always --dirty)"                                                                                                                                                                                                                           default:"dev"`
 	BuildGitCommit             string            `required:"false" arg:"build-git-commit"               env:"BUILD_GIT_COMMIT"               usage:"Build Git commit hash"                                                                                                                                                                                                                                                              default:"none"`
 	BuildDate                  *libtime.DateTime `required:"false" arg:"build-date"                     env:"BUILD_DATE"                     usage:"Build timestamp (RFC3339)"`
@@ -87,7 +88,7 @@ func (a *application) Run(ctx context.Context, sentryClient libsentry.Client) er
 		ctx,
 		eventHandlerConfig,
 	)
-	resolver := factory.CreateConfigResolver(eventHandlerConfig, a.Branch)
+	resolver := factory.CreateConfigResolver(eventHandlerConfig, a.Branch, a.VaultName)
 
 	saramaClient, err := libkafka.CreateSaramaClient(
 		ctx,

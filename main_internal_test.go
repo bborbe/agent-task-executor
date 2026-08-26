@@ -9,6 +9,23 @@ import (
 	"testing"
 )
 
+func TestApplicationVaultNameFieldExists(t *testing.T) {
+	typ := reflect.TypeOf(application{})
+	f, ok := typ.FieldByName("VaultName")
+	if !ok {
+		t.Fatalf("application struct is missing VaultName field")
+	}
+	if f.Type.Kind() != reflect.String {
+		t.Fatalf("VaultName must be string, got %s", f.Type.Kind())
+	}
+	if got, want := f.Tag.Get("env"), "VAULT_NAME"; got != want {
+		t.Errorf("VaultName env tag = %q, want %q", got, want)
+	}
+	if got, want := f.Tag.Get("required"), "true"; got != want {
+		t.Errorf("VaultName required tag = %q, want %q", got, want)
+	}
+}
+
 func TestApplicationBuildGitVersionFieldExists(t *testing.T) {
 	typ := reflect.TypeOf(application{})
 	f, ok := typ.FieldByName("BuildGitVersion")
