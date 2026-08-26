@@ -37,7 +37,7 @@ spec:
 
 | Field | Required | Description |
 |-------|----------|-------------|
-| `spec.assignee` | yes | Matches the `assignee` field in task frontmatter |
+| `spec.assignee` | yes | With a per-vault executor (one per Obsidian vault), matches the composed `{assignee}-{vaultName}` value — the task's plain `assignee` joined with the executor's `VAULT_NAME` (e.g. task `github-update-go-agent` + `VAULT_NAME=personal` → `github-update-go-agent-personal`). A Config CR whose `assignee` is the plain value without the vault suffix never matches. |
 | `spec.image` | yes | Docker image for the K8s Job (tag appended at runtime from branch) |
 | `spec.heartbeat` | yes | Interval between re-spawns for `in_progress` tasks |
 | `spec.taskType` | conditional | Task type this agent handles; must match `^[a-z0-9-]+$`, max 63 chars. **Deprecated: prefer `spec.taskTypes` (list).** Stays functional indefinitely. Required unless `spec.taskTypes` is non-empty. |
@@ -53,6 +53,8 @@ spec:
 | `spec.trigger.statuses` | no | Task statuses that allow spawning. Valid values: `todo`, `in_progress`, `backlog`, `completed`, `hold`, `aborted`. Empty or absent means default statuses apply. |
 
 If `spec.trigger` is omitted, or if `trigger.phases` / `trigger.statuses` are absent or empty, the executor applies its built-in defaults (phases: `planning`, `in_progress`, `ai_review`; statuses: `in_progress`). There is no way to configure a Config that triggers on nothing — an empty list is equivalent to the field being absent.
+
+With a per-vault executor, each instance serves one Obsidian vault: it learns its vault from the required `VAULT_NAME` environment variable and resolves Config CRs by the composed `{assignee}-{vaultName}` key. Config CR names follow the `{assignee}-{vault}` convention. A Config CR whose assignee is the plain value without the vault suffix never matches, so unmatched tasks keep the existing unknown-assignee skip behavior.
 
 ## Properties
 

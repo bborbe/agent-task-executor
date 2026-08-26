@@ -1,8 +1,13 @@
 ---
-status: approved
+status: completed
 spec: [003-vault-scoped-config-resolver]
+summary: 'Documented the vault-scoped {assignee}-{vaultName} match rule in the Config CRD spec (updated the spec.assignee Fields row and added a per-vault executor paragraph); the CHANGELOG ## Unreleased feat: vault entry already existed from prompt 1 and was left intact'
+execution_id: agent-task-executor-vaultslot-exec-004-spec-003-vault-scoped-docs
+dark-factory-version: dev
 created: "2026-08-26T20:24:00Z"
 queued: "2026-08-26T20:33:07Z"
+started: "2026-08-26T20:42:33Z"
+completed: "2026-08-26T20:48:48Z"
 ---
 
 <summary>
