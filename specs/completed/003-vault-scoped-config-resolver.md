@@ -1,5 +1,5 @@
 ---
-status: verifying
+status: completed
 tags:
     - dark-factory
     - spec
@@ -7,6 +7,7 @@ approved: "2026-08-26T20:17:05Z"
 generating: "2026-08-26T20:33:07Z"
 prompted: "2026-08-26T20:33:07Z"
 verifying: "2026-08-26T20:48:48Z"
+completed: "2026-08-26T20:54:10Z"
 branch: dark-factory/vault-scoped-config-resolver
 ---
 
