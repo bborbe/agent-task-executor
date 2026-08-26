@@ -6,69 +6,50 @@ package main
 
 import (
 	"reflect"
-	"testing"
+
+	. "github.com/onsi/ginkgo/v2"
+	. "github.com/onsi/gomega"
 )
 
-func TestApplicationVaultNameFieldExists(t *testing.T) {
-	typ := reflect.TypeOf(application{})
-	f, ok := typ.FieldByName("VaultName")
-	if !ok {
-		t.Fatalf("application struct is missing VaultName field")
-	}
-	if f.Type.Kind() != reflect.String {
-		t.Fatalf("VaultName must be string, got %s", f.Type.Kind())
-	}
-	if got, want := f.Tag.Get("env"), "VAULT_NAME"; got != want {
-		t.Errorf("VaultName env tag = %q, want %q", got, want)
-	}
-	if got, want := f.Tag.Get("required"), "true"; got != want {
-		t.Errorf("VaultName required tag = %q, want %q", got, want)
-	}
-}
+var _ = Describe("application struct field guards", func() {
+	Describe("VaultName field", func() {
+		It("declares the env and required tags", func() {
+			typ := reflect.TypeOf(application{})
+			f, ok := typ.FieldByName("VaultName")
+			Expect(ok).To(BeTrue())
+			Expect(f.Type.Kind()).To(Equal(reflect.String))
+			Expect(f.Tag.Get("env")).To(Equal("VAULT_NAME"))
+			Expect(f.Tag.Get("required")).To(Equal("true"))
+		})
+	})
 
-func TestApplicationBuildGitVersionFieldExists(t *testing.T) {
-	typ := reflect.TypeOf(application{})
-	f, ok := typ.FieldByName("BuildGitVersion")
-	if !ok {
-		t.Fatalf("application struct is missing BuildGitVersion field")
-	}
-	if f.Type.Kind() != reflect.String {
-		t.Fatalf("BuildGitVersion must be string, got %s", f.Type.Kind())
-	}
-	if got, want := f.Tag.Get("env"), "BUILD_GIT_VERSION"; got != want {
-		t.Errorf("BuildGitVersion env tag = %q, want %q", got, want)
-	}
-	if got, want := f.Tag.Get("arg"), "build-git-version"; got != want {
-		t.Errorf("BuildGitVersion arg tag = %q, want %q", got, want)
-	}
-	if got, want := f.Tag.Get("default"), "dev"; got != want {
-		t.Errorf("BuildGitVersion default tag = %q, want %q", got, want)
-	}
-}
+	Describe("BuildGitVersion field", func() {
+		It("declares the env, arg, and default tags", func() {
+			typ := reflect.TypeOf(application{})
+			f, ok := typ.FieldByName("BuildGitVersion")
+			Expect(ok).To(BeTrue())
+			Expect(f.Type.Kind()).To(Equal(reflect.String))
+			Expect(f.Tag.Get("env")).To(Equal("BUILD_GIT_VERSION"))
+			Expect(f.Tag.Get("arg")).To(Equal("build-git-version"))
+			Expect(f.Tag.Get("default")).To(Equal("dev"))
+		})
+	})
 
-func TestApplicationBuildGitVersionFieldOrder(t *testing.T) {
-	typ := reflect.TypeOf(application{})
-	versionIdx, commitIdx := -1, -1
-	for i := 0; i < typ.NumField(); i++ {
-		switch typ.Field(i).Name {
-		case "BuildGitVersion":
-			versionIdx = i
-		case "BuildGitCommit":
-			commitIdx = i
-		}
-	}
-	if versionIdx < 0 || commitIdx < 0 {
-		t.Fatalf(
-			"both BuildGitVersion (%d) and BuildGitCommit (%d) must exist",
-			versionIdx,
-			commitIdx,
-		)
-	}
-	if versionIdx >= commitIdx {
-		t.Errorf(
-			"BuildGitVersion (idx %d) must appear before BuildGitCommit (idx %d)",
-			versionIdx,
-			commitIdx,
-		)
-	}
-}
+	Describe("BuildGitVersion field order", func() {
+		It("appears before BuildGitCommit", func() {
+			typ := reflect.TypeOf(application{})
+			versionIdx, commitIdx := -1, -1
+			for i := 0; i < typ.NumField(); i++ {
+				switch typ.Field(i).Name {
+				case "BuildGitVersion":
+					versionIdx = i
+				case "BuildGitCommit":
+					commitIdx = i
+				}
+			}
+			Expect(versionIdx).To(BeNumerically(">=", 0))
+			Expect(commitIdx).To(BeNumerically(">=", 0))
+			Expect(versionIdx).To(BeNumerically("<", commitIdx))
+		})
+	})
+})

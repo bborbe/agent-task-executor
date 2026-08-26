@@ -56,6 +56,16 @@ func (r *configResolver) Resolve(
 	}
 	composed := assignee + "-" + r.vaultName
 	for _, it := range items {
+		select {
+		case <-ctx.Done():
+			return AgentConfiguration{}, errors.Wrapf(
+				ctx,
+				ctx.Err(),
+				"resolve config %q cancelled",
+				composed,
+			)
+		default:
+		}
 		if it.Spec.Assignee == composed {
 			return convert(it, r.branch.String()), nil
 		}
