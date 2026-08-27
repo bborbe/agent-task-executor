@@ -491,7 +491,11 @@ func (h *taskEventHandler) spawnIfNeeded(
 		return false, nil
 	}
 
-	if task.Frontmatter.TriggerCount() >= task.Frontmatter.MaxTriggers() {
+	// The trigger cap is opt-in: an absent max_triggers means no cap, so a
+	// recurring task that accumulates trigger_count across re-dispatches is
+	// never blocked (the lib default-3 fallback would kill the re-dispatch loop).
+	if _, ok := task.Frontmatter["max_triggers"]; ok &&
+		task.Frontmatter.TriggerCount() >= task.Frontmatter.MaxTriggers() {
 		glog.V(2).Infof("skip task %s: trigger_count %d >= max_triggers %d",
 			task.TaskIdentifier,
 			task.Frontmatter.TriggerCount(),
