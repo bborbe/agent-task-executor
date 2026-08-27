@@ -5,6 +5,7 @@ All notable changes to this project will be documented in this file.
 ## Unreleased
 
 - feat: Scope Config CR resolution per executor vault — the executor now requires `VAULT_NAME` at startup and resolves each task's plain assignee against the composed `{assignee}-{vaultName}` Config assignee (`pkg/config_resolver.go`), so per-vault `maxConcurrentJobs` slots take effect and Config CRs from other vaults are ignored. The `ConfigResolver` interface and its `ErrConfigNotFound` no-match contract are unchanged.
+- fix: address PR review — thread `ctx` cancellation through Config `convert`/`copyEnv` (`pkg/config_resolver.go`) and validate `VAULT_NAME` against `^[a-z][a-z0-9-]*$` at startup (`main.go`), so a cancelled resolve aborts cleanly and a malformed vault slug fails fast instead of silently never matching a Config CR.
 
 ## v0.6.7
 

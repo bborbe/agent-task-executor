@@ -7,6 +7,7 @@ package main
 import (
 	"context"
 	"os"
+	"regexp"
 	"time"
 
 	"github.com/bborbe/cqrs/base"
@@ -63,6 +64,12 @@ type application struct {
 	JobKafkaCaCertSecret string `required:"false" arg:"job-kafka-ca-cert-secret"       env:"JOB_KAFKA_CA_CERT_SECRET"       usage:"Name of the existing K8s secret holding the Kafka CA cert (key ca.crt) to mount into spawned Jobs; empty disables cert mounting. Must be a valid K8s Secret name (RFC 1123: lowercase alphanumeric or '-', <=253 chars) or Job creation fails"`
 }
 
+// vaultSlugRegexp mirrors the controller's VAULT_NAME validation (pkg/routing):
+// a lowercase letter, then lowercase letters, digits, or hyphens. The composed
+// {assignee}-{vaultName} lookup key depends on a well-formed vault slug — a
+// malformed value would silently never match a Config CR.
+var vaultSlugRegexp = regexp.MustCompile(`^[a-z][a-z0-9-]*$`)
+
 //nolint:funlen // Initialization sequence; wiring is linear with no branching.
 func (a *application) Run(ctx context.Context, sentryClient libsentry.Client) error {
 	libmetrics.NewBuildInfoMetrics().SetBuildInfo(a.BuildGitVersion, a.BuildGitCommit, a.BuildDate)
@@ -74,6 +81,13 @@ func (a *application) Run(ctx context.Context, sentryClient libsentry.Client) er
 			ctx,
 			"job-ttl-seconds-after-finished must be >= 0 (0 deletes immediately), got %d",
 			a.JobTTLSecondsAfterFinished,
+		)
+	}
+	if !vaultSlugRegexp.MatchString(a.VaultName) {
+		return errors.Errorf(
+			ctx,
+			"vault-name must match ^[a-z][a-z0-9-]*$ (lowercase letter, then lowercase/digits/hyphens), got %q",
+			a.VaultName,
 		)
 	}
 

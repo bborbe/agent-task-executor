@@ -67,7 +67,7 @@ func (r *configResolver) Resolve(
 		default:
 		}
 		if it.Spec.Assignee == composed {
-			return convert(it, r.branch.String()), nil
+			return convert(ctx, it, r.branch.String())
 		}
 	}
 	return AgentConfiguration{}, errors.Wrapf(
@@ -78,13 +78,17 @@ func (r *configResolver) Resolve(
 	)
 }
 
-func convert(obj agentv1.Config, branch string) AgentConfiguration {
+func convert(ctx context.Context, obj agentv1.Config, branch string) (AgentConfiguration, error) {
+	env, err := copyEnv(ctx, obj.Spec.Env)
+	if err != nil {
+		return AgentConfiguration{}, errors.Wrapf(ctx, err, "convert config %q", obj.Spec.Assignee)
+	}
 	return AgentConfiguration{
 		Assignee:                obj.Spec.Assignee,
 		TaskType:                obj.Spec.TaskType,
 		TaskTypes:               append([]string(nil), obj.Spec.TaskTypes...),
 		Image:                   appendBranchTag(obj.Spec.Image, branch),
-		Env:                     copyEnv(obj.Spec.Env),
+		Env:                     env,
 		SecretName:              obj.Spec.SecretName,
 		VolumeClaim:             obj.Spec.VolumeClaim,
 		VolumeMountPath:         obj.Spec.VolumeMountPath,
@@ -93,13 +97,18 @@ func convert(obj agentv1.Config, branch string) AgentConfiguration {
 		PriorityClassName:       obj.Spec.PriorityClassName,
 		Trigger:                 obj.Spec.Trigger,
 		ZombieJobTimeoutSeconds: obj.Spec.ZombieJobTimeoutSeconds,
-	}
+	}, nil
 }
 
-func copyEnv(in map[string]string) map[string]string {
+func copyEnv(ctx context.Context, in map[string]string) (map[string]string, error) {
 	out := make(map[string]string, len(in))
 	for k, v := range in {
+		select {
+		case <-ctx.Done():
+			return nil, errors.Wrapf(ctx, ctx.Err(), "copy env cancelled")
+		default:
+		}
 		out[k] = v
 	}
-	return out
+	return out, nil
 }
