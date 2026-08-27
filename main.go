@@ -7,6 +7,7 @@ package main
 import (
 	"context"
 	"os"
+	"regexp"
 	"time"
 
 	"github.com/bborbe/cqrs/base"
@@ -46,14 +47,28 @@ type application struct {
 	Branch                     base.Branch       `required:"true"  arg:"branch"                         env:"BRANCH"                         usage:"Kafka topic prefix branch (develop/live)"`
 	TopicPrefix                base.TopicPrefix  `required:"false" arg:"topic-prefix"                   env:"TOPIC_PREFIX"                   usage:"Explicit Kafka topic prefix; empty means unprefixed topics"`
 	Namespace                  libk8s.Namespace  `required:"true"  arg:"namespace"                      env:"NAMESPACE"                      usage:"K8s namespace to spawn Jobs in"`
+	VaultName                  string            `required:"true"  arg:"vault-name"                     env:"VAULT_NAME"                     usage:"Obsidian vault name this executor instance serves; Config CRs are resolved by the composed {assignee}-{vaultName} assignee"`
 	BuildGitVersion            string            `required:"false" arg:"build-git-version"              env:"BUILD_GIT_VERSION"              usage:"Build Git version (git describe --tags --always --dirty)"                                                                                                                                                                                                                           default:"dev"`
 	BuildGitCommit             string            `required:"false" arg:"build-git-commit"               env:"BUILD_GIT_COMMIT"               usage:"Build Git commit hash"                                                                                                                                                                                                                                                              default:"none"`
 	BuildDate                  *libtime.DateTime `required:"false" arg:"build-date"                     env:"BUILD_DATE"                     usage:"Build timestamp (RFC3339)"`
 	HealthcheckCronExpression  string            `required:"true"  arg:"healthcheck-cron-expression"    env:"HEALTHCHECK_CRON_EXPRESSION"    usage:"Cron expression for agent liveness health checks"                                                                                                                                                                                                                                   default:"0 0 8 * * 1"`
 	JobTTLSecondsAfterFinished int32             `required:"false" arg:"job-ttl-seconds-after-finished" env:"JOB_TTL_SECONDS_AFTER_FINISHED" usage:"K8s Job TTL after completion (seconds) — completed Job pods are GCed after this delay"                                                                                                                                                                                              default:"1800"`
-	JobKafkaClientCertSecret   string            `required:"false" arg:"job-kafka-client-cert-secret"   env:"JOB_KAFKA_CLIENT_CERT_SECRET"   usage:"Name of the existing K8s secret holding the Kafka client cert/key (keys user.crt/user.key) to mount into spawned Jobs; empty disables cert mounting. Must be a valid K8s Secret name (RFC 1123: lowercase alphanumeric or '-', <=253 chars) or Job creation fails"`
-	JobKafkaCaCertSecret       string            `required:"false" arg:"job-kafka-ca-cert-secret"       env:"JOB_KAFKA_CA_CERT_SECRET"       usage:"Name of the existing K8s secret holding the Kafka CA cert (key ca.crt) to mount into spawned Jobs; empty disables cert mounting. Must be a valid K8s Secret name (RFC 1123: lowercase alphanumeric or '-', <=253 chars) or Job creation fails"`
+	// JobKafkaClientCertSecret holds the NAME of the K8s Secret carrying the
+	// Kafka client cert/key — not the cert material itself. The value is a
+	// resource reference (already public in the Deployment manifest), so no
+	// display:"length" guard is needed.
+	JobKafkaClientCertSecret string `required:"false" arg:"job-kafka-client-cert-secret"   env:"JOB_KAFKA_CLIENT_CERT_SECRET"   usage:"Name of the existing K8s secret holding the Kafka client cert/key (keys user.crt/user.key) to mount into spawned Jobs; empty disables cert mounting. Must be a valid K8s Secret name (RFC 1123: lowercase alphanumeric or '-', <=253 chars) or Job creation fails"`
+	// JobKafkaCaCertSecret holds the NAME of the K8s Secret carrying the Kafka
+	// CA cert — not the cert material itself. Same reasoning as
+	// JobKafkaClientCertSecret: a resource reference, not secret-shaped.
+	JobKafkaCaCertSecret string `required:"false" arg:"job-kafka-ca-cert-secret"       env:"JOB_KAFKA_CA_CERT_SECRET"       usage:"Name of the existing K8s secret holding the Kafka CA cert (key ca.crt) to mount into spawned Jobs; empty disables cert mounting. Must be a valid K8s Secret name (RFC 1123: lowercase alphanumeric or '-', <=253 chars) or Job creation fails"`
 }
+
+// vaultSlugRegexp mirrors the controller's VAULT_NAME validation (pkg/routing):
+// a lowercase letter, then lowercase letters, digits, or hyphens. The composed
+// {assignee}-{vaultName} lookup key depends on a well-formed vault slug — a
+// malformed value would silently never match a Config CR.
+var vaultSlugRegexp = regexp.MustCompile(`^[a-z][a-z0-9-]*$`)
 
 //nolint:funlen // Initialization sequence; wiring is linear with no branching.
 func (a *application) Run(ctx context.Context, sentryClient libsentry.Client) error {
@@ -66,6 +81,13 @@ func (a *application) Run(ctx context.Context, sentryClient libsentry.Client) er
 			ctx,
 			"job-ttl-seconds-after-finished must be >= 0 (0 deletes immediately), got %d",
 			a.JobTTLSecondsAfterFinished,
+		)
+	}
+	if !vaultSlugRegexp.MatchString(a.VaultName) {
+		return errors.Errorf(
+			ctx,
+			"vault-name must match ^[a-z][a-z0-9-]*$ (lowercase letter, then lowercase/digits/hyphens), got %q",
+			a.VaultName,
 		)
 	}
 
@@ -87,7 +109,7 @@ func (a *application) Run(ctx context.Context, sentryClient libsentry.Client) er
 		ctx,
 		eventHandlerConfig,
 	)
-	resolver := factory.CreateConfigResolver(eventHandlerConfig, a.Branch)
+	resolver := factory.CreateConfigResolver(eventHandlerConfig, a.Branch, a.VaultName)
 
 	saramaClient, err := libkafka.CreateSaramaClient(
 		ctx,
@@ -170,6 +192,7 @@ func (a *application) createHTTPServer(
 		router.Path("/metrics").Handler(promhttp.Handler())
 		router.Path("/setloglevel/{level}").
 			Handler(log.NewSetLoglevelHandler(ctx, log.NewLogLevelSetter(2, 5*time.Minute)))
+		router.Path("/gc").Handler(libhttp.NewGarbageCollectorHandler())
 
 		router.Path("/agents").
 			Handler(handler.NewAgentsHandler(configProvider, os.Getenv("AGENTS_AUTH_SECRET")))

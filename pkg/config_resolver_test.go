@@ -35,14 +35,14 @@ var _ = Describe("ConfigResolver", func() {
 	BeforeEach(func() {
 		ctx = context.Background()
 		provider = &fakeProvider{}
-		resolver = pkg.NewConfigResolver(provider, "dev")
+		resolver = pkg.NewConfigResolver(provider, "dev", "personal")
 	})
 
 	It("returns converted AgentConfiguration with image tag appended", func() {
 		provider.items = []agentv1.Config{
 			{
 				Spec: agentv1.ConfigSpec{
-					Assignee:        "claude",
+					Assignee:        "claude-personal",
 					Image:           "foo/bar",
 					Heartbeat:       "30m",
 					Env:             map[string]string{"KEY": "val"},
@@ -66,7 +66,7 @@ var _ = Describe("ConfigResolver", func() {
 		}
 		config, err := resolver.Resolve(ctx, "claude")
 		Expect(err).To(BeNil())
-		Expect(config.Assignee).To(Equal("claude"))
+		Expect(config.Assignee).To(Equal("claude-personal"))
 		Expect(config.Image).To(Equal("foo/bar:dev"))
 		Expect(config.Env).To(Equal(map[string]string{"KEY": "val"}))
 		Expect(config.SecretName).To(Equal("my-secret"))
@@ -85,7 +85,7 @@ var _ = Describe("ConfigResolver", func() {
 		provider.items = []agentv1.Config{
 			{
 				Spec: agentv1.ConfigSpec{
-					Assignee:  "claude",
+					Assignee:  "claude-personal",
 					Image:     "foo/bar",
 					Heartbeat: "30m",
 				},
@@ -98,7 +98,13 @@ var _ = Describe("ConfigResolver", func() {
 
 	It("returns ErrConfigNotFound when no item matches", func() {
 		provider.items = []agentv1.Config{
-			{Spec: agentv1.ConfigSpec{Assignee: "other-agent", Image: "img", Heartbeat: "1m"}},
+			{
+				Spec: agentv1.ConfigSpec{
+					Assignee:  "other-agent-personal",
+					Image:     "img",
+					Heartbeat: "1m",
+				},
+			},
 		}
 		_, err := resolver.Resolve(ctx, "claude")
 		Expect(err).NotTo(BeNil())
@@ -126,7 +132,7 @@ var _ = Describe("ConfigResolver", func() {
 			provider.items = []agentv1.Config{
 				{
 					Spec: agentv1.ConfigSpec{
-						Assignee:  "claude",
+						Assignee:  "claude-personal",
 						Image:     "img",
 						Heartbeat: "1m",
 						Env:       originalEnv,
@@ -142,10 +148,71 @@ var _ = Describe("ConfigResolver", func() {
 
 	It("branch tagging: given branch=dev and Image=foo/bar, result has Image==foo/bar:dev", func() {
 		provider.items = []agentv1.Config{
-			{Spec: agentv1.ConfigSpec{Assignee: "claude", Image: "foo/bar", Heartbeat: "1m"}},
+			{
+				Spec: agentv1.ConfigSpec{
+					Assignee:  "claude-personal",
+					Image:     "foo/bar",
+					Heartbeat: "1m",
+				},
+			},
 		}
 		config, err := resolver.Resolve(ctx, "claude")
 		Expect(err).To(BeNil())
 		Expect(config.Image).To(Equal("foo/bar:dev"))
+	})
+
+	It("resolves a Config CR by the composed assignee", func() {
+		provider.items = []agentv1.Config{
+			{
+				Spec: agentv1.ConfigSpec{
+					Assignee:          "github-update-go-agent-personal",
+					Image:             "foo/bar",
+					Heartbeat:         "1m",
+					MaxConcurrentJobs: 1,
+				},
+			},
+		}
+		config, err := resolver.Resolve(ctx, "github-update-go-agent")
+		Expect(err).To(BeNil())
+		Expect(config.Assignee).To(Equal("github-update-go-agent-personal"))
+		Expect(config.MaxConcurrentJobs).To(Equal(1))
+	})
+
+	It("no Config matches the composed assignee", func() {
+		provider.items = []agentv1.Config{}
+		_, err := resolver.Resolve(ctx, "github-update-go-agent")
+		Expect(err).NotTo(BeNil())
+		Expect(errors.Is(err, pkg.ErrConfigNotFound)).To(BeTrue())
+		Expect(err.Error()).To(ContainSubstring("github-update-go-agent-personal"))
+	})
+
+	It("a plain assignee without a vault suffix never matches", func() {
+		provider.items = []agentv1.Config{
+			{
+				Spec: agentv1.ConfigSpec{
+					Assignee:  "github-update-go-agent",
+					Image:     "foo/bar",
+					Heartbeat: "1m",
+				},
+			},
+		}
+		_, err := resolver.Resolve(ctx, "github-update-go-agent")
+		Expect(err).NotTo(BeNil())
+		Expect(errors.Is(err, pkg.ErrConfigNotFound)).To(BeTrue())
+	})
+
+	It("ignores Config CRs belonging to other vaults", func() {
+		provider.items = []agentv1.Config{
+			{
+				Spec: agentv1.ConfigSpec{
+					Assignee:  "github-update-go-agent-openclaw",
+					Image:     "foo/bar",
+					Heartbeat: "1m",
+				},
+			},
+		}
+		_, err := resolver.Resolve(ctx, "github-update-go-agent")
+		Expect(err).NotTo(BeNil())
+		Expect(errors.Is(err, pkg.ErrConfigNotFound)).To(BeTrue())
 	})
 })
