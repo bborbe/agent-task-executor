@@ -2,6 +2,10 @@
 
 All notable changes to this project will be documented in this file.
 
+## Unreleased
+
+- fix: make the spawn trigger cap opt-in — an absent `max_triggers` no longer blocks spawn at the lib default of 3, so a recurring task that accumulates `trigger_count` across re-dispatches keeps re-dispatching to its routing assignee (2026-08-27 prod incident: Daily Sentry Triage collector leg dead from re-dispatch #2 onward).
+
 ## v0.7.0
 
 - feat: Scope Config CR resolution per executor vault — the executor now requires `VAULT_NAME` at startup and resolves each task's plain assignee against the composed `{assignee}-{vaultName}` Config assignee (`pkg/config_resolver.go`), so per-vault `maxConcurrentJobs` slots take effect and Config CRs from other vaults are ignored. The `ConfigResolver` interface and its `ErrConfigNotFound` no-match contract are unchanged.
