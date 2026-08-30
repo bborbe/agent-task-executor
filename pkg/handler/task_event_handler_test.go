@@ -555,6 +555,27 @@ var _ = Describe("TaskEventHandler", func() {
 			Expect(fakeSpawner.SpawnJobCallCount()).To(Equal(0))
 		})
 
+		It("does not skip spawn when max_triggers is absent (recurring task)", func() {
+			fakeSpawner.IsJobActiveReturns(false, nil)
+			fakeSpawner.SpawnJobReturns("sentry-collector-job-1", nil)
+			// trigger_count 5 would trip the lib default-3 cap; absent max_triggers
+			// means no cap, so the recurring daily trigger keeps re-dispatching.
+			task := lib.Task{
+				TaskIdentifier: lib.TaskIdentifier("test-task-cap-absent"),
+				Frontmatter: lib.TaskFrontmatter{
+					"status":        "in_progress",
+					"phase":         string(domain.TaskPhasePlanning),
+					"assignee":      "sentry-collector-agent",
+					"stage":         "prod",
+					"trigger_count": 5,
+				},
+			}
+			err := h.ConsumeMessage(ctx, buildMsg(task))
+			Expect(err).To(BeNil())
+			Expect(fakeResultPublisher.PublishIncrementTriggerCountCallCount()).To(Equal(1))
+			Expect(fakeSpawner.SpawnJobCallCount()).To(Equal(1))
+		})
+
 		It("publishes increment and spawns when below cap (happy path)", func() {
 			fakeSpawner.IsJobActiveReturns(false, nil)
 			fakeSpawner.SpawnJobReturns("claude-job-1", nil)
