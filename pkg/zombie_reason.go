@@ -6,8 +6,11 @@ package pkg
 
 // ZombieReason is the closed set of machine-readable reason strings emitted in
 // the ## Failure body section. Operators grep on these values to triage.
-// Adding a new value requires updating this list and the documentation; renaming
-// or removing a value is a breaking change to the on-disk task body contract.
+// OOM kills use the dedicated pod_oom_killed value so operators can grep for
+// OOM specifically; other non-zero pod terminations fall back to the generic
+// pod_crash_no_stdout. Adding a new value requires updating this list and the
+// documentation; renaming or removing a value is a breaking change to the
+// on-disk task body contract.
 type ZombieReason string
 
 const (
@@ -18,6 +21,7 @@ const (
 	ZombieReasonPodCrashNoStdout  ZombieReason = "pod_crash_no_stdout"
 	ZombieReasonExecutorWatchLost ZombieReason = "executor_watch_lost"
 	ZombieReasonTypeMismatch      ZombieReason = "type_mismatch"
+	ZombieReasonPodOOMKilled      ZombieReason = "pod_oom_killed"
 )
 
 // String returns the reason as a string (for use with PublishFailure).
