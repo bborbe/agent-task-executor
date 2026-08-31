@@ -703,6 +703,34 @@ var _ = Describe("TaskEventHandler", func() {
 			Expect(count).To(Equal(2))
 		})
 
+		It("adopts to exactly the cap, spawning now and capping on the next event", func() {
+			fakeSpawner.IsJobActiveReturns(false, nil)
+			fakeSpawner.SpawnJobReturns("claude-job-adopt-boundary", nil)
+			// Boundary between the two adoption specs above: 2 -> 3 with max_triggers 3.
+			// This spawn is allowed (the cap is checked against the count BEFORE the
+			// write, 2 < 3), and adoption lands the task exactly at the cap so the
+			// next event is skipped. Guards the off-by-one in both directions: adopting
+			// to 4 would skip a legitimate spawn, adopting to 2 would grant an extra.
+			task := lib.Task{
+				TaskIdentifier: lib.TaskIdentifier("test-task-scope-adopt-boundary"),
+				Frontmatter: lib.TaskFrontmatter{
+					"status":        "in_progress",
+					"phase":         string(domain.TaskPhaseAIReview),
+					"assignee":      "claude",
+					"stage":         "prod",
+					"trigger_count": 2,
+					"max_triggers":  3,
+				},
+			}
+			err := h.ConsumeMessage(ctx, buildMsg(task))
+			Expect(err).To(BeNil())
+			Expect(fakeSpawner.SpawnJobCallCount()).To(Equal(1))
+			Expect(fakeResultPublisher.PublishSetTriggerScopeCallCount()).To(Equal(1))
+			_, _, scope, count := fakeResultPublisher.PublishSetTriggerScopeArgsForCall(0)
+			Expect(scope).To(Equal("ai_review:"))
+			Expect(count).To(Equal(3))
+		})
+
 		It("publishes increment and spawns when below cap (happy path)", func() {
 			fakeSpawner.IsJobActiveReturns(false, nil)
 			fakeSpawner.SpawnJobReturns("claude-job-1", nil)
