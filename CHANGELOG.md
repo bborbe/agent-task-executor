@@ -2,7 +2,7 @@
 
 All notable changes to this project will be documented in this file.
 
-## Unreleased
+## v0.8.0
 
 - feat: scope the spawn trigger cap to `phase`+`ref` — the executor now records a `trigger_scope` (`<phase>:<ref[:8]>`) alongside `trigger_count`, so an opted-in cap no longer burns its budget across unrelated work. A re-dispatch representing real progress (a new lifecycle phase, or a new commit on the target repo) resets the budget to 1; repeated attempts at the same phase and ref burn it down, which is the shape of a deterministic failure such as a gate broken at one commit. Phase comes from the normalizing accessor so an alias cannot split a scope and grant a second budget; tasks with no `ref` (not repo-backed) scope on phase alone
 - fix: an absent `trigger_scope` is adopted, never treated as changed — every task in flight predates the field, so reading absent as "scope changed" would have granted each of them a free budget reset on the first event after deploy, including one already looping at cap. Adoption carries the existing count forward (`n+1`); a task already at cap is skipped outright with no publish at all
