@@ -237,25 +237,28 @@ var _ = Describe("JobWatcher", func() {
 			Expect(calledReason).To(Equal("deadline_exceeded"))
 		})
 
-		It("maps BackoffLimitExceeded job condition to deadline_exceeded", func() {
-			job := makeJob("job-backoff", string(testTaskID), batchv1.JobCondition{
-				Type:    batchv1.JobFailed,
-				Status:  corev1.ConditionTrue,
-				Reason:  "BackoffLimitExceeded",
-				Message: "Job failed due to backoff limit",
-			})
-			_, err := fakeKubeClient.BatchV1().
-				Jobs("test-ns").
-				Create(ctx, job, metav1.CreateOptions{})
-			Expect(err).To(BeNil())
-			taskStore.Store(testTaskID, testTask)
+		It(
+			"maps BackoffLimitExceeded job condition to pod_crash_no_stdout (no resolvable pod)",
+			func() {
+				job := makeJob("job-backoff", string(testTaskID), batchv1.JobCondition{
+					Type:    batchv1.JobFailed,
+					Status:  corev1.ConditionTrue,
+					Reason:  "BackoffLimitExceeded",
+					Message: "Job failed due to backoff limit",
+				})
+				_, err := fakeKubeClient.BatchV1().
+					Jobs("test-ns").
+					Create(ctx, job, metav1.CreateOptions{})
+				Expect(err).To(BeNil())
+				taskStore.Store(testTaskID, testTask)
 
-			watcher.HandleJob(ctx, job)
+				watcher.HandleJob(ctx, job)
 
-			Expect(fakePublisher.PublishFailureCallCount()).To(Equal(1))
-			_, _, _, calledReason := fakePublisher.PublishFailureArgsForCall(0)
-			Expect(calledReason).To(Equal("deadline_exceeded"))
-		})
+				Expect(fakePublisher.PublishFailureCallCount()).To(Equal(1))
+				_, _, _, calledReason := fakePublisher.PublishFailureArgsForCall(0)
+				Expect(calledReason).To(Equal("pod_crash_no_stdout"))
+			},
+		)
 	})
 
 	Describe("jobFailureReason mapping", func() {
@@ -268,13 +271,13 @@ var _ = Describe("JobWatcher", func() {
 			Expect(pkg.JobFailureReason(job)).To(Equal(pkg.ZombieReasonDeadlineExceeded))
 		})
 
-		It("returns deadline_exceeded for BackoffLimitExceeded", func() {
+		It("returns pod_crash_no_stdout for BackoffLimitExceeded", func() {
 			job := makeJob("j", string(testTaskID), batchv1.JobCondition{
 				Type:   batchv1.JobFailed,
 				Status: corev1.ConditionTrue,
 				Reason: "BackoffLimitExceeded",
 			})
-			Expect(pkg.JobFailureReason(job)).To(Equal(pkg.ZombieReasonDeadlineExceeded))
+			Expect(pkg.JobFailureReason(job)).To(Equal(pkg.ZombieReasonPodCrashNoStdout))
 		})
 
 		It("returns pod_crash_no_stdout for other Failed condition reasons", func() {

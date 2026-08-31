@@ -6,6 +6,7 @@ package pkg
 
 import (
 	"context"
+	"fmt"
 	"sync/atomic"
 	"time"
 
@@ -16,6 +17,7 @@ import (
 	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/labels"
 	k8sinformers "k8s.io/client-go/informers"
 	"k8s.io/client-go/kubernetes"
 	corev1listers "k8s.io/client-go/listers/core/v1"
@@ -144,7 +146,7 @@ func (w *jobWatcher) HandleJob(ctx context.Context, job *batchv1.Job) {
 	taskID := lib.TaskIdentifier(taskIDStr)
 
 	if IsJobFailed(job) {
-		reason := JobFailureReason(job)
+		reason := w.failureReason(job)
 		glog.V(2).Infof("job %s/%s failed (task %s): %s", job.Namespace, job.Name, taskID, reason)
 		w.handleTerminal(ctx, taskID, job, reason, true)
 		return
@@ -170,7 +172,7 @@ func (w *jobWatcher) handleTerminal(
 	ctx context.Context,
 	taskID lib.TaskIdentifier,
 	job *batchv1.Job,
-	reason ZombieReason,
+	reason string,
 	alwaysPublish bool,
 ) {
 	task, ok := w.taskStore.Load(taskID)
@@ -186,9 +188,9 @@ func (w *jobWatcher) publishSyntheticFailure(
 	taskID lib.TaskIdentifier,
 	task lib.Task,
 	job *batchv1.Job,
-	reason ZombieReason,
+	reason string,
 ) {
-	if err := w.publisher.PublishFailure(ctx, task, job.Name, reason.String()); err != nil {
+	if err := w.publisher.PublishFailure(ctx, task, job.Name, reason); err != nil {
 		glog.Errorf("publish synthetic failure for task %s (job %s): %v", taskID, job.Name, err)
 	} else {
 		glog.V(2).Infof("published synthetic failure for task %s (job %s)", taskID, job.Name)
@@ -246,24 +248,70 @@ func IsJobSucceeded(job *batchv1.Job) bool {
 	return false
 }
 
+// isBackoffLimitExceeded reports whether the Job's terminal Failed condition
+// has Reason "BackoffLimitExceeded" (the Job exhausted its retry backoff
+// limit).
+func isBackoffLimitExceeded(job *batchv1.Job) bool {
+	for _, c := range job.Status.Conditions {
+		if c.Type == batchv1.JobFailed && c.Status == corev1.ConditionTrue &&
+			c.Reason == "BackoffLimitExceeded" {
+			return true
+		}
+	}
+	return false
+}
+
 // JobFailureReason maps a failed Job's conditions to a ZombieReason. Returns
-// ZombieReasonDeadlineExceeded when any Failed condition has Reason
-// "DeadlineExceeded" or "BackoffLimitExceeded" (kubelet killed the pod for
-// running past activeDeadlineSeconds or exhausting BackoffLimit). Returns
-// ZombieReasonPodCrashNoStdout for any other Failed condition (the pod
-// terminated non-zero and no AgentResult was observed; the Job-condition
-// informer only fires AFTER terminal state, so absence of an AgentResult is
-// implicit at this point).
+// ZombieReasonDeadlineExceeded when a Failed condition has Reason
+// "DeadlineExceeded" (the kubelet killed the pod for running past
+// activeDeadlineSeconds). Returns the generic pod-failure reason
+// ZombieReasonPodCrashNoStdout for "BackoffLimitExceeded" (the Job exhausted
+// its retry backoff limit — a distinct reason from a deadline kill; HandleJob
+// resolves the pod's terminated reason + exit code and surfaces them in the
+// published reason) and for any other Failed condition (the pod terminated
+// non-zero and no AgentResult was observed; the Job-condition informer only
+// fires AFTER terminal state, so absence of an AgentResult is implicit at this
+// point).
 func JobFailureReason(job *batchv1.Job) ZombieReason {
 	for _, c := range job.Status.Conditions {
 		if c.Type == batchv1.JobFailed && c.Status == corev1.ConditionTrue {
 			switch c.Reason {
-			case "DeadlineExceeded", "BackoffLimitExceeded":
+			case "DeadlineExceeded":
 				return ZombieReasonDeadlineExceeded
+			case "BackoffLimitExceeded":
+				return ZombieReasonPodCrashNoStdout
 			}
 		}
 	}
 	return ZombieReasonPodCrashNoStdout
+}
+
+// failureReason returns the reason string to publish for a failed Job. A
+// BackoffLimitExceeded failure surfaces the pod's terminated reason + exit
+// code when the pod is still resolvable (see backoffFailureReason); every
+// other failure publishes the bare ZombieReason value.
+func (w *jobWatcher) failureReason(job *batchv1.Job) string {
+	reason := JobFailureReason(job)
+	if reason == ZombieReasonDeadlineExceeded || !isBackoffLimitExceeded(job) {
+		return reason.String()
+	}
+	return w.backoffFailureReason(job, reason)
+}
+
+// backoffFailureReason classifies a BackoffLimitExceeded Job using its
+// resolved pod's terminal state: the dedicated pod_oom_killed for an OOMKilled
+// pod, else the generic pod-failure reason, always appending the terminated
+// reason + exit code when a pod is resolvable so operators see the cause
+// without inspecting the pod.
+func (w *jobWatcher) backoffFailureReason(job *batchv1.Job, base ZombieReason) string {
+	terminatedReason, exitCode, ok := w.terminalPodDetail(job)
+	if !ok {
+		return base.String()
+	}
+	if terminatedReason == "OOMKilled" {
+		return fmt.Sprintf("%s (%s/%d)", ZombieReasonPodOOMKilled, terminatedReason, exitCode)
+	}
+	return fmt.Sprintf("%s (%s/%d)", base.String(), terminatedReason, exitCode)
 }
 
 // HandlePod processes a Pod that has transitioned to a terminal failure state.
@@ -360,4 +408,55 @@ func ownerJobName(pod *corev1.Pod) string {
 		}
 	}
 	return ""
+}
+
+// hasNonZeroTerminatedContainer reports whether any container terminated with
+// a non-zero exit code.
+func hasNonZeroTerminatedContainer(pod *corev1.Pod) bool {
+	for _, cs := range pod.Status.ContainerStatuses {
+		if cs.State.Terminated != nil && cs.State.Terminated.ExitCode != 0 {
+			return true
+		}
+	}
+	return false
+}
+
+// terminalPodDetail returns the terminated reason and exit code of the Job's
+// most recently created pod that has a non-zero terminated container, matched
+// by Job owner reference. ok is false when the pod lister is not yet synced,
+// the lister lookup fails, or no owned pod carries a non-zero terminated
+// container.
+func (w *jobWatcher) terminalPodDetail(
+	job *batchv1.Job,
+) (terminatedReason string, exitCode int32, ok bool) {
+	lister := w.PodLister()
+	if lister == nil {
+		return "", 0, false
+	}
+	pods, err := lister.Pods(job.Namespace).List(labels.Everything())
+	if err != nil {
+		glog.Errorf("job watcher: list pods for job %s/%s: %v", job.Namespace, job.Name, err)
+		return "", 0, false
+	}
+	var best *corev1.Pod
+	for _, pod := range pods {
+		if ownerJobName(pod) != job.Name {
+			continue
+		}
+		if !hasNonZeroTerminatedContainer(pod) {
+			continue
+		}
+		if best == nil || pod.CreationTimestamp.After(best.CreationTimestamp.Time) {
+			best = pod
+		}
+	}
+	if best == nil {
+		return "", 0, false
+	}
+	for _, cs := range best.Status.ContainerStatuses {
+		if cs.State.Terminated != nil && cs.State.Terminated.ExitCode != 0 {
+			return cs.State.Terminated.Reason, cs.State.Terminated.ExitCode, true
+		}
+	}
+	return "", 0, false
 }

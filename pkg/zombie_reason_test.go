@@ -34,5 +34,8 @@ var _ = Describe("ZombieReason", func() {
 		It("returns type_mismatch for ZombieReasonTypeMismatch", func() {
 			Expect(pkg.ZombieReasonTypeMismatch.String()).To(Equal("type_mismatch"))
 		})
+		It("returns pod_oom_killed for ZombieReasonPodOOMKilled", func() {
+			Expect(pkg.ZombieReasonPodOOMKilled.String()).To(Equal("pod_oom_killed"))
+		})
 	})
 })

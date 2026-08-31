@@ -1,0 +1,1871 @@
+[23:49:16] Starting headless session...
+[23:49:17] [init] session=199c5f76 model=deepseek-v4-flash[1m] cwd=/workspace tools=28
+[claude-code:unrecognized_model] {"model":"deepseek-v4-flash[1m]","query_source":"sdk"}
+[23:49:17] [system: thinking_tokens]
+[23:49:17] [system: thinking_tokens]
+[23:49:17] [system: thinking_tokens]
+[23:49:17] [system: thinking_tokens]
+[23:49:17] [system: thinking_tokens]
+[23:49:17] [system: thinking_tokens]
+[23:49:17] [system: thinking_tokens]
+[23:49:17] [system: thinking_tokens]
+[23:49:18] [system: thinking_tokens]
+[23:49:18] [system: thinking_tokens]
+[23:49:18] [system: thinking_tokens]
+[23:49:18] [system: thinking_tokens]
+[23:49:18] [system: thinking_tokens]
+[23:49:18] [system: thinking_tokens]
+[23:49:18] [system: thinking_tokens]
+[23:49:18] [system: thinking_tokens]
+[23:49:18] [system: thinking_tokens]
+[23:49:18] [system: thinking_tokens]
+[23:49:18] [system: thinking_tokens]
+[23:49:18] [system: thinking_tokens]
+[23:49:18] [system: thinking_tokens]
+[23:49:18] [system: thinking_tokens]
+[23:49:18] [system: thinking_tokens]
+[23:49:18] [system: thinking_tokens]
+[23:49:18] [system: thinking_tokens]
+[23:49:18] [system: thinking_tokens]
+[23:49:18] [system: thinking_tokens]
+[23:49:18] [system: thinking_tokens]
+[23:49:18] [system: thinking_tokens]
+[23:49:18] [system: thinking_tokens]
+[23:49:18] [system: thinking_tokens]
+[23:49:18] [system: thinking_tokens]
+[23:49:18] [system: thinking_tokens]
+[23:49:18] [system: thinking_tokens]
+[23:49:18] [system: thinking_tokens]
+[23:49:18] [system: thinking_tokens]
+[23:49:18] [system: thinking_tokens]
+[23:49:18] [system: thinking_tokens]
+[23:49:18] [system: thinking_tokens]
+[23:49:18] [system: thinking_tokens]
+[23:49:18] [system: thinking_tokens]
+[23:49:18] [system: thinking_tokens]
+[23:49:18] [system: thinking_tokens]
+[23:49:18] [system: thinking_tokens]
+[23:49:18] [system: thinking_tokens]
+[23:49:18] [system: thinking_tokens]
+[23:49:18] [system: thinking_tokens]
+[23:49:18] [system: thinking_tokens]
+[23:49:18] [system: thinking_tokens]
+[23:49:18] [system: thinking_tokens]
+[23:49:18] [system: thinking_tokens]
+[23:49:18] [system: thinking_tokens]
+[23:49:18] [system: thinking_tokens]
+[23:49:18] [system: thinking_tokens]
+[23:49:18] [system: thinking_tokens]
+[23:49:18] [system: thinking_tokens]
+[23:49:18] [system: thinking_tokens]
+[23:49:18] [system: thinking_tokens]
+[23:49:18] [system: thinking_tokens]
+[23:49:18] [system: thinking_tokens]
+[23:49:18] [system: thinking_tokens]
+[23:49:18] [system: thinking_tokens]
+[23:49:18] [system: thinking_tokens]
+[23:49:18] [system: thinking_tokens]
+[23:49:18] [system: thinking_tokens]
+[23:49:18] [system: thinking_tokens]
+[23:49:18] [system: thinking_tokens]
+[23:49:18] [system: thinking_tokens]
+[23:49:18] [system: thinking_tokens]
+[23:49:18] [system: thinking_tokens]
+[23:49:18] [system: thinking_tokens]
+[23:49:18] [system: thinking_tokens]
+[23:49:18] [system: thinking_tokens]
+[23:49:18] [system: thinking_tokens]
+[23:49:18] [system: thinking_tokens]
+[23:49:18] [system: thinking_tokens]
+[23:49:18] [system: thinking_tokens]
+[23:49:18] [system: thinking_tokens]
+[23:49:18] [system: thinking_tokens]
+[23:49:18] [system: thinking_tokens]
+[23:49:18] [system: thinking_tokens]
+[23:49:18] [system: thinking_tokens]
+[23:49:18] [system: thinking_tokens]
+[23:49:18] [system: thinking_tokens]
+[23:49:18] [system: thinking_tokens]
+[23:49:18] [system: thinking_tokens]
+[23:49:18] [system: thinking_tokens]
+[23:49:18] [system: thinking_tokens]
+[23:49:18] [system: thinking_tokens]
+[23:49:18] [system: thinking_tokens]
+[23:49:18] [system: thinking_tokens]
+[23:49:18] [system: thinking_tokens]
+[23:49:18] [system: thinking_tokens]
+[23:49:18] [system: thinking_tokens]
+[23:49:18] [system: thinking_tokens]
+[23:49:18] [system: thinking_tokens]
+[23:49:18] [system: thinking_tokens]
+[23:49:18] [system: thinking_tokens]
+[23:49:18] [system: thinking_tokens]
+[23:49:18] [system: thinking_tokens]
+[23:49:18] [system: thinking_tokens]
+[23:49:18] [system: thinking_tokens]
+[23:49:18] [system: thinking_tokens]
+[23:49:18] [system: thinking_tokens]
+[23:49:18] [system: thinking_tokens]
+[23:49:18] [system: thinking_tokens]
+[23:49:18] [system: thinking_tokens]
+[23:49:19] [system: thinking_tokens]
+[23:49:19] [system: thinking_tokens]
+[23:49:19] [system: thinking_tokens]
+[23:49:19] [system: thinking_tokens]
+[23:49:19] [system: thinking_tokens]
+[23:49:19] [system: thinking_tokens]
+[23:49:19] [system: thinking_tokens]
+[23:49:19] [system: thinking_tokens]
+[23:49:19] [system: thinking_tokens]
+[23:49:19] [system: thinking_tokens]
+[23:49:19] [system: thinking_tokens]
+[23:49:19] [system: thinking_tokens]
+[23:49:19] [system: thinking_tokens]
+[23:49:19] [system: thinking_tokens]
+[23:49:19] [system: thinking_tokens]
+[23:49:19] [system: thinking_tokens]
+[23:49:19] [system: thinking_tokens]
+[23:49:19] [system: thinking_tokens]
+[23:49:19] [system: thinking_tokens]
+[23:49:19] [system: thinking_tokens]
+[23:49:19] [system: thinking_tokens]
+[23:49:19] [system: thinking_tokens]
+[23:49:19] [system: thinking_tokens]
+[23:49:19] [system: thinking_tokens]
+[23:49:19] [system: thinking_tokens]
+[23:49:19] [system: thinking_tokens]
+[23:49:19] [system: thinking_tokens]
+[23:49:19] [system: thinking_tokens]
+[23:49:19] [system: thinking_tokens]
+[23:49:19] [system: thinking_tokens]
+[23:49:19] [system: thinking_tokens]
+[23:49:19] [system: thinking_tokens]
+[23:49:19] [system: thinking_tokens]
+[23:49:19] [system: thinking_tokens]
+[23:49:19] [system: thinking_tokens]
+[23:49:19] [system: thinking_tokens]
+[23:49:19] [system: thinking_tokens]
+[23:49:19] [system: thinking_tokens]
+[23:49:19] [system: thinking_tokens]
+[23:49:19] [system: thinking_tokens]
+[23:49:19] [system: thinking_tokens]
+[23:49:19] [system: thinking_tokens]
+[23:49:19] [system: thinking_tokens]
+[23:49:19] [system: thinking_tokens]
+[23:49:19] [system: thinking_tokens]
+[23:49:19] [system: thinking_tokens]
+[23:49:19] [system: thinking_tokens]
+[23:49:19] [system: thinking_tokens]
+[23:49:19] [system: thinking_tokens]
+[23:49:19] [system: thinking_tokens]
+[23:49:19] [system: thinking_tokens]
+[23:49:19] [system: thinking_tokens]
+[23:49:19] [system: thinking_tokens]
+[23:49:19] [system: thinking_tokens]
+[23:49:19] [system: thinking_tokens]
+[23:49:19] [system: thinking_tokens]
+[23:49:19] [system: thinking_tokens]
+[23:49:19] [system: thinking_tokens]
+[23:49:19] [system: thinking_tokens]
+[23:49:19] [system: thinking_tokens]
+[23:49:19] [system: thinking_tokens]
+[23:49:19] [system: thinking_tokens]
+[23:49:19] [system: thinking_tokens]
+[23:49:19] [system: thinking_tokens]
+[23:49:19] [system: thinking_tokens]
+[23:49:19] [system: thinking_tokens]
+[23:49:19] [system: thinking_tokens]
+[23:49:19] [system: thinking_tokens]
+[23:49:19] [system: thinking_tokens]
+[23:49:19] [system: thinking_tokens]
+[23:49:19] [system: thinking_tokens]
+[23:49:19] [system: thinking_tokens]
+[23:49:19] [system: thinking_tokens]
+[23:49:19] [system: thinking_tokens]
+[23:49:19] [system: thinking_tokens]
+[23:49:19] [system: thinking_tokens]
+[23:49:19] [system: thinking_tokens]
+[23:49:19] [system: thinking_tokens]
+[23:49:19] [system: thinking_tokens]
+[23:49:19] [system: thinking_tokens]
+[23:49:19] [system: thinking_tokens]
+[23:49:19] [system: thinking_tokens]
+[23:49:19] [system: thinking_tokens]
+[23:49:19] [system: thinking_tokens]
+[23:49:19] [system: thinking_tokens]
+[23:49:19] [system: thinking_tokens]
+[23:49:19] [system: thinking_tokens]
+[23:49:19] [system: thinking_tokens]
+[23:49:19] [system: thinking_tokens]
+[23:49:19] [system: thinking_tokens]
+[23:49:19] [system: thinking_tokens]
+[23:49:19] [system: thinking_tokens]
+[23:49:19] [system: thinking_tokens]
+[23:49:19] [system: thinking_tokens]
+[23:49:19] [system: thinking_tokens]
+[23:49:19] [system: thinking_tokens]
+[23:49:20] [system: thinking_tokens]
+[23:49:20] [system: thinking_tokens]
+[23:49:20] [system: thinking_tokens]
+[23:49:20] [system: thinking_tokens]
+[23:49:20] [system: thinking_tokens]
+[23:49:20] [system: thinking_tokens]
+[23:49:20] [system: thinking_tokens]
+[23:49:20] [system: thinking_tokens]
+[23:49:20] [system: thinking_tokens]
+[23:49:20] [system: thinking_tokens]
+[23:49:20] [system: thinking_tokens]
+[23:49:20] [system: thinking_tokens]
+[23:49:20] [system: thinking_tokens]
+[23:49:20] [system: thinking_tokens]
+[23:49:20] [system: thinking_tokens]
+[23:49:20] [system: thinking_tokens]
+[23:49:20] [system: thinking_tokens]
+[23:49:20] [system: thinking_tokens]
+[23:49:20] [system: thinking_tokens]
+[23:49:20] [system: thinking_tokens]
+[23:49:20] [system: thinking_tokens]
+[23:49:20] [system: thinking_tokens]
+[23:49:20] [system: thinking_tokens]
+[23:49:20] [system: thinking_tokens]
+[23:49:20] [system: thinking_tokens]
+[23:49:20] [system: thinking_tokens]
+[23:49:20] [system: thinking_tokens]
+[23:49:20] [system: thinking_tokens]
+[23:49:20] [system: thinking_tokens]
+[23:49:20] [system: thinking_tokens]
+[23:49:20] [system: thinking_tokens]
+[23:49:20] [system: thinking_tokens]
+[23:49:20] [system: thinking_tokens]
+[23:49:20] [system: thinking_tokens]
+[23:49:20] [system: thinking_tokens]
+[23:49:20] [system: thinking_tokens]
+[23:49:20] [system: thinking_tokens]
+[23:49:20] [system: thinking_tokens]
+[23:49:20] [system: thinking_tokens]
+[23:49:20] [system: thinking_tokens]
+[23:49:20] [system: thinking_tokens]
+[23:49:20] [system: thinking_tokens]
+[23:49:20] [system: thinking_tokens]
+[23:49:20] [system: thinking_tokens]
+[23:49:20] [system: thinking_tokens]
+[23:49:20] [system: thinking_tokens]
+[23:49:20] [system: thinking_tokens]
+[23:49:20] [system: thinking_tokens]
+[23:49:20] [system: thinking_tokens]
+[23:49:20] [system: thinking_tokens]
+[23:49:20] [system: thinking_tokens]
+[23:49:20] [system: thinking_tokens]
+[23:49:20] [system: thinking_tokens]
+[23:49:20] [system: thinking_tokens]
+[23:49:20] [system: thinking_tokens]
+[23:49:20] [system: thinking_tokens]
+[23:49:20] [system: thinking_tokens]
+[23:49:20] [system: thinking_tokens]
+[23:49:20] [system: thinking_tokens]
+[23:49:20] [system: thinking_tokens]
+[23:49:20] [system: thinking_tokens]
+[23:49:20] [system: thinking_tokens]
+[23:49:20] [system: thinking_tokens]
+[23:49:20] [system: thinking_tokens]
+[23:49:20] [system: thinking_tokens]
+[23:49:20] [system: thinking_tokens]
+[23:49:20] [system: thinking_tokens]
+[23:49:20] [system: thinking_tokens]
+[23:49:20] [system: thinking_tokens]
+[23:49:20] [system: thinking_tokens]
+[23:49:20] [system: thinking_tokens]
+[23:49:20] [system: thinking_tokens]
+[23:49:20] [system: thinking_tokens]
+[23:49:20] [system: thinking_tokens]
+[23:49:20] [system: thinking_tokens]
+[23:49:20] [system: thinking_tokens]
+[23:49:20] [system: thinking_tokens]
+[23:49:20] [system: thinking_tokens]
+[23:49:20] [system: thinking_tokens]
+[23:49:20] [system: thinking_tokens]
+[23:49:20] [system: thinking_tokens]
+[23:49:20] [system: thinking_tokens]
+[23:49:21] 💭 .
+- dark-factory:read-guides: Read all dark-factory guides for context before working
+- dark-factory:audit-prompt: Use when the human user explicitly asks to audit a prompt, a path, or a folder of prompts.
+- dark-factory:audit-scenario: Use when the human user explicitly asks to audit a scenario, a path, or a folder of scenarios.
+- dark-factory:audit-spec: Use when the user explicitly asks to audit a spec, the current directory's specs, or a spec and its related prompts and scenarios.
+- dark-fac…
+[23:49:21] $ pwd && ls -la && echo "---DARK_FACTORY_MANAGED---" && echo "${DARK_FACTORY_MANAGED:-<unset>}"
+[23:49:21] $ ls -la specs/in-progress/ 2>/dev/null; echo "---"; ls -la prompts/ 2>/dev/null; echo "---"; find . -maxdepth 3 -name "004-bug-job-failure-reason.md" 2>/dev/null
+[23:49:21] [system: thinking_tokens]
+[23:49:21] [system: thinking_tokens]
+[23:49:21] [system: thinking_tokens]
+[23:49:21] [system: thinking_tokens]
+[23:49:21] [system: thinking_tokens]
+[23:49:21] [system: thinking_tokens]
+[23:49:21] [system: thinking_tokens]
+[23:49:21] [system: thinking_tokens]
+[23:49:21] [system: thinking_tokens]
+[23:49:21] [system: thinking_tokens]
+[23:49:21] [system: thinking_tokens]
+[23:49:21] [system: thinking_tokens]
+[23:49:21] [system: thinking_tokens]
+[23:49:21] [system: thinking_tokens]
+[23:49:21] [system: thinking_tokens]
+[23:49:21] [system: thinking_tokens]
+[23:49:21] [system: thinking_tokens]
+[23:49:21] [system: thinking_tokens]
+[23:49:21] [system: thinking_tokens]
+[23:49:21] [system: thinking_tokens]
+[23:49:21] [system: thinking_tokens]
+[23:49:21] [system: thinking_tokens]
+[23:49:21] [system: thinking_tokens]
+[23:49:21] [system: thinking_tokens]
+[23:49:21] [system: thinking_tokens]
+[23:49:22] [system: thinking_tokens]
+[23:49:22] [system: thinking_tokens]
+[23:49:22] [system: thinking_tokens]
+[23:49:22] [system: thinking_tokens]
+[23:49:22] [system: thinking_tokens]
+[23:49:22] [system: thinking_tokens]
+[23:49:22] [system: thinking_tokens]
+[23:49:22] [system: thinking_tokens]
+[23:49:22] [system: thinking_tokens]
+[23:49:22] [system: thinking_tokens]
+[23:49:22] [system: thinking_tokens]
+[23:49:22] [system: thinking_tokens]
+[23:49:22] [system: thinking_tokens]
+[23:49:22] [system: thinking_tokens]
+[23:49:22] [system: thinking_tokens]
+[23:49:22] [system: thinking_tokens]
+[23:49:22] [system: thinking_tokens]
+[23:49:22] [system: thinking_tokens]
+[23:49:22] [system: thinking_tokens]
+[23:49:22] [system: thinking_tokens]
+[23:49:22] [system: thinking_tokens]
+[23:49:22] [system: thinking_tokens]
+[23:49:22] [system: thinking_tokens]
+[23:49:22] [system: thinking_tokens]
+[23:49:22] [system: thinking_tokens]
+[23:49:22] [system: thinking_tokens]
+[23:49:22] [system: thinking_tokens]
+[23:49:22] [system: thinking_tokens]
+[23:49:22] [system: thinking_tokens]
+[23:49:22] [system: thinking_tokens]
+[23:49:22] [system: thinking_tokens]
+[23:49:22] [system: thinking_tokens]
+[23:49:22] [system: thinking_tokens]
+[23:49:22] [system: thinking_tokens]
+[23:49:22] [system: thinking_tokens]
+[23:49:22] [system: thinking_tokens]
+[23:49:22] [system: thinking_tokens]
+[23:49:22] [system: thinking_tokens]
+[23:49:22] [system: thinking_tokens]
+[23:49:22] [system: thinking_tokens]
+[23:49:22] [system: thinking_tokens]
+[23:49:22] [system: thinking_tokens]
+[23:49:22] [system: thinking_tokens]
+[23:49:22] [system: thinking_tokens]
+[23:49:22] [system: thinking_tokens]
+[23:49:22] [system: thinking_tokens]
+[23:49:22] [system: thinking_tokens]
+[23:49:22] [system: thinking_tokens]
+[23:49:22] [system: thinking_tokens]
+[23:49:22] [system: thinking_tokens]
+[23:49:22] [system: thinking_tokens]
+[23:49:22] [system: thinking_tokens]
+[23:49:22] [system: thinking_tokens]
+[23:49:22] [system: thinking_tokens]
+[23:49:22] [system: thinking_tokens]
+[23:49:22] [system: thinking_tokens]
+[23:49:22] [system: thinking_tokens]
+[23:49:22] [system: thinking_tokens]
+[23:49:22] [system: thinking_tokens]
+[23:49:22] [system: thinking_tokens]
+[23:49:22] [system: thinking_tokens]
+[23:49:22] [system: thinking_tokens]
+[23:49:22] [system: thinking_tokens]
+[23:49:22] [system: thinking_tokens]
+[23:49:22] [system: thinking_tokens]
+[23:49:22] [system: thinking_tokens]
+[23:49:22] [system: thinking_tokens]
+[23:49:22] [system: thinking_tokens]
+[23:49:22] [system: thinking_tokens]
+[23:49:22] [system: thinking_tokens]
+[23:49:22] [system: thinking_tokens]
+[23:49:22] [system: thinking_tokens]
+[23:49:22] [system: thinking_tokens]
+[23:49:22] [system: thinking_tokens]
+[23:49:22] [system: thinking_tokens]
+[23:49:22] [system: thinking_tokens]
+[23:49:22] [system: thinking_tokens]
+[23:49:22] [system: thinking_tokens]
+[23:49:22] [system: thinking_tokens]
+[23:49:22] [system: thinking_tokens]
+[23:49:22] [system: thinking_tokens]
+[23:49:22] [system: thinking_tokens]
+[23:49:22] [system: thinking_tokens]
+[23:49:22] [system: thinking_tokens]
+[23:49:22] [system: thinking_tokens]
+[23:49:22] [system: thinking_tokens]
+[23:49:22] [system: thinking_tokens]
+[23:49:22] [system: thinking_tokens]
+[23:49:22] [system: thinking_tokens]
+[23:49:22] [system: thinking_tokens]
+[23:49:22] [system: thinking_tokens]
+[23:49:22] [system: thinking_tokens]
+[23:49:22] [system: thinking_tokens]
+[23:49:22] [system: thinking_tokens]
+[23:49:22] [system: thinking_tokens]
+[23:49:22] [system: thinking_tokens]
+[23:49:22] [system: thinking_tokens]
+[23:49:22] [system: thinking_tokens]
+[23:49:22] [system: thinking_tokens]
+[23:49:22] [system: thinking_tokens]
+[23:49:23] [system: thinking_tokens]
+[23:49:23] [system: thinking_tokens]
+[23:49:23] [system: thinking_tokens]
+[23:49:23] [system: thinking_tokens]
+[23:49:23] [system: thinking_tokens]
+[23:49:23] [system: thinking_tokens]
+[23:49:23] [system: thinking_tokens]
+[23:49:23] [system: thinking_tokens]
+[23:49:23] [system: thinking_tokens]
+[23:49:23] [system: thinking_tokens]
+[23:49:23] [system: thinking_tokens]
+[23:49:23] [system: thinking_tokens]
+[23:49:23] [system: thinking_tokens]
+[23:49:23] [system: thinking_tokens]
+[23:49:23] [system: thinking_tokens]
+[23:49:23] [system: thinking_tokens]
+[23:49:23] [system: thinking_tokens]
+[23:49:23] [system: thinking_tokens]
+[23:49:23] [system: thinking_tokens]
+[23:49:23] [system: thinking_tokens]
+[23:49:23] [system: thinking_tokens]
+[23:49:23] [system: thinking_tokens]
+[23:49:23] [system: thinking_tokens]
+[23:49:23] [system: thinking_tokens]
+[23:49:23] [system: thinking_tokens]
+[23:49:23] [system: thinking_tokens]
+[23:49:23] [system: thinking_tokens]
+[23:49:23] [system: thinking_tokens]
+[23:49:23] [system: thinking_tokens]
+[23:49:23] [system: thinking_tokens]
+[23:49:23] [system: thinking_tokens]
+[23:49:23] [system: thinking_tokens]
+[23:49:23] [system: thinking_tokens]
+[23:49:23] [system: thinking_tokens]
+[23:49:23] [system: thinking_tokens]
+[23:49:23] [system: thinking_tokens]
+[23:49:23] [system: thinking_tokens]
+[23:49:23] [system: thinking_tokens]
+[23:49:23] [system: thinking_tokens]
+[23:49:23] [system: thinking_tokens]
+[23:49:23] [system: thinking_tokens]
+[23:49:23] [system: thinking_tokens]
+[23:49:23] [system: thinking_tokens]
+[23:49:23] [system: thinking_tokens]
+[23:49:23] [system: thinking_tokens]
+[23:49:23] [system: thinking_tokens]
+[23:49:23] [system: thinking_tokens]
+[23:49:23] [system: thinking_tokens]
+[23:49:23] [system: thinking_tokens]
+[23:49:23] [system: thinking_tokens]
+[23:49:23] [system: thinking_tokens]
+[23:49:23] [system: thinking_tokens]
+[23:49:23] [system: thinking_tokens]
+[23:49:23] [system: thinking_tokens]
+[23:49:23] [system: thinking_tokens]
+[23:49:23] [system: thinking_tokens]
+[23:49:23] [system: thinking_tokens]
+[23:49:23] [system: thinking_tokens]
+[23:49:23] [system: thinking_tokens]
+[23:49:23] [system: thinking_tokens]
+[23:49:23] [system: thinking_tokens]
+[23:49:23] [system: thinking_tokens]
+[23:49:23] [system: thinking_tokens]
+[23:49:23] [system: thinking_tokens]
+[23:49:23] [system: thinking_tokens]
+[23:49:23] [system: thinking_tokens]
+[23:49:23] [system: thinking_tokens]
+[23:49:23] [system: thinking_tokens]
+[23:49:23] [system: thinking_tokens]
+[23:49:23] [system: thinking_tokens]
+[23:49:23] [system: thinking_tokens]
+[23:49:23] [system: thinking_tokens]
+[23:49:23] [system: thinking_tokens]
+[23:49:23] [system: thinking_tokens]
+[23:49:23] [system: thinking_tokens]
+[23:49:23] [system: thinking_tokens]
+[23:49:23] [system: thinking_tokens]
+[23:49:23] [system: thinking_tokens]
+[23:49:23] 💭 Key findings:
+- `DARK_FACTORY_MANAGED=true` is set → **Mode 1 (daemon + container)** → I must **SKIP** the `mark-prompted` step.
+- The working directory is `/workspace` (the repo mount), and the spec lives at `specs/in-progress/004-bug-job-failure-reason.md` (repo-root-relative).
+- The prompts directory exists.
+
+Wait — the command says the spec path is "relative to the repo root, which is the current working directory". The cwd is `/workspace`, and the spec is at `/workspace/specs/in-progress/00…
+[23:49:25] Environment check confirms:
+- `DARK_FACTORY_MANAGED=true` → **Mode 1 (daemon + container)** → I must **SKIP** the `mark-prompted` transition.
+- Repo root is `/workspace` (cwd); spec is at `specs/in-progress/004-bug-job-failure-reason.md`.
+- Existing prompts for spec 002 are in `prompts/`; creator will write new files for spec 004.
+
+Invoking the prompt-creator agent now.
+
+
+[23:49:25] [agent:dark-factory:prompt-creator] Create prompts for spec 004
+    prompt: Generate dark-factory prompt files from the approved spec.\n\n## Context\n- Spec file path (repo-root-relative, resolves to cwd in this backend): `specs/in-pro…
+[23:49:25] [system: background_tasks_changed]
+[23:49:25] [system: task_started]
+[23:49:25]   ← agent reply: Async agent launched successfully. (This tool result is internal metadata — never quote or paste any part of it, including the agentId below, into a user-facing reply.)
+[23:49:25] 💭 Let me start by reading the spec file and understanding the task.
+[23:49:25] [system: thinking_tokens]
+[23:49:25] [system: thinking_tokens]
+[23:49:25] [system: thinking_tokens]
+[23:49:25] [system: thinking_tokens]
+[23:49:25] [system: thinking_tokens]
+[23:49:25] [system: thinking_tokens]
+[23:49:25] [system: thinking_tokens]
+[23:49:25] [system: thinking_tokens]
+[23:49:25] [system: thinking_tokens]
+[23:49:25] [system: thinking_tokens]
+[23:49:25] [system: thinking_tokens]
+[23:49:25] [system: thinking_tokens]
+[23:49:25] [system: thinking_tokens]
+[23:49:25] [system: thinking_tokens]
+[23:49:25] [system: thinking_tokens]
+[23:49:25] [system: thinking_tokens]
+[23:49:25] [system: thinking_tokens]
+[23:49:25] [system: thinking_tokens]
+[23:49:25] [system: thinking_tokens]
+[23:49:25] [system: thinking_tokens]
+[23:49:25] [system: thinking_tokens]
+[23:49:25] [system: thinking_tokens]
+[23:49:25] [system: thinking_tokens]
+[23:49:25] [system: thinking_tokens]
+[23:49:25] [system: thinking_tokens]
+[23:49:25] [system: thinking_tokens]
+[23:49:25] [system: thinking_tokens]
+[23:49:25] [system: thinking_tokens]
+[23:49:25] I'll start by reading the spec file and exploring the repository structure.
+
+
+[23:49:25] [read] /workspace/specs/in-progress/004-bug-job-failure-reason.md
+[23:49:25] [system: task_progress]
+[23:49:25] [system: thinking_tokens]
+[23:49:25] $ ls -la /workspace/ && echo "---PROMPTS---" && ls -la /workspace/prompts/ 2>/dev/null && echo "---COMPLETED---" && ls -la /workspace/prompts/completed/ 2>/dev/null && echo "---SPECS---" && ls -la /wor…
+[23:49:25] [system: task_progress]
+[23:49:26] [system: thinking_tokens]
+[23:49:26] [system: thinking_tokens]
+[23:49:26] [system: thinking_tokens]
+[23:49:26] [system: thinking_tokens]
+[23:49:26] [system: thinking_tokens]
+[23:49:26]   → 141 lines read
+[23:49:26] [system: thinking_tokens]
+[23:49:26] [system: thinking_tokens]
+[23:49:26] [system: thinking_tokens]
+[23:49:26] 💭 The prompt-creator agent is running in the background. I'll wait for its completion notification. I should not poll — I'll be notified. Let me not duplicate its work. I'll wait.
+
+Actually, the instructions say "Pass ... to the prompt-creator agent and wait for its completion." Since the agent runs in the background by default and I'll be notified, I should just wait. There's nothing else useful to do in the meantime that wouldn't interfere with the agent's work on the same files.
+
+I'll pause her…
+[23:49:26] The prompt-creator agent is running in the background. I'll wait for its completion notification before proceeding to the audit pass.
+
+
+[23:49:26] [TaskOutput]
+[23:49:26] 💭 Let me look at the key source files mentioned in the spec. First, let me check `.dark-factory.yaml` for hideGit, and read the relevant source files: `pkg/job_watcher.go`, `pkg/zombie_reason.go`, `pkg/job_watcher_test.go`, `pkg/zombie_reason_test.go`. Also read recent completed prompts for style reference.
+
+Let me do parallel reads.
+[23:49:27] Let me check the repo config and read the key source files.
+
+
+[23:49:27] $ cat /workspace/.dark-factory.yaml && echo "---PKG---" && ls -la /workspace/pkg/ && echo "---COMPLETED-STYLE---" && cat /workspace/prompts/completed/001-spec-001-add-kafka-cert-config.md
+[23:49:27] [system: task_progress]
+[23:49:27] [read] /workspace/pkg/zombie_reason.go
+[23:49:27] [system: task_progress]
+[23:49:27]   → 24 lines read
+[23:49:28] 💭 The `.dark-factory.yaml` shows `workflow: direct` and no `hideGit`, so git commands are technically allowed in verification. But wait — the constraint says "before writing any prompt, check the target repo's `.dark-factory.yaml` (`grep -E '^hideGit:\s*true' .dark-factory.yaml` or `grep -E '^workflow:\s*worktree'` — worktree workflow always masks `.git`)". Here workflow is `direct`, not `worktree`, and no hideGit. So git is NOT masked. But still, the container has no git credentials and no need. …
+[23:49:28] The repo uses `workflow: direct` (no hideGit, no worktree), so `.git` is not masked in the container. Now let me read the core source files.
+
+
+[23:49:28] [read] /workspace/pkg/job_watcher.go
+[23:49:28] [system: task_progress]
+[23:49:28] [read] /workspace/pkg/zombie_reason_test.go
+[23:49:28] [system: task_progress]
+[23:49:28]   → 363 lines read
+[23:49:28]   → 38 lines read
+[23:49:29] 💭 Now let me read the job_watcher_test.go to understand the existing tests, especially the DeadlineExceeded and BackoffLimitExceeded assertions. Also I need to understand:
+1. How the pod lister is available in `HandleJob` — via `w.PodLister()`.
+2. How pods are matched to jobs — by owner reference or `agent.benjamin-borbe.de/task-id` label.
+
+Let me read the test file.
+[23:49:29] Now let me read the test file to understand existing assertions and test infrastructure.
+
+
+[23:49:29] [read] /workspace/pkg/job_watcher_test.go
+[23:49:29] [system: task_progress]
+[23:49:29]   → 512 lines read
+[23:49:50] 💭 Now I have a good understanding of the code. Let me understand the key points:
+
+1. `JobFailureReason(job *batchv1.Job) ZombieReason` is the classifier — currently maps both `DeadlineExceeded` and `BackoffLimitExceeded` to `ZombieReasonDeadlineExceeded`.
+2. `HandleJob` calls `IsJobFailed(job)` → `JobFailureReason(job)` → `w.handleTerminal(ctx, taskID, job, reason, true)` → `w.publishSyntheticFailure(ctx, taskID, task, job, reason)` → `w.publisher.PublishFailure(ctx, task, job.Name, reason.String(…
+[23:49:51] Let me read the zombie sweeper (which uses the pod lister) and its test to understand lister test setup patterns.
+
+
+[23:49:51] [read] /workspace/pkg/zombie_sweeper.go
+[23:49:51] [system: task_progress]
+[23:49:51] $ grep -n "PodLister\|podLister\|Informer\|NewSharedInformer\|Lister\|SetPodLister\|pods" /workspace/pkg/zombie_sweeper_test.go | head -60
+[23:49:51] [system: task_progress]
+[23:49:51]   → 251 lines read
+[23:49:56] [unknown type: tool_progress]
+[23:49:57] 💭 The zombie sweeper test uses a `FakeJobWatcher` mock with `PodListerReturns(podLister)` and populates the pod informer indexer via `podInformer.GetIndexer().Add(pod)`. This is the pattern for testing with a populated lister.
+
+But the job_watcher test uses the REAL `pkg.JobWatcher` (via `pkg.NewJobWatcher(...)`), not the fake. For the OOMKilled tests, we need the real jobWatcher's `PodLister()` to return a populated lister. Since the real `jobWatcher.podLister` atomic pointer is only set in `Run(…
+[23:49:57] Let me check the internal test package convention, docs directory, and the ResultPublisher interface.
+
+
+[23:49:57] $ echo "=== internal test files ===" && grep -rln "package pkg$" /workspace/pkg/*_test.go; echo "=== main_internal_test package ===" && head -20 /workspace/main_internal_test.go; echo "=== docs dir ===…
+[23:49:57] [system: task_progress]
+[23:49:57] ⚠ [bash output]
+		It("returns pod_evicted for ZombieReasonPodEvicted", func() {
+			Expect(pkg.ZombieReasonPodEvicted.String()).To(Equal("pod_evicted"))
+		})
+		It("returns deadline_exceeded for ZombieReasonDeadlineExceeded", func() {
+			Expect(pkg.ZombieReasonDeadlineExceeded.String()).To(Equal("deadline_exceeded"))
+		})
+		It("returns pod_not_scheduled for ZombieReasonPodNotScheduled", func() {
+			Expect(pkg.ZombieReasonPodNotScheduled.String()).To(Equal("pod_not_scheduled"))
+		})
+		It("returns pod_crash_no_stdout for ZombieReasonPodCrashNoStdout", func() {
+			Expect(pkg.ZombieReasonPodCrashNoStdout.String()).To(Equal("pod_crash_no_stdout"))
+		})
+		It("returns executor_watch_lost for ZombieReasonExecutorWatchLost", func() {
+			Expect(pkg.ZombieReasonExecutorWatchLost.String()).To(Equal("executor_watch_lost"))
+		})
+		It("returns type_mismatch for ZombieReasonTypeMismatch", func() {
+			Expect(pkg.ZombieReasonTypeMismatch.String()).To(Equal("type_mismatch"))
+		})
+	})
+})
+[23:50:23] 💭 Now I understand the test structure. All pkg tests are in `package pkg_test` (external). `main_internal_test.go` is in `package main`.
+
+So for testing pod resolution in `HandleJob` with a real `jobWatcher`, I need a way to populate the pod lister. Since all pkg tests are external (`pkg_test`), the test cannot access the private `podLister` atomic field.
+
+Design decision for testability: The cleanest approach that keeps everything external-testable is to make the pod-resolution a method on `jobWa…
+[23:50:24] Let me check the sweeper test's exact lister-setup pattern, the spawner's backoff config, CHANGELOG head, and `fmt` usage conventions.
+
+
+[23:50:24] [read] /workspace/pkg/zombie_sweeper_test.go (offset=100, limit=130)
+[23:50:24] [system: task_progress]
+[23:50:24] $ echo "=== spawner backoff/TTL ===" && grep -n "BackoffLimit\|TTLSecondsAfterFinished\|activeDeadline" /workspace/pkg/spawner/job_spawner.go; echo "=== fmt.Sprintf in pkg ===" && grep -rn "fmt\.Sprint…
+[23:50:24] [system: task_progress]
+[23:50:24]   → 129 lines read
+[23:50:24] ⚠ [bash output]
+
+## v0.7.2
+
+- chore: update github.com/bborbe/agent to v0.84.0, github.com/bborbe/cqrs to v0.6.9, github.com/bborbe/cron to v1.8.28, github.com/bborbe/errors to v1.6.0, github.com/bborbe/http to v1.26.25, github.com/bborbe/k8s to v1.14.16, github.com/bborbe/log to v1.6.25, github.com/bborbe/run to v1.10.1, github.com/bborbe/sentry to v1.10.0, github.com/bborbe/service to v1.10.10, github.com/bborbe/time to v1.27.11, github.com/bborbe/validation to v1.4.23, github.com/bborbe/vault-cli to v0.116.5, github.com/onsi/gomega to v1.43.0
+
+## v0.7.1
+
+- fix: make the spawn trigger cap opt-in — an absent `max_triggers` no longer blocks spawn at the lib default of 3, so a recurring task that accumulates `trigger_count` across re-dispatches keeps re-dispatching to its routing assignee (2026-08-27 prod incident: Daily Sentry Triage collector leg dead from re-dispatch #2 onward).
+
+## v0.7.0
+
+- feat: Scope Config CR resolution per executor vault — the executor now requires `VAULT_NAME` at startup and resolves each task's plain assignee against the composed `{assignee}-{vaultName}` Config assignee (`pkg/config_resolver.go`), so per-vault `maxConcurrentJobs` slots take effect and Config CRs from other vaults are ignored. The `ConfigResolver` interface and its `ErrConfigNotFound` no-match contract are unchanged.
+- fix: address PR review — thread `ctx` cancellation through Config `convert`/`copyEnv` (`pkg/config_resolver.go`) and validate `VAULT_NAME` against `^[a-z][a-z0-9-]*$` at startup (`main.go`), so a cancelled resolve aborts cleanly and a malformed vault slug fails fast instead of silently never matching a Config CR.
+
+## v0.6.7
+
+- chore: update Go to 1.27.0 and github.com/IBM/sarama to v1.60.2, github.com/bborbe/agent to v0.83.0, github.com/bborbe/cqrs to v0.6.8, github.com/bborbe/cron to v1.8.27, github.com/bborbe/errors to v1.5.20, github.com/bborbe/http to v1.26.24, github.com/bborbe/k8s to v1.14.14, github.com/bborbe/kafka to v1.25.9, github.com/bborbe/log to v1.6.24, github.com/bborbe/metrics to v0.5.15, github.com/bborbe/run to v1.9.37, github.com/bborbe/sentry to v1.9.27, github.com/bborbe/service to v1.10.9, github.com/bborbe/time to v1.27.10, github.com/bborbe/validation to v1.4.22, github.com/bborbe/vault-cli to v0.116.1, github.com/onsi/ginkgo/v2 to v2.32.1, github.com/prometheus/client_golang to v1.24.1, k8s.io/api to v0.36.4, k8s.io/apiextensions-apiserver to v0.36.4, k8s.io/apimachinery to v0.36.4, k8s.io/client-go to v0.36.4
+## v0.6.6
+
+- chore: update Go to 1.27.0 and github.com/IBM/sarama to v1.60.2, github.com/bborbe/agent to v0.83.0, github.com/bborbe/cqrs to v0.6.8, github.com/bborbe/cron to v1.8.27, github.com/bborbe/errors to v1.5.20, github.com/bborbe/http to v1.26.24, github.com/bborbe/k8s to v1.14.11, github.com/bborbe/kafka to v1.25.9, github.com/bborbe/log to v1.6.24, github.com/bborbe/metrics to v0.5.15, github.com/bborbe/run to v1.9.37, github.com/bborbe/sentry to v1.9.27, github.com/bborbe/service to v1.10.9, github.com/bborbe/time to v1.27.10, github.com/bborbe/validation to v1.4.22, github.com/bborbe/vault-cli to v0.115.0, github.com/onsi/ginkgo/v2 to v2.32.1, github.com/prometheus/client_golang to v1.24.1, k8s.io/api to v0.36.4, k8s.io/apiextensions-apiserver to v0.36.4, k8s.io/apimachinery to v0.36.4, k8s.io/client-go to v0.36.4
+[23:50:26] [unknown type: tool_progress]
+[23:50:43] 💭 Important findings:
+1. The spawner sets `BackoffLimit=0` (`jobBuilder.SetBackoffLimit(0)`). So a spawned Job fails after a single failed pod — but a Job with backoffLimit=0 still gets the `BackoffLimitExceeded` condition when its pod fails (the Job controller sets `BackoffLimitExceeded` on the JobFailed condition when the pod fails and backoff limit is 0 — actually with backoffLimit=0, the Job fails immediately with condition reason... let me think. With backoffLimit=0, when a pod fails, the Job…
+[23:50:44] Let me check the test runner setup and main_test package, and confirm the make targets.
+
+
+[23:50:44] $ echo "=== Makefile ===" && cat /workspace/Makefile; echo "=== Makefile.precommit ===" && cat /workspace/Makefile.precommit | head -60; echo "=== main_test.go package ===" && head -8 /workspace/main_t…
+[23:50:44] [system: task_progress]
+[23:50:50] 💭 Good. Confirmed:
+- `make test` runs `go test -mod=mod -p=... -cover ...` over all packages at root.
+- `make precommit` = ensure format generate test check addlicense.
+- `main_test.go` is `package main_test`, `main_internal_test.go` is `package main` — mixed internal/external precedent confirmed at repo level.
+- Single service repo at root (no multi-service subdirs). The YOLO CLAUDE.md rule about "service directory" is for multi-service repos; here it's a single module, so `make test`/`make preco…
+[23:50:50] Let me verify the coding plugin docs exist and read how the reason string is embedded in the failure body.
+
+
+[23:50:50] $ echo "=== coding docs ===" && ls /home/node/.claude/plugins/marketplaces/coding/docs/*.md 2>&1 | head -50
+[23:50:50] [system: task_progress]
+[23:50:50] [read] /workspace/pkg/result_publisher.go (offset=160, limit=130)
+[23:50:50] [system: task_progress]
+[23:50:50]   → 129 lines read
+[23:50:50] ⚠ [bash output]
+/home/node/.claude/plugins/marketplaces/coding/docs/go-functional-options-pattern.md
+/home/node/.claude/plugins/marketplaces/coding/docs/go-glog-guide.md
+/home/node/.claude/plugins/marketplaces/coding/docs/go-http-handler-refactoring-guide.md
+/home/node/.claude/plugins/marketplaces/coding/docs/go-http-service-guide.md
+/home/node/.claude/plugins/marketplaces/coding/docs/go-json-error-handler-guide.md
+/home/node/.claude/plugins/marketplaces/coding/docs/go-k8s-binary-conventions.md
+/home/node/.claude/plugins/marketplaces/coding/docs/go-kubernetes-crd-controller-guide.md
+/home/node/.claude/plugins/marketplaces/coding/docs/go-library-guide.md
+/home/node/.claude/plugins/marketplaces/coding/docs/go-licensing-guide.md
+/home/node/.claude/plugins/marketplaces/coding/docs/go-linting-guide.md
+/home/node/.claude/plugins/marketplaces/coding/docs/go-logging-guide.md
+/home/node/.claude/plugins/marketplaces/coding/docs/go-makefile-commands.md
+/home/node/.claude/plugins/marketplaces/coding/docs/go-mocking-guide.md
+/home/node/.claude/plugins/marketplaces/coding/docs/go-mod-dependency-fix-guide.md
+/home/node/.claude/plugins/marketplaces/coding/docs/go-mod-replace-guide.md
+/home/node/.claude/plugins/marketplaces/coding/docs/go-package-layout-guide.md
+/home/node/.claude/plugins/marketplaces/coding/docs/go-parse-pattern.md
+/home/node/.claude/plugins/marketplaces/coding/docs/go-patterns.md
+/home/node/.claude/plugins/marketplaces/coding/docs/go-precommit.md
+/home/node/.claude/plugins/marketplaces/coding/docs/go-prometheus-metrics-guide.md
+[23:50:56] [unknown type: tool_progress]
+[23:51:26] [unknown type: tool_progress]
+[23:51:50] 💭 Confirmed:
+- `PublishFailure` embeds reason verbatim into `## Failure\n\n- **Timestamp:** ...\n- **Job:** ...\n- **Reason:** %s\n`. So the composed string `pod_oom_killed (OOMKilled/137)` lands as `- **Reason:** pod_oom_killed (OOMKilled/137)`. Operators grep `pod_oom_killed` → matches. 
+- `fmt.Sprintf` is the established pattern for building these strings.
+- The coding plugin docs exist on the host.
+
+Now I have everything I need. Let me also double-check the doc listing — I see `go-testing-guid…
+[23:51:56] [unknown type: tool_progress]
+[23:52:04] I have everything I need. The repo uses `workflow: direct` (git not masked), all pkg tests are external (`pkg_test`), and there's a precedent for mixed internal/external test files (`main_test.go` + `main_internal_test.go`). Let me write the prompt.
+
+
+[23:52:04] [write] /workspace/prompts/spec-004-bug-job-failure-reason.md (21027 chars)
+[23:52:04] [system: task_progress]
+[23:52:05]   → File created successfully at: /workspace/prompts/spec-004-bug-job-failure-reason.md (file state is current in your cont…
+[23:52:18] 💭 Now let me do a self-audit per my workflow:
+
+1. **`<summary>` present?** Yes — 8 bullets, plain language, no file paths/struct names in the bullets. Good.
+
+2. **YAGNI pass?** The spec's Goal demands: classifier split, distinct reason for BackoffLimitExceeded, pod resolution, pod_oom_killed value, detail in published reason, regression tests. My requirements cover exactly these. No extra config fields, no metrics, no opt-out flags. The spec Non-goals (memory raise, GH scope, resync noise, zombie …
+[23:52:18] Let me verify one build-safety concern: whether `mocks` imports `pkg` (which matters for the internal `package pkg` test file importing the mocks).
+
+
+[23:52:18] $ head -30 /workspace/mocks/result_publisher.go | grep -A12 "^import" ; echo "=== does mocks import pkg? ===" && grep -n "agent-task-executor/pkg" /workspace/mocks/*.go | head -5
+[23:52:18] [system: task_progress]
+[23:52:18] ⚠ [bash output]
+import (
+	"context"
+	"sync"
+
+	lib "github.com/bborbe/agent"
+	"github.com/bborbe/agent-task-executor/pkg"
+	"github.com/bborbe/cqrs/base"
+)
+
+type FakeResultPublisher struct {
+	PublishFailureStub        func(context.Context, lib.Task, string, string) error
+	publishFailureMutex       sync.RWMutex
+	publishFailureArgsForCall []struct {
+=== does mocks import pkg? ===
+/workspace/mocks/config_resolver.go:8:	"github.com/bborbe/agent-task-executor/pkg"
+/workspace/mocks/job_watcher.go:8:	"github.com/bborbe/agent-task-executor/pkg"
+/workspace/mocks/k8s_connector.go:8:	"github.com/bborbe/agent-task-executor/pkg"
+/workspace/mocks/job_spawner.go:9:	"github.com/bborbe/agent-task-executor/pkg"
+/workspace/mocks/job_spawner.go:10:	"github.com/bborbe/agent-task-executor/pkg/spawner"
+[23:52:25] 💭 Confirmed: `mocks` imports `pkg`. So an internal test file in `package pkg` importing `mocks` would create `pkg(test) → mocks → pkg(normal)`. Per Go's rule, this test-only import cycle is legal — the internal test variant of `pkg` is compiled separately from the normal `pkg`, so `mocks` importing the normal `pkg` doesn't create a cycle.
+
+Wait, let me be very careful. The Go rule: is it truly legal for `package pkg` _test.go file to import a package that imports `pkg`?
+
+The relevant Go behavior: …
+[23:52:25] Let me check the frontmatter convention used by the in-flight prompts in the inbox, to match the `spec` field format.
+
+
+[23:52:25] $ head -12 /workspace/prompts/001-spec-002-config-job-namespace.md; echo "---"; head -12 /workspace/prompts/003-spec-003-vault-scoped-resolver.md 2>/dev/null; echo "--- completed 003 frontmatter ---"; …
+[23:52:25] [system: task_progress]
+[23:52:25] ⚠ [bash output]
+branch: dark-factory/config-job-namespace
+---
+
+<summary>
+- Config CRDs gain an optional `jobNamespace` setting so an operator can place an agent's Jobs in a namespace other than the executor's.
+- Existing Config CRs remain valid unedited — the field is additive and optional (`omitempty`).
+- A new pure resolution function turns an unset `jobNamespace` into the per-environment sandbox name (`<executor-namespace>-agents-sandbox`), so dev and prod never share a sandbox.
+- Setting `jobNamespace` to the executor's own namespace is rejected with an error — no Config can place a Job beside the executor's Secrets by omission OR by explicit override.
+---
+--- completed 003 frontmatter ---
+---
+status: completed
+spec: [003-vault-scoped-config-resolver]
+summary: 'Scoped Config CR resolution per executor vault: added required VAULT_NAME startup setting, threaded it through main.go/factory into the resolver, matched Resolve against the composed {assignee}-{vaultName} key with no plain fallback, updated and extended the Ginkgo suite (4 new cases), added a reflect tag guard, and updated CHANGELOG.'
+execution_id: agent-task-executor-vaultslot-exec-003-spec-003-vault-scoped-resolver
+dark-factory-version: dev
+created: "2026-08-26T20:24:00Z"
+queued: "2026-08-26T20:33:07Z"
+started: "2026-08-26T20:33:42Z"
+completed: "2026-08-26T20:42:32Z"
+[23:52:26] [unknown type: tool_progress]
+[23:52:27] 💭 The convention in this repo is `spec: [002-config-job-namespace]` — the full spec slug including the number. The in-flight prompt uses `spec: [002-config-job-namespace]`. So for my spec `004-bug-job-failure-reason`, the frontmatter should be `spec: [004-bug-job-failure-reason]`, not `spec: ["004"]`.
+
+Let me fix the frontmatter in my prompt. The system prompt structure says `spec: ["020"]` but the repo's actual convention (both in-flight and completed prompts) uses the slug form `[NNN-slug]`. The…
+[23:52:28] The repo convention is the full spec slug (`spec: [004-bug-job-failure-reason]`), not a bare number. Let me fix the frontmatter and add the missing Failure Mode row 5 acknowledgment to requirement 8.
+
+
+[23:52:28] $ python3 - <<'EOF'\nimport re\np = 'prompts/spec-004-bug-job-failure-reason.md'\ns = open(p).read()\ns = s.replace('spec: ["004"]', 'spec: [004-bug-job-failure-reason]')\n# Add failure-mode row 5 ackn…
+[23:52:28] [system: task_progress]
+[23:52:28] 💭 </｜DSML｜parameter>
+<｜DSML｜parameter name="description" string="true">Prompt file content after edit</｜DSML｜parameter>
+</｜DSML｜invoke>
+</｜DSML｜tool_calls>
+[23:52:29] 💭 </｜DSML｜parameter>
+</｜DSML｜invoke>
+</｜DSML｜tool_calls>
+[23:52:29] [system: background_tasks_changed]
+[23:52:29] [system: task_updated]
+[23:52:29] [system: task_notification]
+[23:52:30] [system: thinking_tokens]
+[23:52:30] [system: thinking_tokens]
+[23:52:30] [system: thinking_tokens]
+[23:52:30] [system: thinking_tokens]
+[23:52:30] [system: thinking_tokens]
+[23:52:30] [system: thinking_tokens]
+[23:52:30] [system: thinking_tokens]
+[23:52:30] [system: thinking_tokens]
+[23:52:30] [system: thinking_tokens]
+[23:52:30] [system: thinking_tokens]
+[23:52:30] [system: thinking_tokens]
+[23:52:30] [system: thinking_tokens]
+[23:52:30] [system: thinking_tokens]
+[23:52:30] [system: thinking_tokens]
+[23:52:30] [system: thinking_tokens]
+[23:52:30] [system: thinking_tokens]
+[23:52:30] [system: thinking_tokens]
+[23:52:30] [system: thinking_tokens]
+[23:52:30] [system: thinking_tokens]
+[23:52:30] [system: thinking_tokens]
+[23:52:30] [system: thinking_tokens]
+[23:52:30] [system: thinking_tokens]
+[23:52:30] [system: thinking_tokens]
+[23:52:30] [system: thinking_tokens]
+[23:52:30] [system: thinking_tokens]
+[23:52:30] [system: thinking_tokens]
+[23:52:30] [system: thinking_tokens]
+[23:52:30] [system: thinking_tokens]
+[23:52:30] [system: thinking_tokens]
+[23:52:30] [system: thinking_tokens]
+[23:52:30] [system: thinking_tokens]
+[23:52:30] [system: thinking_tokens]
+[23:52:30] [system: thinking_tokens]
+[23:52:30] [system: thinking_tokens]
+[23:52:30] [system: thinking_tokens]
+[23:52:30] [system: thinking_tokens]
+[23:52:30] [system: thinking_tokens]
+[23:52:30] [system: thinking_tokens]
+[23:52:30] [system: thinking_tokens]
+[23:52:30] 💭 4The prompt-creator agent completed. Its final result text is somewhat terse and reads like an internal progress note ("The repo convention is the full spec slug... Let me fix the frontmatter and add the missing Failure Mode row 5 acknowledgment to requirement 8."). This looks like the agent finished mid-edit or its final message wasn't a proper summary. Let me check what files were actually created in `prompts/` to see the actual state.
+
+Let me list the prompts directory to see what was written…
+[23:52:31] The creator completed but its final message reads like an internal progress note rather than a summary. Let me inspect what it actually produced.
+
+
+[23:52:31] $ ls -la prompts/ && echo "---" && for f in prompts/*spec-004* prompts/*004*; do [ -f "$f" ] && echo "== $f ($(wc -l < "$f") lines) =="; done
+[23:52:31] [system: thinking_tokens]
+[23:52:31] [system: thinking_tokens]
+[23:52:31] [system: thinking_tokens]
+[23:52:31] [system: thinking_tokens]
+[23:52:31] [system: thinking_tokens]
+[23:52:31] [system: thinking_tokens]
+[23:52:31] [system: thinking_tokens]
+[23:52:31] [system: thinking_tokens]
+[23:52:31] [system: thinking_tokens]
+[23:52:31] [system: thinking_tokens]
+[23:52:31] [system: thinking_tokens]
+[23:52:31] [system: thinking_tokens]
+[23:52:31] [system: thinking_tokens]
+[23:52:31] [system: thinking_tokens]
+[23:52:31] [system: thinking_tokens]
+[23:52:31] [system: thinking_tokens]
+[23:52:31] [system: thinking_tokens]
+[23:52:31] [system: thinking_tokens]
+[23:52:31] [system: thinking_tokens]
+[23:52:31] [system: thinking_tokens]
+[23:52:31] [system: thinking_tokens]
+[23:52:31] [system: thinking_tokens]
+[23:52:31] [system: thinking_tokens]
+[23:52:31] [system: thinking_tokens]
+[23:52:31] [system: thinking_tokens]
+[23:52:31] [system: thinking_tokens]
+[23:52:31] [system: thinking_tokens]
+[23:52:31] [system: thinking_tokens]
+[23:52:31] [system: thinking_tokens]
+[23:52:31] [system: thinking_tokens]
+[23:52:31] [system: thinking_tokens]
+[23:52:31] [system: thinking_tokens]
+[23:52:31] [system: thinking_tokens]
+[23:52:31] [system: thinking_tokens]
+[23:52:31] [system: thinking_tokens]
+[23:52:31] [system: thinking_tokens]
+[23:52:31] [system: thinking_tokens]
+[23:52:31] [system: thinking_tokens]
+[23:52:31] [system: thinking_tokens]
+[23:52:31] [system: thinking_tokens]
+[23:52:31] [system: thinking_tokens]
+[23:52:31] [system: thinking_tokens]
+[23:52:31] [system: thinking_tokens]
+[23:52:31] [system: thinking_tokens]
+[23:52:31] [system: thinking_tokens]
+[23:52:32] [system: thinking_tokens]
+[23:52:32] [system: thinking_tokens]
+[23:52:32] [system: thinking_tokens]
+[23:52:32] [system: thinking_tokens]
+[23:52:32] [system: thinking_tokens]
+[23:52:32] [system: thinking_tokens]
+[23:52:32] [system: thinking_tokens]
+[23:52:32] [system: thinking_tokens]
+[23:52:32] [system: thinking_tokens]
+[23:52:32] [system: thinking_tokens]
+[23:52:32] [system: thinking_tokens]
+[23:52:32] [system: thinking_tokens]
+[23:52:32] [system: thinking_tokens]
+[23:52:32] [system: thinking_tokens]
+[23:52:32] [system: thinking_tokens]
+[23:52:32] [system: thinking_tokens]
+[23:52:32] [system: thinking_tokens]
+[23:52:32] [system: thinking_tokens]
+[23:52:32] [system: thinking_tokens]
+[23:52:32] [system: thinking_tokens]
+[23:52:32] [system: thinking_tokens]
+[23:52:32] [system: thinking_tokens]
+[23:52:32] [system: thinking_tokens]
+[23:52:32] [system: thinking_tokens]
+[23:52:32] [system: thinking_tokens]
+[23:52:32] [system: thinking_tokens]
+[23:52:32] [system: thinking_tokens]
+[23:52:32] [system: thinking_tokens]
+[23:52:32] [system: thinking_tokens]
+[23:52:32] [system: thinking_tokens]
+[23:52:32] [system: thinking_tokens]
+[23:52:32] [system: thinking_tokens]
+[23:52:32] [system: thinking_tokens]
+[23:52:32] [system: thinking_tokens]
+[23:52:32] [system: thinking_tokens]
+[23:52:32] [system: thinking_tokens]
+[23:52:32] [system: thinking_tokens]
+[23:52:32] [system: thinking_tokens]
+[23:52:32] [system: thinking_tokens]
+[23:52:32] [system: thinking_tokens]
+[23:52:32] [system: thinking_tokens]
+[23:52:32] [system: thinking_tokens]
+[23:52:32] [system: thinking_tokens]
+[23:52:32] [system: thinking_tokens]
+[23:52:32] [system: thinking_tokens]
+[23:52:32] [system: thinking_tokens]
+[23:52:32] [system: thinking_tokens]
+[23:52:32] [system: thinking_tokens]
+[23:52:32] [system: thinking_tokens]
+[23:52:32] [system: thinking_tokens]
+[23:52:32] [system: thinking_tokens]
+[23:52:32] [system: thinking_tokens]
+[23:52:32] [system: thinking_tokens]
+[23:52:32] [system: thinking_tokens]
+[23:52:32] [system: thinking_tokens]
+[23:52:32] [system: thinking_tokens]
+[23:52:32] [system: thinking_tokens]
+[23:52:32] [system: thinking_tokens]
+[23:52:32] [system: thinking_tokens]
+[23:52:32] [system: thinking_tokens]
+[23:52:32] [system: thinking_tokens]
+[23:52:32] [system: thinking_tokens]
+[23:52:32] [system: thinking_tokens]
+[23:52:32] [system: thinking_tokens]
+[23:52:32] [system: thinking_tokens]
+[23:52:32] [system: thinking_tokens]
+[23:52:32] [system: thinking_tokens]
+[23:52:32] [system: thinking_tokens]
+[23:52:32] [system: thinking_tokens]
+[23:52:32] [system: thinking_tokens]
+[23:52:32] [system: thinking_tokens]
+[23:52:32] [system: thinking_tokens]
+[23:52:32] [system: thinking_tokens]
+[23:52:32] [system: thinking_tokens]
+[23:52:32] [system: thinking_tokens]
+[23:52:32] [system: thinking_tokens]
+[23:52:32] [system: thinking_tokens]
+[23:52:32] [system: thinking_tokens]
+[23:52:32] [system: thinking_tokens]
+[23:52:32] [system: thinking_tokens]
+[23:52:32] [system: thinking_tokens]
+[23:52:32] [system: thinking_tokens]
+[23:52:32] [system: thinking_tokens]
+[23:52:32] [system: thinking_tokens]
+[23:52:32] [system: thinking_tokens]
+[23:52:32] [system: thinking_tokens]
+[23:52:32] [system: thinking_tokens]
+[23:52:32] [system: thinking_tokens]
+[23:52:32] [system: thinking_tokens]
+[23:52:32] [system: thinking_tokens]
+[23:52:32] 💭 The prompt-creator wrote one prompt file: `prompts/spec-004-bug-job-failure-reason.md` (243 lines, 21346 bytes). Interesting — it doesn't follow the `001-`, `002-` prefix convention (single prompt, so no prefix needed — consistent with the convention where a single prompt doesn't need a numbered prefix; the 002 spec produced 001/002/003 because it was multi-prompt).
+
+Wait, but the other prompts use `001-spec-002-config-job-namespace.md`. This one is `spec-004-bug-job-failure-reason.md` without a…
+[23:52:33] One prompt file was written: `prompts/spec-004-bug-job-failure-reason.md` (243 lines). The creator's final message was terse, so let me quickly verify the file is complete (not truncated mid-edit) before auditing.
+
+
+[23:52:33] $ head -20 prompts/spec-004-bug-job-failure-reason.md && echo "..." && echo "=== TAIL ===" && tail -15 prompts/spec-004-bug-job-failure-reason.md
+[23:52:33] ⚠ [bash output]
+<objective>
+Fix the job-failure classifier so a Job that hit `BackoffLimitExceeded` publishes a distinct pod-failure reason that surfaces the pod's terminated reason + exit code (with a dedicated `pod_oom_killed` for OOM kills), never the misleading `deadline_exceeded`, while leaving the genuine deadline path unchanged. Motivating incident (2026-08-16): a pod OOM-killed at ~6 min of a 30-min budget was reported as `deadline_exceeded`, and three genuinely different failures were all logged identically, misdirecting a post-mortem that tallied 82 Jobs as quota-starved.
+</objective>
+...
+=== TAIL ===
+- Do NOT commit — dark-factory handles git.
+- Existing tests must still pass.
+</constraints>
+
+<verification>
+Run `make test` iteratively after each meaningful change (fast feedback loop), then `make precommit` ONCE at the very end.
+
+- `make test` — exits 0.
+- `make precommit` — exits 0.
+- `go test -mod=mod -coverprofile=/tmp/cover.out ./pkg/... && go tool cover -func=/tmp/cover.out` — confirm the new functions (`failureReason`, `backoffFailureReason`, `terminalPodDetail`, `isBackoffLimitExceeded`, `hasNonZeroTerminatedContainer`) are each exercised by at least one test (≥80% statement coverage for new code).
+- `grep -n 'BackoffLimitExceeded' pkg/job_watcher.go` — returns at least one line that does NOT map to `ZombieReasonDeadlineExceeded` (acceptance-criterion evidence).
+- `grep -n 'pod_oom_killed' pkg/zombie_reason.go pkg/zombie_reason_test.go pkg/job_watcher.go pkg/job_watcher_internal_test.go` — shows the new value in the closed set, its `String()` assertion, and its production usage.
+
+Do NOT run `docker`, `make build`, `kubectl`, or `dark-factory` commands in this prompt — those are operator-executable and belong on the spec's verification ladder.
+</verification>
+[23:52:34] The file is complete and well-formed (proper frontmatter, summary, objective, constraints, verification sections — ends cleanly). Now running the audit pass on the generated prompt.
+
+
+[23:52:34] [agent:dark-factory:prompt-auditor] Audit prompt spec-004
+    prompt: Audit the dark-factory prompt file at `prompts/spec-004-bug-job-failure-reason.md` against the Prompt Definition of Done. You have full repo access (cwd) to cr…
+[23:52:34] [system: background_tasks_changed]
+[23:52:34] [system: task_started]
+[23:52:34]   ← agent reply: Async agent launched successfully. (This tool result is internal metadata — never quote or paste any part of it, including the agentId below, into a user-facing reply.)
+[23:52:34] [system: thinking_tokens]
+[23:52:34] [system: thinking_tokens]
+[23:52:34] [system: thinking_tokens]
+[23:52:34] [system: thinking_tokens]
+[23:52:34] [system: thinking_tokens]
+[23:52:34] [system: thinking_tokens]
+[23:52:34] [system: thinking_tokens]
+[23:52:34] 💭 Let me start by understanding the task. I'm auditing a dark-factory prompt file at `prompts/spec-004-bug-job-failure-reason.md`. I need to:
+
+1. Read the prompt file
+2. Run `dark-factory config` from the project root to discover container mounts
+3. Verify code references by reading referenced source files
+4. Evaluate against all criteria
+5. Cross-check code in requirements against coding guidelines
+6. Generate report
+
+Let me start by exploring the workspace and reading the prompt file.
+[23:52:35] 💭 The auditor is running. I'll wait for it. Let me block on it.
+[23:52:35] [TaskOutput]
+[23:52:35] I'll start by exploring the project structure and reading the prompt file under audit.
+
+
+[23:52:35] $ ls -la /workspace/ 2>/dev/null && echo "---" && ls -la /workspace/prompts/ 2>/dev/null && echo "---" && ls -la /workspace/prompts/in-progress/ 2>/dev/null
+[23:52:35] [system: task_progress]
+[23:52:35] $ ls -la /workspace/specs/ 2>/dev/null; echo "---"; find /workspace -maxdepth 2 -name "*.dark-factory*.yaml" -o -maxdepth 2 -name ".dark-factory.yaml" 2>/dev/null
+[23:52:35] [system: task_progress]
+[23:52:36] 💭 The prompt file is at `/workspace/prompts/spec-004-bug-job-failure-reason.md`. Note that other prompts are in `prompts/` with numbered prefixes. Let me read the prompt file, the dark-factory config, and the spec.
+
+Let me read the prompt file first.
+[23:52:36] Let me read the prompt file, the dark-factory config, and check for the linked spec.
+
+
+[23:52:36] [read] /workspace/prompts/spec-004-bug-job-failure-reason.md
+[23:52:36] [system: task_progress]
+[23:52:36] $ cat /workspace/.dark-factory.yaml
+[23:52:36] [system: task_progress]
+[23:52:36]   → 243 lines read
+[23:52:39] 💭 Interesting. The dark-factory config has `workflow: direct` (not `worktree`), and no `hideGit: true`. So git masking is not an issue.
+
+Wait, but there's something odd. The file is in `prompts/` directory (the inbox). Let me check the exact filename: `spec-004-bug-job-failure-reason.md`. There's a `spec: [004-bug-job-failure-reason]` in frontmatter.
+
+Let me check the specs directory for the linked spec. The specs directory has `in-progress`, `ideas`, etc. Let me find spec 004.
+
+Let me also run `d…
+[23:52:39] Now let me discover the container mounts via `dark-factory config` and find the linked spec.
+
+
+[23:52:39] $ which dark-factory 2>/dev/null; dark-factory config 2>&1 | head -50; echo "EXIT: $?"
+[23:52:39] [system: task_progress]
+[23:52:39] $ find /workspace/specs -type f -name "*.md" | sort; echo "---in-progress---"; ls -la /workspace/specs/in-progress/ 2>/dev/null; echo "---ideas---"; ls -la /workspace/specs/ideas/ 2>/dev/null
+[23:52:39] [system: task_progress]
+[23:52:40] 💭 `dark-factory` CLI is not available in this environment. Let me check the daemon log / config to determine the mounts. Let me look at the `.dark-factory.log` and possibly the dark-factory source to understand the mount configuration. Since dark-factory isn't installed, I'll need to infer from the project structure and any config.
+
+The `.dark-factory.yaml` config has `workflow: direct` — so no worktree masking, and no `hideGit`. So git masking is NOT an issue.
+
+For mounts, I need to figure out wh…
+[23:52:41] The dark-factory CLI isn't installed in this environment. Let me check the daemon log for mount details and read the linked spec.
+
+
+[23:52:41] $ cat /workspace/.dark-factory.log
+[23:52:41] [system: task_progress]
+[23:52:41] [read] /workspace/specs/in-progress/004-bug-job-failure-reason.md
+[23:52:41] [system: task_progress]
+[23:52:41]   → 141 lines read
+[23:52:49] 💭 Now I have the spec. Key observations so far:
+
+1. **The `.dark-factory.yaml` has `workflow: direct`** (not `worktree`), and the log shows `hideGit=true` was set via `arg` (`hideGit=true hideGitSource=arg`)! This is important for the hideGit check.
+
+Wait, the log says `hideGit=true hideGitSource=arg`. But `.dark-factory.yaml` says `workflow: direct`. The log line shows `workflow=direct` and `hideGit=true` with `hideGitSource=arg`. So `hideGit=true` is set at runtime via `--set hideGit=true` (arg …
+[23:52:49] Now let me verify the code references. First the core file `pkg/job_watcher.go`.
+
+
+[23:52:49] [read] /workspace/pkg/job_watcher.go
+[23:52:49] [system: task_progress]
+[23:52:49]   → 363 lines read
+[23:52:53] 💭 Now let me verify the claims in the prompt against the actual file:
+
+1. `JobFailureReason` at lines ~249-267 — Actual: lines 249-267. The doc comment is at 249-256, function at 257-267. The prompt says lines ~249-267. ✓ Correct.
+
+2. `HandleJob` at lines ~139-162 — Actual: lines 139-162. ✓ Correct.
+
+3. `handleTerminal` at lines ~164-182 — Actual: lines 164-182. ✓ Correct.
+
+4. `publishSyntheticFailure` at lines ~184-197 — Actual: lines 184-197. ✓ Correct.
+
+5. `PodLister()` at lines ~131-137 — Actu…
+[23:52:53] `pkg/job_watcher.go` references check out. Now `zombie_reason.go`, `result_publisher.go`, and the test files.
+
+
+[23:52:53] [read] /workspace/pkg/zombie_reason.go
+[23:52:53] [system: task_progress]
+[23:52:53] $ ls -la /workspace/pkg/ && echo "---mocks---" && ls -la /workspace/mocks/
+[23:52:53] [system: task_progress]
+[23:52:53]   → 24 lines read
+[23:52:54] 💭 `zombie_reason.go`:
+- `ZombieReason` const block has `ZombieReasonTypeMismatch` as the last value at line 20. The prompt says add `ZombieReasonPodOOMKilled` after `ZombieReasonTypeMismatch`. ✓ Correct.
+- The package doc comment (lines 7-10) states "Adding a new value requires updating this list and the documentation; renaming or removing a value is a breaking change". ✓ Prompt says keep this sentence. ✓
+
+Now let me read the test files: `job_watcher_test.go`, `zombie_reason_test.go`, `zombie_swee…
+[23:52:54] Now the test files and `result_publisher.go` to verify line references and the mock API.
+
+
+[23:52:54] [read] /workspace/pkg/job_watcher_test.go
+[23:52:54] [system: task_progress]
+[23:52:54]   → 512 lines read
+[23:52:57] 💭 Now I can verify the test file references:
+
+1. The HandleJob BackoffLimitExceeded assertion at "~line 240": The `It("maps BackoffLimitExceeded job condition to deadline_exceeded", ...)` starts at line 240 and asserts `Expect(calledReason).To(Equal("deadline_exceeded"))` at line 257. The prompt says: "HandleJob path (~line 240): rename the spec to 'maps BackoffLimitExceeded job condition to pod_crash_no_stdout (no resolvable pod)' and change the final assertion from `Expect(calledReason).To(Equal…
+[23:52:58] Test file references check out. Now `result_publisher.go` `PublishFailure` and the mock API.
+
+
+[23:52:58] [read] /workspace/pkg/result_publisher.go (offset=160, limit=80)
+[23:52:58] [system: task_progress]
+[23:52:58] $ grep -n "func (fake \*FakeResultPublisher) PublishFailure" /workspace/mocks/result_publisher.go
+[23:52:58] [system: task_progress]
+[23:52:58]   → 79 lines read
+[23:52:58] ⚠ [bash output]
+97:func (fake *FakeResultPublisher) PublishFailure(arg1 context.Context, arg2 lib.Task, arg3 string, arg4 string) error {
+119:func (fake *FakeResultPublisher) PublishFailureCallCount() int {
+125:func (fake *FakeResultPublisher) PublishFailureCalls(stub func(context.Context, lib.Task, string, string) error) {
+131:func (fake *FakeResultPublisher) PublishFailureArgsForCall(i int) (context.Context, lib.Task, string, string) {
+138:func (fake *FakeResultPublisher) PublishFailureReturns(result1 error) {
+147:func (fake *FakeResultPublisher) PublishFailureReturnsOnCall(i int, result1 error) {
+[23:52:59] 💭 `PublishFailure` signature confirmed: `(ctx context.Context, task lib.Task, jobName string, reason string) error`. The mock has `PublishFailureArgsForCall(i int) (context.Context, lib.Task, string, string)` — 4 return values. ✓
+
+The `result_publisher.go` PublishFailure at lines 171-230 writes reason verbatim into `- **Reason:** %s`. The prompt says "PublishFailure (lines ~171-230) writes the reason verbatim into the vault `## Failure` body's `- **Reason:**` line". ✓ Correct (lines 171-230 exactl…
+[23:52:59] `PublishFailure` and mock verified. Now `zombie_reason_test.go` and the `zombie_sweeper_test.go` informer pattern.
+
+
+
+
+[23:52:59] [read] /workspace/pkg/zombie_reason_test.go
+[23:52:59] [system: task_progress]
+[23:52:59] $ grep -n "GetIndexer\|informerFactory\|NewSharedInformerFactory\|podInformer\|Pods().Lister\|WithNamespace" /workspace/pkg/zombie_sweeper_test.go
+[23:52:59] [system: task_progress]
+[23:52:59]   → 38 lines read
+[23:53:00] 💭 The `zombie_reason_test.go` has `String()` assertions for each value, ending with `type_mismatch` at line 34-36. The prompt says add a new `It` after the `type_mismatch` one. ✓ Correct.
+
+The `zombie_sweeper_test.go` informer pattern is confirmed:
+```go
+informerFactory := k8sinformers.NewSharedInformerFactoryWithOptions(
+    ...,
+    k8sinformers.WithNamespace("test-ns"),
+)
+podInformer := informerFactory.Core().V1().Pods().Informer()
+_ = podInformer.GetIndexer().Add(pod)
+podLister := informerFact…
+[23:53:01] Let me read the exact informer setup block in `zombie_sweeper_test.go` and check the internal test file precedent.
+
+
+[23:53:01] [read] /workspace/pkg/zombie_sweeper_test.go (offset=110, limit=30)
+[23:53:01] [system: task_progress]
+[23:53:01] $ head -20 /workspace/main_internal_test.go; echo "---"; head -15 /workspace/main_test.go; echo "--- package decl of main_internal ---"; grep -n "^package" /workspace/main_internal_test.go /workspace/m…
+[23:53:01] [system: task_progress]
+[23:53:01]   → 29 lines read
+[23:53:05] [unknown type: tool_progress]
+[23:53:35] [unknown type: tool_progress]
+[23:53:53] 💭 The internal/external test file precedent (`main_test.go` in `package main_test` + `main_internal_test.go` in `package main`) is confirmed.
+
+Now let me check:
+1. `lib.Task` and `lib.TaskIdentifier` from `github.com/bborbe/agent` — verify these exist (grep in module source).
+2. `corev1listers.PodLister` interface — `Pods(namespace).List(selector)`.
+3. The `podLister.Store(&lister)` — `atomic.Pointer[corev1listers.PodLister]`. The prompt's test helper does `w.(*jobWatcher).podLister.Store(&lister)…
+[23:53:54] References in `zombie_reason_test.go`, `zombie_sweeper_test.go`, and the internal-test precedent check out. Now let me verify a few structural things: the Ginkgo suite bootstrap, callers of the functions being changed, and the coding docs paths exist in-container.
+
+
+[23:53:54] $ grep -rn "RunSpecs" /workspace/ | grep -v vendor
+[23:53:54] [system: task_progress]
+[23:53:54] $ grep -rn "handleTerminal\|publishSyntheticFailure\|JobFailureReason\|PodLister()" /workspace/pkg/ /workspace/main.go /workspace/mocks/ | grep -v "_test.go" | grep -v "job_watcher.go"
+[23:53:54] [system: task_progress]
+[23:53:59] 💭 
+40	time=2026-08-31T23:54:48.310+02:00 level=INFO msg="very chatty log entries" seen=69 chattyLevel=chatty
+41	time=2026-08-31T22:41:41Z+02:00 level=INFO msg="nothing to do, waiting for changes" ... (last 80 lines truncated)
+
+The system reminder says the log file was modified. Let me continue.
+
+Key findings so far:
+- The daemon log confirms `hideGit=true hideGitSource=arg` — hideGit is TRUE. So I must check the prompt for bare `git ` commands.
+- `RunSpecs` is in `main_test.go` (package main_test)…
+[23:54:00] The spec-generation log references the pkg suite bootstrap. Let me confirm where `RunSpecs` lives for the `pkg` package and check `agent_configuration_test.go`.
+
+
+[23:54:00] $ head -25 /workspace/pkg/agent_configuration_test.go; echo "---RunSpecs/TestPkg---"; grep -n "func Test\|RunSpecs" /workspace/pkg/*_test.go
+[23:54:00] [system: task_progress]
+[23:54:00] $ ls /home/node/.claude/plugins/marketplaces/coding/docs/ 2>/dev/null | head -50; echo "---CLAUDE.md---"; ls -la /home/node/.claude/CLAUDE.md 2>/dev/null
+[23:54:00] [system: task_progress]
+[23:54:00] ⚠ [bash output]
+go-http-handler-refactoring-guide.md
+go-http-service-guide.md
+go-json-error-handler-guide.md
+go-k8s-binary-conventions.md
+go-kubernetes-crd-controller-guide.md
+go-library-guide.md
+go-licensing-guide.md
+go-linting-guide.md
+go-logging-guide.md
+go-makefile-commands.md
+go-mocking-guide.md
+go-mod-dependency-fix-guide.md
+go-mod-replace-guide.md
+go-package-layout-guide.md
+go-parse-pattern.md
+go-patterns.md
+go-precommit.md
+go-prometheus-metrics-guide.md
+---CLAUDE.md---
+-rw-r--r-- 1 node node 22240 Apr 26 11:22 /home/node/.claude/CLAUDE.md
+[23:54:03] 💭 The coding plugin docs exist at `/home/node/.claude/plugins/marketplaces/coding/docs/` and `/home/node/.claude/CLAUDE.md` exists in the container. So the `<context>` references to these in-container paths are valid. Note the docs dir also has `go-glog-guide.md`, `go-testing-guide.md`, `go-error-wrapping-guide.md`, `changelog-guide.md`, `definition-of-done.md` — all referenced in the prompt. ✓
+
+Also confirmed:
+- `TestPkg(t *testing.T)` + `RunSpecs(t, "Pkg Suite")` in `agent_configuration_test.go`…
+[23:54:05] [unknown type: tool_progress]
+[23:54:05] Coding docs paths exist in-container, and the pkg suite bootstrap is confirmed. Now let me run the mechanical checks: git commands (hideGit=true), `go mod vendor`, operator-only commands, and the format-step claim.
+
+
+[23:54:05] $ echo "=== git commands in prompt ==="; grep -nE '^\s*git\s' /workspace/prompts/spec-004-bug-job-failure-reason.md; echo "=== go mod vendor ==="; grep -n "go mod vendor" /workspace/prompts/spec-004-bu…
+[23:54:05] [system: task_progress]
+[23:54:05] $ echo "=== module name ==="; head -3 /workspace/go.mod; echo "=== goimports-reviser in Makefiles/golangci ==="; grep -rn "goimports-reviser\|goimports" /workspace/Makefile* /workspace/.golangci.yml 2>…
+[23:54:05] [system: task_progress]
+[23:54:05] ⚠ [bash output]
+=== git commands in prompt ===
+=== go mod vendor ===
+=== operator-only commands in verification ===
+10:- For backoff-limit failures, the published failure text now carries the pod's actual termination reason and exit code (e.g. `OOMKilled`/`137`) — no manual `kubectl get pod -o json` needed.
+229:- Do NOT commit — dark-factory handles git.
+242:Do NOT run `docker`, `make build`, `kubectl`, or `dark-factory` commands in this prompt — those are operator-executable and belong on the spec's verification ladder.
+=== git clone/push/gh pr ===
+=== exit ===
+[23:54:13] 💭 Confirmed:
+- No bare `git ` commands in the prompt. hideGit=true is set via arg, but no git commands to flag. The two `git` mentions are in prose ("Do NOT commit — dark-factory handles git" and "kubectl... operator-executable") — those are not commands. ✓
+- No `go mod vendor`. ✓
+- No operator-only commands in `<verification>` — the kubectl/docker mentions are prose in `<summary>` (line 10, describing what the fix eliminates) and in `<constraints>` (line 229, "Do NOT commit") and `<verification>`…
+[23:54:14] No git commands, no `go mod vendor`, no operator-only commands (the kubectl/docker mentions are prose prohibitions, not commands). The goimports-reviser claim is accurate. Let me verify `ResultPublisher` and the bborbe/agent `lib.Task` fields.
+
+
+[23:54:14] $ grep -rn "ResultPublisher interface" -A 10 /workspace/pkg/*.go | grep -v _test; echo "=== lib.Task ==="; ls $(go env GOPATH)/pkg/mod/github.com/bborbe/ 2>/dev/null | grep agent; grep -rn "type Task s…
+[23:54:14] [system: task_progress]
+[23:54:17] [system: task_started]
+[23:54:24] [system: task_notification]
+[23:54:24] ⚠ [bash output]
+/workspace/pkg/result_publisher.go:34:type ResultPublisher interface {
+/workspace/pkg/result_publisher.go-35-	// PublishSpawnNotification publishes current_job, job_started_at, and
+/workspace/pkg/result_publisher.go-36-	// spawn_notification without touching any other frontmatter keys.
+/workspace/pkg/result_publisher.go-37-	PublishSpawnNotification(ctx context.Context, task lib.Task, jobName string) error
+/workspace/pkg/result_publisher.go-38-	// PublishFailure publishes a zombie failure: clears current_job and atomically
+/workspace/pkg/result_publisher.go-39-	// bumps trigger_count by 1 via a paired IncrementFrontmatterCommand. Leaves
+/workspace/pkg/result_publisher.go-40-	// phase, status, and assignee untouched so the existing trigger_count retry
+/workspace/pkg/result_publisher.go-41-	// cap (applyTriggerCap in task/controller/pkg/result/result_writer.go) handles
+/workspace/pkg/result_publisher.go-42-	// eventual operator-inbox escalation. Idempotent per current_job via a TTL'd
+/workspace/pkg/result_publisher.go-43-	// LRU; concurrent classifications for the same job emit one event.
+/workspace/pkg/result_publisher.go-44-	PublishFailure(ctx context.Context, task lib.Task, jobName string, reason string) error
+=== lib.Task ===
+go: downloading go1.27.0 (linux/arm64)
+(eval):1: no matches found: /home/node/go/pkg/mod/github.com/bborbe/agent@*/
+[23:54:27] 💭 The GOPATH module cache doesn't have bborbe/agent downloaded in this environment (or the path is different). The external test file `job_watcher_test.go` already uses `lib.Task`, `lib.TaskIdentifier`, `lib.TaskFrontmatter`, `lib.TaskContent` — and the repo builds (preflight passed per daemon log). So these symbols exist. The new test file's usage mirrors the external file exactly. ✓ No need to grep further — the external test is in-repo precedent.
+
+`ResultPublisher` interface confirmed at line 3…
+[23:54:28] `ResultPublisher` interface confirmed, and the bborbe/agent symbols are established by in-repo test precedent. Let me verify the CHANGELOG state claim.
+
+
+[23:54:28] $ head -20 /workspace/CHANGELOG.md; echo "=== Unreleased present? ==="; grep -n "Unreleased" /workspace/CHANGELOG.md; echo "=== latest version ==="; grep -n "^## v\|^## \[v" /workspace/CHANGELOG.md | h…
+[23:54:28] [system: task_progress]
+[23:54:28] $ grep -n "func NewTaskStore" /workspace/pkg/task_store.go; echo "=== agent version in go.mod ==="; grep "bborbe/agent" /workspace/go.mod
+[23:54:28] [system: task_progress]
+[23:54:28] ⚠ [bash output]
+
+- feat: scope the spawn trigger cap to `phase`+`ref` — the executor now records a `trigger_scope` (`<phase>:<ref[:8]>`) alongside `trigger_count`, so an opted-in cap no longer burns its budget across unrelated work. A re-dispatch representing real progress (a new lifecycle phase, or a new commit on the target repo) resets the budget to 1; repeated attempts at the same phase and ref burn it down, which is the shape of a deterministic failure such as a gate broken at one commit. Phase comes from the normalizing accessor so an alias cannot split a scope and grant a second budget; tasks with no `ref` (not repo-backed) scope on phase alone
+- fix: an absent `trigger_scope` is adopted, never treated as changed — every task in flight predates the field, so reading absent as "scope changed" would have granted each of them a free budget reset on the first event after deploy, including one already looping at cap. Adoption carries the existing count forward (`n+1`); a task already at cap is skipped outright with no publish at all
+- note: the cap stays **opt-in** (an absent `max_triggers` still means no cap). Scoping does not make it safe to default on: a recurring task is not repo-backed, so its scope is constant across re-dispatches and the default-3 fallback would still strip `assignee` and kill the loop — the v0.7.1 / 2026-08-27 Daily Sentry Triage incident. The regression spec for it now names that reasoning inline
+
+## v0.7.2
+
+- chore: update github.com/bborbe/agent to v0.84.0, github.com/bborbe/cqrs to v0.6.9, github.com/bborbe/cron to v1.8.28, github.com/bborbe/errors to v1.6.0, github.com/bborbe/http to v1.26.25, github.com/bborbe/k8s to v1.14.16, github.com/bborbe/log to v1.6.25, github.com/bborbe/run to v1.10.1, github.com/bborbe/sentry to v1.10.0, github.com/bborbe/service to v1.10.10, github.com/bborbe/time to v1.27.11, github.com/bborbe/validation to v1.4.23, github.com/bborbe/vault-cli to v0.116.5, github.com/onsi/gomega to v1.43.0
+
+## v0.7.1
+
+- fix: make the spawn trigger cap opt-in — an absent `max_triggers` no longer blocks spawn at the lib default of 3, so a recurring task that accumulates `trigger_count` across re-dispatches keeps re-dispatching to its routing assignee (2026-08-27 prod incident: Daily Sentry Triage collector leg dead from re-dispatch #2 onward).
+
+## v0.7.0
+
+=== Unreleased present? ===
+=== latest version ===
+5:## v0.8.0
+11:## v0.7.2
+15:## v0.7.1
+[23:54:35] [unknown type: tool_progress]
+[23:54:47] 💭 CHANGELOG confirmed: no `## Unreleased` section, latest is v0.8.0. Requirement 11's claim is accurate. ✓
+
+`NewTaskStore` exists. ✓ bborbe/agent v0.84.0. ✓
+
+Now let me check a couple more subtle things:
+
+1. **The `mocks.FakeResultPublisher` — does it need to be regenerated?** The prompt doesn't change ResultPublisher's interface, so the existing mock works. ✓ No `//counterfeiter:generate` needed.
+
+2. **The internal test file and counterfeiter** — `NewJobWatcher` returns `JobWatcher` interface; ty…
+[23:54:48] Let me check the project's own `docs/` directory for docs the prompt should reference, and confirm the sibling prompt frontmatter convention.
+
+
+
+
+[23:54:48] $ ls -la /workspace/docs/ 2>/dev/null; echo "=== sibling prompt frontmatter ==="; head -6 /workspace/prompts/001-spec-002-config-job-namespace.md
+[23:54:48] [system: task_progress]
+[23:54:48] $ grep -rn "func (w \*jobWatcher) HandlePod\|func classifyPodFailure" /workspace/pkg/job_watcher.go; echo "=== dedupe mechanism ==="; grep -n "checkDedupe\|recordDedupe\|dedupe" /workspace/pkg/result_p…
+[23:54:48] [system: task_progress]
+[23:55:05] [unknown type: tool_progress]
+[23:55:12] 💭 Confirmed:
+- `/workspace/docs/` only has `agent-crd-specification.md` — no relevant doc the prompt should reference for this change. Documentation placement check: N/A (no ignored project doc).
+- Sibling prompt frontmatter uses `spec: [002-config-job-namespace]` — confirms the `spec: [NNN-slug]` convention. The audited prompt's `spec: [004-bug-job-failure-reason]` is consistent. ✓
+- `HandlePod` at line 273, `classifyPodFailure` at 327. ✓
+- Dedupe keyed on jobName (line 103 comment: "jobName -> i…
+[23:55:26] I have completed the audit. All source references, the linked spec, the mount config, and the mechanical checks are done. Here is the report.
+
+---
+
+# Prompt Audit Report: spec-004 — Fix Job Failure Reason (split `BackoffLimitExceeded` from `DeadlineExceeded`)
+
+**File**: `/workspace/prompts/spec-004-bug-job-failure-reason.md`
+**Score**: 9/10
+**Status**: Excellent
+
+## DoD Checklist
+- [x] `<summary>` present and plain-language (8 bullets, observable outcomes, no file paths/struct signatures)
+- [x] `<objective>` states end state + why (2 sentences, names the motivating incident)
+- [x] `<context>` present (files with line anchors, coding plugin docs)
+- [x] `<requirements>` numbered and specific (12 steps, exact paths + code)
+- [x] `<constraints>` present (copied from spec, includes "Do NOT commit")
+- [x] `<verification>` present with runnable, container-executable commands
+- [x] All paths repo-relative (`pkg/...`) or container-backed (`/workspace/...` mount; `/home/node/.claude/...` docs verified present in-container)
+- [x] No bare `git ` commands in `<verification>`/`<requirements>` — required because daemon log shows `hideGit=true` (source=arg). None found.
+- [x] No operator-only commands in `<verification>` — `make test`/`make precommit`/`go test`/`go tool cover`/`grep` only; the kubectl/docker mentions are prose prohibitions (line 242 explicitly defers them to the spec ladder), not commands
+- [x] File in `prompts/` inbox (not `prompts/in-progress/`)
+- [x] Filename `spec-004-bug-job-failure-reason.md` — no dark-factory global `NNN-` prefix; no ordering prefix needed (single-prompt spec)
+- [x] Filename reflects primary change (matches objective/summary)
+- [x] Status is `draft`; frontmatter has only `spec`/`status`/`created`; `spec: [004-bug-job-failure-reason]` matches the canonical slug of `/workspace/specs/in-progress/004-bug-job-failure-reason.md`
+
+## Failure Mode Coverage
+- [x] Spec failure modes addressed: all 6 rows covered — rows 1+3 (req 9 nil-lister test + req 10d empty-cache test), row 2 (req 10b non-OOM), row 4 (req 10c multi-pod), row 5 (req 8 explicitly declares pre-existing dedupe, do-not-modify), row 6 (req 3 split, no merge)
+- [x] Security section — N/A (spec has none)
+- [x] External calls have timeout/cancellation — N/A (no new external calls; `PodLister().List()` is an in-memory informer cache)
+- [x] New strings/values crossing boundaries have contract tests — `pod_oom_killed` is exercised through the real production path `HandleJob → failureReason → handleTerminal → publishSyntheticFailure → PublishFailure` with the fake publisher, asserting exact composed strings (level-2 integration)
+- [x] No `go mod vendor` in `<requirements>`/`<verification>`
+- [x] No cross-repo writes (no `git clone`/`git push`/`gh pr create` anywhere in the prompt)
+- [x] Container-autonomous: no operator-vs-agent step split, no rollout/deploy/observe steps
+- [x/!] Sibling entry points: `HandlePod`/`classifyPodFailure` is a parallel publish path not mentioned by the prompt — flagged as Recommendation (below); spec does not name it as a change target, so not Critical
+
+## Documentation Placement
+- [x] No inlined reusable patterns >10 lines that belong in a doc (inlined snippets are load-bearing contracts, each pinned to an existing file to mirror)
+- [x] No project doc ignored — `/workspace/docs/` contains only `agent-crd-specification.md` (irrelevant to this change)
+- [x] Coding plugin docs referenced in `<context>` — `go-testing-guide.md`, `go-error-wrapping-guide.md`, `go-glog-guide.md`, `changelog-guide.md`, `definition-of-done.md` all verified present at `/home/node/.claude/plugins/marketplaces/coding/docs/`
+- [x] No domain knowledge inlined that should live in project docs
+
+## Code Reference Verification
+All references verified against source:
+
+| Reference | File | Status |
+|-----------|------|--------|
+| `JobFailureReason` (lines ~249-267) | `pkg/job_watcher.go:257-267` | Verified |
+| `HandleJob` (lines ~139-162) | `pkg/job_watcher.go:139-162` | Verified |
+| `handleTerminal` (lines ~164-182, `reason ZombieReason` at 173) | `pkg/job_watcher.go:169-182` | Verified |
+| `publishSyntheticFailure` (lines ~184-197, `reason.String()` at 191) | `pkg/job_watcher.go:184-197` | Verified |
+| `PodLister()` (lines ~131-137), `podLister atomic.Pointer` (line 65) | `pkg/job_watcher.go:65,131-137` | Verified |
+| `classifyPodFailure`/`ownerJobName` (lines ~320-363) | `pkg/job_watcher.go:327-352,356-363` | Verified |
+| `ZombieReason` closed set, `ZombieReasonTypeMismatch` last const | `pkg/zombie_reason.go:13-21` | Verified |
+| Two `BackoffLimitExceeded` assertions (~240, ~271) and two `DeadlineExceeded` (~220, ~262) | `pkg/job_watcher_test.go:240-258,271-278,220-237,262-268` | Verified |
+| `String()` assertions ending at `type_mismatch` | `pkg/zombie_reason_test.go:34-36` | Verified |
+| Informer-indexer `GetIndexer().Add` + `.Lister()` pattern | `pkg/zombie_sweeper_test.go:115-126` | Verified |
+| `PublishFailure` (lines ~171-230) writes reason verbatim to `- **Reason:**`; dedupe keyed on jobName | `pkg/result_publisher.go:171-230`, `:103` | Verified |
+| `PublishFailure` interface signature `(ctx, task, jobName, reason string)` | `pkg/result_publisher.go:34-44` | Verified |
+| Mock `PublishFailureArgsForCall` returns 4 values | `mocks/result_publisher.go:131` | Verified |
+| `RunSpecs(t, "Pkg Suite")` in `package pkg_test` | `pkg/agent_configuration_test.go:17-19` | Verified (internal-test file's `Describe` blocks will run under this suite) |
+| Internal/external test precedent `main_test.go` + `main_internal_test.go` | `/workspace/main_internal_test.go:5`, `/workspace/main_test.go:5` | Verified |
+| CHANGELOG: no `## Unreleased`, latest `v0.8.0` | `CHANGELOG.md:5` | Verified |
+| goimports-reviser `-format` precommit step | `Makefile.precommit:15`, `.golangci.yml:111` | Verified |
+| `NewTaskStore` exists | `pkg/task_store.go:22` | Verified |
+| Non-goal sweeper fallback `return ZombieReasonDeadlineExceeded` | `pkg/zombie_sweeper.go:238-239` | Verified |
+| `lib.Task`/`TaskIdentifier`/`TaskFrontmatter` — in-repo precedent | `pkg/job_watcher_test.go:38-46` | Verified |
+
+## Coding Guidelines Compliance
+| Guideline | File | Status |
+|-----------|------|--------|
+| `fmt.Sprintf` for string building, never `fmt.Errorf` (explicitly instructed) | `go-error-wrapping-guide.md` | Compliant |
+| glog `V(n)` gating, `glog.Errorf` for lookup errors | `go-glog-guide.md` | Compliant |
+| Ginkgo/Gomega v2, no stdlib table tests | `go-testing-guide.md` | Compliant |
+| Counterfeiter mocks (reuses existing `mocks.FakeResultPublisher`, no interface change → no regen needed) | `go-testing-guide.md` | Compliant |
+| No test-only package-level mutable state; no `var X = default` + `SetX` pattern | `go-composition.md` | Compliant |
+| New enum value follows existing closed-set pattern (const + `String()`, no `Validate()` — consistent with current `ZombieReason`) | `go-enum-type-pattern.md` | Compliant |
+
+## YAGNI Pass (scope-creep detector)
+- [x] No opt-out flag / escape hatch rejecting the Goal
+- [x] Every new function (`isBackoffLimitExceeded`, `hasNonZeroTerminatedContainer`, `terminalPodDetail`, `failureReason`, `backoffFailureReason`) maps directly to a spec Desired Behavior / Failure Mode / AC
+- [x] Every test scenario (a–e) maps to an AC or Failure Mode row; no tunable thresholds, no unrequested configurability
+- [x] No "future-proofing" knobs. Clean.
+
+## Critical Issues
+None. All DoD-critical gates pass: container-autonomy, hideGit (no git commands despite `hideGit=true`), no operator-only verification, no cross-repo writes, no `go mod vendor`, no stale code references, complete failure-mode coverage.
+
+## Recommendations
+1. **HandlePod sibling / dedupe ordering race (the one substantive gap).** `HandlePod` (`pkg/job_watcher.go:273`) publishes `pod_crash_no_stdout` for the same OOM-killed pod via `classifyPodFailure` and records the job-name dedupe key (`result_publisher.go:103,119`). When the pod informer event fires before the Job-condition event (typical for OOM kills — the pod dies before the controller sets `BackoffLimitExceeded`), `checkDedupe(jobName)` suppresses the new `pod_oom_killed (OOMKilled/137)` publish from the Job-condition path. The prompt's integration tests call `HandleJob` directly and never exercise this ordering, so the new value's production reachability is unverified. The spec scopes the fix to the Job-condition path and does not name `HandlePod`, so this is a Recommendation, not a Critical.
+   Find/replace — in `<requirements>` step 8, replace the final sentence:
+   > "Spec Failure Mode row 5 (executor crashes mid-publish after classifying) is pre-existing behavior, NOT new work: `PublishFailure` is at-least-once via Kafka and its dedupe (keyed on job name) in `/workspace/pkg/result_publisher.go` already absorbs re-delivery. Do not modify that dedupe code."
+   with:
+   > "Spec Failure Mode row 5 (executor crashes mid-publish after classifying) is pre-existing behavior, NOT new work: `PublishFailure` is at-least-once via Kafka and its dedupe (keyed on job name) in `/workspace/pkg/result_publisher.go` already absorbs re-delivery. Do not modify that dedupe code. Note: the pod-informer entry point (`HandlePod` → `classifyPodFailure`) also publishes for an OOM-killed pod (`pod_crash_no_stdout`) under the same job-name dedupe key, so if the pod event lands before the Job-condition event the `pod_oom_killed` string is dedupe-suppressed. Do NOT change `HandlePod`/`classifyPodFailure` (out of scope), but document this ordering in the new internal test file so the shadowed path is not mistaken for a regression."
+
+2. **Requirement 3 overstates the `DeadlineExceeded`-always-wins invariant.** The new `JobFailureReason` returns the reason of whichever Failed condition iterates first; with both `BackoffLimitExceeded` and `DeadlineExceeded` present in that order, it yields `pod_crash_no_stdout` and the backoff path runs — not `deadline_exceeded`. Kubernetes emits a single Failed condition so this is theoretical, and spec Failure Mode row 6 only requires "either mapping is specific, never a silent merge" (which the code delivers). Minor doc/requirement mismatch, not a functional bug.
+   Find/replace — in `<requirements>` step 3, replace:
+   > "Do NOT merge the two conditions — a `DeadlineExceeded` condition always yields `deadline_exceeded`, even if a `BackoffLimitExceeded` condition is also present."
+   with:
+   > "Do NOT merge the two conditions — a `DeadlineExceeded` condition yields `deadline_exceeded`, and a `BackoffLimitExceeded` condition yields the distinct pod-failure reason (whichever Failed condition iterates first wins; k8s emits a single Failed condition in practice)."
+
+## Strengths
+- Every cited line number verified accurate to within a few lines — no stale references.
+- Requirements are fully load-bearing: exact function signatures, imports, and find-and-replace patterns for both the classifier and the existing tests.
+- Complete failure-mode and AC coverage, with each test scenario explicitly cross-referenced to the spec row it satisfies (req 10a "satisfies ACs 2a, 3, and 4").
+- Boundary-crossing handled correctly: the composed reason strings are asserted at the real `PublishFailure` boundary (level-2 integration through `HandleJob`), not just as constant-value tests.
+- The internal test file is properly justified (needs `w.(*jobWatcher).podLister`) and mirrors the repo's established internal/external precedent; the suite bootstrap (`TestPkg`/`RunSpecs`) will pick up the new specs.
+- Container-executable verification is honest (no exit-code-masked operator commands) and the prompt proactively bans `docker`/`kubectl`/`dark-factory` from itself.
+- YAGNI-clean: no scope creep beyond the spec's Goal, and non-goals (sweeper fallback, memory limit, permissions) are explicitly load-bearing.
+
+## Summary
+An exemplary, fully verified prompt: every code reference checks out against source, the internal-test design compiles mentally, failure modes and ACs are exhaustively covered, and all container-autonomy/hideGit/operator-only gates pass. The only substantive finding is a Recommendation — the unmentioned `HandlePod`/dedupe ordering race that can shadow the new `pod_oom_killed` value in production — worth a one-line acknowledgment in the prompt before approval. Priority action: apply Recommendation 1 (and optionally 2), then approve.
+[23:55:26] [system: background_tasks_changed]
+[23:55:26] [system: task_updated]
+[23:55:26] [system: task_notification]
+[23:55:27] [system: thinking_tokens]
+[23:55:27] [system: thinking_tokens]
+[23:55:27] [system: thinking_tokens]
+[23:55:27] [system: thinking_tokens]
+[23:55:27] [system: thinking_tokens]
+[23:55:27] [system: thinking_tokens]
+[23:55:27] [system: thinking_tokens]
+[23:55:27] [system: thinking_tokens]
+[23:55:27] [system: thinking_tokens]
+[23:55:27] [system: thinking_tokens]
+[23:55:27] [system: thinking_tokens]
+[23:55:27] [system: thinking_tokens]
+[23:55:27] [system: thinking_tokens]
+[23:55:27] [system: thinking_tokens]
+[23:55:27] [system: thinking_tokens]
+[23:55:27] [system: thinking_tokens]
+[23:55:27] [system: thinking_tokens]
+[23:55:27] [system: thinking_tokens]
+[23:55:27] [system: thinking_tokens]
+[23:55:27] [system: thinking_tokens]
+[23:55:27] [system: thinking_tokens]
+[23:55:27] [system: thinking_tokens]
+[23:55:27] [system: thinking_tokens]
+[23:55:27] [system: thinking_tokens]
+[23:55:27] [system: thinking_tokens]
+[23:55:27] [system: thinking_tokens]
+[23:55:27] [system: thinking_tokens]
+[23:55:27] [system: thinking_tokens]
+[23:55:27] [system: thinking_tokens]
+[23:55:27] [system: thinking_tokens]
+[23:55:27] [system: thinking_tokens]
+[23:55:27] [system: thinking_tokens]
+[23:55:27] [system: thinking_tokens]
+[23:55:27] [system: thinking_tokens]
+[23:55:27] [system: thinking_tokens]
+[23:55:27] [system: thinking_tokens]
+[23:55:27] [system: thinking_tokens]
+[23:55:27] [system: thinking_tokens]
+[23:55:27] [system: thinking_tokens]
+[23:55:27] [system: thinking_tokens]
+[23:55:27] [system: thinking_tokens]
+[23:55:27] [system: thinking_tokens]
+[23:55:27] [system: thinking_tokens]
+[23:55:27] [system: thinking_tokens]
+[23:55:27] [system: thinking_tokens]
+[23:55:27] [system: thinking_tokens]
+[23:55:27] [system: thinking_tokens]
+[23:55:27] [system: thinking_tokens]
+[23:55:27] [system: thinking_tokens]
+[23:55:27] [system: thinking_tokens]
+[23:55:27] [system: thinking_tokens]
+[23:55:27] [system: thinking_tokens]
+[23:55:27] [system: thinking_tokens]
+[23:55:27] [system: thinking_tokens]
+[23:55:27] [system: thinking_tokens]
+[23:55:27] [system: thinking_tokens]
+[23:55:27] [system: thinking_tokens]
+[23:55:28] [system: thinking_tokens]
+[23:55:28] [system: thinking_tokens]
+[23:55:28] [system: thinking_tokens]
+[23:55:28] [system: thinking_tokens]
+[23:55:28] [system: thinking_tokens]
+[23:55:28] [system: thinking_tokens]
+[23:55:28] [system: thinking_tokens]
+[23:55:28] [system: thinking_tokens]
+[23:55:28] [system: thinking_tokens]
+[23:55:28] [system: thinking_tokens]
+[23:55:28] [system: thinking_tokens]
+[23:55:28] [system: thinking_tokens]
+[23:55:28] [system: thinking_tokens]
+[23:55:28] [system: thinking_tokens]
+[23:55:28] [system: thinking_tokens]
+[23:55:28] [system: thinking_tokens]
+[23:55:28] [system: thinking_tokens]
+[23:55:28] [system: thinking_tokens]
+[23:55:28] [system: thinking_tokens]
+[23:55:28] [system: thinking_tokens]
+[23:55:28] [system: thinking_tokens]
+[23:55:28] [system: thinking_tokens]
+[23:55:28] [system: thinking_tokens]
+[23:55:28] [system: thinking_tokens]
+[23:55:28] [system: thinking_tokens]
+[23:55:28] [system: thinking_tokens]
+[23:55:28] [system: thinking_tokens]
+[23:55:28] [system: thinking_tokens]
+[23:55:28] [system: thinking_tokens]
+[23:55:28] [system: thinking_tokens]
+[23:55:28] [system: thinking_tokens]
+[23:55:28] [system: thinking_tokens]
+[23:55:28] [system: thinking_tokens]
+[23:55:28] [system: thinking_tokens]
+[23:55:28] [system: thinking_tokens]
+[23:55:28] [system: thinking_tokens]
+[23:55:28] [system: thinking_tokens]
+[23:55:28] [system: thinking_tokens]
+[23:55:28] [system: thinking_tokens]
+[23:55:28] [system: thinking_tokens]
+[23:55:28] [system: thinking_tokens]
+[23:55:28] [system: thinking_tokens]
+[23:55:28] [system: thinking_tokens]
+[23:55:28] [system: thinking_tokens]
+[23:55:28] [system: thinking_tokens]
+[23:55:28] [system: thinking_tokens]
+[23:55:28] [system: thinking_tokens]
+[23:55:28] [system: thinking_tokens]
+[23:55:28] [system: thinking_tokens]
+[23:55:28] [system: thinking_tokens]
+[23:55:28] [system: thinking_tokens]
+[23:55:28] [system: thinking_tokens]
+[23:55:28] [system: thinking_tokens]
+[23:55:28] [system: thinking_tokens]
+[23:55:28] [system: thinking_tokens]
+[23:55:28] [system: thinking_tokens]
+[23:55:28] [system: thinking_tokens]
+[23:55:28] [system: thinking_tokens]
+[23:55:28] [system: thinking_tokens]
+[23:55:28] [system: thinking_tokens]
+[23:55:28] [system: thinking_tokens]
+[23:55:28] [system: thinking_tokens]
+[23:55:28] [system: thinking_tokens]
+[23:55:28] [system: thinking_tokens]
+[23:55:28] [system: thinking_tokens]
+[23:55:28] [system: thinking_tokens]
+[23:55:28] [system: thinking_tokens]
+[23:55:28] [system: thinking_tokens]
+[23:55:28] [system: thinking_tokens]
+[23:55:29] [system: thinking_tokens]
+[23:55:29] [system: thinking_tokens]
+[23:55:29] [system: thinking_tokens]
+[23:55:29] [system: thinking_tokens]
+[23:55:29] [system: thinking_tokens]
+[23:55:29] [system: thinking_tokens]
+[23:55:29] [system: thinking_tokens]
+[23:55:29] [system: thinking_tokens]
+[23:55:29] [system: thinking_tokens]
+[23:55:29] [system: thinking_tokens]
+[23:55:29] [system: thinking_tokens]
+[23:55:29] [system: thinking_tokens]
+[23:55:29] [system: thinking_tokens]
+[23:55:29] [system: thinking_tokens]
+[23:55:29] [system: thinking_tokens]
+[23:55:29] [system: thinking_tokens]
+[23:55:29] [system: thinking_tokens]
+[23:55:29] [system: thinking_tokens]
+[23:55:29] [system: thinking_tokens]
+[23:55:29] [system: thinking_tokens]
+[23:55:29] [system: thinking_tokens]
+[23:55:29] [system: thinking_tokens]
+[23:55:29] [system: thinking_tokens]
+[23:55:29] [system: thinking_tokens]
+[23:55:29] [system: thinking_tokens]
+[23:55:29] [system: thinking_tokens]
+[23:55:29] [system: thinking_tokens]
+[23:55:29] [system: thinking_tokens]
+[23:55:29] [system: thinking_tokens]
+[23:55:29] [system: thinking_tokens]
+[23:55:29] 💭 4The audit completed with a 9/10 "Excellent" score. Now I have:
+
+1. **Creator's summary** — the creator's final result message was terse ("The repo convention is the full spec slug... Let me fix the frontmatter..."), not a proper summary. I need to reconstruct the creator's summary from what I know: it wrote one file `prompts/spec-004-bug-job-failure-reason.md` (243 lines). The command says "Return: the creator's summary". Since the creator's own summary was terse, I'll present what it reported …
+[23:55:40] The audit pass is complete. `DARK_FACTORY_MANAGED=true` → **Mode 1 (daemon + container)** → the `spec mark-prompted` transition is intentionally **skipped** (the host-side generator finalizes `approved → prompted` after this container exits).
+
+---
+
+## Generated Prompts
+
+The prompt-creator produced **one prompt file** for spec `004-bug-job-failure-reason`:
+
+**`prompts/spec-004-bug-job-failure-reason.md`** (243 lines, 21.3 KB)
+
+- **Decomposition decision:** single-prompt spec (one focused bug fix → 1 prompt). Per convention, a single prompt carries no `NNN-` execution-order prefix, hence `spec-004-…` rather than `001-spec-004-…`.
+- **Key decisions (from file + audit):** split `BackoffLimitExceeded` from `DeadlineExceeded` in the job-failure classifier; add `pod_oom_killed` to the closed `ZombieReason` set; surface pod termination reason + exit code in the published failure text; design an internal Ginkgo test file (needs `w.(*jobWatcher).podLister`) mirroring the repo's `main_test.go`/`main_internal_test.go` internal/external precedent; correct the two existing tests that pinned the wrong `deadline_exceeded` mapping; add `## Unreleased` CHANGELOG.
+- **Creator's own closing note:** corrected the frontmatter to use the full spec slug (`spec: [004-bug-job-failure-reason]`) rather than a bare number, and added the Spec Failure Mode row 5 acknowledgment to requirement 8 — both confirmed present in the final file.
+- **Open questions surfaced in the prompt:** none marked by the creator; the auditor surfaced two recommendations (below) for the human reviewer to consider at approval.
+
+---
+
+## Audit Findings
+
+### prompts/spec-004-bug-job-failure-reason.md
+
+**Score: 9/10 — Status: Excellent**
+
+## DoD Checklist
+- [x] `<summary>` present and plain-language (8 bullets, observable outcomes, no file paths/struct signatures)
+- [x] `<objective>` states end state + why (2 sentences, names the motivating incident)
+- [x] `<context>` present (files with line anchors, coding plugin docs)
+- [x] `<requirements>` numbered and specific (12 steps, exact paths + code)
+- [x] `<constraints>` present (copied from spec, includes "Do NOT commit")
+- [x] `<verification>` present with runnable, container-executable commands
+- [x] All paths repo-relative (`pkg/...`) or container-backed (`/workspace/...` mount; `/home/node/.claude/...` docs verified present in-container)
+- [x] No bare `git ` commands in `<verification>`/`<requirements>` — required because daemon log shows `hideGit=true` (source=arg). None found.
+- [x] No operator-only commands in `<verification>` — `make test`/`make precommit`/`go test`/`go tool cover`/`grep` only; the kubectl/docker mentions are prose prohibitions (line 242 explicitly defers them to the spec ladder), not commands
+- [x] File in `prompts/` inbox (not `prompts/in-progress/`)
+- [x] Filename `spec-004-bug-job-failure-reason.md` — no dark-factory global `NNN-` prefix; no ordering prefix needed (single-prompt spec)
+- [x] Filename reflects primary change (matches objective/summary)
+- [x] Status is `draft`; frontmatter has only `spec`/`status`/`created`; `spec: [004-bug-job-failure-reason]` matches the canonical slug of `/workspace/specs/in-progress/004-bug-job-failure-reason.md`
+
+## Failure Mode Coverage
+- [x] Spec failure modes addressed: all 6 rows covered — rows 1+3 (req 9 nil-lister test + req 10d empty-cache test), row 2 (req 10b non-OOM), row 4 (req 10c multi-pod), row 5 (req 8 explicitly declares pre-existing dedupe, do-not-modify), row 6 (req 3 split, no merge)
+- [x] Security section — N/A (spec has none)
+- [x] External calls have timeout/cancellation — N/A (no new external calls; `PodLister().List()` is an in-memory informer cache)
+- [x] New strings/values crossing boundaries have contract tests — `pod_oom_killed` is exercised through the real production path `HandleJob → failureReason → handleTerminal → publishSyntheticFailure → PublishFailure` with the fake publisher, asserting exact composed strings (level-2 integration)
+- [x] No `go mod vendor` in `<requirements>`/`<verification>`
+- [x] No cross-repo writes (no `git clone`/`git push`/`gh pr create` anywhere in the prompt)
+- [x] Container-autonomous: no operator-vs-agent step split, no rollout/deploy/observe steps
+- [x/!] Sibling entry points: `HandlePod`/`classifyPodFailure` is a parallel publish path not mentioned by the prompt — flagged as Recommendation (below); spec does not name it as a change target, so not Critical
+
+## Documentation Placement
+- [x] No inlined reusable patterns >10 lines that belong in a doc (inlined snippets are load-bearing contracts, each pinned to an existing file to mirror)
+- [x] No project doc ignored — `/workspace/docs/` contains only `agent-crd-specification.md` (irrelevant to this change)
+- [x] Coding plugin docs referenced in `<context>` — `go-testing-guide.md`, `go-error-wrapping-guide.md`, `go-glog-guide.md`, `changelog-guide.md`, `definition-of-done.md` all verified present at `/home/node/.claude/plugins/marketplaces/coding/docs/`
+- [x] No domain knowledge inlined that should live in project docs
+
+## Code Reference Verification
+All references verified against source:
+
+| Reference | File | Status |
+|-----------|------|--------|
+| `JobFailureReason` (lines ~249-267) | `pkg/job_watcher.go:257-267` | Verified |
+| `HandleJob` (lines ~139-162) | `pkg/job_watcher.go:139-162` | Verified |
+| `handleTerminal` (lines ~164-182, `reason ZombieReason` at 173) | `pkg/job_watcher.go:169-182` | Verified |
+| `publishSyntheticFailure` (lines ~184-197, `reason.String()` at 191) | `pkg/job_watcher.go:184-197` | Verified |
+| `PodLister()` (lines ~131-137), `podLister atomic.Pointer` (line 65) | `pkg/job_watcher.go:65,131-137` | Verified |
+| `classifyPodFailure`/`ownerJobName` (lines ~320-363) | `pkg/job_watcher.go:327-352,356-363` | Verified |
+| `ZombieReason` closed set, `ZombieReasonTypeMismatch` last const | `pkg/zombie_reason.go:13-21` | Verified |
+| Two `BackoffLimitExceeded` assertions (~240, ~271) and two `DeadlineExceeded` (~220, ~262) | `pkg/job_watcher_test.go:240-258,271-278,220-237,262-268` | Verified |
+| `String()` assertions ending at `type_mismatch` | `pkg/zombie_reason_test.go:34-36` | Verified |
+| Informer-indexer `GetIndexer().Add` + `.Lister()` pattern | `pkg/zombie_sweeper_test.go:115-126` | Verified |
+| `PublishFailure` (lines ~171-230) writes reason verbatim to `- **Reason:**`; dedupe keyed on jobName | `pkg/result_publisher.go:171-230`, `:103` | Verified |
+| `PublishFailure` interface signature `(ctx, task, jobName, reason string)` | `pkg/result_publisher.go:34-44` | Verified |
+| Mock `PublishFailureArgsForCall` returns 4 values | `mocks/result_publisher.go:131` | Verified |
+| `RunSpecs(t, "Pkg Suite")` in `package pkg_test` | `pkg/agent_configuration_test.go:17-19` | Verified (internal-test file's `Describe` blocks will run under this suite) |
+| Internal/external test precedent `main_test.go` + `main_internal_test.go` | `/workspace/main_internal_test.go:5`, `/workspace/main_test.go:5` | Verified |
+| CHANGELOG: no `## Unreleased`, latest `v0.8.0` | `CHANGELOG.md:5` | Verified |
+| goimports-reviser `-format` precommit step | `Makefile.precommit:15`, `.golangci.yml:111` | Verified |
+| `NewTaskStore` exists | `pkg/task_store.go:22` | Verified |
+| Non-goal sweeper fallback `return ZombieReasonDeadlineExceeded` | `pkg/zombie_sweeper.go:238-239` | Verified |
+| `lib.Task`/`TaskIdentifier`/`TaskFrontmatter` — in-repo precedent | `pkg/job_watcher_test.go:38-46` | Verified |
+
+## Coding Guidelines Compliance
+| Guideline | File | Status |
+|-----------|------|--------|
+| `fmt.Sprintf` for string building, never `fmt.Errorf` (explicitly instructed) | `go-error-wrapping-guide.md` | Compliant |
+| glog `V(n)` gating, `glog.Errorf` for lookup errors | `go-glog-guide.md` | Compliant |
+| Ginkgo/Gomega v2, no stdlib table tests | `go-testing-guide.md` | Compliant |
+| Counterfeiter mocks (reuses existing `mocks.FakeResultPublisher`, no interface change → no regen needed) | `go-testing-guide.md` | Compliant |
+| No test-only package-level mutable state; no `var X = default` + `SetX` pattern | `go-composition.md` | Compliant |
+| New enum value follows existing closed-set pattern (const + `String()`, no `Validate()` — consistent with current `ZombieReason`) | `go-enum-type-pattern.md` | Compliant |
+
+## YAGNI Pass (scope-creep detector)
+- [x] No opt-out flag / escape hatch rejecting the Goal
+- [x] Every new function (`isBackoffLimitExceeded`, `hasNonZeroTerminatedContainer`, `terminalPodDetail`, `failureReason`, `backoffFailureReason`) maps directly to a spec Desired Behavior / Failure Mode / AC
+- [x] Every test scenario (a–e) maps to an AC or Failure Mode row; no tunable thresholds, no unrequested configurability
+- [x] No "future-proofing" knobs. Clean.
+
+## Critical Issues
+None. All DoD-critical gates pass: container-autonomy, hideGit (no git commands despite `hideGit=true`), no operator-only verification, no cross-repo writes, no `go mod vendor`, no stale code references, complete failure-mode coverage.
+
+## Recommendations
+1. **HandlePod sibling / dedupe ordering race (the one substantive gap).** `HandlePod` (`pkg/job_watcher.go:273`) publishes `pod_crash_no_stdout` for the same OOM-killed pod via `classifyPodFailure` and records the job-name dedupe key (`result_publisher.go:103,119`). When the pod informer event fires before the Job-condition event (typical for OOM kills — the pod dies before the controller sets `BackoffLimitExceeded`), `checkDedupe(jobName)` suppresses the new `pod_oom_killed (OOMKilled/137)` publish from the Job-condition path. The prompt's integration tests call `HandleJob` directly and never exercise this ordering, so the new value's production reachability is unverified. The spec scopes the fix to the Job-condition path and does not name `HandlePod`, so this is a Recommendation, not a Critical.
+   Find/replace — in `<requirements>` step 8, replace the final sentence:
+   > "Spec Failure Mode row 5 (executor crashes mid-publish after classifying) is pre-existing behavior, NOT new work: `PublishFailure` is at-least-once via Kafka and its dedupe (keyed on job name) in `/workspace/pkg/result_publisher.go` already absorbs re-delivery. Do not modify that dedupe code."
+   with:
+   > "Spec Failure Mode row 5 (executor crashes mid-publish after classifying) is pre-existing behavior, NOT new work: `PublishFailure` is at-least-once via Kafka and its dedupe (keyed on job name) in `/workspace/pkg/result_publisher.go` already absorbs re-delivery. Do not modify that dedupe code. Note: the pod-informer entry point (`HandlePod` → `classifyPodFailure`) also publishes for an OOM-killed pod (`pod_crash_no_stdout`) under the same job-name dedupe key, so if the pod event lands before the Job-condition event the `pod_oom_killed` string is dedupe-suppressed. Do NOT change `HandlePod`/`classifyPodFailure` (out of scope), but document this ordering in the new internal test file so the shadowed path is not mistaken for a regression."
+
+2. **Requirement 3 overstates the `DeadlineExceeded`-always-wins invariant.** The new `JobFailureReason` returns the reason of whichever Failed condition iterates first; with both `BackoffLimitExceeded` and `DeadlineExceeded` present in that order, it yields `pod_crash_no_stdout` and the backoff path runs — not `deadline_exceeded`. Kubernetes emits a single Failed condition so this is theoretical, and spec Failure Mode row 6 only requires "either mapping is specific, never a silent merge" (which the code delivers). Minor doc/requirement mismatch, not a functional bug.
+   Find/replace — in `<requirements>` step 3, replace:
+   > "Do NOT merge the two conditions — a `DeadlineExceeded` condition always yields `deadline_exceeded`, even if a `BackoffLimitExceeded` condition is also present."
+   with:
+   > "Do NOT merge the two conditions — a `DeadlineExceeded` condition yields `deadline_exceeded`, and a `BackoffLimitExceeded` condition yields the distinct pod-failure reason (whichever Failed condition iterates first wins; k8s emits a single Failed condition in practice)."
+
+## Strengths
+- Every cited line number verified accurate to within a few lines — no stale references.
+- Requirements are fully load-bearing: exact function signatures, imports, and find-and-replace patterns for both the classifier and the existing tests.
+- Complete failure-mode and AC coverage, with each test scenario explicitly cross-referenced to the spec row it satisfies (req 10a "satisfies ACs 2a, 3, and 4").
+- Boundary-crossing handled correctly: the composed reason strings are asserted at the real `PublishFailure` boundary (level-2 integration through `HandleJob`), not just as constant-value tests.
+- The internal test file is properly justified (needs `w.(*jobWatcher).podLister`) and mirrors the repo's established internal/external precedent; the suite bootstrap (`TestPkg`/`RunSpecs`) will pick up the new specs.
+- Container-executable verification is honest (no exit-code-masked operator commands) and the prompt proactively bans `docker`/`kubectl`/`dark-factory` from itself.
+- YAGNI-clean: no scope creep beyond the spec's Goal, and non-goals (sweeper fallback, memory limit, permissions) are explicitly load-bearing.
+
+## Summary
+An exemplary, fully verified prompt: every code reference checks out against source, the internal-test design compiles mentally, failure modes and ACs are exhaustively covered, and all container-autonomy/hideGit/operator-only gates pass. The only substantive finding is a Recommendation — the unmentioned `HandlePod`/dedupe ordering race that can shadow the new `pod_oom_killed` value in production — worth a one-line acknowledgment in the prompt before approval. Priority action: apply Recommendation 1 (and optionally 2), then approve.
+
+---
+
+**Spec lifecycle note:** `spec mark-prompted` was **not** run — `DARK_FACTORY_MANAGED=true` (Mode 1), so the host-side generator will finalize `004-bug-job-failure-reason` from `approved → prompted` itself after this container exits. The prompt file remains in the `prompts/` inbox at `status: draft`, ready for the human reviewer's approval.
+[23:55:40] result: The audit pass is complete. `DARK_FACTORY_MANAGED=true` → **Mode 1 (daemon + container)** → the `spec mark-prompted` transition is intentionally **skipped** (the host-side generator finalizes `approved → prompted` after this container exits).
+
+---
+
+## Generated Prompts
+
+The prompt-creator produced **one prompt file** for spec `004-bug-job-failure-reason`:
+
+**`prompts/spec-004-bug-job-failure-reason.md`** (243 lines, 21.3 KB)
+
+- **Decomposition decision:** single-prompt spec (one focused bug fix → 1 prompt). Per convention, a single prompt carries no `NNN-` execution-order prefix, hence `spec-004-…` rather than `001-spec-004-…`.
+- **Key decisions (from file + audit):** split `BackoffLimitExceeded` from `DeadlineExceeded` in the job-failure classifier; add `pod_oom_killed` to the closed `ZombieReason` set; surface pod termination reason + exit code in the published failure text; design an internal Ginkgo test file (needs `w.(*jobWatcher).podLister`) mirroring the repo's `main_test.go`/`main_internal_test.go` internal/external precedent; correct the two existing tests that pinned the wrong `deadline_exceeded` mapping; add `## Unreleased` CHANGELOG.
+- **Creator's own closing note:** corrected the frontmatter to use the full spec slug (`spec: [004-bug-job-failure-reason]`) rather than a bare number, and added the Spec Failure Mode row 5 acknowledgment to requirement 8 — both confirmed present in the final file.
+- **Open questions surfaced in the prompt:** none marked by the creator; the auditor surfaced two recommendations (below) for the human reviewer to consider at approval.
+
+---
+
+## Audit Findings
+
+### prompts/spec-004-bug-job-failure-reason.md
+
+**Score: 9/10 — Status: Excellent**
+
+## DoD Checklist
+- [x] `<summary>` present and plain-language (8 bullets, observable outcomes, no file paths/struct signatures)
+- [x] `<objective>` states end state + why (2 sentences, names the motivating incident)
+- [x] `<context>` present (files with line anchors, coding plugin docs)
+- [x] `<requirements>` numbered and specific (12 steps, exact paths + code)
+- [x] `<constraints>` present (copied from spec, includes "Do NOT commit")
+- [x] `<verification>` present with runnable, container-executable commands
+- [x] All paths repo-relative (`pkg/...`) or container-backed (`/workspace/...` mount; `/home/node/.claude/...` docs verified present in-container)
+- [x] No bare `git ` commands in `<verification>`/`<requirements>` — required because daemon log shows `hideGit=true` (source=arg). None found.
+- [x] No operator-only commands in `<verification>` — `make test`/`make precommit`/`go test`/`go tool cover`/`grep` only; the kubectl/docker mentions are prose prohibitions (line 242 explicitly defers them to the spec ladder), not commands
+- [x] File in `prompts/` inbox (not `prompts/in-progress/`)
+- [x] Filename `spec-004-bug-job-failure-reason.md` — no dark-factory global `NNN-` prefix; no ordering prefix needed (single-prompt spec)
+- [x] Filename reflects primary change (matches objective/summary)
+- [x] Status is `draft`; frontmatter has only `spec`/`status`/`created`; `spec: [004-bug-job-failure-reason]` matches the canonical slug of `/workspace/specs/in-progress/004-bug-job-failure-reason.md`
+
+## Failure Mode Coverage
+- [x] Spec failure modes addressed: all 6 rows covered — rows 1+3 (req 9 nil-lister test + req 10d empty-cache test), row 2 (req 10b non-OOM), row 4 (req 10c multi-pod), row 5 (req 8 explicitly declares pre-existing dedupe, do-not-modify), row 6 (req 3 split, no merge)
+- [x] Security section — N/A (spec has none)
+- [x] External calls have timeout/cancellation — N/A (no new external calls; `PodLister().List()` is an in-memory informer cache)
+- [x] New strings/values crossing boundaries have contract tests — `pod_oom_killed` is exercised through the real production path `HandleJob → failureReason → handleTerminal → publishSyntheticFailure → PublishFailure` with the fake publisher, asserting exact composed strings (level-2 integration)
+- [x] No `go mod vendor` in `<requirements>`/`<verification>`
+- [x] No cross-repo writes (no `git clone`/`git push`/`gh pr create` anywhere in the prompt)
+- [x] Container-autonomous: no operator-vs-agent step split, no rollout/deploy/observe steps
+- [x/!] Sibling entry points: `HandlePod`/`classifyPodFailure` is a parallel publish path not mentioned by the prompt — flagged as Recommendation (below); spec does not name it as a change target, so not Critical
+
+## Documentation Placement
+- [x] No inlined reusable patterns >10 lines that belong in a doc (inlined snippets are load-bearing contracts, each pinned to an existing file to mirror)
+- [x] No project doc ignored — `/workspace/docs/` contains only `agent-crd-specification.md` (irrelevant to this change)
+- [x] Coding plugin docs referenced in `<context>` — `go-testing-guide.md`, `go-error-wrapping-guide.md`, `go-glog-guide.md`, `changelog-guide.md`, `definition-of-done.md` all verified present at `/home/node/.claude/plugins/marketplaces/coding/docs/`
+- [x] No domain knowledge inlined that should live in project docs
+
+## Code Reference Verification
+All references verified against source:
+
+| Reference | File | Status |
+|-----------|------|--------|
+| `JobFailureReason` (lines ~249-267) | `pkg/job_watcher.go:257-267` | Verified |
+| `HandleJob` (lines ~139-162) | `pkg/job_watcher.go:139-162` | Verified |
+| `handleTerminal` (lines ~164-182, `reason ZombieReason` at 173) | `pkg/job_watcher.go:169-182` | Verified |
+| `publishSyntheticFailure` (lines ~184-197, `reason.String()` at 191) | `pkg/job_watcher.go:184-197` | Verified |
+| `PodLister()` (lines ~131-137), `podLister atomic.Pointer` (line 65) | `pkg/job_watcher.go:65,131-137` | Verified |
+| `classifyPodFailure`/`ownerJobName` (lines ~320-363) | `pkg/job_watcher.go:327-352,356-363` | Verified |
+| `ZombieReason` closed set, `ZombieReasonTypeMismatch` last const | `pkg/zombie_reason.go:13-21` | Verified |
+| Two `BackoffLimitExceeded` assertions (~240, ~271) and two `DeadlineExceeded` (~220, ~262) | `pkg/job_watcher_test.go:240-258,271-278,220-237,262-268` | Verified |
+| `String()` assertions ending at `type_mismatch` | `pkg/zombie_reason_test.go:34-36` | Verified |
+| Informer-indexer `GetIndexer().Add` + `.Lister()` pattern | `pkg/zombie_sweeper_test.go:115-126` | Verified |
+| `PublishFailure` (lines ~171-230) writes reason verbatim to `- **Reason:**`; dedupe keyed on jobName | `pkg/result_publisher.go:171-230`, `:103` | Verified |
+| `PublishFailure` interface signature `(ctx, task, jobName, reason string)` | `pkg/result_publisher.go:34-44` | Verified |
+| Mock `PublishFailureArgsForCall` returns 4 values | `mocks/result_publisher.go:131` | Verified |
+| `RunSpecs(t, "Pkg Suite")` in `package pkg_test` | `pkg/agent_configuration_test.go:17-19` | Verified (internal-test file's `Describe` blocks will run under this suite) |
+| Internal/external test precedent `main_test.go` + `main_internal_test.go` | `/workspace/main_internal_test.go:5`, `/workspace/main_test.go:5` | Verified |
+| CHANGELOG: no `## Unreleased`, latest `v0.8.0` | `CHANGELOG.md:5` | Verified |
+| goimports-reviser `-format` precommit step | `Makefile.precommit:15`, `.golangci.yml:111` | Verified |
+| `NewTaskStore` exists | `pkg/task_store.go:22` | Verified |
+| Non-goal sweeper fallback `return ZombieReasonDeadlineExceeded` | `pkg/zombie_sweeper.go:238-239` | Verified |
+| `lib.Task`/`TaskIdentifier`/`TaskFrontmatter` — in-repo precedent | `pkg/job_watcher_test.go:38-46` | Verified |
+
+## Coding Guidelines Compliance
+| Guideline | File | Status |
+|-----------|------|--------|
+| `fmt.Sprintf` for string building, never `fmt.Errorf` (explicitly instructed) | `go-error-wrapping-guide.md` | Compliant |
+| glog `V(n)` gating, `glog.Errorf` for lookup errors | `go-glog-guide.md` | Compliant |
+| Ginkgo/Gomega v2, no stdlib table tests | `go-testing-guide.md` | Compliant |
+| Counterfeiter mocks (reuses existing `mocks.FakeResultPublisher`, no interface change → no regen needed) | `go-testing-guide.md` | Compliant |
+| No test-only package-level mutable state; no `var X = default` + `SetX` pattern | `go-composition.md` | Compliant |
+| New enum value follows existing closed-set pattern (const + `String()`, no `Validate()` — consistent with current `ZombieReason`) | `go-enum-type-pattern.md` | Compliant |
+
+## YAGNI Pass (scope-creep detector)
+- [x] No opt-out flag / escape hatch rejecting the Goal
+- [x] Every new function (`isBackoffLimitExceeded`, `hasNonZeroTerminatedContainer`, `terminalPodDetail`, `failureReason`, `backoffFailureReason`) maps directly to a spec Desired Behavior / Failure Mode / AC
+- [x] Every test scenario (a–e) maps to an AC or Failure Mode row; no tunable thresholds, no unrequested configurability
+- [x] No "future-proofing" knobs. Clean.
+
+## Critical Issues
+None. All DoD-critical gates pass: container-autonomy, hideGit (no git commands despite `hideGit=true`), no operator-only verification, no cross-repo writes, no `go mod vendor`, no stale code references, complete failure-mode coverage.
+
+## Recommendations
+1. **HandlePod sibling / dedupe ordering race (the one substantive gap).** `HandlePod` (`pkg/job_watcher.go:273`) publishes `pod_crash_no_stdout` for the same OOM-killed pod via `classifyPodFailure` and records the job-name dedupe key (`result_publisher.go:103,119`). When the pod informer event fires before the Job-condition event (typical for OOM kills — the pod dies before the controller sets `BackoffLimitExceeded`), `checkDedupe(jobName)` suppresses the new `pod_oom_killed (OOMKilled/137)` publish from the Job-condition path. The prompt's integration tests call `HandleJob` directly and never exercise this ordering, so the new value's production reachability is unverified. The spec scopes the fix to the Job-condition path and does not name `HandlePod`, so this is a Recommendation, not a Critical.
+   Find/replace — in `<requirements>` step 8, replace the final sentence:
+   > "Spec Failure Mode row 5 (executor crashes mid-publish after classifying) is pre-existing behavior, NOT new work: `PublishFailure` is at-least-once via Kafka and its dedupe (keyed on job name) in `/workspace/pkg/result_publisher.go` already absorbs re-delivery. Do not modify that dedupe code."
+   with:
+   > "Spec Failure Mode row 5 (executor crashes mid-publish after classifying) is pre-existing behavior, NOT new work: `PublishFailure` is at-least-once via Kafka and its dedupe (keyed on job name) in `/workspace/pkg/result_publisher.go` already absorbs re-delivery. Do not modify that dedupe code. Note: the pod-informer entry point (`HandlePod` → `classifyPodFailure`) also publishes for an OOM-killed pod (`pod_crash_no_stdout`) under the same job-name dedupe key, so if the pod event lands before the Job-condition event the `pod_oom_killed` string is dedupe-suppressed. Do NOT change `HandlePod`/`classifyPodFailure` (out of scope), but document this ordering in the new internal test file so the shadowed path is not mistaken for a regression."
+
+2. **Requirement 3 overstates the `DeadlineExceeded`-always-wins invariant.** The new `JobFailureReason` returns the reason of whichever Failed condition iterates first; with both `BackoffLimitExceeded` and `DeadlineExceeded` present in that order, it yields `pod_crash_no_stdout` and the backoff path runs — not `deadline_exceeded`. Kubernetes emits a single Failed condition so this is theoretical, and spec Failure Mode row 6 only requires "either mapping is specific, never a silent merge" (which the code delivers). Minor doc/requirement mismatch, not a functional bug.
+   Find/replace — in `<requirements>` step 3, replace:
+   > "Do NOT merge the two conditions — a `DeadlineExceeded` condition always yields `deadline_exceeded`, even if a `BackoffLimitExceeded` condition is also present."
+   with:
+   > "Do NOT merge the two conditions — a `DeadlineExceeded` condition yields `deadline_exceeded`, and a `BackoffLimitExceeded` condition yields the distinct pod-failure reason (whichever Failed condition iterates first wins; k8s emits a single Failed condition in practice)."
+
+## Strengths
+- Every cited line number verified accurate to within a few lines — no stale references.
+- Requirements are fully load-bearing: exact function signatures, imports, and find-and-replace patterns for both the classifier and the existing tests.
+- Complete failure-mode and AC coverage, with each test scenario explicitly cross-referenced to the spec row it satisfies (req 10a "satisfies ACs 2a, 3, and 4").
+- Boundary-crossing handled correctly: the composed reason strings are asserted at the real `PublishFailure` boundary (level-2 integration through `HandleJob`), not just as constant-value tests.
+- The internal test file is properly justified (needs `w.(*jobWatcher).podLister`) and mirrors the repo's established internal/external precedent; the suite bootstrap (`TestPkg`/`RunSpecs`) will pick up the new specs.
+- Container-executable verification is honest (no exit-code-masked operator commands) and the prompt proactively bans `docker`/`kubectl`/`dark-factory` from itself.
+- YAGNI-clean: no scope creep beyond the spec's Goal, and non-goals (sweeper fallback, memory limit, permissions) are explicitly load-bearing.
+
+## Summary
+An exemplary, fully verified prompt: every code reference checks out against source, the internal-test design compiles mentally, failure modes and ACs are exhaustively covered, and all container-autonomy/hideGit/operator-only gates pass. The only substantive finding is a Recommendation — the unmentioned `HandlePod`/dedupe ordering race that can shadow the new `pod_oom_killed` value in production — worth a one-line acknowledgment in the prompt before approval. Priority action: apply Recommendation 1 (and optionally 2), then approve.
+
+---
+
+**Spec lifecycle note:** `spec mark-prompted` was **not** run — `DARK_FACTORY_MANAGED=true` (Mode 1), so the host-side generator will finalize `004-bug-job-failure-reason` from `approved → prompted` itself after this container exits. The prompt file remains in the `prompts/` inbox at `status: draft`, ready for the human reviewer's approval. | duration: 383399ms | cost: $4.2459 | tokens: 892 in / 7855 out
