@@ -502,6 +502,7 @@ var _ = Describe("TaskEventHandler", func() {
 					Frontmatter: lib.TaskFrontmatter{
 						"status":        "in_progress",
 						"phase":         string(domain.TaskPhaseAIReview),
+						"trigger_scope": "ai_review:",
 						"assignee":      "claude",
 						"stage":         "prod",
 						"trigger_count": 1,
@@ -525,10 +526,13 @@ var _ = Describe("TaskEventHandler", func() {
 			task := lib.Task{
 				TaskIdentifier: lib.TaskIdentifier("test-task-uuid-1234"),
 				Frontmatter: lib.TaskFrontmatter{
-					"status":   "in_progress",
-					"phase":    string(domain.TaskPhaseAIReview),
-					"assignee": "claude",
-					"stage":    "prod",
+					"status": "in_progress",
+					"phase":  string(domain.TaskPhaseAIReview),
+					// Matches triggerScope() for this phase with no ref, so the task
+					// takes the same-scope increment path rather than scope adoption.
+					"trigger_scope": "ai_review:",
+					"assignee":      "claude",
+					"stage":         "prod",
 				},
 			}
 			err := h.ConsumeMessage(ctx, buildMsg(task))
@@ -543,6 +547,7 @@ var _ = Describe("TaskEventHandler", func() {
 				Frontmatter: lib.TaskFrontmatter{
 					"status":        "in_progress",
 					"phase":         string(domain.TaskPhaseAIReview),
+					"trigger_scope": "ai_review:",
 					"assignee":      "claude",
 					"stage":         "prod",
 					"trigger_count": 3,
@@ -558,8 +563,16 @@ var _ = Describe("TaskEventHandler", func() {
 		It("does not skip spawn when max_triggers is absent (recurring task)", func() {
 			fakeSpawner.IsJobActiveReturns(false, nil)
 			fakeSpawner.SpawnJobReturns("sentry-collector-job-1", nil)
-			// trigger_count 5 would trip the lib default-3 cap; absent max_triggers
-			// means no cap, so the recurring daily trigger keeps re-dispatching.
+			// The regression guard for the 2026-08-27 Daily Sentry Triage incident,
+			// where the lib default-3 fallback stripped assignee on the 3rd trigger
+			// and silently killed the re-dispatch loop. trigger_count 5 would trip
+			// that fallback; absent max_triggers means no cap, so the recurring
+			// daily trigger keeps re-dispatching.
+			//
+			// Scoping must NOT change this. A recurring task is not repo-backed: it
+			// carries no ref and sits at a stable phase, so its scope is constant
+			// and would never earn a reset. That is precisely why the cap stays
+			// opt-in rather than being flipped default-on.
 			task := lib.Task{
 				TaskIdentifier: lib.TaskIdentifier("test-task-cap-absent"),
 				Frontmatter: lib.TaskFrontmatter{
@@ -572,8 +585,150 @@ var _ = Describe("TaskEventHandler", func() {
 			}
 			err := h.ConsumeMessage(ctx, buildMsg(task))
 			Expect(err).To(BeNil())
-			Expect(fakeResultPublisher.PublishIncrementTriggerCountCallCount()).To(Equal(1))
 			Expect(fakeSpawner.SpawnJobCallCount()).To(Equal(1))
+			// No trigger_scope on disk, so this task adopts the current scope rather
+			// than incrementing. Adoption carries the existing count forward (5+1),
+			// never resetting it — a task already at cap must not gain a free budget
+			// on the first event after deploy.
+			Expect(fakeResultPublisher.PublishIncrementTriggerCountCallCount()).To(Equal(0))
+			Expect(fakeResultPublisher.PublishSetTriggerScopeCallCount()).To(Equal(1))
+			_, _, scope, count := fakeResultPublisher.PublishSetTriggerScopeArgsForCall(0)
+			Expect(scope).To(Equal("planning:"))
+			Expect(count).To(Equal(6))
+		})
+
+		It("resets the budget when the ref changes (new commit earns a retry)", func() {
+			fakeSpawner.IsJobActiveReturns(false, nil)
+			fakeSpawner.SpawnJobReturns("github-update-go-job-1", nil)
+			// At cap under the old scope, but the target repo moved to a new commit.
+			// This is the operator fixing a broken gate and pushing: the failure is
+			// no longer the same failure, so the task earns a fresh budget.
+			task := lib.Task{
+				TaskIdentifier: lib.TaskIdentifier("test-task-scope-newref"),
+				Frontmatter: lib.TaskFrontmatter{
+					"status":        "in_progress",
+					"phase":         string(domain.TaskPhaseAIReview),
+					"trigger_scope": "ai_review:d0d96f7a",
+					"ref":           "9c4e1b77aaaaaaaaaaaaaaaa",
+					"assignee":      "github-update-go-agent",
+					"stage":         "prod",
+					"trigger_count": 3,
+					"max_triggers":  3,
+				},
+			}
+			err := h.ConsumeMessage(ctx, buildMsg(task))
+			Expect(err).To(BeNil())
+			Expect(fakeSpawner.SpawnJobCallCount()).To(Equal(1))
+			Expect(fakeResultPublisher.PublishSetTriggerScopeCallCount()).To(Equal(1))
+			_, _, scope, count := fakeResultPublisher.PublishSetTriggerScopeArgsForCall(0)
+			Expect(scope).To(Equal("ai_review:9c4e1b77"))
+			Expect(count).To(Equal(1))
+		})
+
+		It("keeps capping when the ref is unchanged (deterministic gate failure)", func() {
+			fakeSpawner.IsJobActiveReturns(false, nil)
+			// The incident shape: a gate broken at one commit, retried forever. Same
+			// phase, same ref, so the scope never moves and the budget stays spent.
+			task := lib.Task{
+				TaskIdentifier: lib.TaskIdentifier("test-task-scope-sameref"),
+				Frontmatter: lib.TaskFrontmatter{
+					"status":        "in_progress",
+					"phase":         string(domain.TaskPhaseAIReview),
+					"trigger_scope": "ai_review:d0d96f7a",
+					"ref":           "d0d96f7abbbbbbbbbbbbbbbb",
+					"assignee":      "github-update-go-agent",
+					"stage":         "prod",
+					"trigger_count": 3,
+					"max_triggers":  3,
+				},
+			}
+			err := h.ConsumeMessage(ctx, buildMsg(task))
+			Expect(err).To(BeNil())
+			Expect(fakeSpawner.SpawnJobCallCount()).To(Equal(0))
+			Expect(fakeResultPublisher.PublishSetTriggerScopeCallCount()).To(Equal(0))
+			Expect(fakeResultPublisher.PublishIncrementTriggerCountCallCount()).To(Equal(0))
+		})
+
+		It("does not hand a task already at cap a free budget on scope adoption", func() {
+			fakeSpawner.IsJobActiveReturns(false, nil)
+			fakeSpawner.SpawnJobReturns("claude-job-adopt", nil)
+			// The migration case: a task in flight before trigger_scope existed, and
+			// already at cap. An ABSENT scope must not read as a CHANGED scope — if
+			// it did, this task would reset to a fresh budget on the first event
+			// after deploy and resume looping for another full round.
+			//
+			// It never reaches scope adoption: absent means not-changed, so the cap
+			// check fires first and the spawn is skipped outright. No publish at all.
+			task := lib.Task{
+				TaskIdentifier: lib.TaskIdentifier("test-task-scope-adopt-atcap"),
+				Frontmatter: lib.TaskFrontmatter{
+					"status":        "in_progress",
+					"phase":         string(domain.TaskPhaseAIReview),
+					"assignee":      "claude",
+					"stage":         "prod",
+					"trigger_count": 3,
+					"max_triggers":  3,
+				},
+			}
+			err := h.ConsumeMessage(ctx, buildMsg(task))
+			Expect(err).To(BeNil())
+			Expect(fakeSpawner.SpawnJobCallCount()).To(Equal(0))
+			Expect(fakeResultPublisher.PublishSetTriggerScopeCallCount()).To(Equal(0))
+			Expect(fakeResultPublisher.PublishIncrementTriggerCountCallCount()).To(Equal(0))
+		})
+
+		It("adopts the scope and carries the count forward when below cap", func() {
+			fakeSpawner.IsJobActiveReturns(false, nil)
+			fakeSpawner.SpawnJobReturns("claude-job-adopt-ok", nil)
+			// Same migration case, but with budget left. The task adopts the current
+			// scope and the count moves 1 -> 2 rather than resetting to 1, so the
+			// pre-existing attempts are not forgotten.
+			task := lib.Task{
+				TaskIdentifier: lib.TaskIdentifier("test-task-scope-adopt-below"),
+				Frontmatter: lib.TaskFrontmatter{
+					"status":        "in_progress",
+					"phase":         string(domain.TaskPhaseAIReview),
+					"assignee":      "claude",
+					"stage":         "prod",
+					"trigger_count": 1,
+					"max_triggers":  3,
+				},
+			}
+			err := h.ConsumeMessage(ctx, buildMsg(task))
+			Expect(err).To(BeNil())
+			Expect(fakeSpawner.SpawnJobCallCount()).To(Equal(1))
+			Expect(fakeResultPublisher.PublishSetTriggerScopeCallCount()).To(Equal(1))
+			_, _, scope, count := fakeResultPublisher.PublishSetTriggerScopeArgsForCall(0)
+			Expect(scope).To(Equal("ai_review:"))
+			Expect(count).To(Equal(2))
+		})
+
+		It("adopts to exactly the cap, spawning now and capping on the next event", func() {
+			fakeSpawner.IsJobActiveReturns(false, nil)
+			fakeSpawner.SpawnJobReturns("claude-job-adopt-boundary", nil)
+			// Boundary between the two adoption specs above: 2 -> 3 with max_triggers 3.
+			// This spawn is allowed (the cap is checked against the count BEFORE the
+			// write, 2 < 3), and adoption lands the task exactly at the cap so the
+			// next event is skipped. Guards the off-by-one in both directions: adopting
+			// to 4 would skip a legitimate spawn, adopting to 2 would grant an extra.
+			task := lib.Task{
+				TaskIdentifier: lib.TaskIdentifier("test-task-scope-adopt-boundary"),
+				Frontmatter: lib.TaskFrontmatter{
+					"status":        "in_progress",
+					"phase":         string(domain.TaskPhaseAIReview),
+					"assignee":      "claude",
+					"stage":         "prod",
+					"trigger_count": 2,
+					"max_triggers":  3,
+				},
+			}
+			err := h.ConsumeMessage(ctx, buildMsg(task))
+			Expect(err).To(BeNil())
+			Expect(fakeSpawner.SpawnJobCallCount()).To(Equal(1))
+			Expect(fakeResultPublisher.PublishSetTriggerScopeCallCount()).To(Equal(1))
+			_, _, scope, count := fakeResultPublisher.PublishSetTriggerScopeArgsForCall(0)
+			Expect(scope).To(Equal("ai_review:"))
+			Expect(count).To(Equal(3))
 		})
 
 		It("publishes increment and spawns when below cap (happy path)", func() {
@@ -584,6 +739,7 @@ var _ = Describe("TaskEventHandler", func() {
 				Frontmatter: lib.TaskFrontmatter{
 					"status":        "in_progress",
 					"phase":         string(domain.TaskPhaseAIReview),
+					"trigger_scope": "ai_review:",
 					"assignee":      "claude",
 					"stage":         "prod",
 					"trigger_count": 1,
@@ -608,6 +764,7 @@ var _ = Describe("TaskEventHandler", func() {
 					Frontmatter: lib.TaskFrontmatter{
 						"status":        "in_progress",
 						"phase":         string(domain.TaskPhaseAIReview),
+						"trigger_scope": "ai_review:",
 						"assignee":      "claude",
 						"stage":         "prod",
 						"trigger_count": 0,
@@ -627,6 +784,7 @@ var _ = Describe("TaskEventHandler", func() {
 				Frontmatter: lib.TaskFrontmatter{
 					"status":        "in_progress",
 					"phase":         string(domain.TaskPhaseAIReview),
+					"trigger_scope": "ai_review:",
 					"assignee":      "claude",
 					"stage":         "prod",
 					"trigger_count": 0,
@@ -647,6 +805,7 @@ var _ = Describe("TaskEventHandler", func() {
 				Frontmatter: lib.TaskFrontmatter{
 					"status":        "in_progress",
 					"phase":         string(domain.TaskPhaseAIReview),
+					"trigger_scope": "ai_review:",
 					"assignee":      "claude",
 					"stage":         "prod",
 					"trigger_count": 1,
@@ -1344,8 +1503,16 @@ var _ = Describe("TaskEventHandler", func() {
 				return lib.Task{
 					TaskIdentifier: lib.TaskIdentifier("tid-deferred-037"),
 					Frontmatter: lib.TaskFrontmatter{
-						"status":         "in_progress",
-						"phase":          string(phase),
+						"status": "in_progress",
+						"phase":  string(phase),
+						// Pre-set to match triggerScope() for this phase (no ref), so these
+						// deferred-respawn specs stay on the same-scope increment path.
+						// Without it every task here would take the scope-adoption branch
+						// and publish SetTriggerScope instead — which silently defeats the
+						// specs that inject an error on PublishIncrementTriggerCount and
+						// block on the loop returning it. These tests are about grace-window
+						// and publish-failure behaviour, not about scoping.
+						"trigger_scope":  string(phase) + ":",
 						"assignee":       "claude",
 						"stage":          "prod",
 						"current_job":    "pr-reviewer-agent-cbe79223-20260517093325",
