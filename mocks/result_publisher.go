@@ -50,6 +50,20 @@ type FakeResultPublisher struct {
 	publishRawReturnsOnCall map[int]struct {
 		result1 error
 	}
+	PublishSetTriggerScopeStub        func(context.Context, lib.Task, string, int) error
+	publishSetTriggerScopeMutex       sync.RWMutex
+	publishSetTriggerScopeArgsForCall []struct {
+		arg1 context.Context
+		arg2 lib.Task
+		arg3 string
+		arg4 int
+	}
+	publishSetTriggerScopeReturns struct {
+		result1 error
+	}
+	publishSetTriggerScopeReturnsOnCall map[int]struct {
+		result1 error
+	}
 	PublishSpawnNotificationStub        func(context.Context, lib.Task, string) error
 	publishSpawnNotificationMutex       sync.RWMutex
 	publishSpawnNotificationArgsForCall []struct {
@@ -265,6 +279,70 @@ func (fake *FakeResultPublisher) PublishRawReturnsOnCall(i int, result1 error) {
 		})
 	}
 	fake.publishRawReturnsOnCall[i] = struct {
+		result1 error
+	}{result1}
+}
+
+func (fake *FakeResultPublisher) PublishSetTriggerScope(arg1 context.Context, arg2 lib.Task, arg3 string, arg4 int) error {
+	fake.publishSetTriggerScopeMutex.Lock()
+	ret, specificReturn := fake.publishSetTriggerScopeReturnsOnCall[len(fake.publishSetTriggerScopeArgsForCall)]
+	fake.publishSetTriggerScopeArgsForCall = append(fake.publishSetTriggerScopeArgsForCall, struct {
+		arg1 context.Context
+		arg2 lib.Task
+		arg3 string
+		arg4 int
+	}{arg1, arg2, arg3, arg4})
+	stub := fake.PublishSetTriggerScopeStub
+	fakeReturns := fake.publishSetTriggerScopeReturns
+	fake.recordInvocation("PublishSetTriggerScope", []interface{}{arg1, arg2, arg3, arg4})
+	fake.publishSetTriggerScopeMutex.Unlock()
+	if stub != nil {
+		return stub(arg1, arg2, arg3, arg4)
+	}
+	if specificReturn {
+		return ret.result1
+	}
+	return fakeReturns.result1
+}
+
+func (fake *FakeResultPublisher) PublishSetTriggerScopeCallCount() int {
+	fake.publishSetTriggerScopeMutex.RLock()
+	defer fake.publishSetTriggerScopeMutex.RUnlock()
+	return len(fake.publishSetTriggerScopeArgsForCall)
+}
+
+func (fake *FakeResultPublisher) PublishSetTriggerScopeCalls(stub func(context.Context, lib.Task, string, int) error) {
+	fake.publishSetTriggerScopeMutex.Lock()
+	defer fake.publishSetTriggerScopeMutex.Unlock()
+	fake.PublishSetTriggerScopeStub = stub
+}
+
+func (fake *FakeResultPublisher) PublishSetTriggerScopeArgsForCall(i int) (context.Context, lib.Task, string, int) {
+	fake.publishSetTriggerScopeMutex.RLock()
+	defer fake.publishSetTriggerScopeMutex.RUnlock()
+	argsForCall := fake.publishSetTriggerScopeArgsForCall[i]
+	return argsForCall.arg1, argsForCall.arg2, argsForCall.arg3, argsForCall.arg4
+}
+
+func (fake *FakeResultPublisher) PublishSetTriggerScopeReturns(result1 error) {
+	fake.publishSetTriggerScopeMutex.Lock()
+	defer fake.publishSetTriggerScopeMutex.Unlock()
+	fake.PublishSetTriggerScopeStub = nil
+	fake.publishSetTriggerScopeReturns = struct {
+		result1 error
+	}{result1}
+}
+
+func (fake *FakeResultPublisher) PublishSetTriggerScopeReturnsOnCall(i int, result1 error) {
+	fake.publishSetTriggerScopeMutex.Lock()
+	defer fake.publishSetTriggerScopeMutex.Unlock()
+	fake.PublishSetTriggerScopeStub = nil
+	if fake.publishSetTriggerScopeReturnsOnCall == nil {
+		fake.publishSetTriggerScopeReturnsOnCall = make(map[int]struct {
+			result1 error
+		})
+	}
+	fake.publishSetTriggerScopeReturnsOnCall[i] = struct {
 		result1 error
 	}{result1}
 }

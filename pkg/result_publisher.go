@@ -45,6 +45,27 @@ type ResultPublisher interface {
 	// PublishIncrementTriggerCount sends an IncrementFrontmatterCommand that atomically
 	// increments trigger_count by 1. Must complete before SpawnJob is called.
 	PublishIncrementTriggerCount(ctx context.Context, task lib.Task) error
+	// PublishSetTriggerScope sends an UpdateFrontmatterCommand that records a
+	// trigger_scope and sets trigger_count to count, in one atomic write. Called
+	// instead of PublishIncrementTriggerCount in the two cases where the scope
+	// itself has to be written:
+	//
+	//   - the scope CHANGED (count 1): a re-dispatch against a new phase or a new
+	//     ref starts from a fresh budget, counting the spawn about to happen.
+	//   - the scope was ABSENT (count = existing trigger_count + 1): the task
+	//     predates the field and adopts the current scope WITHOUT a budget reset.
+	//     Absent must not be treated as changed — every task in flight today has no
+	//     trigger_scope, so resetting on absence would hand each of them a free
+	//     budget on the first event after deploy, including one already at cap.
+	//
+	// This is an UpdateFrontmatterCommand rather than a result publish on purpose.
+	// trigger_count is controller-owned: the result writer's ownership guard
+	// (MergeFrontmatter in task/controller) discards any incoming counter value, so
+	// a reset routed through a result payload would be silently dropped. The atomic
+	// frontmatter commands take a different path (buildUpdateModifyFn), which applies
+	// Updates directly to the on-disk frontmatter — an explicit, intentional write
+	// rather than a stale spawn-time snapshot.
+	PublishSetTriggerScope(ctx context.Context, task lib.Task, scope string, count int) error
 	// PublishTypeMismatchFailure publishes a synthetic failure when the task's task_type
 	// is not in the agent's effective type set. Clears assignee and current_job so the
 	// task surfaces in the operator inbox via assignee=="" filter. Does not bump
@@ -215,6 +236,33 @@ func (p *resultPublisher) PublishIncrementTriggerCount(ctx context.Context, task
 		Delta:          1,
 	}
 	return p.publishRaw(ctx, taskcmd.IncrementFrontmatterCommandOperation, cmd)
+}
+
+func (p *resultPublisher) PublishSetTriggerScope(
+	ctx context.Context,
+	task lib.Task,
+	scope string,
+	count int,
+) error {
+	cmd := taskcmd.UpdateFrontmatterCommand{
+		TaskIdentifier: task.TaskIdentifier,
+		Updates: lib.TaskFrontmatter{
+			"trigger_scope": scope,
+			// Never 0: this cycle is about to spawn, and that spawn must be counted
+			// in the same write. Writing 0 and relying on a follow-up increment
+			// would need two publishes for one spawn, which can interleave.
+			"trigger_count": count,
+		},
+	}
+	if err := p.publishRaw(ctx, taskcmd.UpdateFrontmatterCommandOperation, cmd); err != nil {
+		return errors.Wrapf(
+			ctx,
+			err,
+			"publish set trigger scope for task %s",
+			task.TaskIdentifier,
+		)
+	}
+	return nil
 }
 
 func (p *resultPublisher) PublishTypeMismatchFailure(

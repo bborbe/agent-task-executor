@@ -491,28 +491,15 @@ func (h *taskEventHandler) spawnIfNeeded(
 		return false, nil
 	}
 
-	// The trigger cap is opt-in: an absent max_triggers means no cap, so a
-	// recurring task that accumulates trigger_count across re-dispatches is
-	// never blocked (the lib default-3 fallback would kill the re-dispatch loop).
-	if _, ok := task.Frontmatter["max_triggers"]; ok &&
-		task.Frontmatter.TriggerCount() >= task.Frontmatter.MaxTriggers() {
-		glog.V(2).Infof("skip task %s: trigger_count %d >= max_triggers %d",
-			task.TaskIdentifier,
-			task.Frontmatter.TriggerCount(),
-			task.Frontmatter.MaxTriggers(),
-		)
-		metrics.TaskEventsTotal.WithLabelValues("skipped_trigger_cap").Inc()
-		return false, nil
+	// Scoped trigger budget: evaluates the opt-in cap against the task's current
+	// phase+ref scope and publishes the counter write for the spawn about to
+	// happen. Extracted so spawnIfNeeded stays legible; it owns one decision.
+	capped, err = h.applyTriggerBudget(ctx, task)
+	if err != nil {
+		return false, err
 	}
-
-	if err := h.resultPublisher.PublishIncrementTriggerCount(ctx, task); err != nil {
-		metrics.TaskEventsTotal.WithLabelValues("error").Inc()
-		return false, errors.Wrapf(
-			ctx,
-			err,
-			"publish increment trigger_count for task %s",
-			task.TaskIdentifier,
-		)
+	if capped {
+		return false, nil
 	}
 
 	jobName, err := h.jobSpawner.SpawnJob(ctx, task, *config)
@@ -708,5 +695,129 @@ func (h *taskEventHandler) RunDeferredRespawnLoop(ctx context.Context) error {
 				return errors.Wrapf(ctx, err, "deferred respawn loop tick")
 			}
 		}
+	}
+}
+
+// triggerScopeRefLen is how much of the ref is kept in a scope key. A short prefix
+// is enough to distinguish commits while keeping the frontmatter value readable in
+// the task file, where an operator has to be able to eyeball it.
+const triggerScopeRefLen = 8
+
+// triggerScope keys the spawn budget to the work being attempted rather than to the
+// task's whole lifetime.
+//
+// A re-dispatch that represents real progress — a new lifecycle phase, or a new
+// commit on the target repo — produces a different scope and earns a fresh budget.
+// A deterministic failure retried against the same phase and the same ref keeps the
+// same scope and burns the budget down. That difference is what lets the cap run by
+// default instead of opt-in.
+//
+// Phase comes from the normalizing accessor, so a phase alias does not split a scope
+// and silently hand out a second budget. ref is absent on human-authored tasks
+// (it is written by the agents that clone a repo, alongside clone_url and base_ref);
+// those tasks scope on phase alone, which is the correct degradation — there is no
+// commit for them to make progress against.
+func triggerScope(fm lib.TaskFrontmatter) string {
+	var phase string
+	if p := fm.Phase(); p != nil {
+		phase = string(*p)
+	}
+	ref, _ := fm.String("ref")
+	if len(ref) > triggerScopeRefLen {
+		ref = ref[:triggerScopeRefLen]
+	}
+	return phase + ":" + ref
+}
+
+// applyTriggerBudget evaluates the scoped trigger cap for one spawn decision and,
+// when the spawn may proceed, publishes exactly one counter write recording it.
+// Returns capped=true when the cap is reached and the spawn must be skipped.
+//
+// The cap stays OPT-IN: an absent max_triggers still means no cap.
+//
+// Scoping does not make it safe to default on, which was the original plan for
+// this change. A recurring task is exactly the case v0.7.1 protected after the
+// 2026-08-27 prod incident (Daily Sentry Triage: the lib default-3 fallback
+// stripped assignee on the 3rd trigger and silently killed the re-dispatch loop),
+// and such a task is NOT repo-backed — it carries no ref and sits at a stable
+// phase, so its scope is a constant. The counter would accrue across re-dispatches
+// exactly as before and the cap would fire at 3, re-creating the incident.
+// Scoping only helps where the scope actually moves.
+//
+// What scoping DOES fix is the opt-in cap's correctness: a task that opts in no
+// longer burns its budget across unrelated attempts, so an operator can set a
+// tight max_triggers without it leaking into the next phase or the next commit.
+func (h *taskEventHandler) applyTriggerBudget(
+	ctx context.Context,
+	task lib.Task,
+) (bool, error) {
+	currentScope := triggerScope(task.Frontmatter)
+	storedScope, hasScope := task.Frontmatter.String("trigger_scope")
+
+	// An ABSENT scope is not a CHANGED scope. Every task in flight today predates
+	// this field, so treating absent as changed would hand each of them a free
+	// budget reset on the first event after deploy — including one already looping
+	// at cap, which would resume for another N. Absent means "adopt the current
+	// scope, keep the count".
+	scopeChanged := hasScope && storedScope != currentScope
+
+	_, optedIn := task.Frontmatter["max_triggers"]
+	if optedIn && !scopeChanged &&
+		task.Frontmatter.TriggerCount() >= task.Frontmatter.MaxTriggers() {
+		glog.V(2).Infof("skip task %s: trigger_count %d >= max_triggers %d in scope %q",
+			task.TaskIdentifier,
+			task.Frontmatter.TriggerCount(),
+			task.Frontmatter.MaxTriggers(),
+			currentScope,
+		)
+		metrics.TaskEventsTotal.WithLabelValues("skipped_trigger_cap").Inc()
+		return true, nil
+	}
+
+	// Exactly one publish per spawn in every branch. Splitting "write the scope"
+	// and "count the spawn" into two commands would emit two writes for one spawn
+	// and let them interleave with a concurrent write.
+	count, useScopeWrite := triggerBudgetWrite(task.Frontmatter, scopeChanged, hasScope)
+	if !useScopeWrite {
+		if err := h.resultPublisher.PublishIncrementTriggerCount(ctx, task); err != nil {
+			metrics.TaskEventsTotal.WithLabelValues("error").Inc()
+			return false, errors.Wrapf(
+				ctx, err, "publish increment trigger_count for task %s", task.TaskIdentifier,
+			)
+		}
+		return false, nil
+	}
+
+	glog.V(2).Infof("task %s: trigger scope %q -> %q, trigger_count -> %d",
+		task.TaskIdentifier, storedScope, currentScope, count,
+	)
+	if err := h.resultPublisher.PublishSetTriggerScope(ctx, task, currentScope, count); err != nil {
+		metrics.TaskEventsTotal.WithLabelValues("error").Inc()
+		return false, errors.Wrapf(
+			ctx, err, "publish set trigger scope for task %s", task.TaskIdentifier,
+		)
+	}
+	return false, nil
+}
+
+// triggerBudgetWrite decides which counter write a spawn needs. useScopeWrite
+// reports whether the scope itself must be persisted alongside the count.
+//
+//   - scope changed: fresh budget at 1, counting the spawn about to happen.
+//   - scope absent: adopt at count+1 — carry the existing attempts forward rather
+//     than resetting, so the migration to this field grants nobody a free budget.
+//   - scope unchanged: no scope write; the ordinary increment path applies.
+func triggerBudgetWrite(
+	fm lib.TaskFrontmatter,
+	scopeChanged bool,
+	hasScope bool,
+) (int, bool) {
+	switch {
+	case scopeChanged:
+		return 1, true
+	case !hasScope:
+		return fm.TriggerCount() + 1, true
+	default:
+		return 0, false
 	}
 }
