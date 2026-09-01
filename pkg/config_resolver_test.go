@@ -186,7 +186,7 @@ var _ = Describe("ConfigResolver", func() {
 		Expect(err.Error()).To(ContainSubstring("github-update-go-agent-personal"))
 	})
 
-	It("a plain assignee without a vault suffix never matches", func() {
+	It("falls back to the plain assignee when no composed Config exists", func() {
 		provider.items = []agentv1.Config{
 			{
 				Spec: agentv1.ConfigSpec{
@@ -196,9 +196,33 @@ var _ = Describe("ConfigResolver", func() {
 				},
 			},
 		}
-		_, err := resolver.Resolve(ctx, "github-update-go-agent")
-		Expect(err).NotTo(BeNil())
-		Expect(errors.Is(err, pkg.ErrConfigNotFound)).To(BeTrue())
+		config, err := resolver.Resolve(ctx, "github-update-go-agent")
+		Expect(err).To(BeNil())
+		Expect(config.Assignee).To(Equal("github-update-go-agent"))
+		Expect(config.Image).To(Equal("foo/bar:dev"))
+	})
+
+	It("prefers the composed assignee over the plain fallback when both exist", func() {
+		provider.items = []agentv1.Config{
+			{
+				Spec: agentv1.ConfigSpec{
+					Assignee:  "github-update-go-agent-personal",
+					Image:     "composed/img",
+					Heartbeat: "1m",
+				},
+			},
+			{
+				Spec: agentv1.ConfigSpec{
+					Assignee:  "github-update-go-agent",
+					Image:     "plain/img",
+					Heartbeat: "1m",
+				},
+			},
+		}
+		config, err := resolver.Resolve(ctx, "github-update-go-agent")
+		Expect(err).To(BeNil())
+		Expect(config.Assignee).To(Equal("github-update-go-agent-personal"))
+		Expect(config.Image).To(Equal("composed/img:dev"))
 	})
 
 	It("ignores Config CRs belonging to other vaults", func() {

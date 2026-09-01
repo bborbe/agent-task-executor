@@ -31,7 +31,10 @@ type ConfigResolver interface {
 // typed store. The branch is captured here and appended as the image tag at
 // resolution time. Resolutions are scoped to the given vault: each task's
 // plain assignee is matched against the composed {assignee}-{vaultName}
-// Config assignee, so per-vault Config CRs apply per executor instance.
+// Config assignee, so per-vault Config CRs apply per executor instance. When
+// no composed Config exists, Resolve falls back to the plain assignee, so the
+// singular shared-topic executor (v0.6.x Config CRs without a vault suffix)
+// keeps resolving on the v0.7+ line.
 func NewConfigResolver(
 	provider k8s.Provider[agentv1.Config],
 	branch base.Branch,
@@ -67,6 +70,25 @@ func (r *configResolver) Resolve(
 		default:
 		}
 		if it.Spec.Assignee == composed {
+			return convert(ctx, it, r.branch.String())
+		}
+	}
+	// No {assignee}-{vaultName} Config: fall back to the plain assignee so the
+	// singular executor's un-suffixed Config CRs (v0.6.x naming) keep resolving.
+	// Per-vault installs still match composed first, so vault scoping wins when
+	// a composed Config exists.
+	for _, it := range items {
+		select {
+		case <-ctx.Done():
+			return AgentConfiguration{}, errors.Wrapf(
+				ctx,
+				ctx.Err(),
+				"resolve config %q cancelled",
+				assignee,
+			)
+		default:
+		}
+		if it.Spec.Assignee == assignee {
 			return convert(ctx, it, r.branch.String())
 		}
 	}
