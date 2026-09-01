@@ -2,7 +2,7 @@
 
 All notable changes to this project will be documented in this file.
 
-## Unreleased
+## v0.8.2
 
 - fix: `ConfigResolver` falls back to the plain assignee when no `{assignee}-{vaultName}` Config exists — the singular shared-topic executor keeps resolving its un-suffixed (v0.6.x) Config CRs on the v0.7+ line; per-vault installs still match composed first, so vault scoping wins whenever a composed Config exists
 
