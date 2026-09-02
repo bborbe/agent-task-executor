@@ -2,7 +2,7 @@
 
 All notable changes to this project will be documented in this file.
 
-## Unreleased
+## v0.8.3
 
 - chore: update github.com/bborbe/agent to v0.85.0, github.com/bborbe/cqrs to v0.6.10, github.com/bborbe/cron to v1.8.29, github.com/bborbe/kafka to v1.25.10, github.com/bborbe/metrics to v0.6.0, github.com/bborbe/vault-cli to v0.118.5, github.com/prometheus/client_model to v0.6.3
 
