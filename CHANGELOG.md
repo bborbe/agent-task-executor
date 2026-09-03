@@ -2,6 +2,10 @@
 
 All notable changes to this project will be documented in this file.
 
+## Unreleased
+
+- feat: label `skipped_unknown_assignee` with the assignee name — new `agent_executor_skipped_unknown_assignee_total{assignee="..."}` counter incremented alongside the existing `task_events_total{result="skipped_unknown_assignee"}`. The bare counter says a skip happened but not which assignee; the 2026-08-26 → 2026-09-03 sentry-deep-analyzer incident stranded 12 tasks for 8 days with only the bare counter moving, invisible as a routable alert. Observability-only; routing behavior unchanged.
+
 ## v0.9.1
 
 - fix: clear `current_job` on the job-success path — the executor's JobWatcher now publishes a `current_job=""` frontmatter command (new `ResultPublisher.PublishClearCurrentJob`, deduped per job like `PublishFailure`) before evicting a succeeded job's task from the TaskStore. Previously a succeeded job left `current_job`/`job_started_at` set forever: the agent's result write-back never clears it and the zombie sweeper is blind to the task once it leaves `Snapshot()`, so `github-update-go` fleet sweeps accumulated hundreds of stale task references.

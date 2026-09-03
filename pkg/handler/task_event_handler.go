@@ -322,6 +322,9 @@ func (h *taskEventHandler) resolveConfig(
 				task.Frontmatter.Assignee(),
 			)
 			metrics.TaskEventsTotal.WithLabelValues("skipped_unknown_assignee").Inc()
+			metrics.SkippedUnknownAssigneeTotal.WithLabelValues(
+				string(task.Frontmatter.Assignee()),
+			).Inc()
 			return nil, true, nil
 		}
 		metrics.TaskEventsTotal.WithLabelValues("error").Inc()
