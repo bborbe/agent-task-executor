@@ -152,6 +152,15 @@ type resultPublisher struct {
 	dedupe              *ttlDedupe
 }
 
+// targetVaultFromTask reads the task's frontmatter "target_vault" key and
+// returns it as a string, returning "" when the key is absent or holds a
+// non-string value. The executor serves all vaults ("shared") and must never
+// inject its own vault name, so the routing stamp always comes from the task.
+func targetVaultFromTask(task lib.Task) string {
+	vault, _ := task.Frontmatter.String("target_vault")
+	return vault
+}
+
 func (p *resultPublisher) PublishSpawnNotification(
 	ctx context.Context,
 	task lib.Task,
@@ -159,6 +168,7 @@ func (p *resultPublisher) PublishSpawnNotification(
 ) error {
 	cmd := taskcmd.UpdateFrontmatterCommand{
 		TaskIdentifier: task.TaskIdentifier,
+		TargetVault:    targetVaultFromTask(task),
 		Updates: lib.TaskFrontmatter{
 			"spawn_notification": true,
 			"current_job":        jobName,
@@ -188,6 +198,7 @@ func (p *resultPublisher) PublishFailure(
 	)
 	updateCmd := taskcmd.UpdateFrontmatterCommand{
 		TaskIdentifier: task.TaskIdentifier,
+		TargetVault:    targetVaultFromTask(task),
 		Updates: lib.TaskFrontmatter{
 			"current_job": "",
 		},
@@ -207,6 +218,7 @@ func (p *resultPublisher) PublishFailure(
 
 	incrementCmd := taskcmd.IncrementFrontmatterCommand{
 		TaskIdentifier: task.TaskIdentifier,
+		TargetVault:    targetVaultFromTask(task),
 		Field:          "trigger_count",
 		Delta:          1,
 	}
@@ -232,6 +244,7 @@ func (p *resultPublisher) PublishFailure(
 func (p *resultPublisher) PublishIncrementTriggerCount(ctx context.Context, task lib.Task) error {
 	cmd := taskcmd.IncrementFrontmatterCommand{
 		TaskIdentifier: task.TaskIdentifier,
+		TargetVault:    targetVaultFromTask(task),
 		Field:          "trigger_count",
 		Delta:          1,
 	}
@@ -246,6 +259,7 @@ func (p *resultPublisher) PublishSetTriggerScope(
 ) error {
 	cmd := taskcmd.UpdateFrontmatterCommand{
 		TaskIdentifier: task.TaskIdentifier,
+		TargetVault:    targetVaultFromTask(task),
 		Updates: lib.TaskFrontmatter{
 			"trigger_scope": scope,
 			// Never 0: this cycle is about to spawn, and that spawn must be counted
@@ -289,6 +303,7 @@ func (p *resultPublisher) PublishTypeMismatchFailure(
 
 	cmd := taskcmd.UpdateFrontmatterCommand{
 		TaskIdentifier: task.TaskIdentifier,
+		TargetVault:    targetVaultFromTask(task),
 		Updates:        updates,
 		Body: &taskcmd.BodySection{
 			Heading: "## Failure",

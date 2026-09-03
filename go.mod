@@ -4,7 +4,7 @@ go 1.27.0
 
 require (
 	github.com/IBM/sarama v1.60.2
-	github.com/bborbe/agent v0.85.0
+	github.com/bborbe/agent v0.86.0
 	github.com/bborbe/cqrs v0.6.10
 	github.com/bborbe/cron v1.8.29
 	github.com/bborbe/errors v1.6.0
@@ -96,7 +96,7 @@ require (
 	github.com/x448/float16 v0.8.4 // indirect
 	go.yaml.in/yaml/v2 v2.4.4 // indirect
 	go.yaml.in/yaml/v3 v3.0.5 // indirect
-	golang.org/x/crypto v0.55.0 // indirect
+	golang.org/x/crypto v0.56.0 // indirect
 	golang.org/x/mod v0.40.0 // indirect
 	golang.org/x/net v0.58.0 // indirect
 	golang.org/x/oauth2 v0.36.0 // indirect
