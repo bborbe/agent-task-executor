@@ -101,40 +101,58 @@ var _ = Describe("JobWatcher", func() {
 			Expect(err).To(BeNil())
 		})
 
-		It("does NOT publish synthetic failure for Succeeded job (trusts agent publish)", func() {
-			job := makeJob("job-2", string(testTaskID), succeededCondition())
-			_, err := fakeKubeClient.BatchV1().
-				Jobs("test-ns").
-				Create(ctx, job, metav1.CreateOptions{})
-			Expect(err).To(BeNil())
-			taskStore.Store(testTaskID, testTask)
+		It(
+			"does NOT publish synthetic failure but DOES clear current_job for Succeeded job",
+			func() {
+				job := makeJob("job-2", string(testTaskID), succeededCondition())
+				_, err := fakeKubeClient.BatchV1().
+					Jobs("test-ns").
+					Create(ctx, job, metav1.CreateOptions{})
+				Expect(err).To(BeNil())
+				taskStore.Store(testTaskID, testTask)
 
-			watcher.HandleJob(ctx, job)
+				watcher.HandleJob(ctx, job)
 
-			Expect(fakePublisher.PublishFailureCallCount()).To(Equal(0))
-			// task cleaned up from store
-			_, ok := taskStore.Load(testTaskID)
-			Expect(ok).To(BeFalse())
+				// No synthetic failure — the agent already published its real result.
+				Expect(fakePublisher.PublishFailureCallCount()).To(Equal(0))
+				// But current_job must be cleared so the vault task does not carry a
+				// stale job reference the sweeper can never see.
+				Expect(fakePublisher.PublishClearCurrentJobCallCount()).To(Equal(1))
+				_, calledTask, calledJobName := fakePublisher.PublishClearCurrentJobArgsForCall(0)
+				Expect(string(calledTask.TaskIdentifier)).To(Equal(string(testTaskID)))
+				Expect(calledJobName).To(Equal("job-2"))
+				// task cleaned up from store
+				_, ok := taskStore.Load(testTaskID)
+				Expect(ok).To(BeFalse())
 
-			_, err = fakeKubeClient.BatchV1().Jobs("test-ns").Get(ctx, "job-2", metav1.GetOptions{})
-			Expect(err).To(BeNil())
-		})
+				_, err = fakeKubeClient.BatchV1().
+					Jobs("test-ns").
+					Get(ctx, "job-2", metav1.GetOptions{})
+				Expect(err).To(BeNil())
+			},
+		)
 
-		It("skips synthetic failure for Succeeded job when task is not in store", func() {
-			job := makeJob("job-3", string(testTaskID), succeededCondition())
-			_, err := fakeKubeClient.BatchV1().
-				Jobs("test-ns").
-				Create(ctx, job, metav1.CreateOptions{})
-			Expect(err).To(BeNil())
-			// intentionally NOT storing task in taskStore
+		It(
+			"skips synthetic failure and current_job clear for Succeeded job when task is not in store",
+			func() {
+				job := makeJob("job-3", string(testTaskID), succeededCondition())
+				_, err := fakeKubeClient.BatchV1().
+					Jobs("test-ns").
+					Create(ctx, job, metav1.CreateOptions{})
+				Expect(err).To(BeNil())
+				// intentionally NOT storing task in taskStore
 
-			watcher.HandleJob(ctx, job)
+				watcher.HandleJob(ctx, job)
 
-			Expect(fakePublisher.PublishFailureCallCount()).To(Equal(0))
+				Expect(fakePublisher.PublishFailureCallCount()).To(Equal(0))
+				Expect(fakePublisher.PublishClearCurrentJobCallCount()).To(Equal(0))
 
-			_, err = fakeKubeClient.BatchV1().Jobs("test-ns").Get(ctx, "job-3", metav1.GetOptions{})
-			Expect(err).To(BeNil())
-		})
+				_, err = fakeKubeClient.BatchV1().
+					Jobs("test-ns").
+					Get(ctx, "job-3", metav1.GetOptions{})
+				Expect(err).To(BeNil())
+			},
+		)
 
 		It("ignores jobs without task-id label", func() {
 			job := makeJob("job-4", "", failedCondition("crash"))

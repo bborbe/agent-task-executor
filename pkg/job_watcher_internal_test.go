@@ -314,7 +314,14 @@ func (errorPodNamespaceLister) Get(_ string) (*corev1.Pod, error) {
 // import cycle. It exposes the same PublishFailure call-recording API the
 // counterfeiter fake does, so the spec assertions are unchanged.
 type fakeResultPublisher struct {
-	publishFailureCalls []resultPublisherCall
+	publishFailureCalls  []resultPublisherCall
+	clearCurrentJobCalls []clearCurrentJobCall
+}
+
+type clearCurrentJobCall struct {
+	ctx     context.Context
+	task    lib.Task
+	jobName string
 }
 
 type resultPublisherCall struct {
@@ -343,6 +350,19 @@ func (f *fakeResultPublisher) PublishFailure(
 		task:    task,
 		jobName: jobName,
 		reason:  reason,
+	})
+	return nil
+}
+
+func (f *fakeResultPublisher) PublishClearCurrentJob(
+	ctx context.Context,
+	task lib.Task,
+	jobName string,
+) error {
+	f.clearCurrentJobCalls = append(f.clearCurrentJobCalls, clearCurrentJobCall{
+		ctx:     ctx,
+		task:    task,
+		jobName: jobName,
 	})
 	return nil
 }
@@ -388,4 +408,15 @@ func (f *fakeResultPublisher) PublishFailureArgsForCall(
 ) (context.Context, lib.Task, string, string) {
 	c := f.publishFailureCalls[i]
 	return c.ctx, c.task, c.jobName, c.reason
+}
+
+func (f *fakeResultPublisher) PublishClearCurrentJobCallCount() int {
+	return len(f.clearCurrentJobCalls)
+}
+
+func (f *fakeResultPublisher) PublishClearCurrentJobArgsForCall(
+	i int,
+) (context.Context, lib.Task, string) {
+	c := f.clearCurrentJobCalls[i]
+	return c.ctx, c.task, c.jobName
 }

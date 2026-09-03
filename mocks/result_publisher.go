@@ -11,6 +11,19 @@ import (
 )
 
 type FakeResultPublisher struct {
+	PublishClearCurrentJobStub        func(context.Context, lib.Task, string) error
+	publishClearCurrentJobMutex       sync.RWMutex
+	publishClearCurrentJobArgsForCall []struct {
+		arg1 context.Context
+		arg2 lib.Task
+		arg3 string
+	}
+	publishClearCurrentJobReturns struct {
+		result1 error
+	}
+	publishClearCurrentJobReturnsOnCall map[int]struct {
+		result1 error
+	}
 	PublishFailureStub        func(context.Context, lib.Task, string, string) error
 	publishFailureMutex       sync.RWMutex
 	publishFailureArgsForCall []struct {
@@ -92,6 +105,69 @@ type FakeResultPublisher struct {
 	}
 	invocations      map[string][][]interface{}
 	invocationsMutex sync.RWMutex
+}
+
+func (fake *FakeResultPublisher) PublishClearCurrentJob(arg1 context.Context, arg2 lib.Task, arg3 string) error {
+	fake.publishClearCurrentJobMutex.Lock()
+	ret, specificReturn := fake.publishClearCurrentJobReturnsOnCall[len(fake.publishClearCurrentJobArgsForCall)]
+	fake.publishClearCurrentJobArgsForCall = append(fake.publishClearCurrentJobArgsForCall, struct {
+		arg1 context.Context
+		arg2 lib.Task
+		arg3 string
+	}{arg1, arg2, arg3})
+	stub := fake.PublishClearCurrentJobStub
+	fakeReturns := fake.publishClearCurrentJobReturns
+	fake.recordInvocation("PublishClearCurrentJob", []interface{}{arg1, arg2, arg3})
+	fake.publishClearCurrentJobMutex.Unlock()
+	if stub != nil {
+		return stub(arg1, arg2, arg3)
+	}
+	if specificReturn {
+		return ret.result1
+	}
+	return fakeReturns.result1
+}
+
+func (fake *FakeResultPublisher) PublishClearCurrentJobCallCount() int {
+	fake.publishClearCurrentJobMutex.RLock()
+	defer fake.publishClearCurrentJobMutex.RUnlock()
+	return len(fake.publishClearCurrentJobArgsForCall)
+}
+
+func (fake *FakeResultPublisher) PublishClearCurrentJobCalls(stub func(context.Context, lib.Task, string) error) {
+	fake.publishClearCurrentJobMutex.Lock()
+	defer fake.publishClearCurrentJobMutex.Unlock()
+	fake.PublishClearCurrentJobStub = stub
+}
+
+func (fake *FakeResultPublisher) PublishClearCurrentJobArgsForCall(i int) (context.Context, lib.Task, string) {
+	fake.publishClearCurrentJobMutex.RLock()
+	defer fake.publishClearCurrentJobMutex.RUnlock()
+	argsForCall := fake.publishClearCurrentJobArgsForCall[i]
+	return argsForCall.arg1, argsForCall.arg2, argsForCall.arg3
+}
+
+func (fake *FakeResultPublisher) PublishClearCurrentJobReturns(result1 error) {
+	fake.publishClearCurrentJobMutex.Lock()
+	defer fake.publishClearCurrentJobMutex.Unlock()
+	fake.PublishClearCurrentJobStub = nil
+	fake.publishClearCurrentJobReturns = struct {
+		result1 error
+	}{result1}
+}
+
+func (fake *FakeResultPublisher) PublishClearCurrentJobReturnsOnCall(i int, result1 error) {
+	fake.publishClearCurrentJobMutex.Lock()
+	defer fake.publishClearCurrentJobMutex.Unlock()
+	fake.PublishClearCurrentJobStub = nil
+	if fake.publishClearCurrentJobReturnsOnCall == nil {
+		fake.publishClearCurrentJobReturnsOnCall = make(map[int]struct {
+			result1 error
+		})
+	}
+	fake.publishClearCurrentJobReturnsOnCall[i] = struct {
+		result1 error
+	}{result1}
 }
 
 func (fake *FakeResultPublisher) PublishFailure(arg1 context.Context, arg2 lib.Task, arg3 string, arg4 string) error {
