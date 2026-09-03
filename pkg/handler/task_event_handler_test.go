@@ -186,6 +186,9 @@ var _ = Describe("TaskEventHandler", func() {
 			err := h.ConsumeMessage(ctx, buildMsg(task))
 			Expect(err).To(BeNil())
 			Expect(fakeSpawner.SpawnJobCallCount()).To(Equal(0))
+			Expect(testutil.ToFloat64(
+				metrics.SkippedUnknownAssigneeTotal.WithLabelValues("unknown-agent"),
+			)).To(Equal(float64(1)))
 		})
 
 		It("returns wrapped error when resolver fails with non-NotFound", func() {
