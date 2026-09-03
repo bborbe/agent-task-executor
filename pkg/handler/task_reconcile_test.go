@@ -6,7 +6,12 @@ package handler_test
 
 import (
 	"context"
+	"encoding/json"
+	"sync"
+	"sync/atomic"
+	"time"
 
+	"github.com/IBM/sarama"
 	lib "github.com/bborbe/agent"
 	"github.com/bborbe/cqrs/base"
 	"github.com/bborbe/errors"
@@ -343,6 +348,82 @@ var _ = Describe("TaskEventHandler reconcile loop", func() {
 			err := h.ReconcileOnce(cancelCtx)
 			Expect(err).To(BeNil())
 			Expect(fakeSpawner.SpawnJobCallCount()).To(Equal(0))
+		},
+	)
+
+	It(
+		"races the reconcile path against the Kafka event path for an uncapped task and spawns exactly one job (AC 5)",
+		func() {
+			// Spec 005 AC 5: with the per-assignee lock taken unconditionally, a
+			// reconcile tick racing the event path for the SAME uncapped task results
+			// in exactly one Job. Without the unconditional lock both goroutines read
+			// IsJobActive=false before either has created its Job, then both spawn.
+			// The fake is stateful like the real cluster: IsJobActive reports whether a
+			// Job has been created, and the sleep widens the read->spawn window so the
+			// unlocked race is deterministic rather than luck-of-the-timing.
+			fakeResolver.ResolveReturns(
+				pkg.AgentConfiguration{
+					Assignee:          "claude",
+					Image:             "my-image:latest",
+					MaxConcurrentJobs: 0,
+				},
+				nil,
+			)
+			var spawned atomic.Int64
+			fakeSpawner.CountActiveJobsReturns(0, nil)
+			fakeSpawner.SpawnJobStub = func(
+				_ context.Context,
+				_ lib.Task,
+				_ pkg.AgentConfiguration,
+			) (string, error) {
+				spawned.Add(1)
+				return "job-name", nil
+			}
+			fakeSpawner.IsJobActiveStub = func(
+				_ context.Context,
+				_ lib.TaskIdentifier,
+			) (bool, error) {
+				time.Sleep(20 * time.Millisecond)
+				return spawned.Load() > 0, nil
+			}
+			fakeGitRestClient.IsReadyReturns(true, nil)
+
+			task := lib.Task{
+				TaskIdentifier: lib.TaskIdentifier("tid-double-spawn"),
+				Frontmatter: lib.TaskFrontmatter{
+					"status":   "in_progress",
+					"phase":    string(domain.TaskPhaseExecution),
+					"assignee": "claude",
+					"stage":    "prod",
+				},
+			}
+			fakeGitRestClient.ListReturns([]string{"24 Tasks/tid-double-spawn.md"}, nil)
+			fakeGitRestClient.GetReturns([]byte(renderTaskFile(task)), nil)
+
+			// NOTE: buildMsg in task_event_handler_test.go is a Describe-scoped
+			// closure (not package-level) and is NOT visible from this file. Define a
+			// local equivalent so the regression spec is self-contained.
+			buildMsg := func(t lib.Task) *sarama.ConsumerMessage {
+				value, err := json.Marshal(t)
+				Expect(err).To(BeNil())
+				return &sarama.ConsumerMessage{Value: value}
+			}
+
+			var wg sync.WaitGroup
+			wg.Add(2)
+			go func() {
+				defer GinkgoRecover()
+				defer wg.Done()
+				Expect(h.ConsumeMessage(ctx, buildMsg(task))).To(BeNil())
+			}()
+			go func() {
+				defer GinkgoRecover()
+				defer wg.Done()
+				Expect(h.ReconcileOnce(ctx)).To(BeNil())
+			}()
+			wg.Wait()
+
+			Expect(fakeSpawner.SpawnJobCallCount()).To(Equal(1))
 		},
 	)
 })

@@ -196,6 +196,10 @@ type taskEventHandler struct {
 // latency everyone's. Serializing per assignee costs nothing — spawns are rare
 // against Job runtimes measured in the 11-15 minute range.
 //
+// Taken unconditionally since spec 005: the reconcile loop and the Kafka consumer
+// must also serialize for uncapped assignees, or a reconcile tick racing the event
+// path for the same task would double-spawn.
+//
 // WARNING: correct only while the executor runs replicas: 1 (verified in quant dev
 // and prod). Scaling to 2 reinstates the race across processes and requires a lease
 // or leader election instead.
@@ -495,10 +499,16 @@ func (h *taskEventHandler) spawnIfNeeded(
 	}
 
 	// Held across the cap check AND the SpawnJob call below, so no other goroutine
-	// can observe a stale Job count in between. Only taken when a cap is configured:
-	// an uncapped agent has nothing to serialize, and holding the lock anyway would
-	// queue its spawns behind each other for no benefit.
-	if config != nil && config.MaxConcurrentJobs > 0 {
+	// can observe a stale Job count in between. Taken unconditionally (for any
+	// resolved config, capped or not) because three goroutines reach spawnIfNeeded
+	// — the Kafka consumer, the deferred-respawn loop, and the reconcile loop
+	// (spec 005) — and for an UNCAPPED assignee they must still serialize
+	// count-then-spawn so two of them cannot both read IsJobActive=false before
+	// either creates the Job and double-spawn the same task. Spawns are rare
+	// against Job runtimes measured in minutes, so the per-assignee serialization
+	// costs nothing measurable. config is nil only for tasks that never reach this
+	// code (empty assignee is filtered upstream); the nil guard stays defensive.
+	if config != nil {
 		defer h.lockAssigneeSpawn(config.Assignee)()
 	}
 

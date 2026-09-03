@@ -1,8 +1,13 @@
 ---
-status: approved
+status: completed
 spec: [005-bug-executor-restart-drops-deferred-respawn-queue]
+summary: Made the per-assignee spawn lock in spawnIfNeeded unconditional to serialize count-then-spawn across the reconcile loop, Kafka consumer, and deferred-respawn loop, and locked it with a concurrent regression spec in task_reconcile_test.go that races both paths for the same uncapped task and asserts exactly one SpawnJob
+execution_id: agent-task-executor-exec-008-spec-005-spawn-lock
+dark-factory-version: dev
 created: "2026-09-03T18:04:37Z"
 queued: "2026-09-03T18:18:58Z"
+started: "2026-09-03T18:34:58Z"
+completed: "2026-09-03T18:41:04Z"
 branch: dark-factory/bug-executor-restart-drops-deferred-respawn-queue
 ---
 
