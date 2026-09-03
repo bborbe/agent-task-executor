@@ -577,4 +577,137 @@ var _ = Describe("ResultPublisher", func() {
 			Expect(err.Error()).To(ContainSubstring("update-frontmatter"))
 		})
 	})
+
+	Describe("TargetVault stamping", func() {
+		It(
+			"stamps UpdateFrontmatterCommand and IncrementFrontmatterCommand with the task's target_vault",
+			func() {
+				task := lib.Task{
+					TaskIdentifier: lib.TaskIdentifier("test-task-vault"),
+					Frontmatter: lib.TaskFrontmatter{
+						"status":        "in_progress",
+						"target_vault":  "personal",
+						"trigger_count": 0,
+					},
+				}
+				err := publisher.PublishFailure(
+					ctx,
+					task,
+					"claude-20260418120000",
+					"pod OOM killed",
+				)
+				Expect(err).NotTo(HaveOccurred())
+
+				Expect(producer.messages).To(HaveLen(2))
+				_, updateCmd := decodeUpdateFrontmatterCommand(producer.messages[0])
+				Expect(updateCmd.TargetVault).To(Equal("personal"))
+				_, incrementCmd := decodeIncrementFrontmatterCommand(producer.messages[1])
+				Expect(incrementCmd.TargetVault).To(Equal("personal"))
+			},
+		)
+
+		It("leaves TargetVault off the wire when the task has no target_vault", func() {
+			task := lib.Task{
+				TaskIdentifier: lib.TaskIdentifier("test-task-no-vault"),
+				Frontmatter: lib.TaskFrontmatter{
+					"status": "in_progress",
+				},
+			}
+			err := publisher.PublishFailure(ctx, task, "claude-20260418120000", "pod OOM killed")
+			Expect(err).NotTo(HaveOccurred())
+
+			Expect(producer.messages).To(HaveLen(2))
+			_, updateCmd := decodeUpdateFrontmatterCommand(producer.messages[0])
+			Expect(updateCmd.TargetVault).To(Equal(""))
+			_, incrementCmd := decodeIncrementFrontmatterCommand(producer.messages[1])
+			Expect(incrementCmd.TargetVault).To(Equal(""))
+
+			// omitempty keeps the field off the wire entirely when empty.
+			raw, err := producer.messages[0].Value.Encode()
+			Expect(err).NotTo(HaveOccurred())
+			var command base.Command
+			Expect(json.Unmarshal(raw, &command)).To(Succeed())
+			dataBytes, err := json.Marshal(command.Data)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(string(dataBytes)).NotTo(ContainSubstring("targetVault"))
+		})
+
+		It("stamped commands satisfy the lib slug contract", func() {
+			// The publish path itself never calls Validate — the slug rule is
+			// enforced downstream by the controller. Pin the contract here so a
+			// malformed vault slug in a task's frontmatter cannot ride through
+			// silently: what we publish must be something the consumer accepts.
+			task := lib.Task{
+				TaskIdentifier: lib.TaskIdentifier("test-task-vault-contract"),
+				Frontmatter: lib.TaskFrontmatter{
+					"status":       "in_progress",
+					"target_vault": "personal",
+				},
+			}
+			err := publisher.PublishSpawnNotification(ctx, task, "claude-20260418120000")
+			Expect(err).NotTo(HaveOccurred())
+
+			_, cmd := decodeUpdateFrontmatterCommand(producer.messages[0])
+			Expect(cmd.Validate(ctx)).To(Succeed())
+		})
+
+		It("stamps all other command constructions with the task's target_vault", func() {
+			task := lib.Task{
+				TaskIdentifier: lib.TaskIdentifier("test-task-vault-all"),
+				Frontmatter: lib.TaskFrontmatter{
+					"status":       "in_progress",
+					"assignee":     "agent-pr-reviewer",
+					"target_vault": "work",
+				},
+			}
+
+			// PublishSpawnNotification
+			err := publisher.PublishSpawnNotification(ctx, task, "claude-20260418120000")
+			Expect(err).NotTo(HaveOccurred())
+			Expect(producer.messages).To(HaveLen(1))
+			_, spawnCmd := decodeUpdateFrontmatterCommand(producer.messages[0])
+			Expect(spawnCmd.TargetVault).To(Equal("work"))
+
+			// PublishIncrementTriggerCount
+			err = publisher.PublishIncrementTriggerCount(ctx, task)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(producer.messages).To(HaveLen(2))
+			_, incCmd := decodeIncrementFrontmatterCommand(producer.messages[1])
+			Expect(incCmd.TargetVault).To(Equal("work"))
+
+			// PublishSetTriggerScope
+			err = publisher.PublishSetTriggerScope(ctx, task, "ai_review:abc12345", 1)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(producer.messages).To(HaveLen(3))
+			_, scopeCmd := decodeUpdateFrontmatterCommand(producer.messages[2])
+			Expect(scopeCmd.TargetVault).To(Equal("work"))
+
+			// PublishTypeMismatchFailure
+			err = publisher.PublishTypeMismatchFailure(
+				ctx,
+				task,
+				`task_type "healthcheck" not in effective set [pr-review]`,
+			)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(producer.messages).To(HaveLen(4))
+			_, mismatchCmd := decodeUpdateFrontmatterCommand(producer.messages[3])
+			Expect(mismatchCmd.TargetVault).To(Equal("work"))
+		})
+
+		It("stamps empty TargetVault when target_vault holds a non-string value", func() {
+			task := lib.Task{
+				TaskIdentifier: lib.TaskIdentifier("test-task-nonstring-vault"),
+				Frontmatter: lib.TaskFrontmatter{
+					"status":       "in_progress",
+					"target_vault": 42,
+				},
+			}
+			err := publisher.PublishSpawnNotification(ctx, task, "claude-20260418120000")
+			Expect(err).NotTo(HaveOccurred())
+
+			Expect(producer.messages).To(HaveLen(1))
+			_, cmd := decodeUpdateFrontmatterCommand(producer.messages[0])
+			Expect(cmd.TargetVault).To(Equal(""))
+		})
+	})
 })
