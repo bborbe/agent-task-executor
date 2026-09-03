@@ -1,8 +1,13 @@
 ---
-status: approved
+status: completed
 spec: [005-bug-executor-restart-drops-deferred-respawn-queue]
+summary: 'Documented the reconcile loop env config surface (GITREST_URL, GITREST_GATEWAY_SECRET, TASK_GLOB) in README.md with a new ''Reconcile loop configuration'' section, and added a docs: bullet to CHANGELOG.md Unreleased'
+execution_id: agent-task-executor-exec-009-spec-005-readme-doc
+dark-factory-version: dev
 created: "2026-09-03T18:04:37Z"
 queued: "2026-09-03T18:18:58Z"
+started: "2026-09-03T18:41:05Z"
+completed: "2026-09-03T18:41:37Z"
 branch: dark-factory/bug-executor-restart-drops-deferred-respawn-queue
 ---
 
