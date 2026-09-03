@@ -48,3 +48,12 @@ time=2026-09-03T20:41:05.632+02:00 level=INFO msg="container assigned" prompt_id
 time=2026-09-03T20:41:37.304+02:00 level=INFO msg="docker container exited" prompt_id=009-spec-005-readme-doc spec_id=005-bug-executor-restart-drops-deferred-respawn-queue container="" workflow_type=direct container=agent-task-executor-exec-009-spec-005-readme-doc exit_code=0 workflow_step=run_claude
 time=2026-09-03T20:41:37.304+02:00 level=INFO msg="completion report" status=success summary="Documented the reconcile loop env config surface (GITREST_URL, GITREST_GATEWAY_SECRET, TASK_GLOB) in README.md with a new 'Reconcile loop configuration' section, and added a docs: bullet to CHANGELOG.md Unreleased"
 time=2026-09-03T20:41:37.313+02:00 level=INFO msg="moved to completed" prompt_id=009-spec-005-readme-doc spec_id=005-bug-executor-restart-drops-deferred-respawn-queue container="" workflow_type=direct container=agent-task-executor-exec-009-spec-005-readme-doc
+time=2026-09-03T20:41:37.427+02:00 level=INFO msg="committed changes (autoRelease disabled, skipping tag)" prompt_id=009-spec-005-readme-doc spec_id=005-bug-executor-restart-drops-deferred-respawn-queue container="" workflow_type=direct container=agent-task-executor-exec-009-spec-005-readme-doc workflow_step=commit
+time=2026-09-03T20:41:37.429+02:00 level=INFO msg="spec awaiting verification" spec=005-bug-executor-restart-drops-deferred-respawn-queue
+time=2026-09-03T20:41:37.429+02:00 level=INFO msg="watching for queued prompts" dir=prompts/in-progress
+time=2026-09-03T20:41:37.431+02:00 level=INFO msg="nothing to do, waiting for changes"
+time=2026-09-03T20:42:37.426+02:00 level=INFO msg="nothing to do, waiting for changes"
+time=2026-09-03T20:42:37.428+02:00 level=INFO msg="swept prompted specs to verifying" transitioned=1
+time=2026-09-03T20:42:54.689+02:00 level=INFO msg="spec watcher shutting down"
+time=2026-09-03T20:42:54.689+02:00 level=INFO msg="processor shutting down"
+time=2026-09-03T20:42:54.689+02:00 level=INFO msg="watcher shutting down"
