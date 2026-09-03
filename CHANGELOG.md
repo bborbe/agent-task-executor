@@ -4,6 +4,8 @@ All notable changes to this project will be documented in this file.
 
 ## v0.8.5
 
+- feat: stamp every published frontmatter command with the task's `target_vault` — `UpdateFrontmatterCommand`/`IncrementFrontmatterCommand` from `pkg/result_publisher.go` now carry `TargetVault` sourced from the task's own frontmatter key, never the executor's `VAULT_NAME` (the shared executor serves all vaults), so controllers can skip cross-vault commands before scanning their vault. Tasks without the key publish exactly as before (`omitempty` keeps the wire shape stable).
+- chore: move the pkg package's Ginkgo suite entry-point (`TestPkg`) from the top of `agent_configuration_test.go` into the conventional `pkg/suite_test.go` location so spec discovery is explicit
 - fix: repoint `DOCKER_REGISTRY` default off the dead `docker.quant` host to `docker.prod.nuke.benjamin-borbe.de:443`
 
 ## v0.8.4

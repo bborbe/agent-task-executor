@@ -5,8 +5,6 @@
 package pkg_test
 
 import (
-	"testing"
-
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 
@@ -14,10 +12,8 @@ import (
 	"github.com/bborbe/agent-task-executor/pkg"
 )
 
-func TestPkg(t *testing.T) {
-	RegisterFailHandler(Fail)
-	RunSpecs(t, "Pkg Suite")
-}
+// The Ginkgo suite entry-point (TestPkg) lives in suite_test.go — the
+// package-conventional *_suite_test.go location.
 
 var _ = Describe("AgentConfiguration", func() {
 	Describe("EffectiveZombieJobTimeoutSeconds", func() {

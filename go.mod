@@ -4,7 +4,7 @@ go 1.27.0
 
 require (
 	github.com/IBM/sarama v1.60.2
-	github.com/bborbe/agent v0.85.1
+	github.com/bborbe/agent v0.86.0
 	github.com/bborbe/cqrs v0.6.10
 	github.com/bborbe/cron v1.8.29
 	github.com/bborbe/errors v1.6.0

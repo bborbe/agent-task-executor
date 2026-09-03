@@ -152,6 +152,18 @@ type resultPublisher struct {
 	dedupe              *ttlDedupe
 }
 
+// targetVaultFromTask reads the task's frontmatter "target_vault" key and
+// returns it as a string, returning "" when the key is absent or holds a
+// non-string value. TaskFrontmatter.String returns (string, bool) — the
+// discarded second value is the found/type-assert flag, not an error; "" on
+// false is exactly the documented fallback. The executor serves all vaults
+// ("shared") and must never inject its own vault name, so the routing stamp
+// always comes from the task.
+func targetVaultFromTask(task lib.Task) string {
+	vault, _ := task.Frontmatter.String("target_vault")
+	return vault
+}
+
 func (p *resultPublisher) PublishSpawnNotification(
 	ctx context.Context,
 	task lib.Task,
@@ -159,6 +171,7 @@ func (p *resultPublisher) PublishSpawnNotification(
 ) error {
 	cmd := taskcmd.UpdateFrontmatterCommand{
 		TaskIdentifier: task.TaskIdentifier,
+		TargetVault:    targetVaultFromTask(task),
 		Updates: lib.TaskFrontmatter{
 			"spawn_notification": true,
 			"current_job":        jobName,
@@ -188,6 +201,7 @@ func (p *resultPublisher) PublishFailure(
 	)
 	updateCmd := taskcmd.UpdateFrontmatterCommand{
 		TaskIdentifier: task.TaskIdentifier,
+		TargetVault:    targetVaultFromTask(task),
 		Updates: lib.TaskFrontmatter{
 			"current_job": "",
 		},
@@ -207,6 +221,7 @@ func (p *resultPublisher) PublishFailure(
 
 	incrementCmd := taskcmd.IncrementFrontmatterCommand{
 		TaskIdentifier: task.TaskIdentifier,
+		TargetVault:    targetVaultFromTask(task),
 		Field:          "trigger_count",
 		Delta:          1,
 	}
@@ -232,6 +247,7 @@ func (p *resultPublisher) PublishFailure(
 func (p *resultPublisher) PublishIncrementTriggerCount(ctx context.Context, task lib.Task) error {
 	cmd := taskcmd.IncrementFrontmatterCommand{
 		TaskIdentifier: task.TaskIdentifier,
+		TargetVault:    targetVaultFromTask(task),
 		Field:          "trigger_count",
 		Delta:          1,
 	}
@@ -246,6 +262,7 @@ func (p *resultPublisher) PublishSetTriggerScope(
 ) error {
 	cmd := taskcmd.UpdateFrontmatterCommand{
 		TaskIdentifier: task.TaskIdentifier,
+		TargetVault:    targetVaultFromTask(task),
 		Updates: lib.TaskFrontmatter{
 			"trigger_scope": scope,
 			// Never 0: this cycle is about to spawn, and that spawn must be counted
@@ -289,6 +306,7 @@ func (p *resultPublisher) PublishTypeMismatchFailure(
 
 	cmd := taskcmd.UpdateFrontmatterCommand{
 		TaskIdentifier: task.TaskIdentifier,
+		TargetVault:    targetVaultFromTask(task),
 		Updates:        updates,
 		Body: &taskcmd.BodySection{
 			Heading: "## Failure",
@@ -311,6 +329,9 @@ func (p *resultPublisher) publishRaw(
 	operation base.CommandOperation,
 	payload interface{},
 ) error {
+	// Payload validation is the publisher's test-suite contract plus the
+	// consumer's job (the controller validates each command before persisting);
+	// publishRaw intentionally does not re-validate.
 	event, err := base.ParseEvent(ctx, payload)
 	if err != nil {
 		return errors.Wrapf(ctx, err, "parse event for operation %s", operation)
