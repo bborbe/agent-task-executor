@@ -50,4 +50,5 @@ func init() {
 	TaskEventsTotal.WithLabelValues("unknown_phase").Add(0)
 	TaskEventsTotal.WithLabelValues("respawn_grace_window").Add(0)
 	TaskEventsTotal.WithLabelValues("respawn_after_grace_window").Add(0)
+	TaskEventsTotal.WithLabelValues("deferred_concurrency_cap").Add(0)
 }

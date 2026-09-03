@@ -677,9 +677,16 @@ func (h *taskEventHandler) EvalDeferredRespawns(ctx context.Context) error {
 // deferredRespawns with retryAfter = job_started_at + defaultRespawnGracePeriod.
 // Called once from RunDeferredRespawnLoop on startup. Idempotent: any entry already
 // present in deferredRespawns is left untouched. This restores deferred state lost
-// when the in-memory map is wiped by an executor restart, so a stuck task does not
-// remain stuck for want of a Kafka event that will never arrive.
-func (h *taskEventHandler) seedDeferredRespawnsFromStore() {
+// when the in-memory map is wiped by an executor restart, so a task deferred
+// behind the concurrency cap does not remain stuck for want of a Kafka event that
+// will never arrive.
+//
+// The agent configuration is resolved here at seed time (not left zero-valued):
+// a seeded entry is later evaluated by evalDeferredRespawns → spawnIfNeeded, which
+// spawns with the entry's config — a zero-valued config would spawn a Job with an
+// empty image. Tasks whose assignee config cannot be resolved are skipped; they
+// are re-evaluated when a genuine Kafka event for the task arrives.
+func (h *taskEventHandler) seedDeferredRespawnsFromStore(ctx context.Context) {
 	snapshot := h.taskStore.Snapshot()
 
 	h.deferredMu.Lock()
@@ -700,12 +707,17 @@ func (h *taskEventHandler) seedDeferredRespawnsFromStore() {
 		if jobStartedErr != nil {
 			continue
 		}
+		config, resolveErr := h.resolver.Resolve(ctx, task.Frontmatter.Assignee().String())
+		if resolveErr != nil {
+			glog.V(2).Infof(
+				"seed deferred respawn: skip task %s (config unresolvable for assignee %s): %v",
+				taskID, task.Frontmatter.Assignee(), resolveErr,
+			)
+			continue
+		}
 		h.deferredRespawns[taskID] = deferredEntry{
-			task: task,
-			// config: the agent configuration is resolved at event time; the seed
-			// uses an empty value here. For seeded entries the config is zero-valued;
-			// this is acceptable because the next genuine Kafka event for the task
-			// will supply the correct config via the event-driven path.
+			task:       task,
+			config:     config,
 			retryAfter: jobStartedAt.Add(defaultRespawnGracePeriod),
 		}
 	}
@@ -716,7 +728,7 @@ func (h *taskEventHandler) RunDeferredRespawnLoop(ctx context.Context) error {
 	// Startup reconciliation: recover deferred entries lost across an executor
 	// restart by scanning the in-memory taskStore. See seedDeferredRespawnsFromStore
 	// for the restart-safety rationale (spec 037 AC #5).
-	h.seedDeferredRespawnsFromStore()
+	h.seedDeferredRespawnsFromStore(ctx)
 
 	// Fire one eval immediately after seeding so that tasks whose grace has
 	// already elapsed at startup are picked up without waiting for the first tick.

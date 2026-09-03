@@ -426,4 +426,52 @@ var _ = Describe("TaskEventHandler reconcile loop", func() {
 			Expect(fakeSpawner.SpawnJobCallCount()).To(Equal(1))
 		},
 	)
+
+	It(
+		"seeds deferred entries with a resolved config so an at-cap task is deferred, not spawned with an empty config (MF-1)",
+		func() {
+			// MF-1 regression: seedDeferredRespawnsFromStore used to seed
+			// zero-valued configs; a seeded entry past its grace window was then
+			// evaluated by evalDeferredRespawns → spawnIfNeeded, which proceeded
+			// to SpawnJob with an empty (zero-valued) AgentConfiguration. With the
+			// config resolved at seed time, an at-cap assignee's seeded task is
+			// deferred instead of spawned.
+			past := currentDateTime.Now().Time().Add(-10 * time.Minute).Format(time.RFC3339)
+			task := lib.Task{
+				TaskIdentifier: lib.TaskIdentifier("tid-seed-mf1"),
+				Frontmatter: lib.TaskFrontmatter{
+					"status":         "in_progress",
+					"phase":          string(domain.TaskPhaseExecution),
+					"assignee":       "claude",
+					"current_job":    "job-seed-mf1",
+					"job_started_at": past,
+				},
+			}
+			taskStore.Store(task.TaskIdentifier, task)
+			fakeResolver.ResolveReturns(
+				pkg.AgentConfiguration{
+					Assignee:          "claude",
+					Image:             "my-image:latest",
+					MaxConcurrentJobs: 1,
+				},
+				nil,
+			)
+			fakeSpawner.CountActiveJobsReturns(1, nil) // at cap
+			fakeSpawner.IsJobActiveReturns(false, nil) // prior job is gone
+
+			loopCtx, cancel := context.WithCancel(context.Background())
+			done := make(chan error, 1)
+			go func() {
+				defer GinkgoRecover()
+				done <- h.RunDeferredRespawnLoop(loopCtx)
+			}()
+			time.Sleep(100 * time.Millisecond) // let the startup seed + initial eval run
+			cancel()
+			Eventually(done).Should(Receive(BeNil()))
+
+			// At cap → deferred, not spawned (a zero-valued config would have spawned).
+			Expect(fakeSpawner.SpawnJobCallCount()).To(Equal(0))
+			Expect(fakeResolver.ResolveCallCount()).To(BeNumerically(">=", 1))
+		},
+	)
 })
