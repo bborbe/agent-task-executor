@@ -1,6 +1,8 @@
 ---
-status: approved
+status: prompted
 approved: "2026-08-08T20:38:48Z"
+generating: "2026-09-03T17:46:06Z"
+prompted: "2026-09-03T17:57:12Z"
 branch: dark-factory/config-job-namespace
 ---
 

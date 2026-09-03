@@ -1,0 +1,2382 @@
+[19:57:13] Starting headless session...
+[19:57:14] [init] session=3667b84f model=deepseek-v4-flash[1m] cwd=/workspace tools=28
+[claude-code:unrecognized_model] {"model":"deepseek-v4-flash[1m]","query_source":"sdk"}
+[19:57:14] [system: thinking_tokens]
+[19:57:14] [system: thinking_tokens]
+[19:57:14] [system: thinking_tokens]
+[19:57:14] [system: thinking_tokens]
+[19:57:14] [system: thinking_tokens]
+[19:57:14] [system: thinking_tokens]
+[19:57:14] [system: thinking_tokens]
+[19:57:14] [system: thinking_tokens]
+[19:57:14] [system: thinking_tokens]
+[19:57:14] [system: thinking_tokens]
+[19:57:14] [system: thinking_tokens]
+[19:57:14] [system: thinking_tokens]
+[19:57:14] [system: thinking_tokens]
+[19:57:14] [system: thinking_tokens]
+[19:57:14] [system: thinking_tokens]
+[19:57:14] [system: thinking_tokens]
+[19:57:14] [system: thinking_tokens]
+[19:57:14] [system: thinking_tokens]
+[19:57:14] [system: thinking_tokens]
+[19:57:14] [system: thinking_tokens]
+[19:57:15] [system: thinking_tokens]
+[19:57:15] [system: thinking_tokens]
+[19:57:15] [system: thinking_tokens]
+[19:57:15] [system: thinking_tokens]
+[19:57:15] [system: thinking_tokens]
+[19:57:15] [system: thinking_tokens]
+[19:57:15] [system: thinking_tokens]
+[19:57:15] [system: thinking_tokens]
+[19:57:15] [system: thinking_tokens]
+[19:57:15] [system: thinking_tokens]
+[19:57:15] [system: thinking_tokens]
+[19:57:15] [system: thinking_tokens]
+[19:57:15] [system: thinking_tokens]
+[19:57:15] [system: thinking_tokens]
+[19:57:15] [system: thinking_tokens]
+[19:57:15] [system: thinking_tokens]
+[19:57:15] [system: thinking_tokens]
+[19:57:15] [system: thinking_tokens]
+[19:57:15] [system: thinking_tokens]
+[19:57:15] [system: thinking_tokens]
+[19:57:15] [system: thinking_tokens]
+[19:57:15] [system: thinking_tokens]
+[19:57:15] [system: thinking_tokens]
+[19:57:15] [system: thinking_tokens]
+[19:57:15] [system: thinking_tokens]
+[19:57:15] [system: thinking_tokens]
+[19:57:15] [system: thinking_tokens]
+[19:57:15] [system: thinking_tokens]
+[19:57:15] [system: thinking_tokens]
+[19:57:15] [system: thinking_tokens]
+[19:57:15] [system: thinking_tokens]
+[19:57:15] [system: thinking_tokens]
+[19:57:15] [system: thinking_tokens]
+[19:57:15] [system: thinking_tokens]
+[19:57:15] [system: thinking_tokens]
+[19:57:15] [system: thinking_tokens]
+[19:57:15] [system: thinking_tokens]
+[19:57:15] [system: thinking_tokens]
+[19:57:15] [system: thinking_tokens]
+[19:57:15] [system: thinking_tokens]
+[19:57:15] [system: thinking_tokens]
+[19:57:15] [system: thinking_tokens]
+[19:57:15] [system: thinking_tokens]
+[19:57:15] [system: thinking_tokens]
+[19:57:15] [system: thinking_tokens]
+[19:57:15] [system: thinking_tokens]
+[19:57:15] [system: thinking_tokens]
+[19:57:15] [system: thinking_tokens]
+[19:57:15] [system: thinking_tokens]
+[19:57:15] [system: thinking_tokens]
+[19:57:15] [system: thinking_tokens]
+[19:57:15] [system: thinking_tokens]
+[19:57:15] [system: thinking_tokens]
+[19:57:15] [system: thinking_tokens]
+[19:57:15] [system: thinking_tokens]
+[19:57:15] [system: thinking_tokens]
+[19:57:15] [system: thinking_tokens]
+[19:57:15] [system: thinking_tokens]
+[19:57:15] [system: thinking_tokens]
+[19:57:15] [system: thinking_tokens]
+[19:57:15] [system: thinking_tokens]
+[19:57:15] [system: thinking_tokens]
+[19:57:15] [system: thinking_tokens]
+[19:57:15] [system: thinking_tokens]
+[19:57:15] [system: thinking_tokens]
+[19:57:15] [system: thinking_tokens]
+[19:57:15] [system: thinking_tokens]
+[19:57:15] [system: thinking_tokens]
+[19:57:15] [system: thinking_tokens]
+[19:57:15] [system: thinking_tokens]
+[19:57:15] [system: thinking_tokens]
+[19:57:15] [system: thinking_tokens]
+[19:57:15] [system: thinking_tokens]
+[19:57:15] [system: thinking_tokens]
+[19:57:15] [system: thinking_tokens]
+[19:57:15] [system: thinking_tokens]
+[19:57:15] [system: thinking_tokens]
+[19:57:15] [system: thinking_tokens]
+[19:57:15] [system: thinking_tokens]
+[19:57:15] [system: thinking_tokens]
+[19:57:15] [system: thinking_tokens]
+[19:57:15] [system: thinking_tokens]
+[19:57:15] [system: thinking_tokens]
+[19:57:15] [system: thinking_tokens]
+[19:57:15] [system: thinking_tokens]
+[19:57:15] [system: thinking_tokens]
+[19:57:15] [system: thinking_tokens]
+[19:57:15] [system: thinking_tokens]
+[19:57:15] [system: thinking_tokens]
+[19:57:15] [system: thinking_tokens]
+[19:57:15] [system: thinking_tokens]
+[19:57:15] [system: thinking_tokens]
+[19:57:15] [system: thinking_tokens]
+[19:57:15] [system: thinking_tokens]
+[19:57:16] [system: thinking_tokens]
+[19:57:16] [system: thinking_tokens]
+[19:57:16] [system: thinking_tokens]
+[19:57:16] [system: thinking_tokens]
+[19:57:16] [system: thinking_tokens]
+[19:57:16] [system: thinking_tokens]
+[19:57:16] [system: thinking_tokens]
+[19:57:16] [system: thinking_tokens]
+[19:57:16] [system: thinking_tokens]
+[19:57:16] [system: thinking_tokens]
+[19:57:16] [system: thinking_tokens]
+[19:57:16] [system: thinking_tokens]
+[19:57:16] [system: thinking_tokens]
+[19:57:16] [system: thinking_tokens]
+[19:57:16] [system: thinking_tokens]
+[19:57:16] [system: thinking_tokens]
+[19:57:16] [system: thinking_tokens]
+[19:57:16] [system: thinking_tokens]
+[19:57:16] [system: thinking_tokens]
+[19:57:16] [system: thinking_tokens]
+[19:57:16] [system: thinking_tokens]
+[19:57:16] [system: thinking_tokens]
+[19:57:16] [system: thinking_tokens]
+[19:57:16] [system: thinking_tokens]
+[19:57:16] [system: thinking_tokens]
+[19:57:16] [system: thinking_tokens]
+[19:57:16] [system: thinking_tokens]
+[19:57:16] [system: thinking_tokens]
+[19:57:16] [system: thinking_tokens]
+[19:57:16] [system: thinking_tokens]
+[19:57:16] [system: thinking_tokens]
+[19:57:16] [system: thinking_tokens]
+[19:57:16] [system: thinking_tokens]
+[19:57:16] [system: thinking_tokens]
+[19:57:16] [system: thinking_tokens]
+[19:57:16] [system: thinking_tokens]
+[19:57:16] [system: thinking_tokens]
+[19:57:16] [system: thinking_tokens]
+[19:57:16] [system: thinking_tokens]
+[19:57:16] [system: thinking_tokens]
+[19:57:16] [system: thinking_tokens]
+[19:57:16] [system: thinking_tokens]
+[19:57:16] [system: thinking_tokens]
+[19:57:16] [system: thinking_tokens]
+[19:57:16] [system: thinking_tokens]
+[19:57:16] [system: thinking_tokens]
+[19:57:16] [system: thinking_tokens]
+[19:57:16] [system: thinking_tokens]
+[19:57:16] [system: thinking_tokens]
+[19:57:16] [system: thinking_tokens]
+[19:57:16] [system: thinking_tokens]
+[19:57:16] [system: thinking_tokens]
+[19:57:16] [system: thinking_tokens]
+[19:57:16] [system: thinking_tokens]
+[19:57:16] [system: thinking_tokens]
+[19:57:16] [system: thinking_tokens]
+[19:57:16] [system: thinking_tokens]
+[19:57:16] [system: thinking_tokens]
+[19:57:16] [system: thinking_tokens]
+[19:57:16] [system: thinking_tokens]
+[19:57:16] [system: thinking_tokens]
+[19:57:16] [system: thinking_tokens]
+[19:57:16] [system: thinking_tokens]
+[19:57:16] [system: thinking_tokens]
+[19:57:16] [system: thinking_tokens]
+[19:57:16] [system: thinking_tokens]
+[19:57:16] [system: thinking_tokens]
+[19:57:16] [system: thinking_tokens]
+[19:57:16] [system: thinking_tokens]
+[19:57:16] [system: thinking_tokens]
+[19:57:16] [system: thinking_tokens]
+[19:57:16] [system: thinking_tokens]
+[19:57:16] [system: thinking_tokens]
+[19:57:16] [system: thinking_tokens]
+[19:57:16] [system: thinking_tokens]
+[19:57:16] [system: thinking_tokens]
+[19:57:16] [system: thinking_tokens]
+[19:57:16] [system: thinking_tokens]
+[19:57:16] [system: thinking_tokens]
+[19:57:16] [system: thinking_tokens]
+[19:57:16] [system: thinking_tokens]
+[19:57:16] [system: thinking_tokens]
+[19:57:16] [system: thinking_tokens]
+[19:57:16] [system: thinking_tokens]
+[19:57:16] [system: thinking_tokens]
+[19:57:16] [system: thinking_tokens]
+[19:57:16] [system: thinking_tokens]
+[19:57:16] [system: thinking_tokens]
+[19:57:16] [system: thinking_tokens]
+[19:57:16] [system: thinking_tokens]
+[19:57:16] [system: thinking_tokens]
+[19:57:16] [system: thinking_tokens]
+[19:57:16] [system: thinking_tokens]
+[19:57:17] [system: thinking_tokens]
+[19:57:17] [system: thinking_tokens]
+[19:57:17] [system: thinking_tokens]
+[19:57:17] [system: thinking_tokens]
+[19:57:17] [system: thinking_tokens]
+[19:57:17] [system: thinking_tokens]
+[19:57:17] [system: thinking_tokens]
+[19:57:17] [system: thinking_tokens]
+[19:57:17] [system: thinking_tokens]
+[19:57:17] [system: thinking_tokens]
+[19:57:17] [system: thinking_tokens]
+[19:57:17] [system: thinking_tokens]
+[19:57:17] [system: thinking_tokens]
+[19:57:17] [system: thinking_tokens]
+[19:57:17] [system: thinking_tokens]
+[19:57:17] [system: thinking_tokens]
+[19:57:17] [system: thinking_tokens]
+[19:57:17] [system: thinking_tokens]
+[19:57:17] [system: thinking_tokens]
+[19:57:17] [system: thinking_tokens]
+[19:57:17] [system: thinking_tokens]
+[19:57:17] [system: thinking_tokens]
+[19:57:17] [system: thinking_tokens]
+[19:57:17] [system: thinking_tokens]
+[19:57:17] [system: thinking_tokens]
+[19:57:17] [system: thinking_tokens]
+[19:57:17] [system: thinking_tokens]
+[19:57:17] [system: thinking_tokens]
+[19:57:17] [system: thinking_tokens]
+[19:57:17] [system: thinking_tokens]
+[19:57:17] [system: thinking_tokens]
+[19:57:17] [system: thinking_tokens]
+[19:57:17] [system: thinking_tokens]
+[19:57:17] [system: thinking_tokens]
+[19:57:17] [system: thinking_tokens]
+[19:57:17] [system: thinking_tokens]
+[19:57:17] [system: thinking_tokens]
+[19:57:17] [system: thinking_tokens]
+[19:57:17] [system: thinking_tokens]
+[19:57:17] [system: thinking_tokens]
+[19:57:17] [system: thinking_tokens]
+[19:57:17] [system: thinking_tokens]
+[19:57:17] [system: thinking_tokens]
+[19:57:17] [system: thinking_tokens]
+[19:57:17] [system: thinking_tokens]
+[19:57:17] [system: thinking_tokens]
+[19:57:17] [system: thinking_tokens]
+[19:57:17] [system: thinking_tokens]
+[19:57:17] [system: thinking_tokens]
+[19:57:17] [system: thinking_tokens]
+[19:57:17] [system: thinking_tokens]
+[19:57:17] [system: thinking_tokens]
+[19:57:17] [system: thinking_tokens]
+[19:57:17] [system: thinking_tokens]
+[19:57:17] [system: thinking_tokens]
+[19:57:17] [system: thinking_tokens]
+[19:57:17] [system: thinking_tokens]
+[19:57:17] [system: thinking_tokens]
+[19:57:17] [system: thinking_tokens]
+[19:57:17] [system: thinking_tokens]
+[19:57:17] [system: thinking_tokens]
+[19:57:17] [system: thinking_tokens]
+[19:57:17] [system: thinking_tokens]
+[19:57:17] [system: thinking_tokens]
+[19:57:17] [system: thinking_tokens]
+[19:57:17] [system: thinking_tokens]
+[19:57:17] [system: thinking_tokens]
+[19:57:17] [system: thinking_tokens]
+[19:57:17] [system: thinking_tokens]
+[19:57:17] [system: thinking_tokens]
+[19:57:17] [system: thinking_tokens]
+[19:57:17] [system: thinking_tokens]
+[19:57:17] [system: thinking_tokens]
+[19:57:17] [system: thinking_tokens]
+[19:57:17] [system: thinking_tokens]
+[19:57:17] [system: thinking_tokens]
+[19:57:17] [system: thinking_tokens]
+[19:57:17] [system: thinking_tokens]
+[19:57:17] [system: thinking_tokens]
+[19:57:17] [system: thinking_tokens]
+[19:57:17] [system: thinking_tokens]
+[19:57:17] [system: thinking_tokens]
+[19:57:17] [system: thinking_tokens]
+[19:57:17] [system: thinking_tokens]
+[19:57:17] [system: thinking_tokens]
+[19:57:17] [system: thinking_tokens]
+[19:57:17] [system: thinking_tokens]
+[19:57:17] [system: thinking_tokens]
+[19:57:17] 💭 Let me understand the task. I'm asked to invoke the `prompt-creator` agent (which is `dark-factory:prompt-creator`) to generate prompts from the approved spec at `specs/in-progress/005-bug-executor-restart-drops-deferred-respawn-queue.md`.
+
+Let me first check the environment — the working directory is `/workspace`, and I need to pass the repo-root-relative spec path. The spec path is `specs/in-progress/005-bug-executor-restart-drops-deferred-respawn-queue.md`.
+
+Wait, but the git status shows we'…
+[19:57:18] I'll generate prompts from the approved spec. Let me first verify the environment and check the daemon-managed flag, then launch the prompt-creator agent.
+
+
+[19:57:18] $ echo "DARK_FACTORY_MANAGED=${DARK_FACTORY_MANAGED:-<unset>}"; echo "PWD=$(pwd)"; ls -la specs/in-progress/005-bug-executor-restart-drops-deferred-respawn-queue.md; ls prompts/ 2>/dev/null || echo "(n…
+[19:57:19] [system: thinking_tokens]
+[19:57:19] [system: thinking_tokens]
+[19:57:19] [system: thinking_tokens]
+[19:57:19] [system: thinking_tokens]
+[19:57:19] [system: thinking_tokens]
+[19:57:19] [system: thinking_tokens]
+[19:57:19] [system: thinking_tokens]
+[19:57:19] [system: thinking_tokens]
+[19:57:19] [system: thinking_tokens]
+[19:57:19] [system: thinking_tokens]
+[19:57:19] [system: thinking_tokens]
+[19:57:19] [system: thinking_tokens]
+[19:57:19] [system: thinking_tokens]
+[19:57:19] [system: thinking_tokens]
+[19:57:19] [system: thinking_tokens]
+[19:57:19] [system: thinking_tokens]
+[19:57:19] [system: thinking_tokens]
+[19:57:19] [system: thinking_tokens]
+[19:57:19] [system: thinking_tokens]
+[19:57:19] [system: thinking_tokens]
+[19:57:19] [system: thinking_tokens]
+[19:57:19] [system: thinking_tokens]
+[19:57:19] [system: thinking_tokens]
+[19:57:19] [system: thinking_tokens]
+[19:57:19] [system: thinking_tokens]
+[19:57:19] [system: thinking_tokens]
+[19:57:19] [system: thinking_tokens]
+[19:57:19] [system: thinking_tokens]
+[19:57:19] [system: thinking_tokens]
+[19:57:19] [system: thinking_tokens]
+[19:57:19] [system: thinking_tokens]
+[19:57:19] 💭 `DARK_FACTORY_MANAGED=true` — this is Mode 1 (daemon + container). So I must SKIP the `mark-prompted` step.
+
+The spec exists at `specs/in-progress/005-bug-executor-restart-drops-deferred-respawn-queue.md`. The prompts dir has existing prompts for spec 002 and completed/in-progress/log subdirs.
+
+Now let me launch the prompt-creator agent in the foreground (since the audit step depends on its output). I'll pass the repo-root-relative spec path.
+[19:57:20] `DARK_FACTORY_MANAGED=true` → Mode 1 (daemon + container), so I'll **skip** the `mark-prompted` step at the end. The spec exists. Now launching the prompt-creator agent (foreground — the audit pass depends on its output).
+
+
+[19:57:20] [agent:dark-factory:prompt-creator] Generate prompts from spec 005
+    prompt: Generate dark-factory prompt files from the approved spec at:\n\n`specs/in-progress/005-bug-executor-restart-drops-deferred-respawn-queue.md`\n\n(relative to t…
+[19:57:20] [system: task_started]
+[19:57:21] [system: task_progress]
+[19:57:21] [read] /workspace/specs/in-progress/005-bug-executor-restart-drops-deferred-respawn-queue.md
+[19:57:21] [system: task_progress]
+[19:57:21] $ ls -la /workspace/prompts/ && echo "---COMPLETED---" && ls -la /workspace/prompts/completed/ 2>/dev/null | head -50
+[19:57:21]   → 157 lines read
+[19:57:23] [system: task_progress]
+[19:57:23] $ ls -la && echo "---" && cat .dark-factory.yaml 2>/dev/null && echo "---GOMOD---" && head -30 go.mod
+[19:57:23] [system: task_progress]
+[19:57:23] $ ls -la pkg/ pkg/handler/ 2>/dev/null && echo "---CHART---" && find . -maxdepth 3 -name "Chart.yaml" -not -path "*/node_modules/*" 2>/dev/null
+[19:57:23] ⚠ [bash output]
+	github.com/bborbe/http v1.26.25
+	github.com/bborbe/k8s v1.14.16
+	github.com/bborbe/kafka v1.25.11
+	github.com/bborbe/log v1.6.25
+	github.com/bborbe/metrics v0.6.1
+	github.com/bborbe/run v1.10.2
+	github.com/bborbe/sentry v1.10.0
+	github.com/bborbe/service v1.10.10
+	github.com/bborbe/time v1.27.11
+	github.com/bborbe/validation v1.4.23
+	github.com/bborbe/vault-cli v0.121.0
+	github.com/golang/glog v1.2.5
+	github.com/google/uuid v1.6.0
+	github.com/gorilla/mux v1.8.1
+	github.com/onsi/ginkgo/v2 v2.32.1
+	github.com/onsi/gomega v1.43.0
+	github.com/prometheus/client_golang v1.24.1
+	github.com/prometheus/client_model v0.6.3
+	gopkg.in/yaml.v3 v3.0.1
+	k8s.io/api v0.36.4
+[19:57:25] [system: task_progress]
+[19:57:25] $ wc -l pkg/handler/task_event_handler.go pkg/task_store.go pkg/spawner/*.go pkg/zombie_sweeper.go main.go pkg/factory/*.go
+[19:57:25] [system: task_progress]
+[19:57:25] $ ls -la pkg/spawner/ pkg/factory/ pkg/metrics/ && echo "---DOCS---" && ls -la docs/ && echo "---MAIN---" && grep -n "factory.Create\|Run(" main.go | head -40
+[19:57:25] ⚠ [bash output]
+-rw-r--r-- 1 node node 19021 Aug 13 18:05 job_spawner.go
+-rw-r--r-- 1 node node 45410 Aug 13 18:05 job_spawner_test.go
+---DOCS---
+total 8
+drwxr-xr-x 1 node node   96 Aug 30 11:09 .
+drwxr-xr-x 1 node node 1184 Sep  3 19:46 ..
+-rw-r--r-- 1 node node 6770 Aug 30 11:09 agent-crd-specification.md
+---MAIN---
+74:func (a *application) Run(ctx context.Context, sentryClient libsentry.Client) error {
+103:	connector := factory.CreateK8sConnector(kubeConfig)
+107:	eventHandlerConfig := factory.CreateEventHandlerConfig()
+108:	resourceEventHandler := factory.CreateResourceEventHandlerConfig(
+112:	resolver := factory.CreateConfigResolver(eventHandlerConfig, a.Branch, a.VaultName)
+131:	jobWatcher := factory.CreateJobWatcher(kubeClient, a.Namespace, taskStore, resultPublisher)
+133:	zombieSweeper := factory.CreateZombieSweeper(
+142:	healthcheckRunner := factory.CreateHealthcheckRunner(
+148:	healthcheckCron := factory.CreateHealthcheckCron(
+153:	consumer, taskEventHandler := factory.CreateConsumer(
+170:	return service.Run(
+209:		).Run(ctx)
+[19:57:26] [system: task_progress]
+[19:57:26] [read] /workspace/pkg/handler/task_event_handler.go
+[19:57:26]   → 823 lines read
+[19:57:28] [system: task_progress]
+[19:57:28] [read] /workspace/pkg/task_store.go
+[19:57:28] [system: task_progress]
+[19:57:28] [read] /workspace/pkg/zombie_sweeper.go
+[19:57:28]   → 251 lines read
+[19:57:28]   → 58 lines read
+[19:57:29] [system: task_progress]
+[19:57:29] [read] /workspace/main.go
+[19:57:29] [system: task_progress]
+[19:57:29] [read] /workspace/pkg/factory/factory.go
+[19:57:29] [system: task_progress]
+[19:57:29] [read] /workspace/pkg/event_handler_config.go
+[19:57:29]   → 20 lines read
+[19:57:29]   → 211 lines read
+[19:57:29]   → 170 lines read
+[19:57:30] [system: task_progress]
+[19:57:30] [read] /workspace/pkg/spawner/job_spawner.go (offset=, limit=180)
+[19:57:30] [system: task_progress]
+[19:57:30] [read] /workspace/pkg/metrics/metrics.go
+[19:57:30]   → 44 lines read
+[19:57:30]   → 179 lines read
+[19:57:32] [system: task_progress]
+[19:57:32] $ ls $(go env GOPATH)/pkg/mod/github.com/bborbe/ 2>/dev/null | head -60
+[19:57:32] [system: task_progress]
+[19:57:32] $ find $(go env GOPATH)/pkg/mod/github.com/bborbe/ -maxdepth 1 -name "*controller*" 2>/dev/null; echo "---"; find $(go env GOPATH)/pkg/mod/github.com/bborbe/ -maxdepth 1 -name "*gitrest*" -o -maxdepth …
+[19:57:35] [system: task_started]
+[19:57:42] [system: task_notification]
+[19:57:43] [system: task_progress]
+[19:57:43] $ echo "GOPATH=$(go env GOPATH 2>/dev/null)"; echo "GOMODCACHE=$(go env GOMODCACHE 2>/dev/null)"; ls /home/node/go/pkg/mod/github.com/bborbe/ 2>/dev/null | head -80
+[19:57:44] [system: task_progress]
+[19:57:44] $ ls /home/node/go/pkg/mod/ 2>/dev/null | head; echo "---count---"; ls /home/node/go/pkg/mod/github.com/ 2>/dev/null | head -40; echo "---agent-task-controller search---"; find /home/node/go/pkg/mod -m…
+[19:57:45] [system: task_progress]
+[19:57:45] $ timeout 120 go mod download github.com/bborbe/agent github.com/bborbe/vault-cli 2>&1 | tail -5; echo "exit: $?"
+[19:57:47] [system: task_progress]
+[19:57:47] $ timeout 120 go mod download github.com/bborbe/agent-task-controller@latest 2>&1 | tail -5; echo "exit: $?"; ls -d /home/node/go/pkg/mod/github.com/bborbe/agent-task-controller* 2>/dev/null
+[19:57:50] [system: task_started]
+[19:58:16] [system: task_notification]
+[19:58:17] [system: task_progress]
+[19:58:17] $ ls /home/node/go/pkg/mod/github.com/bborbe/agent-task-controller@v0.6.6/pkg/gitrestclient/ 2>/dev/null && echo "---" && ls /home/node/go/pkg/mod/github.com/bborbe/agent-task-controller@v0.6.6/
+[19:58:18] [system: task_progress]
+[19:58:18] [read] /home/node/go/pkg/mod/github.com/bborbe/agent-task-controller@v0.6.6/pkg/gitrestclient/git_rest_client.go
+[19:58:18]   → 422 lines read
+[19:58:24] [system: task_progress]
+[19:58:24] $ ls /home/node/go/pkg/mod/github.com/bborbe/agent@v0.85.1/ | head -40; echo "---FILES---"; find /home/node/go/pkg/mod/github.com/bborbe/agent@v0.85.1 -name "*.go" | xargs grep -ln "func.*Parse.*Task\|…
+[19:58:25] [system: task_progress]
+[19:58:25] $ grep -n "func Parse\|type Task struct" /home/node/go/pkg/mod/github.com/bborbe/agent@v0.85.1/agent_task.go | head; echo "---PARSER---"; grep -n "func \|^type " /home/node/go/pkg/mod/github.com/bborbe…
+[19:58:25] ⚠ [bash output]
+---PARSER---
+25:type AIParser interface {
+36:type ParseStep[T any] struct {
+49:func NewParseStep[T any](
+64:func (s *ParseStep[T]) Name() string { return s.name }
+67:func (s *ParseStep[T]) ShouldRun(_ context.Context, md *Markdown) (bool, error) {
+73:func (s *ParseStep[T]) Run(ctx context.Context, md *Markdown) (*Result, error) {
+---MARKDOWN---
+26:type Section struct {
+37:type Markdown struct {
+48:func ParseMarkdown(_ context.Context, content string) (*Markdown, error) {
+62:func (m *Markdown) FindSection(heading string) (*Section, bool) {
+75:func (m *Markdown) AddSection(section Section) {
+81:func (m *Markdown) ReplaceSection(section Section) {
+93:func (m *Markdown) InsertSection(pos int, section Section) {
+108:func (m *Markdown) Marshal(ctx context.Context) (string, error) {
+145:func splitMarkdownFrontmatter(content string) (string, string) {
+159:func parseMarkdownFrontmatter(fm string) TaskFrontmatter {
+173:func splitMarkdownSections(body string) (string, []Section) {
+217:func isMarkdownSectionHeading(line string) bool {
+[19:58:26] [system: task_progress]
+[19:58:26] $ grep -rn "lib.Task\|ParseMarkdown\|TaskFrontmatter\|frontmatter" /home/node/go/pkg/mod/github.com/bborbe/agent-task-controller@v0.6.6/pkg/vault/ 2>/dev/null | head -30; echo "---vault pkg---"; ls /ho…
+[19:58:27] [system: task_progress]
+[19:58:27] $ grep -rn "ParseMarkdown\|lib.Task{" /home/node/go/pkg/mod/github.com/bborbe/agent-task-controller@v0.6.6/pkg/scanner/ 2>/dev/null | head -20; echo "---scanner files---"; ls /home/node/go/pkg/mod/gith…
+[19:58:28] [system: task_progress]
+[19:58:28] [read] /home/node/go/pkg/mod/github.com/bborbe/agent-task-controller@v0.6.6/pkg/scanner/frontmatter.go
+[19:58:28]   → 96 lines read
+[19:58:29] [system: task_progress]
+[19:58:29] $ sed -n '290,360p' /home/node/go/pkg/mod/github.com/bborbe/agent-task-controller@v0.6.6/pkg/scanner/vault_scanner.go
+[19:58:29] ⚠ [bash output]
+}
+
+// injectAndStore generates a UUID, writes it into the file via ops.writeFile,
+// and records a sentinel hash entry with the file's current assignee.
+// Returns (nil task, writtenRelPath, writeError).
+func (v *vaultScanner) injectAndStore(
+	ctx context.Context,
+	content []byte,
+	relPath string,
+	currentAssignee lib.TaskAssignee,
+) (*lib.Task, string, bool) {
+	id := uuid.New().String()
+	newContent, injectErr := InjectTaskIdentifier(ctx, content, id)
+	if injectErr != nil {
+		glog.Warningf("skipping %s: failed to inject task_identifier: %v", relPath, injectErr)
+		v.metrics.SkippedFilesTotal(metrics.ReasonInjectTaskIdentifierFailed).Inc()
+		return nil, "", false
+	}
+	if writeErr := v.ops.writeFile(ctx, relPath, newContent); writeErr != nil {
+		glog.Warningf("failed to write %s: %v", relPath, writeErr)
+[19:58:30] [system: task_progress]
+[19:58:30] $ grep -n "frontmatter\s*:=\|parseFrontmatter\|TaskFrontmatter" /home/node/go/pkg/mod/github.com/bborbe/agent-task-controller@v0.6.6/pkg/scanner/vault_scanner.go | head -20
+[19:58:31] [system: task_progress]
+[19:58:31] $ sed -n '230,290p' /home/node/go/pkg/mod/github.com/bborbe/agent-task-controller@v0.6.6/pkg/scanner/vault_scanner.go
+[19:58:31] ⚠ [bash output]
+			)
+			v.metrics.SkippedFilesTotal(metrics.ReasonAutoInjectDisabled).Inc()
+			return nil, "", false
+		}
+		return v.injectAndStore(ctx, content, relPath, currentFMAssignee)
+	}
+	if !isValidUUID(taskID) {
+		if !v.autoInject {
+			glog.Warningf(
+				"AUTO_INJECT_TASK_IDENTIFIER=false; skipping task without valid task_identifier: %s",
+				relPath,
+			)
+			v.metrics.SkippedFilesTotal(metrics.ReasonAutoInjectDisabled).Inc()
+			return nil, "", false
+		}
+		glog.Warningf("replacing non-UUID task_identifier %q in %s", taskID, relPath)
+		return v.injectAndStore(ctx, removeTaskIdentifier(content), relPath, currentFMAssignee)
+	}
+	if !v.isIdentifierUnique(taskID, relPath) {
+		if !v.autoInject {
+[19:58:34] [system: task_progress]
+[19:58:34] $ grep -n "func Parse\|^func " /home/node/go/pkg/mod/github.com/bborbe/agent@v0.85.1/agent_markdown.go | head; echo "---TASK ACCESSORS---"; grep -n "func (f TaskFrontmatter)\|func (t Task)\|type Task s…
+[19:58:34] ⚠ [bash output]
+217:func isMarkdownSectionHeading(line string) bool {
+---TASK ACCESSORS---
+/home/node/go/pkg/mod/github.com/bborbe/agent@v0.85.1/agent_task.go:19:type Task struct {
+/home/node/go/pkg/mod/github.com/bborbe/agent@v0.85.1/agent_task.go:26:func (t Task) Validate(ctx context.Context) error {
+/home/node/go/pkg/mod/github.com/bborbe/agent@v0.85.1/agent_task.go:33:func (t Task) Ptr() *Task {
+/home/node/go/pkg/mod/github.com/bborbe/agent@v0.85.1/agent_task-frontmatter.go:16:type TaskFrontmatter map[string]interface{}
+/home/node/go/pkg/mod/github.com/bborbe/agent@v0.85.1/agent_task-frontmatter.go:18:func (f TaskFrontmatter) Status() domain.TaskStatus {
+/home/node/go/pkg/mod/github.com/bborbe/agent@v0.85.1/agent_task-frontmatter.go:26:func (f TaskFrontmatter) Phase() *domain.TaskPhase {
+/home/node/go/pkg/mod/github.com/bborbe/agent@v0.85.1/agent_task-frontmatter.go:38:func (f TaskFrontmatter) Assignee() TaskAssignee {
+/home/node/go/pkg/mod/github.com/bborbe/agent@v0.85.1/agent_task-frontmatter.go:45:func (f TaskFrontmatter) TaskType() TaskType {
+/home/node/go/pkg/mod/github.com/bborbe/agent@v0.85.1/agent_task-frontmatter.go:52:func (f TaskFrontmatter) Stage() string {
+/home/node/go/pkg/mod/github.com/bborbe/agent@v0.85.1/agent_task-frontmatter.go:62:func (f TaskFrontmatter) RetryCount() int {
+/home/node/go/pkg/mod/github.com/bborbe/agent@v0.85.1/agent_task-frontmatter.go:75:func (f TaskFrontmatter) MaxRetries() int {
+/home/node/go/pkg/mod/github.com/bborbe/agent@v0.85.1/agent_task-frontmatter.go:88:func (f TaskFrontmatter) TriggerCount() int {
+/home/node/go/pkg/mod/github.com/bborbe/agent@v0.85.1/agent_task-frontmatter.go:101:func (f TaskFrontmatter) MaxTriggers() int {
+/home/node/go/pkg/mod/github.com/bborbe/agent@v0.85.1/agent_task-frontmatter.go:114:func (f TaskFrontmatter) SpawnNotification() bool {
+/home/node/go/pkg/mod/github.com/bborbe/agent@v0.85.1/agent_task-frontmatter.go:121:func (f TaskFrontmatter) CurrentJob() string {
+/home/node/go/pkg/mod/github.com/bborbe/agent@v0.85.1/agent_task-frontmatter.go:129:func (f TaskFrontmatter) JobStartedAt() (time.Time, error) {
+/home/node/go/pkg/mod/github.com/bborbe/agent@v0.85.1/agent_task-frontmatter.go:144:func (f TaskFrontmatter) String(key string) (string, bool) {
+/home/node/go/pkg/mod/github.com/bborbe/agent@v0.85.1/agent_task-frontmatter.go:157:func (f TaskFrontmatter) Int(key string) (int, bool) {
+[19:58:35] [system: task_progress]
+[19:58:35] $ ls /home/node/go/pkg/mod/github.com/bborbe/vault-cli@v0.121.0/pkg/domain/ 2>/dev/null; echo "---STATUS---"; grep -n "TaskStatusInProgress\|TaskStatuses\b\|type TaskStatus\b" /home/node/go/pkg/mod/git…
+[19:58:36] [system: task_progress]
+[19:58:36] $ sed -n '1,40p' /home/node/go/pkg/mod/github.com/bborbe/agent@v0.85.1/agent_task.go; echo "---FRONTMATTER TYPE---"; sed -n '1,30p' /home/node/go/pkg/mod/github.com/bborbe/agent@v0.85.1/agent_task-fron…
+[19:58:36] ⚠ [bash output]
+)
+
+// TaskFrontmatter is a generic map of frontmatter key-value pairs.
+// Serializable as JSON (Kafka) and YAML (vault file).
+// Typed accessors provide type-safe access to well-known fields.
+type TaskFrontmatter map[string]interface{}
+
+func (f TaskFrontmatter) Status() domain.TaskStatus {
+	v, _ := f["status"].(string)
+	if canonical, ok := domain.NormalizeTaskStatus(v); ok {
+		return canonical
+	}
+	return domain.TaskStatus(v)
+}
+
+func (f TaskFrontmatter) Phase() *domain.TaskPhase {
+	v, ok := f["phase"].(string)
+	if !ok || v == "" {
+		return nil
+	}
+[19:58:38] [system: task_progress]
+[19:58:38] $ find /workspace -maxdepth 4 \( -name "*.yaml" -o -name "*.yml" \) -not -path "*/.git/*" -not -path "*/vendor/*" | head -40; echo "---README---"; cat /workspace/README.md
+[19:58:38] [system: task_progress]
+[19:58:38] [read] /workspace/pkg/config_resolver.go
+[19:58:38]   → 136 lines read
+[19:58:40] [system: task_progress]
+[19:58:40] [read] /workspace/prompts/completed/005-spec-004-bug-job-failure-reason.md
+[19:58:40]   → 250 lines read
+[19:58:42] [system: task_progress]
+[19:58:42] [read] /workspace/prompts/3-spec-002-config-job-namespace-doc.md
+[19:58:42] [system: task_progress]
+[19:58:42] $ grep -n "chart\|Chart\|README\|helm\|nuke" /workspace/prompts/1-spec-002-config-job-namespace-model.md /workspace/prompts/2-spec-002-config-job-namespace-spawner.md /workspace/prompts/3-spec-002-conf…
+[19:58:42]   → 54 lines read
+[19:58:43] [system: task_progress]
+[19:58:43] $ grep -n "chart\|Chart\|README\|helm\|values\|deploy" /workspace/prompts/completed/001-spec-001-add-kafka-cert-config.md /workspace/prompts/completed/002-spec-001-mount-kafka-certs.md | head -30
+[19:58:47] [system: task_progress]
+[19:58:47] $ grep -n "GitRest\|GITREST\|gateway\|Gateway" /home/node/go/pkg/mod/github.com/bborbe/agent-task-controller@v0.6.6/main.go | head -40
+[19:58:50] [system: task_progress]
+[19:58:50] $ grep -rn "Secrets(\|CoreV1()" /workspace/pkg/ /workspace/main.go | head; echo "---k8s connector---"; grep -n "func \|kubeClient\|Client" /workspace/pkg/k8s_connector.go | head -30
+[19:58:50] ⚠ [bash output]
+/workspace/pkg/envtest/job_watcher_envtest_test.go:113:		_, err := kubeClient.CoreV1().Pods(ns).Create(ctx, pod, metav1.CreateOptions{})
+/workspace/pkg/envtest/job_watcher_envtest_test.go:125:		fetched, err := kubeClient.CoreV1().Pods(ns).Get(ctx, "envtest-pod-1", metav1.GetOptions{})
+/workspace/pkg/envtest/job_watcher_envtest_test.go:141:		_, err = kubeClient.CoreV1().Pods(ns).UpdateStatus(ctx, fetched, metav1.UpdateOptions{})
+/workspace/pkg/envtest/job_watcher_envtest_test.go:144:		confirmed, err := kubeClient.CoreV1().
+/workspace/pkg/spawner/job_spawner.go:127:	podSpecBuilder.SetImagePullSecrets([]string{imagePullSecretName(config)})
+---k8s connector---
+48:// CRDClientBuilder constructs the apiextensions clientset from a rest.Config.
+50:type CRDClientBuilder func(*rest.Config) (apiextensionsclient.Interface, error)
+52:// DefaultCRDClientBuilder wraps apiextensionsclient.NewForConfig to satisfy CRDClientBuilder.
+53:func DefaultCRDClientBuilder(c *rest.Config) (apiextensionsclient.Interface, error) {
+58:// Production callers pass DefaultCRDClientBuilder as the builder.
+59:func NewK8sConnector(config *rest.Config, crdBuilder CRDClientBuilder) K8sConnector {
+66:	crdBuilder CRDClientBuilder
+70:func (c *k8sConnector) SetupCustomResourceDefinition(ctx context.Context) error {
+102:func (c *k8sConnector) Listen(
+130:func desiredCRDSpec() apiextensionsv1.CustomResourceDefinitionSpec {
+171:func configSpecSchema() apiextensionsv1.JSONSchemaProps {
+180:func configSpecValidations() apiextensionsv1.ValidationRules {
+189:func configSpecProperties() map[string]apiextensionsv1.JSONSchemaProps {
+[19:59:07] [system: task_progress]
+[19:59:07] $ grep -rn "gateway\|Gateway\|GATEWAY" /home/node/go/pkg/mod/github.com/bborbe/agent-task-controller@v0.6.6/docs/ 2>/dev/null | head -20; echo "---values---"; find /home/node/go/pkg/mod/github.com/bbor…
+[19:59:24] [system: task_progress]
+[19:59:24] $ grep -rn "Stage()\|stage" /home/node/go/pkg/mod/github.com/bborbe/agent@v0.85.1/agent_task-frontmatter.go | head; echo "---where stage written---"; grep -rln "Stage()\|stage" /home/node/go/pkg/mod/gi…
+[19:59:26] [system: task_progress]
+[19:59:26] $ grep -rn "\"stage\"\|'stage'\|Stage()" /home/node/go/pkg/mod/github.com/bborbe/agent-task-controller@v0.6.6/pkg/result/ /home/node/go/pkg/mod/github.com/bborbe/agent-task-controller@v0.6.6/pkg/scanne…
+[19:59:40] [system: task_progress]
+[19:59:40] $ ls /workspace/mocks/ && echo "---fakes---" && grep -n "FakeTaskEventHandler" /workspace/mocks/task_event_handler.go 2>/dev/null | head -3; echo "---counterfeiter---"; grep -rn "counterfeiter" /worksp…
+[19:59:40] ⚠ [bash output]
+config_resolver.go
+job_spawner.go
+job_watcher.go
+k8s_connector.go
+mocks.go
+result_publisher.go
+task_event_handler.go
+zombie_sweeper.go
+---fakes---
+12:type FakeTaskEventHandler struct {
+51:func (fake *FakeTaskEventHandler) ConsumeMessage(arg1 context.Context, arg2 *sarama.ConsumerMessage) error {
+71:func (fake *FakeTaskEventHandler) ConsumeMessageCallCount() int {
+---counterfeiter---
+[19:59:41] [system: task_progress]
+[19:59:41] $ grep -n "make test\|make precommit\|go generate\|counterfeiter\|mockery" /workspace/Makefile /workspace/Makefile.precommit 2>/dev/null | head -30; echo "---fake task event handler methods---"; grep -…
+[19:59:41] ⚠ [bash output]
+51:func (fake *FakeTaskEventHandler) ConsumeMessage(arg1 context.Context, arg2 *sarama.ConsumerMessage) error {
+71:func (fake *FakeTaskEventHandler) ConsumeMessageCallCount() int {
+77:func (fake *FakeTaskEventHandler) ConsumeMessageCalls(stub func(context.Context, *sarama.ConsumerMessage) error) {
+83:func (fake *FakeTaskEventHandler) ConsumeMessageArgsForCall(i int) (context.Context, *sarama.ConsumerMessage) {
+90:func (fake *FakeTaskEventHandler) ConsumeMessageReturns(result1 error) {
+99:func (fake *FakeTaskEventHandler) ConsumeMessageReturnsOnCall(i int, result1 error) {
+113:func (fake *FakeTaskEventHandler) EvalDeferredRespawns(arg1 context.Context) error {
+132:func (fake *FakeTaskEventHandler) EvalDeferredRespawnsCallCount() int {
+138:func (fake *FakeTaskEventHandler) EvalDeferredRespawnsCalls(stub func(context.Context) error) {
+144:func (fake *FakeTaskEventHandler) EvalDeferredRespawnsArgsForCall(i int) context.Context {
+151:func (fake *FakeTaskEventHandler) EvalDeferredRespawnsReturns(result1 error) {
+160:func (fake *FakeTaskEventHandler) EvalDeferredRespawnsReturnsOnCall(i int, result1 error) {
+174:func (fake *FakeTaskEventHandler) RunDeferredRespawnLoop(arg1 context.Context) error {
+193:func (fake *FakeTaskEventHandler) RunDeferredRespawnLoopCallCount() int {
+199:func (fake *FakeTaskEventHandler) RunDeferredRespawnLoopCalls(stub func(context.Context) error) {
+205:func (fake *FakeTaskEventHandler) RunDeferredRespawnLoopArgsForCall(i int) context.Context {
+212:func (fake *FakeTaskEventHandler) RunDeferredRespawnLoopReturns(result1 error) {
+221:func (fake *FakeTaskEventHandler) RunDeferredRespawnLoopReturnsOnCall(i int, result1 error) {
+235:func (fake *FakeTaskEventHandler) Invocations() map[string][][]interface{} {
+245:func (fake *FakeTaskEventHandler) recordInvocation(key string, args []interface{}) {
+[19:59:43] [system: task_progress]
+[19:59:43] $ grep -n "MaxConcurrentJobs\|type AgentConfiguration struct\|Assignee " /workspace/pkg/agent_configuration.go | head; echo "---"; sed -n '1,60p' /workspace/pkg/agent_configuration.go
+[19:59:44] [system: task_progress]
+[19:59:44] $ grep -n "Describe\|Context\|It(\|newTestHandler\|NewTaskEventHandler\|FakeJobSpawner\|BeforeEach" /workspace/pkg/handler/task_event_handler_test.go | head -60
+[19:59:44] ⚠ [bash output]
+706:		It("adopts to exactly the cap, spawning now and capping on the next event", func() {
+734:		It("publishes increment and spawns when below cap (happy path)", func() {
+755:		It(
+780:		It("skips spawn when max_triggers=0 (zero-cap edge case)", func() {
+800:		It("publishes increment once even when SpawnJob fails (over-count documented)", func() {
+821:		It("skips spawn when current_job in frontmatter and K8s job is active", func() {
+838:		It("spawns job when stage is absent (defaults to prod) and executor is prod", func() {
+853:		It("skips task with stage=dev when executor branch is prod", func() {
+868:		It("spawns job with stage=dev when executor branch is dev", func() {
+869:			localSpawner := new(mocks.FakeJobSpawner)
+876:			localHandler := handler.NewTaskEventHandler(
+898:		It("removes task from taskStore when event has status=completed", func() {
+915:		It("skips task with absent stage (defaults to prod) when executor branch is dev", func() {
+916:			localSpawner := new(mocks.FakeJobSpawner)
+922:			localHandler := handler.NewTaskEventHandler(
+943:		It("spawns job when Trigger == nil (default phases and statuses apply)", func() {
+962:		It("spawns job when Config has Trigger.Phases=[todo] and event phase=todo", func() {
+985:		It(
+1013:		It(
+1044:		It(
+[19:59:45] [system: task_progress]
+[19:59:45] $ sed -n '41,80p' /workspace/pkg/handler/task_event_handler_test.go
+[19:59:46] [system: task_progress]
+[19:59:46] $ grep -rn "NewTaskEventHandler\|RunDeferredRespawnLoop\|RunReconcile\|CreateConsumer" /workspace --include="*.go" | grep -v "/mocks/" | grep -v "_test.go" | head; echo "---test call sites---"; grep -r…
+[19:59:46] ⚠ [bash output]
+/workspace/main.go:176:		taskEventHandler.RunDeferredRespawnLoop,
+/workspace/pkg/handler/task_event_handler.go:111:	// Called by RunDeferredRespawnLoop on each tick; also callable directly in tests.
+/workspace/pkg/handler/task_event_handler.go:113:	// RunDeferredRespawnLoop polls evalDeferredRespawns every deferredRespawnInterval
+/workspace/pkg/handler/task_event_handler.go:115:	RunDeferredRespawnLoop(ctx context.Context) error
+/workspace/pkg/handler/task_event_handler.go:118:// NewTaskEventHandler creates a new TaskEventHandler.
+/workspace/pkg/handler/task_event_handler.go:119:func NewTaskEventHandler(
+/workspace/pkg/handler/task_event_handler.go:158:// (RunDeferredRespawnLoop), both started by service.Run in main.go — and each reads
+/workspace/pkg/handler/task_event_handler.go:638:// Called once from RunDeferredRespawnLoop on startup. Idempotent: any entry already
+/workspace/pkg/handler/task_event_handler.go:674:// RunDeferredRespawnLoop implements TaskEventHandler.
+---test call sites---
+/workspace/pkg/handler/task_event_handler_test.go:63:		h = handler.NewTaskEventHandler(
+/workspace/pkg/handler/task_event_handler_test.go:876:			localHandler := handler.NewTaskEventHandler(
+/workspace/pkg/handler/task_event_handler_test.go:922:			localHandler := handler.NewTaskEventHandler(
+/workspace/pkg/handler/task_event_handler_test.go:1656:					freshHandler := handler.NewTaskEventHandler(
+/workspace/pkg/handler/task_event_handler_test.go:1675:					go func() { done <- freshHandler.RunDeferredRespawnLoop(shortCtx) }()
+/workspace/pkg/handler/task_event_handler_test.go:1690:				"RunDeferredRespawnLoop returns error when initial evalDeferredRespawns fails",
+/workspace/pkg/handler/task_event_handler_test.go:1702:					freshHandler := handler.NewTaskEventHandler(
+/workspace/pkg/handler/task_event_handler_test.go:1714:					go func() { done <- freshHandler.RunDeferredRespawnLoop(ctx) }()
+/workspace/pkg/handler/task_event_handler_test.go:1722:				"RunDeferredRespawnLoop returns error when evalDeferredRespawns fails on ticker tick",
+/workspace/pkg/handler/task_event_handler_test.go:1727:					// When RunDeferredRespawnLoop runs, seedDeferredRespawnsFromStore re-adds the
+[20:00:06] [system: task_progress]
+[20:00:06] $ grep -n "fieldalignment\|field-alignment\|unused\|structcheck" /workspace/.golangci.yml; echo "---full config---"; cat /workspace/.golangci.yml
+[20:00:06] ⚠ [bash output]
+      - linters:
+          - revive
+        text: "exported"
+      - linters:
+          - dupl
+        path: "_test\\.go$"
+      - linters:
+          - errcheck
+        path: "_test\\.go$"
+      - linters:
+          - unparam
+        path: "_test\\.go$"
+      - linters:
+          - gosec
+        path: "_test\\.go$"
+
+formatters:
+  enable:
+    - gofmt
+    - goimports
+[20:00:08] [system: task_progress]
+[20:00:08] $ grep -n "nosec\|G107\|G404\|G115" /home/node/go/pkg/mod/github.com/bborbe/agent-task-controller@v0.6.6/pkg/gitrestclient/git_rest_client.go; echo "---controller golangci---"; cat /home/node/go/pkg/mo…
+[20:00:08] ⚠ [bash output]
+    - bodyclose
+    - forcetypeassert
+    - asasalint
+    - prealloc
+  settings:
+    depguard:
+      rules:
+        Main:
+          deny:
+            - pkg: "sigs.k8s.io/structured-merge-diff/v4"
+              desc: "use sigs.k8s.io/structured-merge-diff/v6 instead"
+            - pkg: "github.com/pkg/errors"
+              desc: "use github.com/bborbe/errors instead"
+            - pkg: "golang.org/x/net/context"
+              desc: "use context from standard library instead"
+            - pkg: "golang.org/x/lint/golint"
+              desc: "deprecated, use revive or staticcheck instead"
+            - pkg: "io/ioutil"
+              desc: "deprecated since Go 1.16, use io and os packages instead"
+            - pkg: "github.com/bborbe/argument$"
+[20:00:14] [system: task_progress]
+[20:00:14] $ grep -rn "X-Gateway-Secret\|gateway-secret\|GATEWAY_SECRET" /home/node/go/pkg/mod/github.com/bborbe/ 2>/dev/null | grep -v "_test.go" | head -20
+[20:00:18] [system: task_progress]
+[20:00:18] $ grep -rn "agent-task-executor" /home/node/go/pkg/mod/github.com/bborbe/agent@v0.85.1/helm/ 2>/dev/null | head -20; echo "---executor envs in chart---"; grep -rn "GITREST\|TASK_GLOB\|reconcile\|EXECUT…
+[20:00:20] [system: task_progress]
+[20:00:20] $ ls /home/node/go/pkg/mod/github.com/bborbe/agent@v0.85.1/helm/templates/ | grep executor; echo "---deployment env---"; grep -n "env\|Env\|secretKeyRef\|configMapKeyRef\|JOB_KAFKA\|VAULT\|BRANCH" /hom…
+[20:00:29] [system: task_progress]
+[20:00:29] $ cat /home/node/go/pkg/mod/github.com/bborbe/agent@v0.85.1/helm/templates/executor-rbac.yaml; echo "===SECRET==="; cat /home/node/go/pkg/mod/github.com/bborbe/agent@v0.85.1/helm/templates/executor-sec…
+[20:00:42] [system: task_progress]
+[20:00:42] $ sed -n '26,70p' /home/node/go/pkg/mod/github.com/bborbe/agent@v0.85.1/agent_markdown.go; echo "---splitMarkdownFrontmatter---"; sed -n '145,172p' /home/node/go/pkg/mod/github.com/bborbe/agent@v0.85.1…
+[20:00:42] ⚠ [bash output]
+	}
+	return rest[:end], rest[end+5:]
+}
+
+// parseMarkdownFrontmatter parses YAML frontmatter; best-effort, returns
+// an empty map on parse error.
+func parseMarkdownFrontmatter(fm string) TaskFrontmatter {
+	out := TaskFrontmatter{}
+	if fm == "" {
+		return out
+	}
+	if err := yaml.Unmarshal([]byte(fm), &out); err != nil {
+		return TaskFrontmatter{}
+	}
+	return out
+}
+
+// splitMarkdownSections splits body content into preamble + sections at
+// '# '/'## ' heading boundaries (level 1 or 2 headings start a new
+// section; level 3+ stays inside the parent section).
+[20:00:47] [system: task_progress]
+[20:00:47] $ grep -n "Content\|TASK_CONTENT\|buildJobEnvBuilder\|func (s \*jobSpawner)" /workspace/pkg/spawner/job_spawner.go | head -30
+[20:00:47] ⚠ [bash output]
+96:func (s *jobSpawner) SpawnJob(
+105:	envBuilder, err := s.buildJobEnvBuilder(ctx, task, config)
+178:func (s *jobSpawner) IsJobActive(
+213:func (s *jobSpawner) CountActiveJobs(ctx context.Context, assignee string) (int, error) {
+403:func (s *jobSpawner) applyKafkaCertVolumes(job *batchv1.Job) {
+478:// buildJobEnvBuilder constructs the env var set for the spawned Job's container.
+479:// It renders the full markdown for TASK_CONTENT so agents can parse frontmatter
+481:func (s *jobSpawner) buildJobEnvBuilder(
+486:	taskContent, err := renderTaskContent(ctx, task)
+491:	envBuilder.Add("TASK_CONTENT", taskContent)
+504:// renderTaskContent serializes task into the markdown form an agent expects:
+511:func renderTaskContent(ctx context.Context, task lib.Task) (string, error) {
+513:		return string(task.Content), nil
+519:	return "---\n" + string(fmBytes) + "---\n" + string(task.Content), nil
+[20:00:48] [system: task_progress]
+[20:00:48] $ sed -n '478,520p' /workspace/pkg/spawner/job_spawner.go
+[20:00:48] ⚠ [bash output]
+	return envBuilder, nil
+}
+
+// renderTaskContent serializes task into the markdown form an agent expects:
+// "---\n<yaml-frontmatter>---\n<body>". When task.Frontmatter is empty, the
+// body is returned unchanged (no empty "{}" wrapper).
+//
+// The agent side (lib.ParseMarkdown) reads frontmatter fields like
+// clone_url / ref / base_ref directly from this string — keep the wrapper
+// shape byte-compatible with controller/pkg/result.WriteResult.
+func renderTaskContent(ctx context.Context, task lib.Task) (string, error) {
+	if len(task.Frontmatter) == 0 {
+		return string(task.Content), nil
+	}
+	fmBytes, err := yaml.Marshal(map[string]any(task.Frontmatter))
+	if err != nil {
+		return "", errors.Wrapf(ctx, err, "marshal frontmatter for task %s", task.TaskIdentifier)
+	}
+	return "---\n" + string(fmBytes) + "---\n" + string(task.Content), nil
+}
+[20:01:31] [system: task_progress]
+[20:01:31] $ sed -n '300,370p' /workspace/pkg/handler/task_event_handler_test.go
+[20:01:31] ⚠ [bash output]
+						TaskIdentifier: lib.TaskIdentifier(
+							fmt.Sprintf("tid-cap-concurrent-%d", i),
+						),
+						Frontmatter: lib.TaskFrontmatter{
+							"status":   "in_progress",
+							"phase":    string(domain.TaskPhaseExecution),
+							"assignee": "claude",
+						},
+					}
+					Expect(h.ConsumeMessage(ctx, buildMsg(task))).To(BeNil())
+				}(i)
+			}
+			wg.Wait()
+
+			Expect(fakeSpawner.SpawnJobCallCount()).To(Equal(1))
+		})
+
+		It("does not count active jobs when MaxConcurrentJobs is unset", func() {
+			fakeSpawner.IsJobActiveReturns(false, nil)
+			task := lib.Task{
+[20:02:06] [system: task_progress]
+[20:02:06] $ cat /workspace/pkg/metrics/metrics_test.go; echo "===SUITE==="; cat /workspace/pkg/metrics/metrics_suite_test.go
+[20:02:06] ⚠ [bash output]
+// Use of this source code is governed by a BSD-style
+// license that can be found in the LICENSE file.
+
+package metrics_test
+
+import (
+	"testing"
+	"time"
+
+	. "github.com/onsi/ginkgo/v2"
+	. "github.com/onsi/gomega"
+	"github.com/onsi/gomega/format"
+)
+
+func TestMetrics(t *testing.T) {
+	time.Local = time.UTC
+	format.TruncatedDiff = false
+	RegisterFailHandler(Fail)
+	RunSpecs(t, "Metrics Suite")
+}
+[20:02:15] [system: task_progress]
+[20:02:15] $ grep -rn "testutil\|ToFloat64\|DefaultGatherer" /workspace/pkg/ /workspace/main*_test.go 2>/dev/null | head; echo "---glog guide?---"; ls /home/node/.claude/plugins/marketplaces/coding/docs/ 2>/dev/n…
+[20:02:15] ⚠ [bash output]
+go-concurrency-patterns.md
+go-context-cancellation-in-loops.md
+go-cqrs.md
+go-doc-best-practices.md
+go-dockerfile-guide.md
+go-enum-type-pattern.md
+go-error-wrapping-guide.md
+go-factory-pattern.md
+go-filter-pattern.md
+go-functional-composition-pattern.md
+go-functional-options-pattern.md
+go-glog-guide.md
+go-http-handler-refactoring-guide.md
+go-http-service-guide.md
+go-json-error-handler-guide.md
+go-k8s-binary-conventions.md
+go-kubernetes-crd-controller-guide.md
+go-library-guide.md
+go-licensing-guide.md
+go-linting-guide.md
+[20:02:17] [system: task_progress]
+[20:02:17] $ sed -n '1320,1360p' /workspace/pkg/handler/task_event_handler_test.go
+[20:02:27] [system: task_progress]
+[20:02:27] $ head -20 /workspace/CHANGELOG.md
+[20:02:27] ⚠ [bash output]
+# Changelog
+
+All notable changes to this project will be documented in this file.
+
+## Unreleased
+
+- chore: update github.com/bborbe/agent to v0.85.1, github.com/bborbe/kafka to v1.25.11, github.com/bborbe/metrics to v0.6.1, github.com/bborbe/run to v1.10.2, github.com/bborbe/vault-cli to v0.121.0
+
+## v0.8.3
+
+- chore: update github.com/bborbe/agent to v0.85.0, github.com/bborbe/cqrs to v0.6.10, github.com/bborbe/cron to v1.8.29, github.com/bborbe/kafka to v1.25.10, github.com/bborbe/metrics to v0.6.0, github.com/bborbe/vault-cli to v0.118.5, github.com/prometheus/client_model to v0.6.3
+
+## v0.8.2
+
+- fix: `ConfigResolver` falls back to the plain assignee when no `{assignee}-{vaultName}` Config exists — the singular shared-topic executor keeps resolving its un-suffixed (v0.6.x) Config CRs on the v0.7+ line; per-vault installs still match composed first, so vault scoping wins whenever a composed Config exists
+
+## v0.8.1
+
+- fix: split `BackoffLimitExceeded` from `DeadlineExceeded` in the job failure classifier — a Job that exhausted its backoff limit now publishes the pod's terminated reason + exit code (dedicated `pod_oom_killed` for OOM kills) instead of a misleading `deadline_exceeded`
+[20:02:34] [system: task_progress]
+[20:02:34] $ sed -n '1640,1760p' /workspace/pkg/handler/task_event_handler_test.go
+[20:02:34] ⚠ [bash output]
+					err = h.ConsumeMessage(ctx, buildMsg(taskB))
+					Expect(err).To(BeNil())
+
+					fakeResultPublisher.PublishIncrementTriggerCountReturnsOnCall(
+						1,
+						errors.Errorf(ctx, "tick eval failed"),
+					)
+
+					// Advance clock to graceExpiredR so entries are ready when ticker fires.
+					currentDateTime.SetNow(libtimetest.ParseDateTime(graceExpiredR))
+
+					done := make(chan error, 1)
+					go func() { done <- h.RunDeferredRespawnLoop(ctx) }()
+					err = <-done
+					Expect(err).NotTo(BeNil())
+					Expect(err.Error()).To(ContainSubstring("tick eval failed"))
+				},
+			)
+
+			It("deferred re-eval respects trigger cap", func() {
+[20:02:37] [system: task_progress]
+[20:02:37] $ sed -n '1,80p' /home/node/go/pkg/mod/github.com/bborbe/agent-task-controller@v0.6.6/pkg/gitrestclient/git_rest_client_test.go
+[20:02:37] ⚠ [bash output]
+				server = httptest.NewServer(
+					http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+						Expect(r.Method).To(Equal(http.MethodGet))
+						Expect(r.URL.Path).To(Equal("/api/v1/files/tasks/foo.md"))
+						w.WriteHeader(http.StatusOK)
+						_, _ = w.Write([]byte("---\nfoo: bar\n---\nbody"))
+					}),
+				)
+				client = gitrestclient.NewGitRestClientForTest(server.URL, "", "", zeroBackoff)
+			})
+
+			It("returns the file bytes and nil error", func() {
+				content, err := client.Get(ctx, "tasks/foo.md")
+				Expect(err).To(BeNil())
+				Expect(content).To(Equal([]byte("---\nfoo: bar\n---\nbody")))
+			})
+		})
+
+		Context("404 response", func() {
+			BeforeEach(func() {
+[20:03:22] [system: task_progress]
+[20:03:22] $ sed -n '836,898p' /workspace/pkg/handler/task_event_handler_test.go; echo "---agent Stage normalizer---"; grep -n "NormalizeTaskStage\|func (f TaskFrontmatter) Stage" /home/node/go/pkg/mod/github.com…
+[20:03:25] [system: task_progress]
+[20:03:25] $ sed -n '50,62p' /home/node/go/pkg/mod/github.com/bborbe/agent@v0.85.1/agent_task-frontmatter.go; echo "---branch normalize---"; grep -rn "func.*Branch\|NormalizeBranch\|string(branch)" /home/node/go/…
+[20:03:25] ⚠ [bash output]
+		return "prod"
+	}
+	return v
+}
+
+// RetryCount returns the number of failed attempts recorded in frontmatter.
+// Returns 0 when the field is absent.
+func (f TaskFrontmatter) RetryCount() int {
+---branch normalize---
+---handler stage check actual lines---
+
+	stage := task.Frontmatter.Stage()
+	if stage != string(h.branch) {
+		glog.V(3).Infof(
+			"skip task %s with stage %s (executor branch %s)",
+			task.TaskIdentifier, stage, h.branch,
+		)
+		metrics.TaskEventsTotal.WithLabelValues("skipped_stage").Inc()
+		return lib.Task{}, nil, true, nil
+	}
+[20:03:31] [system: task_progress]
+[20:03:31] $ head -40 /workspace/mocks/mocks.go; echo "---go generate directives---"; grep -rn "go:generate" /workspace/pkg/ | head
+[20:03:34] [system: task_progress]
+[20:03:34] $ grep -rln "go:generate go run github.com/maxbrunsfeld" /workspace/pkg/ | head; echo "---pkg root suite?---"; ls /workspace/pkg/*suite_test.go /workspace/pkg/*_suite_test.go 2>/dev/null
+[20:03:34] ⚠ [Bash] error: Exit code 1\n/workspace/pkg/k8s_connector_test.go\n/workspace/pkg/probe/probe_suite_test.go\n/workspace/pkg/handler/task_event_handler_test.go\n/workspace/pkg/spawner/job_spawner_test.go\n---pkg root suite?---\n(eval):1: no matches found: /workspace/pkg/*suite_test.go
+[20:04:06] [system: task_progress]
+[20:04:06] $ wc -l /workspace/pkg/handler/task_event_handler_test.go /workspace/pkg/handler/task_event_handler.go; echo "---revive file-length-limit on tests---"; grep -n "file-length-limit\|_test" /workspace/.go…
+[20:04:11] [system: task_progress]
+[20:04:11] $ head -40 /workspace/pkg/handler/task_event_handler_test.go
+[20:04:11] ⚠ [bash output]
+	"github.com/bborbe/cqrs/base"
+	"github.com/bborbe/errors"
+	libtime "github.com/bborbe/time"
+	libtimetest "github.com/bborbe/time/test"
+	"github.com/bborbe/vault-cli/pkg/domain"
+	. "github.com/onsi/ginkgo/v2"
+	. "github.com/onsi/gomega"
+	"github.com/prometheus/client_golang/prometheus/testutil"
+
+	agentv1 "github.com/bborbe/agent-task-executor/k8s/apis/agent.benjamin-borbe.de/v1"
+	"github.com/bborbe/agent-task-executor/mocks"
+	pkg "github.com/bborbe/agent-task-executor/pkg"
+	"github.com/bborbe/agent-task-executor/pkg/handler"
+	"github.com/bborbe/agent-task-executor/pkg/metrics"
+)
+
+func TestHandler(t *testing.T) {
+	RegisterFailHandler(Fail)
+	RunSpecs(t, "Handler Suite")
+}
+[20:04:22] [system: task_progress]
+[20:04:22] $ grep -rn "func Test" /workspace/pkg/*_test.go | head; echo "---suite file?---"; ls /workspace/pkg/*suite* 2>/dev/null; grep -rln "RunSpecs" /workspace/pkg/*_test.go 2>/dev/null | head
+[20:04:24] [system: task_progress]
+[20:04:24] $ sed -n '1,30p' /workspace/pkg/agent_configuration_test.go; echo "---fake usage in pkg tests---"; grep -rn "kubernetes/fake\|NewSimpleClientset" /workspace/pkg/*_test.go | head
+[20:04:37] [system: task_progress]
+[20:04:37] $ date -u +"%Y-%m-%dT%H:%M:%SZ"
+[20:05:08] [system: task_progress]
+[20:05:08] [write] /workspace/prompts/1-spec-005-gitrest-client.md (21793 chars)
+[20:05:08]   → File created successfully at: /workspace/prompts/1-spec-005-gitrest-client.md (file state is current in your context — …
+[20:05:52] [system: task_progress]
+[20:05:52] [write] /workspace/prompts/2-spec-005-reconcile-loop.md (30569 chars)
+[20:05:52]   → File created successfully at: /workspace/prompts/2-spec-005-reconcile-loop.md (file state is current in your context — …
+[20:06:07] [system: task_progress]
+[20:06:07] [write] /workspace/prompts/3-spec-005-spawn-lock.md (10796 chars)
+[20:06:07]   → File created successfully at: /workspace/prompts/3-spec-005-spawn-lock.md (file state is current in your context — no n…
+[20:06:16] [system: task_progress]
+[20:06:16] [write] /workspace/prompts/4-spec-005-readme-doc.md (5443 chars)
+[20:06:16]   → File created successfully at: /workspace/prompts/4-spec-005-readme-doc.md (file state is current in your context — no n…
+[20:06:25] [system: task_progress]
+[20:06:25] $ ls -d /workspace/vendor 2>/dev/null && echo "vendor exists" || echo "no vendor dir"; echo "---make test---"; grep -n "^test\|mod=vendor\|mod=mod\|GOFLAGS" /workspace/Makefile* 2>/dev/null | head -20
+[20:06:28] [system: task_progress]
+[20:06:28] $ cd /workspace/prompts && grep -l -- '-mod=vendor' *.md
+[20:06:30] [system: task_progress]
+[20:06:30] $ cd /workspace/prompts && sed -i 's/-mod=vendor/-mod=mod/g' 1-spec-005-gitrest-client.md 2-spec-005-reconcile-loop.md 3-spec-005-spawn-lock.md && grep -c -- '-mod=mod' 1-spec-005-gitrest-client.md 2-s…
+[20:06:43] [system: task_progress]
+[20:06:43] $ grep -rn "FakeTaskEventHandler" /workspace --include="*.go" | grep -v "/mocks/task_event_handler.go" | head; echo "---interface assignment---"; grep -rn "TaskEventHandler" /workspace/main*_test.go /w…
+[20:06:45] [system: task_progress]
+[20:06:45] $ cd /workspace/prompts && for f in 1-spec-005-gitrest-client.md 2-spec-005-reconcile-loop.md 3-spec-005-spawn-lock.md 4-spec-005-readme-doc.md; do echo "=== $f ==="; grep -n 'go test\|make precommit\|…
+[20:06:51] [system: task_progress]
+[20:06:51] $ grep -n "imports: \`gopkg.in/yaml.v3" /workspace/prompts/2-spec-005-reconcile-loop.md
+[20:06:53] [system: task_progress]
+[20:06:53] $ cd /workspace/prompts && sed -i 's|`libtime "github.com/bborbe/time"`|`"github.com/bborbe/errors"`, `libtime "github.com/bborbe/time"`|' 2-spec-005-reconcile-loop.md && grep -n 'github.com/bborbe/err…
+[20:06:55] [system: task_progress]
+[20:06:55] $ cd /workspace/prompts && sed -n '431p' 2-spec-005-reconcile-loop.md
+[20:06:55] ⚠ [bash output]
+    (imports: `gopkg.in/yaml.v3`, `github.com/bborbe/agent-task-executor/mocks`, `lib "github.com/bborbe/agent"`, `"github.com/bborbe/cqrs/base"`, `"github.com/bborbe/vault-cli/pkg/domain"`, `pkg "github.com/bborbe/agent-task-executor/pkg"`, `"github.com/bborbe/agent-task-executor/pkg/handler"`, `"github.com/bborbe/agent-task-executor/pkg/metrics"`, `"github.com/bborbe/errors"`, `libtime "github.com/bborbe/time"`, `"github.com/prometheus/client_golang/prometheus/testutil"`, Ginkgo/Gomega.)
+[20:07:09] [system: task_progress]
+[20:07:09] $ grep -n "concurrencyCapRetryDelay\|defaultReconcileIntervalSeconds is the interval" /workspace/prompts/2-spec-005-reconcile-loop.md | head; echo "---req 5 ReconcileOnce start---"; grep -n "func (h \*…
+[20:07:09] ⚠ [bash output]
+52:1. Add the reconcile interval constant to `/workspace/pkg/handler/task_event_handler.go`, directly after the `concurrencyCapRetryDelay` const (line 54):
+54:// defaultReconcileIntervalSeconds is the interval between reconcile-loop passes
+---req 5 ReconcileOnce start---
+215:func (h *taskEventHandler) ReconcileOnce(ctx context.Context) error {
+[20:07:10] [system: task_progress]
+[20:07:10] [read] /workspace/prompts/2-spec-005-reconcile-loop.md (offset=52, limit=14)
+[20:07:10]   → 13 lines read
+[20:07:18] [system: task_progress]
+[20:07:18] $ cd /workspace/prompts && python3 - <<'PY'\nimport re\np = "2-spec-005-reconcile-loop.md"\ns = open(p).read()\n\n# 1) Extend requirement 1 with the pass-timeout constant.\nold_const_block = """// defa…
+[20:07:24] [system: task_progress]
+[20:07:24] $ grep -n "Startup pass (DB 1)" /workspace/prompts/2-spec-005-reconcile-loop.md
+[20:07:27] [system: task_progress]
+[20:07:27] $ cd /workspace/prompts && python3 - <<'PY'\np = "2-spec-005-reconcile-loop.md"\ns = open(p).read()\nold = "    j. Startup pass (DB 1): run `RunReconcileLoop` in a short-lived context (`context.WithCan…
+[20:07:28] [system: task_progress]
+[20:07:28] [read] /workspace/prompts/2-spec-005-reconcile-loop.md (offset=52, limit=90)
+[20:07:28]   → 89 lines read
+[20:07:30] [system: task_progress]
+[20:07:30] [read] /workspace/prompts/2-spec-005-reconcile-loop.md (offset=215, limit=120)
+[20:07:30]   → 119 lines read
+[20:07:34] [system: task_progress]
+[20:07:34] [read] /workspace/prompts/2-spec-005-reconcile-loop.md (offset=333, limit=60)
+[20:07:34]   → 59 lines read
+[20:07:47] [system: task_progress]
+[20:07:47] $ cd /workspace/prompts && python3 - <<'PY'\n# Prompt 1: add reviewer decision note to <context>\np1 = "1-spec-005-gitrest-client.md"\ns = open(p1).read()\nanchor = "Relevant docs (in-container paths):…
+[20:07:52] [system: task_progress]
+[20:07:52] $ cd /workspace/prompts && ls -la *spec-005*.md && echo "---line counts---" && wc -l *spec-005*.md && echo "---summary bullets---" && for f in *spec-005*.md; do echo "== $f"; sed -n '/<summary>/,/<\/su…
+[20:07:54] [system: task_progress]
+[20:07:54] [read] /workspace/prompts/2-spec-005-reconcile-loop.md (offset=418, limit=55)
+[20:07:54]   → 54 lines read
+[20:08:12] [system: task_updated]
+[20:08:12] [system: task_notification]
+[20:08:12]   ← agent reply: All four prompts are complete and internally consistent. Here is the summary.
+[20:08:12] [system: thinking_tokens]
+[20:08:12] [system: thinking_tokens]
+[20:08:12] [system: thinking_tokens]
+[20:08:12] [system: thinking_tokens]
+[20:08:12] [system: thinking_tokens]
+[20:08:12] [system: thinking_tokens]
+[20:08:12] [system: thinking_tokens]
+[20:08:12] [system: thinking_tokens]
+[20:08:12] [system: thinking_tokens]
+[20:08:12] [system: thinking_tokens]
+[20:08:12] [system: thinking_tokens]
+[20:08:12] [system: thinking_tokens]
+[20:08:12] [system: thinking_tokens]
+[20:08:12] [system: thinking_tokens]
+[20:08:12] [system: thinking_tokens]
+[20:08:12] [system: thinking_tokens]
+[20:08:12] [system: thinking_tokens]
+[20:08:12] [system: thinking_tokens]
+[20:08:12] [system: thinking_tokens]
+[20:08:12] [system: thinking_tokens]
+[20:08:12] [system: thinking_tokens]
+[20:08:12] [system: thinking_tokens]
+[20:08:12] [system: thinking_tokens]
+[20:08:12] [system: thinking_tokens]
+[20:08:12] [system: thinking_tokens]
+[20:08:12] [system: thinking_tokens]
+[20:08:12] [system: thinking_tokens]
+[20:08:12] [system: thinking_tokens]
+[20:08:13] [system: thinking_tokens]
+[20:08:13] [system: thinking_tokens]
+[20:08:13] [system: thinking_tokens]
+[20:08:13] [system: thinking_tokens]
+[20:08:13] [system: thinking_tokens]
+[20:08:13] [system: thinking_tokens]
+[20:08:13] [system: thinking_tokens]
+[20:08:13] [system: thinking_tokens]
+[20:08:13] [system: thinking_tokens]
+[20:08:13] [system: thinking_tokens]
+[20:08:13] [system: thinking_tokens]
+[20:08:13] [system: thinking_tokens]
+[20:08:13] [system: thinking_tokens]
+[20:08:13] [system: thinking_tokens]
+[20:08:13] [system: thinking_tokens]
+[20:08:13] [system: thinking_tokens]
+[20:08:13] 💭 The prompt-creator agent created 4 prompts:
+1. `/workspace/prompts/1-spec-005-gitrest-client.md`
+2. `/workspace/prompts/2-spec-005-reconcile-loop.md`
+3. `/workspace/prompts/3-spec-005-spawn-lock.md`
+4. `/workspace/prompts/4-spec-005-readme-doc.md`
+
+Now I need to run a single audit pass: for each prompt file, invoke the `dark-factory:prompt-auditor` agent on that path. Collect each audit report. Do NOT retry, rewrite, or merge prompts based on findings.
+
+Let me first verify the files exist, then …
+[20:08:13] The creator wrote 4 prompts. Let me verify the files exist, then run the audit pass — auditing all four in parallel since they're independent.
+
+
+[20:08:13] $ ls -la prompts/1-spec-005-gitrest-client.md prompts/2-spec-005-reconcile-loop.md prompts/3-spec-005-spawn-lock.md prompts/4-spec-005-readme-doc.md
+[20:08:14] [system: thinking_tokens]
+[20:08:14] [system: thinking_tokens]
+[20:08:14] [system: thinking_tokens]
+[20:08:14] [system: thinking_tokens]
+[20:08:14] [system: thinking_tokens]
+[20:08:14] [system: thinking_tokens]
+[20:08:14] [system: thinking_tokens]
+[20:08:14] [system: thinking_tokens]
+[20:08:14] [system: thinking_tokens]
+[20:08:14] [system: thinking_tokens]
+[20:08:14] [system: thinking_tokens]
+[20:08:14] [system: thinking_tokens]
+[20:08:14] [system: thinking_tokens]
+[20:08:14] 💭 All four files exist. Now I'll audit each in parallel with the `dark-factory:prompt-auditor` agent. Each audit is independent, so I launch all four concurrently.
+[20:08:16] All four files confirmed. Now auditing all four in parallel with the prompt-auditor agent.
+
+
+[20:08:16] [agent:dark-factory:prompt-auditor] Audit prompt 1 gitrest-client
+    prompt: Audit the dark-factory prompt file at `prompts/1-spec-005-gitrest-client.md` (relative to the repo root / current working directory — do not prefix with /works…
+[20:08:16] [system: task_started]
+[20:08:16] [agent:dark-factory:prompt-auditor] Audit prompt 2 reconcile-loop
+    prompt: Audit the dark-factory prompt file at `prompts/2-spec-005-reconcile-loop.md` (relative to the repo root / current working directory — do not prefix with /works…
+[20:08:16] [system: task_started]
+[20:08:16] [agent:dark-factory:prompt-auditor] Audit prompt 3 spawn-lock
+    prompt: Audit the dark-factory prompt file at `prompts/3-spec-005-spawn-lock.md` (relative to the repo root / current working directory — do not prefix with /workspace…
+[20:08:16] [system: task_started]
+[20:08:16] [agent:dark-factory:prompt-auditor] Audit prompt 4 readme-doc
+    prompt: Audit the dark-factory prompt file at `prompts/4-spec-005-readme-doc.md` (relative to the repo root / current working directory — do not prefix with /workspace…
+[20:08:16] [system: task_started]
+[20:08:18] [system: task_progress]
+[20:08:18] [read] /workspace/prompts/3-spec-005-spawn-lock.md
+[20:08:18] [system: task_progress]
+[20:08:18] $ dark-factory config 2>&1 | head -50
+[20:08:18]   → 155 lines read
+[20:08:18] [system: task_progress]
+[20:08:18] [read] /workspace/prompts/4-spec-005-readme-doc.md
+[20:08:18] [system: task_progress]
+[20:08:18] $ dark-factory config 2>&1 | head -50
+[20:08:18]   → 67 lines read
+[20:08:18] [system: task_progress]
+[20:08:18] [read] /workspace/prompts/2-spec-005-reconcile-loop.md
+[20:08:18] [system: task_progress]
+[20:08:18] $ dark-factory config 2>&1 | head -100
+[20:08:18]   → 507 lines read
+[20:08:19] [system: task_progress]
+[20:08:19] [read] /workspace/prompts/1-spec-005-gitrest-client.md
+[20:08:19] [system: task_progress]
+[20:08:19] $ ls -la && echo "---PROMPTS---" && ls -la prompts/ && echo "---INPROGRESS---" && ls -la prompts/in-progress/ 2>/dev/null || echo "no in-progress dir"
+[20:08:19]   → 345 lines read
+[20:08:20] [system: task_progress]
+[20:08:20] $ ls -la /workspace/ | head -50
+[20:08:20] [system: task_progress]
+[20:08:20] $ which dark-factory 2>/dev/null; ls /workspace/.dark-factory.yaml 2>/dev/null; find / -name ".dark-factory.yaml" -not -path "*/proc/*" 2>/dev/null | head
+[20:08:20] [system: task_progress]
+[20:08:20] $ ls -la /workspace/ | head -50; echo "---"; cat /workspace/.dark-factory.yaml 2>/dev/null || echo "NO .dark-factory.yaml at root"
+[20:08:20] [system: task_progress]
+[20:08:20] $ find / -name ".dark-factory.yaml" -not -path "*/node_modules/*" 2>/dev/null | head; echo "---"; which dark-factory darkfactory 2>/dev/null; ls /workspace/prompts/
+[20:08:21] [system: task_progress]
+[20:08:21] $ ls -la /workspace/ && echo "---" && cat /workspace/.dark-factory.yaml 2>/dev/null | head -60
+[20:08:21] [system: task_progress]
+[20:08:21] $ ls /workspace/prompts/ && echo "---SPECS---" && ls /workspace/specs/ /workspace/specs/in-progress/ 2>/dev/null
+[20:08:21] [system: task_progress]
+[20:08:21] [read] /workspace/.dark-factory.yaml
+[20:08:21] [system: task_progress]
+[20:08:21] [read] /workspace/README.md
+[20:08:21]   → 7 lines read
+[20:08:21]   → 29 lines read
+[20:08:23] [system: task_progress]
+[20:08:23] [read] /workspace/specs/in-progress/005-bug-executor-restart-drops-deferred-respawn-queue.md
+[20:08:23] [system: task_progress]
+[20:08:23] $ wc -l /workspace/pkg/handler/task_event_handler.go /workspace/pkg/handler/task_event_handler_test.go /workspace/pkg/handler/task_reconcile_test.go /workspace/pkg/spawner/job_spawner.go
+[20:08:23]   → 157 lines read
+[20:08:23] ⚠ [Bash] error: Exit code 1\n   823 /workspace/pkg/handler/task_event_handler.go\n  1909 /workspace/pkg/handler/task_event_handler_test.go\nwc: /workspace/pkg/handler/task_reconcile_test.go: No such file or directory\n   520 /workspace/pkg/spawner/job_spawner.go\n  3252 total
+[20:08:23] [system: task_progress]
+[20:08:23] [read] /workspace/specs/in-progress/005-bug-executor-restart-drops-deferred-respawn-queue.md
+[20:08:23] [system: task_progress]
+[20:08:23] $ grep -rn "mount" /home/node/.claude/plugins/marketplaces/dark-factory/ 2>/dev/null | grep -iE "workspace|/docs|mount" | head -30
+[20:08:23]   → 157 lines read
+[20:08:23] ⚠ [bash output]
+/home/node/.claude/plugins/marketplaces/dark-factory/CHANGELOG.md:304:  - **`ProbeLaunchConfig` struct** in `pkg/cmd/healthcheck/probes.go` carries all the per-invocation launch knobs (image, mounts, env, hideGit, extraMounts). The factory builds one and shares it across boot/mount/claude — they all hit the same launch path with only their probe-specific `Entrypoint` + `Command` differing.
+/home/node/.claude/plugins/marketplaces/dark-factory/CHANGELOG.md:306:  - **Mount probe** now mounts `<projectRoot>:/workspace` (it didn't before — so the v0.179.0 mount probe was writing to an in-container overlay, not testing the actual host mount). Uses `--entrypoint /bin/sh` like the boot probe.
+/home/node/.claude/plugins/marketplaces/dark-factory/CHANGELOG.md:307:  - **Claude probe** now mounts `<claudeDir>:/home/node/.claude` (it didn't before — so v0.179.0's claude probe failed on every real install because the container had no auth credentials) and inherits the same env/mounts/hideGit wiring as production. Uses `--entrypoint claude` and asserts `OK` substring in stdout.
+/home/node/.claude/plugins/marketplaces/dark-factory/CHANGELOG.md:310:  - **Live-verified** before commit against two repos (`dark-factory`, `coding`) — all six configured probes (docker, image, boot, claude, mount, plus the config-gated gh/notifications when applicable) report green; total wall time ~5.5s.
+/home/node/.claude/plugins/marketplaces/dark-factory/CHANGELOG.md:314:- feat(runner): introduce `BootContainerProbe` in `pkg/runner/probe.go` — boots a throwaway `docker run --rm` container from the configured image with a unique `<project>-healthcheck-boot-<16 hex>` name, waits for it to be running, and runs an in-container `sh -c` to create+delete `.dark-factory-healthcheck/probe` under `/workspace` and assert `BOOT_OK`. The helper detects the "UID remap to root" / mount-permission regression that scenario 003 catches. Uses `errors.Wrap`/`errors.Wrapf` from `github.com/bborbe/errors` for every error path, `log/slog` for success/failure logging, and the same `if m.IsReadonly() { ":ro" }` rule as `dockerExecutor.buildDockerCommand`. Re-export helpers `TruncateForTest` and `UniqueContainerNameForTest` added to `pkg/runner/export_test.go`; new Ginkgo coverage in `pkg/runner/probe_test.go` exercises the green path, the `WaitUntilRunning` failure, the missing-`BOOT_OK` stdout, the `docker run` failure, the `docker exec` failure, the extraMounts append + `:ro` path, the extraMounts skip-on-missing-src path, the unique-name-per-invocation property, the `truncate` helper, and the `uniqueContainerName` shape.
+/home/node/.claude/plugins/marketplaces/dark-factory/CHANGELOG.md:315:- feat(cmd): add `dark-factory healthcheck` subcommand plus the four local probes (docker / image / boot / mount) — `pkg/cmd/healthcheck.go` defines the `HealthcheckCommand` interface, private `healthcheckCommand` struct, and `NewHealthcheckCommand(probes Probes)` factory mirroring `pkg/cmd/doctor.go`'s shape; `pkg/cmd/healthcheck/probes.go` defines the `Probe` interface and four exported constructors (`NewDockerProbe`, `NewImageProbe`, `NewBootProbe`, `NewMountProbe`) that emit one `slog.Info` line on success and one `slog.Error` line on failure with `probe=<name>`. Probes run in fixed order (docker → image → boot → mount) and fail-fast; on failure the command prints the category on its own line followed by a 2-space-indented detail line, matching `dark-factory doctor`'s table shape. `--no-claude` is consumed for forward-compat with prompt 2b; `--help`/`-h` is intercepted by `main.go` before reaching `Run`. The factory `CreateHealthcheckCommand` in `pkg/factory/factory.go` wires the probes in the documented order using the production `subproc.NewRunner()`, `executor.NewDockerContainerChecker`, and `&runner.BootContainerProbe{...}` from `cfg`. Counterfeiter mocks generated at `mocks/healthcheck-command.go` and `mocks/healthcheck-probe.go`. New tests in `pkg/cmd/healthcheck_test.go` (unknown-flag rejection, all-green path, first-probe-failure short-circuit, stdout category on failure, `--no-claude` consumption) and `pkg/cmd/healthcheck/probes_test.go` (one `It` per probe — success path with fake `subproc.Runner`, failure path with non-zero exit, `BootProbe` wrapper success+failure). Coverage on the new packages ≥87% statements; CLI surface wired into `main.go`'s `ParseArgs`, `runCommand`, `printCommandHelp`, and `printHelp` so `dark-factory healthcheck --help` prints the usage and exits 0, and `dark-factory help` shows the new command row.
+/home/node/.claude/plugins/marketplaces/dark-factory/CHANGELOG.md:316:- feat(cmd): extend `dark-factory healthcheck` to the full seven-probe sequence (docker → image → boot → claude → mount → gh → notifications) — three new probe constructors in `pkg/cmd/healthcheck/probes.go` (`NewClaudeProbe`, `NewGhProbe`, `NewNotificationsProbe`) plus a `NotificationsConfigured(cfg config.Config) bool` sentinel. `NewClaudeProbe` runs `docker run --rm <image> claude -p "reply with exactly: OK"` against a one-shot container with a hard 10s timeout (`subproc.NewRunnerWithThresholds(2s, 10s)`) and asserts the literal `OK` substring in stdout; the prompt is a hard-coded constant (`claudeProbePrompt`) so no operator input can reach the Claude shell. `NewGhProbe` runs `gh auth status` with 3s/5s thresholds and surfaces the captured stdout in the wrapped error. `NewNotificationsProbe(cfg, *http.Client)` POSTs a fixed minimal JSON payload (`{"chat_id":...,"text":"dark-factory healthcheck"}` for Telegram; `{"content":"dark-factory healthcheck"}` for Discord) via the injected `*http.Client` (factory passes a 5s-timeout client) and asserts a 2xx response. The full URL is stored in memory but is NEVER logged — only `url.Host` and the response status are surfaced, so the bot token and webhook URL cannot leak via slog. The factory `CreateHealthcheckCommand` appends the gh probe only when `cfg.PR` is true and the notifications probe only when `NotificationsConfigured(cfg)` is true (env var name set AND env value non-empty); the `--no-claude` flag trims the Claude probe at run time. The `healthcheckCommand.Run` orchestrator now emits one `slog.Info "healthcheck probe starting" probe=<name>` line per probe (the captured-output hook the new tests need) and a `slog.Error "healthcheck probe failed"` line on each failure, before printing the categorized table. New Ginkgo coverage in `pkg/cmd/healthcheck/probes_test.go` exercises the green path, the `OK`-missing stdout, the non-zero exit (Claude), the non-zero exit (gh), the no-config no-op, the 2xx success via injected `RoundTripper`, the 401-with-body-snippet failure, and the transport error; a `NotificationsConfigured` block covers the four env combinations. `pkg/cmd/healthcheck_test.go` gets a 7-probe orchestration block with a `slog.SetDefault` capture handler that asserts the seven `probe=<name>` markers appear in the captured output in fixed order, plus negative-assertion tests for `--no-claude`, `pr=false` (gh skipped), and `NotificationsConfigured=false` (notifications skipped). Per-probe timeouts sum to ≤100s worst case; the spec AC (≤15s full / ≤5s `--no-claude` on a warm sandbox) is a property of the green path.
+/home/node/.claude/plugins/marketplaces/dark-factory/CHANGELOG.md:317:- feat(cli): add `dark-factory healthcheck` subcommand that probes the full pipeline-execution stack (Docker, image, boot, claude, mount, gh, notifications) in fixed order with fail-fast semantics; exit 0 on all-pass, non-zero with a categorized table naming the failing probe; `--no-claude` skips the only token-spending probe. New shared boot helper under `pkg/runner/` is also reused by the scenario-003 smoke test.
+/home/node/.claude/plugins/marketplaces/dark-factory/CHANGELOG.md:1107:- test: fix `buildPreflightDockerArgs` extra-mount tests to use `GinkgoT().TempDir()` so `os.Stat` succeeds on the host
+/home/node/.claude/plugins/marketplaces/dark-factory/CHANGELOG.md:1215:- fix: Remove broken `--tmpfs /workspace/.git` overlay from worktree-mode executor; the overlay caused a Docker mount error because a git worktree's `.git` is a file, not a directory
+/home/node/.claude/plugins/marketplaces/dark-factory/CHANGELOG.md:1273:- chore: verify HOST_CACHE_DIR auto-default end-to-end — confirmed go-build and golangci-lint caches bind-mounted in YOLO container
+/home/node/.claude/plugins/marketplaces/dark-factory/CHANGELOG.md:1281:- fix: prompt-auditor honors container mounts from `dark-factory config` — container-absolute paths backed by a mount (e.g. `/docs/...` when `../docs → /docs`) are no longer flagged as path-portability violations
+/home/node/.claude/plugins/marketplaces/dark-factory/CHANGELOG.md:1458:- chore: Verify GOPATH mount provides Go module cache inside YOLO container at `/home/node/go/pkg`
+/home/node/.claude/plugins/marketplaces/dark-factory/CHANGELOG.md:1462:- **breaking:** Remove hardcoded `$HOME/go/pkg` mount — add `extraMounts` with `${GOPATH}/pkg` for Go projects
+/home/node/.claude/plugins/marketplaces/dark-factory/CHANGELOG.md:1506:- feat: Add `extraMounts` config field to inject additional volume mounts into YOLO containers
+/home/node/.claude/plugins/marketplaces/dark-factory/CHANGELOG.md:1644:- fix prompt temp file permissions so container user can read mounted prompt
+/home/node/.claude/plugins/marketplaces/dark-factory/CHANGELOG.md:1765:- fix: Change Go module cache mount from read-only to read-write so YOLO containers can download uncached dependencies
+/home/node/.claude/plugins/marketplaces/dark-factory/CHANGELOG.md:1769:- Add prompt to mount Go module cache read-write in YOLO container
+/home/node/.claude/plugins/marketplaces/dark-factory/CHANGELOG.md:1822:- feat: mount Go module cache read-only in Docker containers to prevent prompt code from tampering with the shared module cache
+/home/node/.claude/plugins/marketplaces/dark-factory/CHANGELOG.md:2013:- fix: mount `gitconfigFile` as read-only at `/home/node/.gitconfig-extra` instead of writable at `/home/node/.gitconfig` — Docker bind-mounted files cannot be atomically replaced by `git config --global`, causing "Device or resource busy" errors; the claude-yolo entrypoint (v0.2.9+) copies the staged file before appending proxy settings
+[20:08:24] [system: task_progress]
+[20:08:24] $ cat /home/node/.claude/plugins/marketplaces/dark-factory/example/.dark-factory.yaml 2>/dev/null; echo "---"; ls /home/node/.claude/plugins/marketplaces/dark-factory/ 2>/dev/null; echo "---"; ls /home…
+[20:08:24] [system: task_progress]
+[20:08:24] $ ls /workspace/prompts/ /workspace/prompts/in-progress/ 2>/dev/null; echo "---"; ls /workspace/specs/ /workspace/specs/in-progress/ 2>/dev/null
+[20:08:26] [system: task_progress]
+[20:08:26] [read] /workspace/pkg/handler/task_event_handler.go (offset=140, limit=60)
+[20:08:26] [system: task_progress]
+[20:08:26] [read] /workspace/pkg/handler/task_event_handler.go (offset=430, limit=130)
+[20:08:26]   → 129 lines read
+[20:08:26]   → 59 lines read
+[20:08:29] [system: task_progress]
+[20:08:29] [read] /workspace/pkg/handler/task_event_handler_test.go (offset=295, limit=70)
+[20:08:29] [system: task_progress]
+[20:08:29] [read] /workspace/pkg/spawner/job_spawner.go (offset=35, limit=30)
+[20:08:29]   → 69 lines read
+[20:08:29]   → 29 lines read
+[20:08:29] [system: task_progress]
+[20:08:29] $ cat /workspace/.dark-factory.yaml; echo "---"; which dark-factory 2>/dev/null || echo "dark-factory CLI NOT on PATH"; echo "---"; ls /workspace/vendor 2>/dev/null | head -3 || echo "no vendor dir"; e…
+[20:08:29] [system: task_progress]
+[20:08:29] $ ls /workspace/specs/ /workspace/specs/in-progress/ 2>/dev/null; echo "---"; ls -la /workspace/specs/in-progress/
+[20:08:29] ⚠ [bash output]
+module github.com/bborbe/agent-task-executor
+
+go 1.27.0
+
+require (
+	github.com/IBM/sarama v1.60.2
+	github.com/bborbe/agent v0.85.1
+	github.com/bborbe/cqrs v0.6.10
+	github.com/bborbe/cron v1.8.29
+	github.com/bborbe/errors v1.6.0
+	github.com/bborbe/http v1.26.25
+	github.com/bborbe/k8s v1.14.16
+	github.com/bborbe/kafka v1.25.11
+	github.com/bborbe/log v1.6.25
+	github.com/bborbe/metrics v0.6.1
+	github.com/bborbe/run v1.10.2
+	github.com/bborbe/sentry v1.10.0
+	github.com/bborbe/service v1.10.10
+	github.com/bborbe/time v1.27.11
+	github.com/bborbe/validation v1.4.23
+[20:08:30] [system: task_progress]
+[20:08:30] [read] /workspace/specs/in-progress/005-bug-executor-restart-drops-deferred-respawn-queue.md
+[20:08:30] [system: task_progress]
+[20:08:30] $ ls /home/node/.claude/plugins/marketplaces/coding/docs/ | head -80
+[20:08:30]   → 157 lines read
+[20:08:30] ⚠ [bash output]
+node-makefile-commands.md
+node-service-guide.md
+prd-guide.md
+python-architecture-patterns.md
+python-cli-arguments-guide.md
+python-factory-pattern.md
+python-ioc-guide.md
+python-logging-guide.md
+python-makefile-commands.md
+python-project-structure.md
+python-pydantic-guide.md
+readme-guide.md
+releasing-coding.md
+rule-block-schema.md
+security
+selector-mode-guide.md
+tdd-guide.md
+teamvault-conventions.md
+test-pyramid-triggers.md
+three-command-review-split.md
+[20:08:31] [system: task_progress]
+[20:08:31] [read] /workspace/pkg/handler/task_event_handler.go (offset=1, limit=160)
+[20:08:31] [system: task_progress]
+[20:08:31] $ wc -l /workspace/pkg/handler/task_event_handler.go /workspace/main.go /workspace/pkg/factory/factory.go /workspace/pkg/handler/task_event_handler_test.go /workspace/pkg/zombie_sweeper.go /workspace/p…
+[20:08:31]   → 159 lines read
+[20:08:32] [system: task_progress]
+[20:08:32] [read] /workspace/prompts/2-spec-005-reconcile-loop.md
+[20:08:32] [system: task_progress]
+[20:08:32] $ grep -n 'func buildMsg\|func renderTaskFile\|ReconcileOnce\|var h \|h =\|fakeResolver\s*=\|fakeSpawner\s*=\|fakeGitRestClient\s*=\|BeforeEach\|JustBeforeEach' /workspace/pkg/handler/task_event_handle…
+[20:08:32]   → 507 lines read
+[20:08:33] [system: task_progress]
+[20:08:33] [read] /workspace/specs/in-progress/005-bug-executor-restart-drops-deferred-respawn-queue.md
+[20:08:33]   → 157 lines read
+[20:08:34] [system: task_progress]
+[20:08:34] [read] /workspace/pkg/handler/task_event_handler.go (offset=200, limit=180)
+[20:08:34]   → 179 lines read
+[20:08:34] [system: task_progress]
+[20:08:34] $ grep -n 'func buildMsg\|buildMsg :=\|buildMsg =' /workspace/pkg/handler/task_event_handler_test.go
+[20:08:34] [system: task_progress]
+[20:08:34] $ grep -n 'ReconcileOnce\|h.ReconcileOnce\|func (h \*taskEventHandler) ReconcileOnce' /workspace/pkg/handler/task_event_handler.go; echo "---"; grep -n 'fakeGitRestClient\|GitRestClient' /workspace/pkg…
+[20:08:34] ⚠ [Bash] error: Exit code 2\n---\n---pkg listing---\n/workspace/pkg/handler/:\nagents_handler.go\nagents_handler_test.go\nhealthcheck_trigger_handler.go\nhealthcheck_trigger_handler_test.go\ntask_event_handler.go\ntask_event_handler_test.go
+[20:08:35] [system: task_progress]
+[20:08:35] $ grep -rn "GITREST_URL\|GITREST_GATEWAY_SECRET\|TASK_GLOB\|gateway-secret\|gitrest" --include="*.go" --include="*.md" --include="*.yaml" --include="*.yml" . 2>/dev/null | grep -v "\.git/" | head -40
+[20:08:35] [system: task_progress]
+[20:08:35] $ git status --porcelain; echo "---BRANCH---"; git branch --show-current
+[20:08:35] ⚠ [bash output]
+prompts/1-spec-005-gitrest-client.md:55:package gitrestclient
+prompts/1-spec-005-gitrest-client.md:88:// gateway-secret auth; when empty, no auth headers are sent (backward-compat
+prompts/1-spec-005-gitrest-client.md:107:// setAuthHeaders sets the gateway-secret auth headers on req when the secret is configured.
+prompts/1-spec-005-gitrest-client.md:219:2. Create `/workspace/pkg/gitrestclient/gitrestclient_suite_test.go` in `package gitrestclient_test` mirroring the pattern in `/workspace/pkg/metrics/metrics_suite_test.go`, including the counterfeiter go:generate directive (copy the exact directive line from `/workspace/pkg/handler/task_event_handler_test.go:7`):
+prompts/1-spec-005-gitrest-client.md:225:3. Create `/workspace/pkg/gitrestclient/git_rest_client_test.go` in `package gitrestclient_test` using `net/http/httptest` servers (mirror the assertion style of the controller's `git_rest_client_test.go`: the handler asserts `r.Method`, `r.URL.Path`, and `r.URL.Query()` on each request). Cover:
+prompts/1-spec-005-gitrest-client.md:239:4. Create `/workspace/pkg/gitrest_gateway_secret.go` in `/workspace/pkg/` (package `pkg`) with:
+prompts/1-spec-005-gitrest-client.md:258:// `gateway-secret` data key (the Secret git-rest and the controller share).
+prompts/1-spec-005-gitrest-client.md:259:const gitRestGatewaySecretDataKey = "gateway-secret"
+prompts/1-spec-005-gitrest-client.md:265:// the env var GITREST_GATEWAY_SECRET references the secret by NAME, matching
+prompts/1-spec-005-gitrest-client.md:267:// missing or lacks the gateway-secret data key, so a misconfigured deployment
+prompts/1-spec-005-gitrest-client.md:291:5. Create `/workspace/pkg/gitrest_gateway_secret_test.go` in `package pkg_test` (this registers into the existing "Pkg Suite" launched by `TestPkg` in `/workspace/pkg/agent_configuration_test.go`). Use `fake.NewSimpleClientset(&corev1.Secret{ObjectMeta: metav1.ObjectMeta{Name: "gw-secret", Namespace: "test-ns"}, Data: map[string][]byte{"gateway-secret": []byte("s3cret")}})` (imports `k8s.io/client-go/kubernetes/fake`, `corev1 "k8s.io/api/core/v1"`, `metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"`). Cover:
+prompts/1-spec-005-gitrest-client.md:293:   b. secret present with `gateway-secret` data key → returns the value `"s3cret"`.
+prompts/1-spec-005-gitrest-client.md:295:   d. secret present WITHOUT the `gateway-secret` data key (e.g. `Data: map[string][]byte{"other": []byte("x")}`) → returns an error mentioning the data key.
+prompts/1-spec-005-gitrest-client.md:302:	GitRestURL string `required:"false" arg:"git-rest-url" env:"GITREST_URL" usage:"git-rest HTTP API base URL the reconcile loop reads vault task files through" default:"http://vault-obsidian-openclaw:9090"`
+prompts/1-spec-005-gitrest-client.md:304:	// git-rest gateway secret (data key `gateway-secret`) — not the secret
+prompts/1-spec-005-gitrest-client.md:309:	GitRestGatewaySecret string `required:"false" arg:"git-rest-gateway-secret" env:"GITREST_GATEWAY_SECRET" usage:"Name of the existing K8s secret holding the git-rest gateway secret (data key gateway-secret); empty disables gateway auth"`
+prompts/1-spec-005-gitrest-client.md:313:	TaskGlob string `required:"false" arg:"task-glob" env:"TASK_GLOB" usage:"git-rest glob selecting vault task files to reconcile" default:"24 Tasks/*.md"`
+prompts/1-spec-005-gitrest-client.md:317:7. Regenerate the mock: run `go generate -mod=mod ./pkg/gitrestclient/...` (or `go generate -mod=mod ./...`) so `/workspace/mocks/git_rest_client.go` with `FakeGitRestClient` is produced from the `//counterfeiter:generate` annotation in requirement 1. The mock must satisfy `gitrestclient.GitRestClient` (methods `Get`, `List`, `IsReady` with the usual counterfeiter `...Returns`, `...CallCount`, `...ArgsForCall` accessors). Do not hand-write the mock.
+prompts/1-spec-005-gitrest-client.md:326:- `GITREST_GATEWAY_SECRET` holds a K8s Secret NAME (like `JOB_KAFKA_CLIENT_CERT_SECRET`), never the secret value; the value is read from the K8s API and held in memory only.
+prompts/1-spec-005-gitrest-client.md:334:Run `go test -mod=mod ./pkg/gitrestclient/... ./pkg/` iteratively after each change (fast feedback loop), then `make precommit` ONCE at the very end.
+[20:08:38] [system: task_progress]
+[20:08:38] [read] /workspace/pkg/handler/task_event_handler.go (offset=430, limit=270)
+[20:08:38]   → 269 lines read
+[20:08:38] [system: task_progress]
+[20:08:38] [read] /workspace/pkg/handler/task_event_handler_test.go (offset=30, limit=60)
+[20:08:38]   → 59 lines read
+[20:08:40] [system: task_progress]
+[20:08:40] $ grep -rn "GitRestURL\|GITREST_\|TaskGlob\|gateway-secret\|JobKafkaClientCertSecret\|reconcile" --include="*.go" /workspace/pkg/ /workspace/main.go 2>/dev/null | grep -v "_test.go" | head -30; echo "=…
+[20:08:40] [system: task_progress]
+[20:08:40] $ grep -rn "docs/dod.md\|definition-of-done" /workspace/docs/ 2>/dev/null | head; echo "---"; ls /workspace/docs/ 2>/dev/null; echo "---verify spec dir---"; ls /workspace/specs/
+[20:08:42] [system: task_progress]
+[20:08:42] [read] /workspace/pkg/metrics/metrics.go
+[20:08:42] [system: task_progress]
+[20:08:42] [read] /workspace/pkg/metrics/metrics_test.go
+[20:08:42] [system: task_progress]
+[20:08:42] [read] /workspace/main.go
+[20:08:42]   → 64 lines read
+[20:08:42]   → 44 lines read
+[20:08:42]   → 211 lines read
+[20:08:48] [system: task_progress]
+[20:08:48] [read] /workspace/prompts/1-spec-005-gitrest-client.md
+[20:08:48] [system: task_progress]
+[20:08:48] $ ls -R /workspace/pkg/ | head -60; echo "=== mocks ==="; ls /workspace/mocks/; echo "=== grep gitrest ==="; grep -rln "gitrest" /workspace/pkg/ /workspace/main.go /workspace/mocks/ 2>/dev/null
+[20:08:48]   → 345 lines read
+[20:08:49] [system: task_progress]
+[20:08:49] $ sed -n '30,80p' main.go
+[20:08:49] [system: task_progress]
+[20:08:49] $ grep -n 'JobKafkaClientCertSecret\|JobKafkaCaCertSecret\|JOB_KAFKA_CLIENT_CERT_SECRET' main.go main_internal_test.go | head -30
+[20:08:49] ⚠ [bash output]
+	// JobKafkaCaCertSecret holds the NAME of the K8s Secret carrying the Kafka
+	// CA cert — not the cert material itself. Same reasoning as
+	// JobKafkaClientCertSecret: a resource reference, not secret-shaped.
+	JobKafkaCaCertSecret string `required:"false" arg:"job-kafka-ca-cert-secret"       env:"JOB_KAFKA_CA_CERT_SECRET"       usage:"Name of the existing K8s secret holding the Kafka CA cert (key ca.crt) to mount into spawned Jobs; empty disables cert mounting. Must be a valid K8s Secret name (RFC 1123: lowercase alphanumeric or '-', <=253 chars) or Job creation fails"`
+}
+
+// vaultSlugRegexp mirrors the controller's VAULT_NAME validation (pkg/routing):
+// a lowercase letter, then lowercase letters, digits, or hyphens. The composed
+// {assignee}-{vaultName} lookup key depends on a well-formed vault slug — a
+// malformed value would silently never match a Config CR.
+var vaultSlugRegexp = regexp.MustCompile(`^[a-z][a-z0-9-]*$`)
+
+//nolint:funlen // Initialization sequence; wiring is linear with no branching.
+func (a *application) Run(ctx context.Context, sentryClient libsentry.Client) error {
+	libmetrics.NewBuildInfoMetrics().SetBuildInfo(a.BuildGitVersion, a.BuildGitCommit, a.BuildDate)
+	glog.V(1).
+		Infof("agent-task-executor started version=%s commit=%s", a.BuildGitVersion, a.BuildGitCommit)
+
+	if a.JobTTLSecondsAfterFinished < 0 {
+		return errors.Errorf(
+[20:08:52] [system: task_progress]
+[20:08:52] $ echo "=== metrics suite ==="; sed -n '1,25p' pkg/metrics/metrics_suite_test.go; echo "=== metrics_test head ==="; sed -n '1,15p' pkg/metrics/metrics_test.go
+[20:08:52] [system: task_progress]
+[20:08:52] $ echo "=== job_spawner 30-45 ==="; sed -n '30,45p' pkg/spawner/job_spawner.go; echo "=== job_watcher_internal_test 15-30 ==="; sed -n '15,30p' pkg/job_watcher_internal_test.go; echo "=== config_resolv…
+[20:08:52] ⚠ [bash output]
+	Resolve(ctx context.Context, assignee string) (AgentConfiguration, error)
+}
+
+// NewConfigResolver returns a ConfigResolver backed by the given
+=== task_event_handler_test 1-15 ===
+// Copyright (c) 2026 Benjamin Borbe All rights reserved.
+// Use of this source code is governed by a BSD-style
+// license that can be found in the LICENSE file.
+
+package handler_test
+
+//go:generate go run github.com/maxbrunsfeld/counterfeiter/v6@v6.12.2 -generate
+
+import (
+	"context"
+	"encoding/json"
+	"fmt"
+	"sync"
+	"sync/atomic"
+	"testing"
+[20:08:57] [system: task_progress]
+[20:08:57] [read] /workspace/pkg/agent_configuration.go
+[20:08:57] [system: task_progress]
+[20:08:57] [read] /workspace/pkg/factory/factory.go
+[20:08:57]   → 120 lines read
+[20:08:57]   → 170 lines read
+[20:09:00] [system: task_progress]
+[20:09:00] $ echo "=== agent_configuration_test TestPkg ==="; grep -n 'TestPkg\|Pkg Suite\|RegisterFailHandler\|RunSpecs' pkg/agent_configuration_test.go; echo "=== pkg package decls ==="; grep -rn '^package ' pk…
+[20:09:00] [system: task_progress]
+[20:09:00] $ echo "=== controller module cache ==="; ls /home/node/go/pkg/mod/github.com/bborbe/ 2>/dev/null | grep -i 'agent-task-controller'; ls -d /home/node/go/pkg/mod/github.com/bborbe/agent-task-controller@…
+[20:09:00] ⚠ [bash output]
+18:	RegisterFailHandler(Fail)
+19:	RunSpecs(t, "Pkg Suite")
+=== pkg package decls ===
+pkg/cron_scheduler.go:5:package pkg
+pkg/agent_configuration_test.go:5:package pkg_test
+pkg/resource_event_handler_config.go:5:package pkg
+pkg/agent_configuration.go:5:package pkg
+pkg/k8s_connector.go:5:package pkg
+pkg/config_resolver_test.go:5:package pkg_test
+pkg/task_store_test.go:5:package pkg_test
+pkg/config_resolver.go:5:package pkg
+pkg/job_watcher.go:5:package pkg
+pkg/job_watcher_internal_test.go:5:package pkg
+=== errors usage in config_resolver ===
+58:		return AgentConfiguration{}, errors.Wrapf(ctx, err, "list agent configs")
+64:			return AgentConfiguration{}, errors.Wrapf(
+83:			return AgentConfiguration{}, errors.Wrapf(
+95:	return AgentConfiguration{}, errors.Wrapf(
+106:		return AgentConfiguration{}, errors.Wrapf(ctx, err, "convert config %q", obj.Spec.Assignee)
+130:			return nil, errors.Wrapf(ctx, ctx.Err(), "copy env cancelled")
+[20:09:02] [system: task_progress]
+[20:09:02] $ grep -n "JobSpawner interface" -A 20 pkg/spawner/*.go | head -40; echo "=== ErrConfigNotFound ==="; grep -rn "ErrConfigNotFound" pkg/config_resolver.go; echo "=== branch ==="; grep -rn "type Branch" …
+[20:09:02] ⚠ [bash output]
+// Use of this source code is governed by a BSD-style
+// license that can be found in the LICENSE file.
+
+package metrics_test
+
+import (
+	"testing"
+	"time"
+
+	. "github.com/onsi/ginkgo/v2"
+	. "github.com/onsi/gomega"
+	"github.com/onsi/gomega/format"
+)
+
+func TestMetrics(t *testing.T) {
+	time.Local = time.UTC
+	format.TruncatedDiff = false
+	RegisterFailHandler(Fail)
+	RunSpecs(t, "Metrics Suite")
+}
+[20:09:03] [system: task_progress]
+[20:09:03] $ wc -l /home/node/go/pkg/mod/github.com/bborbe/agent-task-controller@v0.6.6/pkg/gitrestclient/git_rest_client.go; echo "---"; cat /home/node/go/pkg/mod/github.com/bborbe/agent-task-controller@v0.6.6/p…
+[20:09:03] ⚠ [bash output]
+	}
+	resp, err := g.httpClient.Do(req)
+	if err != nil {
+		g.metrics.GitRestCallsTotal("readiness", "error").Inc()
+		return false, errors.Wrapf(ctx, err, "readiness check")
+	}
+	_, _ = io.Copy(io.Discard, resp.Body)
+	_ = resp.Body.Close()
+	switch resp.StatusCode {
+	case http.StatusOK:
+		g.metrics.GitRestCallsTotal("readiness", "success").Inc()
+		return true, nil
+	case http.StatusServiceUnavailable:
+		g.metrics.GitRestCallsTotal("readiness", "success").Inc()
+		return false, nil
+	default:
+		g.metrics.GitRestCallsTotal("readiness", "error").Inc()
+		return false, errors.Errorf(ctx, "readiness returned unexpected status %d", resp.StatusCode)
+	}
+}
+[20:09:06] [system: task_progress]
+[20:09:06] $ CQRS=$(ls -d /home/node/go/pkg/mod/github.com/bborbe/cqrs@* 2>/dev/null | head -1); echo "cqrs: $CQRS"; grep -rn "type Branch" "$CQRS/base/" 2>/dev/null | head -5; echo "=== agent lib Task types ==="…
+[20:09:08] [system: task_progress]
+[20:09:08] $ echo "=== agent module helm templates ==="; ls -d /home/node/go/pkg/mod/github.com/bborbe/agent@* 2>/dev/null; grep -rn 'gatewaySecret\|gateway-secret' /home/node/go/pkg/mod/github.com/bborbe/agent@v…
+[20:09:08] [system: task_progress]
+[20:09:08] $ echo "=== libk8s Namespace ==="; grep -rn 'type Namespace' /home/node/go/pkg/mod/github.com/bborbe/k8s@v1.14.16/ | head; grep -rn 'func (.*Namespace) String' /home/node/go/pkg/mod/github.com/bborbe/k…
+[20:09:09] [system: task_progress]
+[20:09:09] $ AGENT=/home/node/go/pkg/mod/github.com/bborbe/agent@v0.85.1; sed -n '1,40p' "$AGENT/agent_task.go"; echo "=== TaskAssignee ==="; grep -rn "type TaskAssignee" "$AGENT"/ | head -3; echo "=== vault-cli …
+[20:09:09] ⚠ [bash output]
+	Frontmatter    TaskFrontmatter `json:"frontmatter"`
+	Content        TaskContent     `json:"content"`
+}
+
+func (t Task) Validate(ctx context.Context) error {
+	return validation.All{
+		validation.Name("TaskIdentifier", t.TaskIdentifier),
+		validation.Name("Content", t.Content),
+	}.Validate(ctx)
+}
+
+func (t Task) Ptr() *Task {
+	return &t
+}
+=== TaskAssignee ===
+/home/node/go/pkg/mod/github.com/bborbe/agent@v0.85.1/agent_task-assignee.go:16:type TaskAssignee string
+=== vault-cli Contains ===
+/home/node/go/pkg/mod/github.com/bborbe/vault-cli@v0.121.0
+/home/node/go/pkg/mod/github.com/bborbe/vault-cli@v0.121.0/pkg/domain/task_phase.go:52:func (t TaskPhases) Contains(phase TaskPhase) bool {
+/home/node/go/pkg/mod/github.com/bborbe/vault-cli@v0.121.0/pkg/domain/task_status.go:52:func (t TaskStatuses) Contains(status TaskStatus) bool {
+[20:09:11] [system: task_progress]
+[20:09:11] $ ls /home/node/.claude/plugins/marketplaces/coding/docs/documentation-guide.md /home/node/.claude/plugins/marketplaces/coding/docs/readme-guide.md 2>&1; echo "---"; ls -la /workspace/docs/; echo "---"…
+[20:09:11] [system: task_progress]
+[20:09:11] $ for f in /workspace/prompts/1-spec-005-gitrest-client.md /workspace/prompts/2-spec-005-reconcile-loop.md /workspace/prompts/3-spec-005-spawn-lock.md; do echo "=== $f ==="; head -8 "$f"; done
+[20:09:12] [system: task_progress]
+[20:09:12] $ sed -n '1,80p' pkg/handler/task_event_handler_test.go
+[20:09:12] ⚠ [bash output]
+		taskStore = pkg.NewTaskStore()
+		currentDateTime = libtime.NewCurrentDateTime()
+		h = handler.NewTaskEventHandler(
+			fakeSpawner,
+			base.Branch("prod"),
+			fakeResolver,
+			fakeResultPublisher,
+			taskStore,
+			currentDateTime,
+		)
+	})
+
+	buildMsg := func(task lib.Task) *sarama.ConsumerMessage {
+		value, err := json.Marshal(task)
+		Expect(err).To(BeNil())
+		return &sarama.ConsumerMessage{Value: value}
+	}
+
+	Describe("ConsumeMessage", func() {
+		It("skips empty message", func() {
+[20:09:12] [system: task_progress]
+[20:09:12] $ ls -d /home/node/go/pkg/mod/github.com/bborbe/k8s@* 2>/dev/null; K8SDIR=$(ls -d /home/node/go/pkg/mod/github.com/bborbe/k8s@* 2>/dev/null | head -1); echo "K8SDIR=$K8SDIR"; grep -rn 'type Namespace' …
+[20:09:14] [system: task_progress]
+[20:09:14] $ echo "GOPATH=$(go env GOPATH 2>/dev/null)"; find /home/node/go/pkg/mod/github.com/bborbe -maxdepth 1 -name 'k8s*' 2>/dev/null; find / -maxdepth 6 -type d -name 'k8s@*' -path '*bborbe*' 2>/dev/null | …
+[20:09:15] [system: task_progress]
+[20:09:15] $ grep -n "NewTaskEventHandler(" pkg/handler/task_event_handler_test.go; echo "=== context of call sites ==="; for L in 876 922 1656 1702; do echo "--- line $L ---"; sed -n "$((L-4)),$((L+4))p" pkg/han…
+[20:09:15] ⚠ [bash output]
+--- line 1656 ---
+					stuck := buildGraceTask(domain.TaskPhaseExecution, 0, 3)
+					restartStore := pkg.NewTaskStore()
+					restartStore.Store(stuck.TaskIdentifier, stuck)
+
+					freshHandler := handler.NewTaskEventHandler(
+						fakeSpawner,
+						base.Branch("prod"),
+						fakeResolver,
+						fakeResultPublisher,
+--- line 1702 ---
+					fakeResultPublisher.PublishIncrementTriggerCountReturns(
+						errors.Errorf(ctx, "publish failed"),
+					)
+
+					freshHandler := handler.NewTaskEventHandler(
+						fakeSpawner,
+						base.Branch("prod"),
+						fakeResolver,
+						fakeResultPublisher,
+[20:09:15] [system: task_progress]
+[20:09:15] $ grep -rn "workspace" /home/node/.claude/plugins/marketplaces/dark-factory/docs/yolo-container-setup.md /home/node/.claude/plugins/marketplaces/dark-factory/docs/execution-backends.md /home/node/.clau…
+[20:09:15] [system: task_progress]
+[20:09:16] $ grep -rn "hideGit\|workflow" /home/node/.claude/plugins/marketplaces/dark-factory/docs/*.md 2>/dev/null | head -20
+[20:09:16] [system: task_progress]
+[20:09:16] $ ls /home/node/go/pkg/mod/github.com/bborbe/ 2>/dev/null; echo "---"; find /home/node/go/pkg/mod -maxdepth 3 -iname '*k8s*' 2>/dev/null | head
+[20:09:19] [system: task_progress]
+[20:09:19] $ for L in 876 922 1656 1702; do echo "--- $L ---"; sed -n "$((L+1)),$((L+10))p" pkg/handler/task_event_handler_test.go; done
+[20:09:20] [system: task_progress]
+[20:09:20] $ echo "=== libk8s import + usage ==="; grep -rn 'libk8s\|Namespace' main.go | head -15; echo "=== existing k8s clientset usage in repo ==="; grep -rn 'kubernetes.Interface\|CoreV1().Secrets\|clientset…
+[20:09:20] ⚠ [bash output]
+main.go:131:	jobWatcher := factory.CreateJobWatcher(kubeClient, a.Namespace, taskStore, resultPublisher)
+main.go:135:		a.Namespace,
+main.go:158:		a.Namespace,
+main.go:173:			return connector.Listen(ctx, a.Namespace, resourceEventHandler)
+=== existing k8s clientset usage in repo ===
+pkg/k8s_connector_test.go:16:	apiextensionsclient "k8s.io/apiextensions-apiserver/pkg/client/clientset/clientset"
+pkg/k8s_connector_test.go:17:	"k8s.io/apiextensions-apiserver/pkg/client/clientset/clientset/fake"
+pkg/k8s_connector.go:14:	apiextensionsclient "k8s.io/apiextensions-apiserver/pkg/client/clientset/clientset"
+pkg/k8s_connector.go:21:	versioned "github.com/bborbe/agent-task-executor/k8s/client/clientset/versioned"
+pkg/k8s_connector.go:48:// CRDClientBuilder constructs the apiextensions clientset from a rest.Config.
+pkg/k8s_connector.go:49:// Injected to allow fake clientsets in tests.
+pkg/k8s_connector.go:71:	clientset, err := c.crdBuilder(c.config)
+pkg/k8s_connector.go:73:		return errors.Wrapf(ctx, err, "build apiextensions clientset")
+pkg/k8s_connector.go:75:	crds := clientset.ApiextensionsV1().CustomResourceDefinitions()
+pkg/k8s_connector.go:107:	clientset, err := versioned.NewForConfig(c.config)
+pkg/k8s_connector.go:109:		return errors.Wrapf(ctx, err, "build agentconfig clientset")
+pkg/k8s_connector.go:112:		clientset,
+pkg/job_watcher.go:49:	kubeClient kubernetes.Interface,
+pkg/job_watcher.go:63:	kubeClient kubernetes.Interface
+pkg/envtest/job_watcher_envtest_test.go:53:		kubeClient kubernetes.Interface
+[20:09:22] [system: task_progress]
+[20:09:22] $ grep -n 'spawnIfNeeded' /workspace/pkg/handler/task_event_handler.go | head; echo "---domain---"; grep -rn 'TaskPhaseExecution' /home/node/go/pkg/mod/github.com/bborbe/vault-cli@*/pkg/domain/*.go 2>/…
+[20:09:22] [system: task_progress]
+[20:09:22] $ head -20 /workspace/prompts/4-spec-005-readme-doc.md; echo "===1==="; head -20 /workspace/prompts/1-spec-005-gitrest-client.md
+[20:09:22] ⚠ [bash output]
+===1===
+---
+status: draft
+spec: [005-bug-executor-restart-drops-deferred-respawn-queue]
+created: "2026-09-03T18:04:37Z"
+branch: dark-factory/bug-executor-restart-drops-deferred-respawn-queue
+---
+
+<summary>
+- The executor gains a read-only git-rest HTTP client (`List` / `Get` / `IsReady`) so a future reconcile loop can read vault task files without a vault mount or filesystem view — the same client shape `agent-task-controller` already uses, ported into this repo with no cross-repo import.
+- The ported client sends git-rest's `X-Gateway-Secret` / `X-Gateway-Initator` auth headers when a gateway secret is configured; with no secret it sends no headers, so auth-disabled git-rest still works.
+- The gateway secret is referenced by K8s secret NAME (the `JobKafkaClientCertSecret` pattern), never the value in env: a new helper reads the secret's `gateway-secret` data key from the K8s API and returns the value for the client to use in-memory only.
+- Three new executor env config values are declared on the `application` struct — `GITREST_URL`, `GITREST_GATEWAY_SECRET` (secret name, default empty = no auth), `TASK_GLOB` (default `24 Tasks/*.md`) — so the config surface is fixed before the reconcile loop prompt consumes them.
+- A counterfeiter mock (`FakeGitRestClient`) is generated so downstream prompts can test against a fake vault source.
+- Full HTTP-level tests (httptest) cover success, 503-readiness, error, and auth-header paths for all three methods; the secret-read helper is tested against a fake clientset.
+</summary>
+
+<objective>
+Establish the executor's vault-read contract: a small, read-only git-rest HTTP client (`List`/`Get`/`IsReady`) with gateway-secret auth, plus the three executor env config values it is configured from, so the reconcile loop built in the next prompt can derive task state from the vault without a vault mount or filesystem view.
+</objective>
+[20:09:23] [system: task_progress]
+[20:09:23] $ go mod download github.com/bborbe/k8s 2>&1 | head -5; K8SDIR=$(ls -d /home/node/go/pkg/mod/github.com/bborbe/k8s@* 2>/dev/null | head -1); echo "K8SDIR=$K8SDIR"; grep -rn 'type Namespace\|func (.*Nam…
+[20:09:25] [system: task_progress]
+[20:09:25] [read] /workspace/prompts/1-spec-005-gitrest-client.md (offset=296, limit=45)
+[20:09:25] [system: task_progress]
+[20:09:25] $ grep -n "TASK_GLOB\|TaskGlob\|taskGlob\|glob\|GitRestURL\|GitRestGatewaySecret\|gateway-secret\|reconcile" /workspace/prompts/2-spec-005-reconcile-loop.md | head -30
+[20:09:25]   → 44 lines read
+[20:09:25] ⚠ [bash output]
+56:// defaultReconcileIntervalSeconds is the interval between reconcile-loop passes
+62:// reconcilePassTimeout bounds one reconcile pass so a slow or large vault
+67:const reconcilePassTimeout = 30 * time.Second
+90:// pkg/scanner/frontmatter.go (spec 005 — the reconcile loop reads vault task
+146:		glog.Warningf("event=reconcile_skip reason=invalid_frontmatter err=%v", err)
+151:		glog.Warningf("event=reconcile_skip reason=unparseable_frontmatter err=%v", err)
+156:		glog.Warningf("event=reconcile_skip reason=missing_task_identifier")
+169:	// ReconcileOnce runs one reconcile pass: lists the task files under the
+170:	// configured task glob via git-rest, parses each file's frontmatter, and
+180:4. Change `NewTaskEventHandler` (lines 118-137) to accept and store the git-rest client and task glob. New signature (append two parameters after `currentDateTime`):
+190:	taskGlob string,
+202:		taskGlob:         taskGlob,
+206:Add `gitRestClient gitrestclient.GitRestClient` and `taskGlob string` fields to the `taskEventHandler` struct (lines 139-150), and add the import `"github.com/bborbe/agent-task-executor/pkg/gitrestclient"` to the local import group (with `pkg`, `metrics`, `spawner`).
+208:5. Add the reconcile methods to `/workspace/pkg/handler/task_event_handler.go`. Place `ReconcileOnce` immediately before `RunReconcileLoop`, and place both after `RunDeferredRespawnLoop` (after line 699). Target code:
+210:// ReconcileOnce runs a single reconcile pass: lists the task files under the
+211:// configured task glob via git-rest, parses each file's frontmatter, and
+214:// The reconcile loop is the source-of-truth floor (spec 005): it derives state
+230:	passCtx, cancel := context.WithTimeout(ctx, reconcilePassTimeout)
+235:		glog.Warningf("event=reconcile_vault_unavailable reason=readiness_error err=%v", err)
+239:		glog.Warningf("event=reconcile_vault_unavailable reason=not_ready")
+[20:09:32] [system: task_progress]
+[20:09:32] $ echo "=== sibling prompt 2 failure-mode / changelog coverage ==="; grep -nE 'reconcile_vault_unavailable|CHANGELOG|Unreleased|timeout|Interval|executor_reconcile_redriven_total|per-pass' prompts/2-sp…
+[20:09:32] [system: task_progress]
+[20:09:32] $ echo "=== controller test style ==="; grep -n 'r.Method\|r.URL.Path\|r.URL.Query\|httptest' /home/node/go/pkg/mod/github.com/bborbe/agent-task-controller@v0.6.6/pkg/gitrestclient/git_rest_client_test…
+[20:09:32] ⚠ [bash output]
+239:		glog.Warningf("event=reconcile_vault_unavailable reason=not_ready")
+336:// defaultReconcileIntervalSeconds until ctx is cancelled. ReconcileOnce returns
+343:	ticker := time.NewTicker(defaultReconcileIntervalSeconds)
+364:		Name: "executor_reconcile_redriven_total",
+369:Extend `/workspace/pkg/metrics/metrics_test.go` (the first `It` block, line ~19) so the expected registered names also include `"executor_reconcile_redriven_total"`.
+464:    e. AC 6 (counter increments): covered by (a) and (b) — assert the `executor_reconcile_redriven_total` delta explicitly in both.
+
+=== prompt 3 changelog? ===
+132:3. Do NOT add a CHANGELOG entry in this prompt — the single `feat:` bullet in `## Unreleased` from the previous prompt already covers the double-spawn hardening (its text names the unconditional lock). Do NOT add any other code changes: no new config, no metrics, no interface changes.
+=== prompt 4 changelog? ===
+9:- The executor's `README.md` documents the three new environment variables the reconcile loop is configured from — `GITREST_URL`, `GITREST_GATEWAY_SECRET`, `TASK_GLOB` — so an operator deploying or debugging the executor knows what each controls and what the defaults are.
+10:- The README states that `GITREST_GATEWAY_SECRET` references a K8s Secret by NAME (data key `gateway-secret`), never the secret value, and that the executor's ServiceAccount must be able to read that Secret.
+11:- The README notes the deployment dependency: the Helm chart and config-repo values for these variables live outside this repo and are wired on the operator side (the chart must pass the secret NAME and grant `secrets/get` to the executor's ServiceAccount).
+16:Document the new executor env config surface added by the reconcile-loop feature (spec 005) in `README.md`, so operators know the variable names, defaults, semantics, and the ServiceAccount permission the git-rest gateway secret requires.
+20:Read `/workspace/README.md` fully before changing it. It currently describes the executor's role and links; the new content is a short "Reconcile loop configuration" section documenting the env vars added by this feature.
+31:1. In `/workspace/README.md`, after the introductory paragraph (before the `## Links` section), add a `## Reconcile loop configuration` section documenting the three env vars in a table, using the existing plain-markdown style of the file. The section MUST contain, as substrings, each env var name (`GITREST_URL`, `GITREST_GATEWAY_SECRET`, `TASK_GLOB`) and the phrase `gateway-secret`:
+48:2. Do NOT change any other content of `README.md` (the intro, the `## Links` section, or the `## License` section stay as-is). No Go, YAML, Makefile, or chart changes in this prompt.
+53:- The README must state the semantics exactly as implemented: `GITREST_GATEWAY_SECRET` is a K8s Secret NAME whose `gateway-secret` data key holds the value; the executor reads it at startup; the ServiceAccount needs `get` on that Secret. Do not document a value-in-env behavior.
+60:- `grep -c 'GITREST_URL' README.md` — outputs ≥1.
+61:- `grep -c 'GITREST_GATEWAY_SECRET' README.md` — outputs ≥1.
+[20:09:37] [system: task_progress]
+[20:09:37] $ cat /workspace/tools.env; echo "=== do existing go:generate directives match v6.12.2? ==="; grep -rn 'go:generate go run github.com/maxbrunsfeld/counterfeiter' /workspace/pkg/ | head
+[20:09:37] [system: task_progress]
+[20:09:37] $ echo "=== prompt1 frontmatter spec ==="; sed -n '1,6p' prompts/1-spec-005-gitrest-client.md; echo "=== git commands in verification/requirements? ==="; grep -nE '^\s*git\s|git clone|git push|git comm…
+[20:09:37] ⚠ [bash output]
+291:/workspace/pkg/agent_configuration_test.go
+291:/workspace/pkg/gitrest_gateway_secret_test.go
+297:/workspace/main.go
+29:/workspace/pkg/config_resolver.go
+317:/pkg/gitrestclient/...
+317:/workspace/mocks/git_rest_client.go
+31:/home/node/go/pkg/mod/github.com/bborbe/agent-task-controller
+31:/pkg/gitrestclient/git_rest_client.go
+334:/pkg/gitrestclient/...
+336:/pkg/gitrestclient/...
+339:/git_rest_client.go
+342:/pkg/gitrestclient/...
+41:/home/node/.claude/plugins/marketplaces/coding/docs/go-testing-guide.md
+42:/home/node/.claude/plugins/marketplaces/coding/docs/go-error-wrapping-guide.md
+43:/home/node/.claude/plugins/marketplaces/coding/docs/go-security-linting.md
+44:/home/node/.claude/plugins/marketplaces/coding/docs/definition-of-done.md
+48:/workspace/pkg/gitrestclient/
+48:/workspace/pkg/gitrestclient/git_rest_client.go
+69:/../mocks/git_rest_client.go
+72:/foo.md
+[20:09:39] [system: task_progress]
+[20:09:39] $ grep -n "env\|table\|configuration" /home/node/.claude/plugins/marketplaces/coding/docs/readme-guide.md | head -20; echo "===FAILMODE CHECK prompt2==="; grep -n "vault_unavailable\|rate.limit\|rate_l…
+[20:09:39] ⚠ [bash output]
+230:	passCtx, cancel := context.WithTimeout(ctx, reconcilePassTimeout)
+235:		glog.Warningf("event=reconcile_vault_unavailable reason=readiness_error err=%v", err)
+239:		glog.Warningf("event=reconcile_vault_unavailable reason=not_ready")
+300:// unresolvable Config) — mirroring parseAndFilter's gates. Reconcile uses the
+361:// restart dropped their in-memory deferral state (spec 005).
+369:Extend `/workspace/pkg/metrics/metrics_test.go` (the first `It` block, line ~19) so the expected registered names also include `"executor_reconcile_redriven_total"`.
+406:   a. After the `resultPublisher`/`taskStore`/`jobWatcher`/`zombieSweeper` block and BEFORE the `consumer, taskEventHandler := factory.CreateConsumer(...)` call (i.e., after line 151), add:
+429:9. Update the five existing `NewTaskEventHandler` call sites in `/workspace/pkg/handler/task_event_handler_test.go` — each gains the two new arguments `fakeGitRestClient, "24 Tasks/*.md"` after `currentDateTime` (or `libtime.NewCurrentDateTime()` / the local clock var). The call sites are at lines 63 (the BeforeEach), 876, 922, 1656, and 1702. Do NOT add any new Ginkgo specs to this file (it is 1909 lines; the 2000-line revive limit is near). Also add the BeforeEach setup for the fake client (the `var` block at line 43-51 gains `fakeGitRestClient *mocks.FakeGitRestClient`, and the BeforeEach gains):
+435:10. Create `/workspace/pkg/handler/task_reconcile_test.go` in `package handler_test` — a new file (do NOT extend the 1909-line existing test file). It registers into the existing "Handler Suite" launched by `TestHandler` in `task_event_handler_test.go`; give it its OWN `var _ = Describe("TaskEventHandler reconcile loop", func() {...})` block with its own `BeforeEach` replicating the setup in `task_event_handler_test.go:52-76` plus the fake git-rest client (default `IsReadyReturns(true, nil)`), constructing the handler via `handler.NewTaskEventHandler(fakeSpawner, base.Branch("prod"), fakeResolver, fakeResultPublisher, taskStore, currentDateTime, fakeGitRestClient, "24 Tasks/*.md")`.
+453:    a. AC 1 (happy path): `fakeGitRestClient.ListReturns([]string{"24 Tasks/tid-a.md"}, nil)`, `GetReturns([]byte(renderTaskFile(task)), nil)` for an eligible task (status in_progress, phase planning, assignee claude, stage prod, resolver returns `pkg.AgentConfiguration{Assignee: "claude", Image: "my-image:latest"}`), `fakeSpawner.IsJobActiveReturns(false, nil)`. Run `h.ReconcileOnce(ctx)`; assert `fakeSpawner.SpawnJobCallCount() == 1` and the counter delta (`testutil.ToFloat64(metrics.ReconcileRedrivenTotal)` before vs after) is +1.
+454:    b. AC 2 (restart recovery with empty store): fresh `pkg.NewTaskStore()` (empty — simulating the post-restart wipe), git-rest returns a deferred-shape task whose frontmatter has NO `current_job` key (status in_progress, phase execution, assignee claude, stage prod), no Kafka message is sent; run one `ReconcileOnce`; assert `SpawnJobCallCount() == 1` and the counter delta is +1. This is the exact shape `deferIfAtConcurrencyCap` leaves behind.
+460:       - unresolvable config (`fakeResolver.ResolveReturns(pkg.AgentConfiguration{}, pkg.ErrConfigNotFound)`)
+461:       - live Job (`fakeSpawner.IsJobActiveReturns(true, nil)`)
+463:    d. AC 4 (concurrency cap respected): `fakeResolver.ResolveReturns(pkg.AgentConfiguration{Assignee: "claude", Image: "my-image:latest", MaxConcurrentJobs: 1}, nil)`, `fakeSpawner.CountActiveJobsReturns(1, nil)` (at cap), `fakeSpawner.IsJobActiveReturns(false, nil)`; run `ReconcileOnce`; assert `SpawnJobCallCount() == 0` (deferred, not immediately spawned).
+467:    h. Failure mode — List error: `IsReadyReturns(true, nil)`, `ListReturns(nil, errors.Errorf(ctx, "rate limited"))`; assert `SpawnJobCallCount() == 0` (pass skipped, no panic).
+474:    - feat: add a periodic reconcile loop that re-derives running tasks from the vault (via git-rest) and live Jobs, so a task deferred behind `maxConcurrentJobs` whose in-memory deferral was lost across an executor restart resumes without a Kafka event or vault edit; observable via `executor_reconcile_redriven_total` and `event=reconcile*` log lines, with the per-assignee spawn lock taken unconditionally to prevent reconcile/event double-spawns
+477:12. Do NOT touch `seedDeferredRespawnsFromStore` (lines 642-672) — it remains as-is; the reconcile loop is the new restart-recovery floor and must not be gated on `deferredRespawns` contents. Do NOT change `deferIfAtConcurrencyCap`, `checkActiveCurrentJob`, or the Kafka event path.
+483:- The reconcile loop is the source-of-truth floor: it reads the vault via git-rest and live Jobs via the spawner. It must NOT consult or be gated on the in-memory `deferredRespawns` map or `taskStore` (which a restart wipes).
+484:- Re-driving an eligible task MUST go through the existing `spawnIfNeeded` path so the concurrency cap, trigger budget, and `current_job` grace-window logic apply identically to event-driven and reconcile-driven spawns. Do NOT duplicate any of that logic in the reconcile code.
+488:- Do NOT add the unconditional spawn lock in this prompt — that is the next prompt.
+[20:09:45] [system: task_progress]
+[20:09:45] $ sed -n '1,35p' /workspace/pkg/handler/task_event_handler_test.go | grep -n 'sarama\|import\|"' | head -30; echo "---vendor?---"; ls -d /workspace/vendor 2>/dev/null || echo "no vendor dir"; echo "---…
+[20:09:45] ⚠ [bash output]
+8:	github.com/bborbe/cqrs v0.6.10
+9:	github.com/bborbe/cron v1.8.29
+10:	github.com/bborbe/errors v1.6.0
+11:	github.com/bborbe/http v1.26.25
+12:	github.com/bborbe/k8s v1.14.16
+13:	github.com/bborbe/kafka v1.25.11
+14:	github.com/bborbe/log v1.6.25
+15:	github.com/bborbe/metrics v0.6.1
+16:	github.com/bborbe/run v1.10.2
+17:	github.com/bborbe/sentry v1.10.0
+18:	github.com/bborbe/service v1.10.10
+19:	github.com/bborbe/time v1.27.11
+20:	github.com/bborbe/validation v1.4.23
+21:	github.com/bborbe/vault-cli v0.121.0
+40:	github.com/bborbe/argument/v2 v2.13.2 // indirect
+41:	github.com/bborbe/collection v1.20.25 // indirect
+42:	github.com/bborbe/kv v1.21.12 // indirect
+43:	github.com/bborbe/math v1.4.8 // indirect
+44:	github.com/bborbe/parse v1.11.0 // indirect
+45:	github.com/bborbe/strimzi v1.8.16 // indirect
+[20:09:45] [system: task_progress]
+[20:09:45] $ grep -rn "branch:" /home/node/.claude/plugins/marketplaces/dark-factory/docs/*.md 2>/dev/null | head -20; echo "==="; grep -rln "spec:\|frontmatter\|status: draft\|inboxDir" /home/node/.claude/plugin…
+[20:09:45] [system: task_progress]
+[20:09:45] $ ls /home/node/go/pkg/mod/github.com/bborbe/ 2>/dev/null | grep -i "dark\|factory"; find /home/node -maxdepth 6 -iname "*dark-factory*" -type d 2>/dev/null | grep -v plugins | head
+[20:09:54] [system: task_progress]
+[20:09:54] $ echo "=== gitrest service name in agent helm ==="; grep -rn 'obsidian-openclaw\|vault-obsidian\|gitrest' /home/node/go/pkg/mod/github.com/bborbe/agent@v0.85.1/helm/values.yaml /home/node/go/pkg/mod/g…
+[20:09:54] ⚠ [bash output]
+/home/node/go/pkg/mod/github.com/bborbe/agent@v0.85.1/helm/values.yaml:201:  #   # GIT_REST_URL (http://vault-obsidian-<vaultName>:9090) when gitRestUrl is empty.
+/home/node/go/pkg/mod/github.com/bborbe/agent@v0.85.1/helm/values.yaml:204:  #   # http://vault-obsidian-<vaultName>:9090.
+/home/node/go/pkg/mod/github.com/bborbe/agent@v0.85.1/helm/values.yaml:206:  #   # (a `vault-obsidian-<vault>` Service on port 9090). If your git-rest/Obsidian
+=== mocks package decl ===
+// Code generated by counterfeiter. DO NOT EDIT.
+package mocks
+
+import (
+	"context"
+	"sync"
+
+	lib "github.com/bborbe/agent"
+	"github.com/bborbe/agent-task-executor/pkg"
+	"github.com/bborbe/agent-task-executor/pkg/spawner"
+)
+
+type FakeJobSpawner struct {
+	CountActiveJobsStub        func(context.Context, string) (int, error)
+	countActiveJobsMutex       sync.RWMutex
+5:package mocks
+[20:09:56] [system: task_progress]
+[20:09:56] [read] /home/node/.claude/plugins/marketplaces/coding/docs/readme-guide.md (offset=50, limit=65)
+[20:09:56]   → 64 lines read
+[20:10:20] [system: task_progress]
+[20:10:20] $ echo "=== format target ==="; sed -n '1,30p' /workspace/Makefile.precommit; echo "=== errors.Wrapf count in pkg ==="; grep -rn 'errors\.Wrapf' /workspace/pkg/ | wc -l; echo "=== fmt.Errorf in prompt?…
+[20:10:20] ⚠ [bash output]
+generate:
+	rm -rf mocks avro
+	mkdir -p mocks
+	echo "package mocks" > mocks/mocks.go
+	go generate -mod=mod ./...
+
+.PHONY: generatek8s
+generatek8s:
+	bash hack/update-codegen.sh
+
+# -race=true catches data races but flakes on some CI runners (rare SIGSEGV
+# during gexec.Build in cmd/*-style binary smoke tests). Default off; opt in
+=== errors.Wrapf count in pkg ===
+44
+=== fmt.Errorf in prompt? ===
+42:- `/home/node/.claude/plugins/marketplaces/coding/docs/go-error-wrapping-guide.md` — `github.com/bborbe/errors`, never `fmt.Errorf`.
+323:- Repo conventions are frozen: Ginkgo/Gomega v2 tests (no stdlib table tests), `github.com/bborbe/errors` wrapping (never `fmt.Errorf`), counterfeiter mocks for any new dependency (`//counterfeiter:generate`), glog `V(n)` gating.
+=== inlined Go line count (reqs 1+4 blocks) ===
+166
+49
+[20:10:23] [system: task_progress]
+[20:10:23] $ cat /workspace/Makefile.precommit; echo "=== FakeTaskEventHandler usage ==="; grep -rn "FakeTaskEventHandler" /workspace/pkg/ /workspace/mocks/ | grep -v "mocks/task_event_handler.go" | head
+[20:10:23] [system: task_progress]
+[20:10:23] $ P=/workspace/prompts/2-spec-005-reconcile-loop.md\necho "=== fmt.Errorf occurrences ==="; grep -c "fmt.Errorf" $P\necho "=== errors.Wrapf in project pkg/ ==="; grep -rc "errors.Wrapf" /workspace/pkg/…
+[20:10:23] ⚠ [bash output]
+=== fmt.Errorf occurrences ===
+2
+=== errors.Wrapf in project pkg/ ===
+9
+=== errors.Errorf in project pkg/ ===
+4
+=== bare git commands in requirements/verification ===
+=== operator-only commands in verification ===
+13:Do NOT run `docker`, `make build`, `kubectl`, `dark-factory`, `gh`, or `scripts/*.sh` commands in this prompt — those are operator-executable and belong on the spec's verification ladder.
+=== go mod vendor ===
+=== git clone / push ===
+[20:10:28] [system: task_progress]
+[20:10:28] $ P=/workspace/prompts/2-spec-005-reconcile-loop.md; grep -n "fmt.Errorf\|fmt.Sprintf" $P; echo "=== check inlined code blocks for fmt ==="; grep -n 'errors\.Errorf\|errors\.Wrapf' $P | head -20
+[20:10:28] ⚠ [bash output]
+46:- `/home/node/.claude/plugins/marketplaces/coding/docs/go-error-wrapping-guide.md` — never `fmt.Errorf`; `fmt.Sprintf` for building test fixture strings is fine.
+481:- Repo conventions are frozen: Ginkgo/Gomega v2 tests (no stdlib table tests), `github.com/bborbe/errors` wrapping (never `fmt.Errorf`), counterfeiter mocks for any new dependency, glog `V(n)` gating.
+=== check inlined code blocks for fmt ===
+96:		return "", errors.Errorf(ctx, "no frontmatter delimiter found")
+106:		return "", errors.Errorf(ctx, "frontmatter not closed")
+418:       return errors.Wrapf(ctx, err, "read git-rest gateway secret")
+466:    g. Failure mode — readiness error: `fakeGitRestClient.IsReadyReturns(false, errors.Errorf(ctx, "boom"))`; assert `ListCallCount() == 0` and `SpawnJobCallCount() == 0`.
+467:    h. Failure mode — List error: `IsReadyReturns(true, nil)`, `ListReturns(nil, errors.Errorf(ctx, "rate limited"))`; assert `SpawnJobCallCount() == 0` (pass skipped, no panic).
+468:    i. Failure mode — Get error for one path: `ListReturns([]string{"24 Tasks/bad.md"}, nil)`, `GetReturns(nil, errors.Errorf(ctx, "boom"))`; assert `SpawnJobCallCount() == 0` and `ReconcileOnce` returns nil (no crash).
+[20:10:35] [system: task_updated]
+[20:10:35] [system: task_notification]
+[20:10:35]   ← agent reply: I have completed the audit. I read the prompt file, the linked spec (`specs/in-progress/005-bug-executor-restart-drops-deferred-respawn-queue.md`), all three sibling 005 prompts, the target `README.m…
+[20:10:35] [system: task_updated]
+[20:10:35] [system: task_notification]
+[20:10:35]   ← agent reply: I have everything I need. Here is the audit report.
+[20:10:38] [system: task_progress]
+[20:10:38] $ for f in prompts/1-spec-005-gitrest-client.md prompts/2-spec-005-reconcile-loop.md prompts/3-spec-005-spawn-lock.md prompts/4-spec-005-readme-doc.md prompts/1-spec-002-config-job-namespace-model.md; …
+[20:10:55] [system: task_progress]
+[20:10:55] $ grep -n "Unreleased" /workspace/CHANGELOG.md | head; sed -n '/## Unreleased/,/^## /p' /workspace/CHANGELOG.md | head -30
+[20:10:55] [system: task_progress]
+[20:10:55] $ echo "=== does vault-cli domain export TaskStatusInProgress/TaskPhasePlanning etc? ==="; VC=/home/node/go/pkg/mod/github.com/bborbe/vault-cli@v0.121.0; grep -rn "TaskStatusInProgress\|TaskPhasePlanni…
+[20:11:17] [system: task_progress]
+[20:11:17] $ AGENT=/home/node/go/pkg/mod/github.com/bborbe/agent@v0.85.1; sed -n '1,70p' "$AGENT/agent_task-frontmatter.go"
+[20:11:17] [system: task_progress]
+[20:11:17] $ echo "=== methods on taskEventHandler receivers ==="; grep -nE 'func \(h \*taskEventHandler\) [A-Za-z]+' pkg/handler/task_event_handler.go; echo "=== other Run* methods in handler pkg ==="; grep -rnE…
+[20:11:17] ⚠ [bash output]
+// Returns "prod" if the key is absent or empty.
+func (f TaskFrontmatter) Stage() string {
+	v, _ := f["stage"].(string)
+	if v == "" {
+		return "prod"
+	}
+	return v
+}
+
+// RetryCount returns the number of failed attempts recorded in frontmatter.
+// Returns 0 when the field is absent.
+func (f TaskFrontmatter) RetryCount() int {
+	switch v := f["retry_count"].(type) {
+	case int:
+		return v
+	case float64:
+		return int(v)
+	default:
+		return 0
+	}
+[20:11:17] ⚠ [bash output]
+=== methods on taskEventHandler receivers ===
+172:func (h *taskEventHandler) lockAssigneeSpawn(assignee string) func() {
+193:func (h *taskEventHandler) cleanupTerminalTask(task lib.Task) {
+204:func (h *taskEventHandler) ConsumeMessage(ctx context.Context, msg *sarama.ConsumerMessage) error {
+220:func (h *taskEventHandler) parseAndFilter(
+309:func (h *taskEventHandler) resolveConfig(
+386:func (h *taskEventHandler) checkActiveCurrentJob(
+450:func (h *taskEventHandler) spawnIfNeeded(
+535:func (h *taskEventHandler) deferIfAtConcurrencyCap(
+587:func (h *taskEventHandler) evalDeferredRespawns(ctx context.Context) error {
+624:func (h *taskEventHandler) removeDeferredEntry(id lib.TaskIdentifier) {
+631:func (h *taskEventHandler) EvalDeferredRespawns(ctx context.Context) error {
+642:func (h *taskEventHandler) seedDeferredRespawnsFromStore() {
+675:func (h *taskEventHandler) RunDeferredRespawnLoop(ctx context.Context) error {
+750:func (h *taskEventHandler) applyTriggerBudget(
+=== other Run* methods in handler pkg ===
+[20:11:22] [system: task_progress]
+[20:11:22] $ echo "=== all NewTaskEventHandler callers repo-wide ==="; grep -rn "NewTaskEventHandler(" /workspace --include="*.go" | grep -v "/pkg/mod/"; echo "=== FakeJobSpawner accessors used in tests ==="; gre…
+[20:11:22] ⚠ [bash output]
+170:			Expect(fakeSpawner.SpawnJobCallCount()).To(Equal(0))
+=== IsJobActive signature in mock ===
+61:func (fake *FakeJobSpawner) CountActiveJobs(arg1 context.Context, arg2 string) (int, error) {
+81:func (fake *FakeJobSpawner) CountActiveJobsCallCount() int {
+87:func (fake *FakeJobSpawner) CountActiveJobsCalls(stub func(context.Context, string) (int, error)) {
+93:func (fake *FakeJobSpawner) CountActiveJobsArgsForCall(i int) (context.Context, string) {
+100:func (fake *FakeJobSpawner) CountActiveJobsReturns(result1 int, result2 error) {
+110:func (fake *FakeJobSpawner) CountActiveJobsReturnsOnCall(i int, result1 int, result2 error) {
+126:func (fake *FakeJobSpawner) IsJobActive(arg1 context.Context, arg2 lib.TaskIdentifier) (bool, error) {
+146:func (fake *FakeJobSpawner) IsJobActiveCallCount() int {
+152:func (fake *FakeJobSpawner) IsJobActiveCalls(stub func(context.Context, lib.TaskIdentifier) (bool, error)) {
+158:func (fake *FakeJobSpawner) IsJobActiveArgsForCall(i int) (context.Context, lib.TaskIdentifier) {
+165:func (fake *FakeJobSpawner) IsJobActiveReturns(result1 bool, result2 error) {
+175:func (fake *FakeJobSpawner) IsJobActiveReturnsOnCall(i int, result1 bool, result2 error) {
+191:func (fake *FakeJobSpawner) SpawnJob(arg1 context.Context, arg2 lib.Task, arg3 pkg.AgentConfiguration) (string, error) {
+212:func (fake *FakeJobSpawner) SpawnJobCallCount() int {
+218:func (fake *FakeJobSpawner) SpawnJobCalls(stub func(context.Context, lib.Task, pkg.AgentConfiguration) (string, error)) {
+224:func (fake *FakeJobSpawner) SpawnJobArgsForCall(i int) (context.Context, lib.Task, pkg.AgentConfiguration) {
+231:func (fake *FakeJobSpawner) SpawnJobReturns(result1 string, result2 error) {
+241:func (fake *FakeJobSpawner) SpawnJobReturnsOnCall(i int, result1 string, result2 error) {
+[20:11:31] [system: task_updated]
+[20:11:31] [system: task_notification]
+[20:11:31]   ← agent reply: All verifications are complete. Every code reference, line anchor, and cross-batch dependency has been checked. Here is the full audit report.
+[20:11:42] [system: task_progress]
+[20:11:42] $ head -5 /workspace/go.mod; echo "=== revive limit ==="; grep -n "file-length\|max-lines\|2000" /workspace/.golangci.yml; echo "=== prompt 3 exists? ==="; ls /workspace/prompts/3-spec-005-spawn-lock.m…
+[20:11:46] [system: task_progress]
+[20:11:46] $ grep -iE "mount|hideGit|workspace|workflow|GOPATH|claude" /workspace/.dark-factory.log | head -20; echo "=== prompt 4 readme-doc scope ==="; grep -nE "README|chart|env" /workspace/prompts/4-spec-005-…
+[20:11:55] [system: task_progress]
+[20:11:55] $ grep -nE 'func \(.*\) (Run|SweepOnce|NewZombieSweeper|.*Zombie)' /workspace/pkg/zombie_sweeper.go | head; echo "---"; sed -n '85,95p' /workspace/pkg/zombie_sweeper.go
+[20:11:55] ⚠ [bash output]
+90:func (s *zombieSweeper) Run(ctx context.Context) error {
+117:func (s *zombieSweeper) SweepOnce(ctx context.Context) error {
+---
+// "no recent heartbeat" is implemented as "no Pod in PodRunning phase observed
+// for this task". If a per-job heartbeat is added later (a follow-up spec),
+// this predicate gets a real check; for now `classify` treats `pod not Running`
+// as covering both halves of the conjunction.
+
+func (s *zombieSweeper) Run(ctx context.Context) error {
+	// Interval is resolved once at startup. CRD changes to ZombieSweeperIntervalSeconds
+	// take effect only after pod restart. Acceptable because executor pods are short-lived
+	// relative to CRD reconciliation cycles.
+	interval, err := s.resolveSweeperInterval(ctx)
+	if err != nil {
+[20:12:25] [system: task_updated]
+[20:12:25] [system: task_notification]
+[20:12:25]   ← agent reply: I have completed the full audit. All code references have been verified against the actual source files. Here is the report.
+[20:12:28] [system: thinking_tokens]
+[20:12:28] [system: thinking_tokens]
+[20:12:28] [system: thinking_tokens]
+[20:12:28] [system: thinking_tokens]
+[20:12:28] [system: thinking_tokens]
+[20:12:28] [system: thinking_tokens]
+[20:12:28] [system: thinking_tokens]
+[20:12:28] [system: thinking_tokens]
+[20:12:28] [system: thinking_tokens]
+[20:12:28] [system: thinking_tokens]
+[20:12:28] [system: thinking_tokens]
+[20:12:28] [system: thinking_tokens]
+[20:12:28] [system: thinking_tokens]
+[20:12:28] [system: thinking_tokens]
+[20:12:28] [system: thinking_tokens]
+[20:12:28] [system: thinking_tokens]
+[20:12:28] [system: thinking_tokens]
+[20:12:28] [system: thinking_tokens]
+[20:12:28] [system: thinking_tokens]
+[20:12:28] [system: thinking_tokens]
+[20:12:28] [system: thinking_tokens]
+[20:12:28] [system: thinking_tokens]
+[20:12:28] [system: thinking_tokens]
+[20:12:28] [system: thinking_tokens]
+[20:12:28] [system: thinking_tokens]
+[20:12:28] [system: thinking_tokens]
+[20:12:28] [system: thinking_tokens]
+[20:12:28] [system: thinking_tokens]
+[20:12:28] [system: thinking_tokens]
+[20:12:28] [system: thinking_tokens]
+[20:12:28] [system: thinking_tokens]
+[20:12:28] [system: thinking_tokens]
+[20:12:28] [system: thinking_tokens]
+[20:12:28] [system: thinking_tokens]
+[20:12:29] [system: thinking_tokens]
+[20:12:29] [system: thinking_tokens]
+[20:12:29] [system: thinking_tokens]
+[20:12:29] [system: thinking_tokens]
+[20:12:29] [system: thinking_tokens]
+[20:12:29] [system: thinking_tokens]
+[20:12:29] [system: thinking_tokens]
+[20:12:29] [system: thinking_tokens]
+[20:12:29] [system: thinking_tokens]
+[20:12:29] [system: thinking_tokens]
+[20:12:29] [system: thinking_tokens]
+[20:12:29] [system: thinking_tokens]
+[20:12:29] [system: thinking_tokens]
+[20:12:29] [system: thinking_tokens]
+[20:12:29] [system: thinking_tokens]
+[20:12:29] [system: thinking_tokens]
+[20:12:29] [system: thinking_tokens]
+[20:12:29] [system: thinking_tokens]
+[20:12:29] [system: thinking_tokens]
+[20:12:29] [system: thinking_tokens]
+[20:12:29] [system: thinking_tokens]
+[20:12:29] [system: thinking_tokens]
+[20:12:29] [system: thinking_tokens]
+[20:12:29] [system: thinking_tokens]
+[20:12:29] [system: thinking_tokens]
+[20:12:29] [system: thinking_tokens]
+[20:12:29] [system: thinking_tokens]
+[20:12:29] [system: thinking_tokens]
+[20:12:29] [system: thinking_tokens]
+[20:12:29] [system: thinking_tokens]
+[20:12:29] [system: thinking_tokens]
+[20:12:29] [system: thinking_tokens]
+[20:12:29] [system: thinking_tokens]
+[20:12:29] [system: thinking_tokens]
+[20:12:29] [system: thinking_tokens]
+[20:12:29] [system: thinking_tokens]
+[20:12:29] [system: thinking_tokens]
+[20:12:29] [system: thinking_tokens]
+[20:12:29] [system: thinking_tokens]
+[20:12:29] [system: thinking_tokens]
+[20:12:29] [system: thinking_tokens]
+[20:12:29] [system: thinking_tokens]
+[20:12:29] [system: thinking_tokens]
+[20:12:29] [system: thinking_tokens]
+[20:12:29] [system: thinking_tokens]
+[20:12:29] [system: thinking_tokens]
+[20:12:29] [system: thinking_tokens]
+[20:12:29] [system: thinking_tokens]
+[20:12:29] [system: thinking_tokens]
+[20:12:29] [system: thinking_tokens]
+[20:12:29] [system: thinking_tokens]
+[20:12:29] [system: thinking_tokens]
+[20:12:29] [system: thinking_tokens]
+[20:12:29] [system: thinking_tokens]
+[20:12:29] [system: thinking_tokens]
+[20:12:29] [system: thinking_tokens]
+[20:12:29] [system: thinking_tokens]
+[20:12:30] [system: thinking_tokens]
+[20:12:30] [system: thinking_tokens]
+[20:12:30] [system: thinking_tokens]
+[20:12:30] [system: thinking_tokens]
+[20:12:30] [system: thinking_tokens]
+[20:12:30] [system: thinking_tokens]
+[20:12:30] [system: thinking_tokens]
+[20:12:30] [system: thinking_tokens]
+[20:12:30] [system: thinking_tokens]
+[20:12:30] [system: thinking_tokens]
+[20:12:30] [system: thinking_tokens]
+[20:12:30] [system: thinking_tokens]
+[20:12:30] [system: thinking_tokens]
+[20:12:30] [system: thinking_tokens]
+[20:12:30] [system: thinking_tokens]
+[20:12:30] [system: thinking_tokens]
+[20:12:30] [system: thinking_tokens]
+[20:12:30] [system: thinking_tokens]
+[20:12:30] [system: thinking_tokens]
+[20:12:30] [system: thinking_tokens]
+[20:12:30] [system: thinking_tokens]
+[20:12:30] [system: thinking_tokens]
+[20:12:30] [system: thinking_tokens]
+[20:12:30] [system: thinking_tokens]
+[20:12:30] [system: thinking_tokens]
+[20:12:30] [system: thinking_tokens]
+[20:12:30] [system: thinking_tokens]
+[20:12:30] [system: thinking_tokens]
+[20:12:30] [system: thinking_tokens]
+[20:12:30] [system: thinking_tokens]
+[20:12:30] [system: thinking_tokens]
+[20:12:30] [system: thinking_tokens]
+[20:12:30] [system: thinking_tokens]
+[20:12:30] [system: thinking_tokens]
+[20:12:30] [system: thinking_tokens]
+[20:12:30] [system: thinking_tokens]
+[20:12:30] 💭 All four audits are complete. Now I need to finalize:
+
+1. The spec transition step. `DARK_FACTORY_MANAGED=true` → Mode 1 (daemon + container), so I must **SKIP** the `mark-prompted` step.
+
+The prompt-creator reported success (created 4 files). The audits collected findings. But regardless of audit findings, in Mode 1 the step is skipped.
+
+Let me verify: the skip conditions are:
+- `DARK_FACTORY_MANAGED` is set → Mode 1, skip.
+
+Since DARK_FACTORY_MANAGED=true, I skip mark-prompted. The creator did…
+[20:12:59] All four audits are complete. Since `DARK_FACTORY_MANAGED=true` (Mode 1 — daemon + container), I'm skipping the `spec mark-prompted` transition; the host-side generator will finalize the spec (`approved → prompted`) after this container exits.
+
+## Generated Prompts
+
+**Creator:** `dark-factory:prompt-creator` — 4 prompt files written to `prompts/`, executed in order `1 → 2 → 3 → 4`:
+
+- `prompts/1-spec-005-gitrest-client.md` — read-only git-rest client package (`List`/`Get`/`IsReady` + gateway-secret auth), `ReadGitRestGatewaySecret` (reads secret from K8s by NAME, data key `gateway-secret`), 3 env config fields (`GITREST_URL`, `GITREST_GATEWAY_SECRET`, `TASK_GLOB`), `FakeGitRestClient` counterfeiter mock, httptest + fake-clientset tests.
+- `prompts/2-spec-005-reconcile-loop.md` — the core feature: `ReconcileOnce`/`RunReconcileLoop` on `taskEventHandler`, `defaultReconcileIntervalSeconds = 60s` + `reconcilePassTimeout = 30s` constants, eligibility filter via new `pkg/handler/task_file.go` (ported frontmatter/body parsing), `executor_reconcile_redriven_total` counter, main.go/factory wiring, `## Unreleased` `feat:` bullet, new `pkg/handler/task_reconcile_test.go` covering ACs 1–4 + 6 and every failure-mode row.
+- `prompts/3-spec-005-spawn-lock.md` — unconditional per-assignee lock in `spawnIfNeeded` + concurrent reconcile-vs-Kafka double-spawn regression test (AC 5).
+- `prompts/4-spec-005-readme-doc.md` — README docs for the three env vars (documentation-only).
+
+**Key decisions / deviations flagged for the reviewer:**
+- Prompt 3 depends on prompt 2 (deviation from the decomposition's dependency column): AC 5's evidence races the two paths (reconcile + Kafka), so `ReconcileOnce` must exist first.
+- Git-rest client is inlined verbatim (read-only subset, no `Post`/`Delete`, no retry/backoff/metrics) — `agent-task-controller` is not a go.mod dep, so no cross-repo import.
+- Gateway secret by NAME, held in memory only; data key `gateway-secret` verified against `bborbe/agent` helm templates. **Deployment dependency flagged:** executor ServiceAccount currently has no `secrets: get` permission (chart-side RBAC + env wiring are operator-ladder work).
+- Reconcile eligibility uses DEFAULT trigger sets (not per-Config overrides), matching AC 1's literal wording.
+- Task body preserved verbatim in `parseTaskFile` (dropped body would spawn an agent with no instructions).
+- No scenario prompt: reconcile loop is fully unit-testable.
+
+**Open questions for the human reviewer:** (1) env var names + `gateway-secret` data key must match chart-side wiring exactly; (2) executor SA `secrets: get` grant required for the secret-by-name design; (3) `reconcilePassTimeout = 30s` is a new constant implied by the Failure Modes table — reviewer may want to confirm the value.
+
+## Audit Findings
+
+### prompts/1-spec-005-gitrest-client.md
+
+**Prompt Audit Report: git-rest vault reader client (spec 005, prompt 1)**
+**Score: 9/10 — Status: Excellent**
+
+**DoD Checklist** — All PASS: `<summary>` (7 bullets, observable outcomes); `<objective>` (2 sentences, end state); `<context>` (CLAUDE.md + 5 repo files + controller reference + auth contract + 4 coding docs); `<requirements>` numbered 1–8 with exact paths/verbatim code/signatures/named tests (a–l); `<constraints>` (spec's frozen conventions + do-not-commit); `<verification>` (`go test -mod=mod`, `make precommit` once, targeted greps, coverage). All paths valid in-container; no bare `git`/operator-only commands in `<verification>`; file in `prompts/` inbox; filename `1-spec-005-gitrest-client.md` uses the allowed single-digit prefix; frontmatter `status: draft`, `spec: [005-bug-executor-restart-drops-deferred-respawn-queue]`, `created` present.
+
+**Failure Mode Coverage** — PASS. Client-level triggers covered: unreachable/503 (IsReady `(false,nil)` on 503, test 3j; `(false,err)` on network failure, 3l), rate-limit/contract drift (non-200 → error, 3b/3g), slow/vault-large (30s timeout + 10 MiB LimitReader). Remaining rows (live Job, over-cap, Config unresolvable, race, restart mid-reconcile) covered by sibling prompts 2 and 3 (verified). Security: read-only (writes explicitly dropped), secret by NAME read once, never logged/embedded, no new listeners. External calls have timeout/cancellation (30s client, `NewRequestWithContext`, fail-fast reads, ctx-threaded K8s Get). All boundary-crossing constants have contract tests at the real boundary (headers, glob param, 503 semantics, JSON round-trip, escaping, secret data key) — level-2, no shape-only tests. No `go mod vendor`, no cross-repo writes, container-autonomous, sibling entry points N/A (new code only).
+
+**Code Reference Verification** — Every reference verified accurate: `application` struct insert point after `JobKafkaCaCertSecret` (main.go:64), Ginkgo suite pattern, counterfeiter annotation format, fake clientset imports, `errors.Errorf`/`Wrapf` style, go:generate directive (task_event_handler_test.go:7), `TestPkg`/Pkg Suite, the ported client block diffed verbatim against `agent-task-controller@v0.6.6/pkg/gitrestclient/git_rest_client.go` (metrics/backoff/writes removed), chart secret data key `gateway-secret` (agent@v0.85.1 controller-secret.yaml:18 + statefulset:73), default URL `http://vault-obsidian-openclaw:9090` (statefulset:89), `libk8s.Namespace.String()`, `make precommit` counterfeiter flow (Makefile.precommit:5,19-23), httptest assertion style, mock output path `mocks/git_rest_client.go`. No hallucinated symbols, no version-existence claims.
+
+**Coding Guidelines** — Compliant across all: `errors.Wrapf`/`errors.Errorf` (never `fmt.Errorf`), Ginkgo/Gomega v2 external test packages, counterfeiter (no hand-written mock), ctx threaded, no test-only package-level mutable state, gosec (30s timeout, 10 MiB cap, no secret logging).
+
+**YAGNI Pass** — PASS. No opt-out flag (empty-secret→no-auth-header is the frozen `JobKafkaClientCertSecret` pattern, not an escape hatch); every config field spec-demanded; no future-proofing knobs; the declare-now/wire-next split is deliberate and freezes the config surface before the consumer lands.
+
+**Critical Issues** — None.
+
+**Recommendations (all optional):** (1) Inlined Go volume ~215 lines nominally over the 200-line heuristic — verbatim port, no collision, no action required; (2) minor: comment that the default URL's vault name is deployment-specific; (3) minor: `<summary>` carries env-var/header names, but these are exactly the contract surface a reviewer must approve.
+
+**Summary:** Exemplary — all DoD sections present, every reference verified, all boundaries carry real contract tests, no autonomy/hideGit/cross-repo/operator hazards, scope maps exactly to decomposition row 1 with sibling dependencies confirmed. Priority action: none — approve as-is.
+
+---
+
+### prompts/2-spec-005-reconcile-loop.md
+
+**Prompt Audit Report: Reconcile loop for spec 005**
+**Score: 9/10 — Status: Excellent**
+
+**DoD Checklist** — All PASS: `<summary>` (8 bullets), `<objective>` (restart non-destructive), `<context>` well-scoped read-first list, `<requirements>` numbered 1–12 with exact paths/signatures/inlined target code, `<constraints>` (interval constant no-CRD/no-env, source-of-truth floor, no deferredRespawns gating, reuse spawnIfNeeded, do-not-commit, no unconditional lock), `<verification>` (`make precommit` + per-AC grep evidence + coverage). Paths mount-backed (`/workspace`, `/home/node/.claude`, `/home/node/go/pkg/mod`), no bare `git`, no operator-only commands (verification even bans them), inbox file, `2-` prefix, filename matches change, `status: draft`.
+
+**Failure Mode Coverage** — PASS. Every trigger has a requirement step + test: git-rest 503/unreachable (IsReady gate, `event=reconcile_vault_unavailable`, tests 10.f/g), rate-limit/contract drift (skip+log, 10.h/i), slow/vault-large (`reconcilePassTimeout = 30s` + pass abort, 10.k), live Job (skipped via spawnIfNeeded/IsJobActive, 10.c), over-cap (deferIfAtConcurrencyCap, 10.d), Config unresolvable (resolveConfig skip+count, 10.c), restart mid-reconcile (stateless-by-construction, startup pass 10.j). Reconcile-vs-Kafka race explicitly deferred to sibling prompt 3 (verified covering AC 5/DB 4). Security: read-only, secret-by-name never logged, spawn gated on resolvable Config, no new listeners. External calls bounded by per-pass timeout with non-blocking select on `passCtx.Done()`. New metric `executor_reconcile_redriven_total` gets a registered-names assertion in metrics_test.go (level-1) + runtime counter delta assertions. No vendor, no cross-repo writes, container-autonomous, sibling entry points: shared functions frozen (req 12); `taskEventHandler` is the only implementation, no stale `FakeTaskEventHandler` risk.
+
+**Documentation Placement** — PASS with one WARN: ~325 lines inlined Go exceeds the 200-line threshold, but largely load-bearing target code (verbatim ports); req 2's frontmatter/body extraction is a candidate for `docs/vault-task-file-format.md`. No error-wrapping/test-framework/mock collisions.
+
+**Code Reference Verification** — All verified accurate: `TaskEventHandler` interface/struct, `defaultTriggerPhases`/`defaultTriggerStatuses`, `deferredRespawnInterval`, `concurrencyCapRetryDelay`, `parseAndFilter`, `resolveConfig`, `spawnIfNeeded`, `deferIfAtConcurrencyCap`, `seedDeferredRespawnsFromStore`, `RunDeferredRespawnLoop`, main.go `Run`/`service.Run` insert point, factory `CreateConsumer`/`NewTaskEventHandler` call, all five test call sites + var block + BeforeEach (1909-line file), `zombie_sweeper.go` `Run`/`SweepOnce`, `JobsSpawnedTotal` after line 27, `AgentConfiguration` fields, `pkg.ErrConfigNotFound`, `spawner.JobSpawner`, `lib.Task`/`TaskFrontmatter`, `domain.TaskStatuses.Contains`/`TaskPhases.Contains`. Prompt-1 symbols (`gitrestclient.NewGitRestClient`, `ReadGitRestGatewaySecret`, `FakeGitRestClient`, `a.GitRestURL`/`GitRestGatewaySecret`/`TaskGlob`) verified via sibling prompt 1 — signatures match exactly; they land before prompt 2 per the dependency table.
+
+**Coding Guidelines** — Compliant: `errors.Wrapf`/`errors.Errorf`, ctx threaded incl. non-blocking select, factory zero logic `Create*`, Ginkgo/Gomega v2 + counterfeiter + coverage ≥80%, glog `event=` tags, time injection as constructor param, no test-only mutable state.
+
+**YAGNI Pass** — PASS. `defaultReconcileIntervalSeconds` (non-configurable, spec-demanded) and `reconcilePassTimeout` (Failure Mode 3) are not creep. No opt-out flag, no tunable knob with no consumer.
+
+**Critical Issues** — None.
+
+**Recommendations:**
+1. **WARN — CHANGELOG bullet claims behavior this prompt does not ship.** Req 11's bullet ends with `", with the per-assignee spawn lock taken unconditionally to prevent reconcile/event double-spawns"` — that's AC 5/DB 4, which constraint line 488 defers to prompt 3. At prompt-2 ship time the statement is factually false (lock remains conditional until prompt 3 lands). Suggested: `...and \`event=reconcile*\` log lines (the per-assignee spawn-lock hardening that prevents reconcile/event double-spawns lands in a follow-up prompt)`.
+2. **WARN — Boundary: the `"24 Tasks/*.md"` glob is not asserted as forwarded into the `List` boundary.** Add one level-1 assertion to test 10.a: `Expect(fakeGitRestClient.ListArgsForCall(0)).To(Equal("24 Tasks/*.md"))`.
+3. **WARN — minor DoD plain-language deviation** in `<summary>`/`<objective>`: swaps `spawnIfNeeded` → "the existing spawn path" and `executor_reconcile_redriven_total` → "a new Prometheus counter" would fully comply. Cosmetic.
+4. **WARN — inlined-code volume** (~325 lines); consider extracting req 2's frontmatter/body parsing to `docs/vault-task-file-format.md`.
+5. **Observation (no action):** static `branch:` frontmatter matches generator output across all four sibling prompts.
+
+**Summary:** Near-flawless — complete DoD, every reference verified, all failure modes + Security covered, fully container-autonomous, correct cross-prompt sequencing with siblings 1 and 3. Only actionable item is the changelog wording fix (recommendation 1). Recommend approval with the changelog clause trimmed.
+
+---
+
+### prompts/3-spec-005-spawn-lock.md
+
+**Prompt Audit Report: Unconditional per-assignee spawn lock + double-spawn regression test**
+**Score: 7/10 — Status: Needs Improvement (single Critical must-fix)**
+
+**DoD Checklist** — All PASS: `<summary>` (5 bullets), `<objective>`, `<context>`, `<requirements>` (exact old→new snippets), `<constraints>` (incl. do-not-commit), `<verification>` (runnable container commands). Paths valid, no bare `git`, no operator-only commands (explicitly named and forbidden), inbox file, `3-` prefix, filename matches change, `status: draft`.
+
+**Failure Mode Coverage** — PASS. The spec's "Reconcile and Kafka event race → exactly one Job" row is exactly what the regression test asserts; remaining rows covered by sibling prompt 2 (verified). Security N/A (no new surface). External calls N/A. Boundary-crossing contract test: level-2 integration — races real production paths (`h.ConsumeMessage` + `h.ReconcileOnce` → real `spawnIfNeeded`) through a stateful counterfeiter fake, asserting exactly one `SpawnJob`. No vendor, no cross-repo writes, container-autonomous. Sibling entry points: single shared `spawnIfNeeded` edit — all callers (event path :212, deferred-respawn loop :602, reconcile loop) inherit the unconditional lock; no parallel implementation.
+
+**Documentation Placement** — PASS. No inlined reusable pattern; the ~60-line test spec is the change's own artifact and mirrors the existing technique at `task_event_handler_test.go:305`. Docs referenced in `<context>`, not inlined.
+
+**Code Reference Verification** — All correct except one (see Critical Issue 1): `lockAssigneeSpawn` doc comment (:152-171), conditional lock guard (:466-473, old text verbatim), `deferIfAtConcurrencyCap` "0 = uncapped" (:540), existing capped test (:305-361), `JobSpawner` interface, `renderTaskFile` (in scope, sibling prompt 2), `domain.TaskPhaseExecution` (vault-cli v0.121.0), mock signatures all match counterfeiter-generated.
+
+**Coding Guidelines** — Compliant: Ginkgo/Gomega v2 + counterfeiter fakes, no `fmt.Errorf`, raw `go func` only in test with `defer GinkgoRecover()` (production explicitly banned), no test-only mutable state, coverage ≥80% with coverprofile.
+
+**YAGNI Pass** — PASS. No opt-out flag, no new knobs (constraints explicitly forbid), no future-proofing branches; req 3 forbids extra code. Scope matches DB 4 / AC 5 exactly.
+
+**Critical Issues**
+
+**Critical Issue 1 — `buildMsg` is not visible from the new spec's Describe block; the regression test will not compile as written.**
+
+Requirement 2 says: "This spec needs `buildMsg` (defined in the existing `task_event_handler_test.go` in the same `handler_test` package)". That is factually wrong. `buildMsg` is declared at `task_event_handler_test.go:73` as a **closure-local variable inside `var _ = Describe("TaskEventHandler", ...)`** (the anonymous function passed to `Describe` at line 41). Being in the same package does not give another file's Describe block access to a closure-local. The new spec is appended inside `Describe("TaskEventHandler reconcile loop", ...)` in `task_reconcile_test.go` — a different closure in a different file — so `buildMsg` is out of scope there. Referencing it produces `undefined: buildMsg`, a compile failure in the very test this prompt ships.
+
+Find/replace:
+- OLD: `This spec needs \`buildMsg\` (defined in the existing \`task_event_handler_test.go\` in the same \`handler_test\` package) and \`renderTaskFile\` (defined in \`task_reconcile_test.go\`). Imports \`sync\`, \`sync/atomic\`, \`time\` already in the reconcile test file if not present.`
+- NEW: `This spec needs \`renderTaskFile\` (defined in the same \`Describe("TaskEventHandler reconcile loop", ...)\` block) and a \`buildMsg\` helper. \`buildMsg\` is declared at \`task_event_handler_test.go:73\` as a closure-local inside that file's \`Describe("TaskEventHandler", ...)\` block and is NOT visible from this file's separate Describe block — define a local \`buildMsg\` at the top of this Describe block, mirroring \`task_event_handler_test.go:73\` verbatim (json.Marshal the task into \`&sarama.ConsumerMessage{Value: value}\`). Ensure imports \`sync\`, \`sync/atomic\`, \`time\`, \`encoding/json\`, and \`github.com/IBM/sarama\` are present (prompt 2's import list for this file does not include \`sync\`/\`sync/atomic\`/\`time\`/\`encoding/json\`/\`sarama\`).`
+
+**Recommendations:**
+1. **Req 2 import phrasing** (part of the fix): "already ... if not present" is self-contradictory and factually wrong for this file — make it imperative: "Ensure imports ... are present."
+2. **Summary contains identifiers:** bullets 1 and 3 name `spawnIfNeeded`, `MaxConcurrentJobs`, `SpawnJob` — style nit; reword for plain language.
+3. **`branch:` frontmatter field** — uniform generator convention across all sibling prompts; not a blocker.
+4. **Verification grep evidence claim is weak:** `grep -n 'lockAssigneeSpawn'` matches the function definition regardless of whether the guard is unconditional — suggest `grep -n 'if config != nil' pkg/handler/task_event_handler.go` or delete the evidence framing. The `-count=10` regression run is the real proof.
+
+**Summary:** Excellent, well-scoped prompt with fully verified line references and a strong boundary-crossing regression test — but it must not ship as written: the regression test references `buildMsg`, which is a closure-local in the other Describe block and will not compile in `task_reconcile_test.go`. Apply Critical Issue 1's one-line fix (define a local `buildMsg` in the new Describe block and ensure the five imports), then this is approvable.
+
+---
+
+### prompts/4-spec-005-readme-doc.md
+
+**Prompt Audit Report: README doc for executor reconcile-loop env config**
+**Score: 8/10 — Status: Good**
+
+**DoD Checklist** — All PASS: `<summary>` (4 bullets, plain-language, no code paths/struct names), `<objective>` (single sentence), `<context>` (README + docs guide + chart/operator work framed out-of-scope), `<requirements>` (2 numbered, exact markdown table inlined, insertion point pinned after intro/before `## Links`, non-negotiable substrings), `<constraints>` (documentation-only, exact semantics, do-not-edit-chart, do-not-commit, no `make precommit` for docs-only), `<verification>` (5 `grep` commands on README.md). Paths mount-backed, no bare `git` (explicitly forbidden), no operator-only commands, inbox file, `4-` prefix, filename matches change, `status: draft` (with `branch:` confirmed as tool-managed per workflows.md:168).
+
+**Failure Mode Coverage** — PASS. Spec failure modes are implementation behavior covered by siblings 1–3 (verified); prompt 4 has no failure-mode surface of its own. Security item "gateway secret by NAME, never logged/embedded" carried into README content directly (line 43; constraint "Do not document a value-in-env behavior"). External calls N/A. Docs↔code boundary: env var names verified exact match against prompt 1's `env:` tags — `GITREST_URL`/`http://vault-obsidian-openclaw:9090`, `GITREST_GATEWAY_SECRET`/empty, `TASK_GLOB`/`24 Tasks/*.md`, data key `gateway-secret`; acceptance greps enforce the match. No vendor, no cross-repo writes, container-autonomous (operator work — `secrets: get` Role grant, chart env wiring — explicitly deferred to the spec's verification ladder, line 24). Sibling entry points N/A (no code edits).
+
+**Documentation Placement** — PASS with WARN: ~15-line markdown table is the deliverable itself, not a reusable pattern (correct way to specify docs verbatim). Project `docs/` has only `agent-crd-specification.md` (irrelevant) — no missing project doc. **WARN:** references `documentation-guide.md` (correct) but the coding plugin also ships `readme-guide.md`, the README-specific guide covering env-var/configuration sections — the more targeted reference for this edit. Domain knowledge placed durably in README.md, not inlined. Good placement.
+
+**Code Reference Verification** — All correct: README.md structure (insertion point between lines 13 and 15), env declarations in prompt 1 (:297-313) match the table verbatim, reconcile-loop consumption in prompt 2 (:180-206), secret read at startup (prompt 2:15), `JOB_KAFKA_CLIENT_CERT_SECRET` NAME-not-value precedent (main.go:60,63 — the real in-repo precedent), SA `secrets: get` grant documented as chart-side operator work (prompt 1:38), `documentation-guide.md` present. No stale-reference risk (env vars don't exist yet in source; contract assertions accurate against siblings; verification self-contained).
+
+**Coding Guidelines** — N/A (no Go code; docs-only).
+
+**YAGNI Pass** — PASS. No opt-out flag, no invented knobs; the three env vars are the spec's own Constraints; no future-proofing.
+
+**Critical Issues** — None.
+
+**Recommendations:**
+1. **Summary bullet count (minor):** DoD asks 5–10; has 4. Suggested fifth: `- No Go, YAML, or chart changes — documentation only; the chart-side env wiring and RBAC grant stay on the operator verification ladder.`
+2. **Reference `readme-guide.md` in `<context>`:** append `- /home/node/.claude/plugins/marketplaces/coding/docs/readme-guide.md — README structure and env-var/configuration section guidance.`
+3. **Execution-order note (informational):** README documents env vars that only exist in code after prompts 1 and 2 land. The spec's decomposition already encodes the dependency (row 4 "Depends on: prompt 1"); fine as long as the daemon executes the batch in order — if any mechanism could run prompt 4 standalone, it should be blocked until prompts 1–2 are merged.
+
+**Summary:** Strong, well-scoped documentation-only prompt with accurate cross-prompt contract references, a self-contained verification set, and correct container/operator boundary handling. Two minor recommendations (summary has 4 bullets rather than the DoD's 5; `readme-guide.md` would be a more targeted doc reference) and one informational ordering note. No critical issues; safe to approve after the minor tweaks.
+
+---
+
+**Spec transition:** skipped — `DARK_FACTORY_MANAGED=true` (Mode 1, daemon + container); the host-side dark-factory generator will finalize `005-bug-executor-restart-drops-deferred-respawn-queue` (`approved → prompted`) after this container exits. No changes made to prompts or spec — the human reviewer owns any follow-up from the audit findings (notably **Critical Issue 1 in prompt 3**, the `buildMsg` compile failure).
+[20:12:59] result: All four audits are complete. Since `DARK_FACTORY_MANAGED=true` (Mode 1 — daemon + container), I'm skipping the `spec mark-prompted` transition; the host-side generator will finalize the spec (`approved → prompted`) after this container exits.
+
+## Generated Prompts
+
+**Creator:** `dark-factory:prompt-creator` — 4 prompt files written to `prompts/`, executed in order `1 → 2 → 3 → 4`:
+
+- `prompts/1-spec-005-gitrest-client.md` — read-only git-rest client package (`List`/`Get`/`IsReady` + gateway-secret auth), `ReadGitRestGatewaySecret` (reads secret from K8s by NAME, data key `gateway-secret`), 3 env config fields (`GITREST_URL`, `GITREST_GATEWAY_SECRET`, `TASK_GLOB`), `FakeGitRestClient` counterfeiter mock, httptest + fake-clientset tests.
+- `prompts/2-spec-005-reconcile-loop.md` — the core feature: `ReconcileOnce`/`RunReconcileLoop` on `taskEventHandler`, `defaultReconcileIntervalSeconds = 60s` + `reconcilePassTimeout = 30s` constants, eligibility filter via new `pkg/handler/task_file.go` (ported frontmatter/body parsing), `executor_reconcile_redriven_total` counter, main.go/factory wiring, `## Unreleased` `feat:` bullet, new `pkg/handler/task_reconcile_test.go` covering ACs 1–4 + 6 and every failure-mode row.
+- `prompts/3-spec-005-spawn-lock.md` — unconditional per-assignee lock in `spawnIfNeeded` + concurrent reconcile-vs-Kafka double-spawn regression test (AC 5).
+- `prompts/4-spec-005-readme-doc.md` — README docs for the three env vars (documentation-only).
+
+**Key decisions / deviations flagged for the reviewer:**
+- Prompt 3 depends on prompt 2 (deviation from the decomposition's dependency column): AC 5's evidence races the two paths (reconcile + Kafka), so `ReconcileOnce` must exist first.
+- Git-rest client is inlined verbatim (read-only subset, no `Post`/`Delete`, no retry/backoff/metrics) — `agent-task-controller` is not a go.mod dep, so no cross-repo import.
+- Gateway secret by NAME, held in memory only; data key `gateway-secret` verified against `bborbe/agent` helm templates. **Deployment dependency flagged:** executor ServiceAccount currently has no `secrets: get` permission (chart-side RBAC + env wiring are operator-ladder work).
+- Reconcile eligibility uses DEFAULT trigger sets (not per-Config overrides), matching AC 1's literal wording.
+- Task body preserved verbatim in `parseTaskFile` (dropped body would spawn an agent with no instructions).
+- No scenario prompt: reconcile loop is fully unit-testable.
+
+**Open questions for the human reviewer:** (1) env var names + `gateway-secret` data key must match chart-side wiring exactly; (2) executor SA `secrets: get` grant required for the secret-by-name design; (3) `reconcilePassTimeout = 30s` is a new constant implied by the Failure Modes table — reviewer may want to confirm the value.
+
+## Audit Findings
+
+### prompts/1-spec-005-gitrest-client.md
+
+**Prompt Audit Report: git-rest vault reader client (spec 005, prompt 1)**
+**Score: 9/10 — Status: Excellent**
+
+**DoD Checklist** — All PASS: `<summary>` (7 bullets, observable outcomes); `<objective>` (2 sentences, end state); `<context>` (CLAUDE.md + 5 repo files + controller reference + auth contract + 4 coding docs); `<requirements>` numbered 1–8 with exact paths/verbatim code/signatures/named tests (a–l); `<constraints>` (spec's frozen conventions + do-not-commit); `<verification>` (`go test -mod=mod`, `make precommit` once, targeted greps, coverage). All paths valid in-container; no bare `git`/operator-only commands in `<verification>`; file in `prompts/` inbox; filename `1-spec-005-gitrest-client.md` uses the allowed single-digit prefix; frontmatter `status: draft`, `spec: [005-bug-executor-restart-drops-deferred-respawn-queue]`, `created` present.
+
+**Failure Mode Coverage** — PASS. Client-level triggers covered: unreachable/503 (IsReady `(false,nil)` on 503, test 3j; `(false,err)` on network failure, 3l), rate-limit/contract drift (non-200 → error, 3b/3g), slow/vault-large (30s timeout + 10 MiB LimitReader). Remaining rows (live Job, over-cap, Config unresolvable, race, restart mid-reconcile) covered by sibling prompts 2 and 3 (verified). Security: read-only (writes explicitly dropped), secret by NAME read once, never logged/embedded, no new listeners. External calls have timeout/cancellation (30s client, `NewRequestWithContext`, fail-fast reads, ctx-threaded K8s Get). All boundary-crossing constants have contract tests at the real boundary (headers, glob param, 503 semantics, JSON round-trip, escaping, secret data key) — level-2, no shape-only tests. No `go mod vendor`, no cross-repo writes, container-autonomous, sibling entry points N/A (new code only).
+
+**Code Reference Verification** — Every reference verified accurate: `application` struct insert point after `JobKafkaCaCertSecret` (main.go:64), Ginkgo suite pattern, counterfeiter annotation format, fake clientset imports, `errors.Errorf`/`Wrapf` style, go:generate directive (task_event_handler_test.go:7), `TestPkg`/Pkg Suite, the ported client block diffed verbatim against `agent-task-controller@v0.6.6/pkg/gitrestclient/git_rest_client.go` (metrics/backoff/writes removed), chart secret data key `gateway-secret` (agent@v0.85.1 controller-secret.yaml:18 + statefulset:73), default URL `http://vault-obsidian-openclaw:9090` (statefulset:89), `libk8s.Namespace.String()`, `make precommit` counterfeiter flow (Makefile.precommit:5,19-23), httptest assertion style, mock output path `mocks/git_rest_client.go`. No hallucinated symbols, no version-existence claims.
+
+**Coding Guidelines** — Compliant across all: `errors.Wrapf`/`errors.Errorf` (never `fmt.Errorf`), Ginkgo/Gomega v2 external test packages, counterfeiter (no hand-written mock), ctx threaded, no test-only package-level mutable state, gosec (30s timeout, 10 MiB cap, no secret logging).
+
+**YAGNI Pass** — PASS. No opt-out flag (empty-secret→no-auth-header is the frozen `JobKafkaClientCertSecret` pattern, not an escape hatch); every config field spec-demanded; no future-proofing knobs; the declare-now/wire-next split is deliberate and freezes the config surface before the consumer lands.
+
+**Critical Issues** — None.
+
+**Recommendations (all optional):** (1) Inlined Go volume ~215 lines nominally over the 200-line heuristic — verbatim port, no collision, no action required; (2) minor: comment that the default URL's vault name is deployment-specific; (3) minor: `<summary>` carries env-var/header names, but these are exactly the contract surface a reviewer must approve.
+
+**Summary:** Exemplary — all DoD sections present, every reference verified, all boundaries carry real contract tests, no autonomy/hideGit/cross-repo/operator hazards, scope maps exactly to decomposition row 1 with sibling dependencies confirmed. Priority action: none — approve as-is.
+
+---
+
+### prompts/2-spec-005-reconcile-loop.md
+
+**Prompt Audit Report: Reconcile loop for spec 005**
+**Score: 9/10 — Status: Excellent**
+
+**DoD Checklist** — All PASS: `<summary>` (8 bullets), `<objective>` (restart non-destructive), `<context>` well-scoped read-first list, `<requirements>` numbered 1–12 with exact paths/signatures/inlined target code, `<constraints>` (interval constant no-CRD/no-env, source-of-truth floor, no deferredRespawns gating, reuse spawnIfNeeded, do-not-commit, no unconditional lock), `<verification>` (`make precommit` + per-AC grep evidence + coverage). Paths mount-backed (`/workspace`, `/home/node/.claude`, `/home/node/go/pkg/mod`), no bare `git`, no operator-only commands (verification even bans them), inbox file, `2-` prefix, filename matches change, `status: draft`.
+
+**Failure Mode Coverage** — PASS. Every trigger has a requirement step + test: git-rest 503/unreachable (IsReady gate, `event=reconcile_vault_unavailable`, tests 10.f/g), rate-limit/contract drift (skip+log, 10.h/i), slow/vault-large (`reconcilePassTimeout = 30s` + pass abort, 10.k), live Job (skipped via spawnIfNeeded/IsJobActive, 10.c), over-cap (deferIfAtConcurrencyCap, 10.d), Config unresolvable (resolveConfig skip+count, 10.c), restart mid-reconcile (stateless-by-construction, startup pass 10.j). Reconcile-vs-Kafka race explicitly deferred to sibling prompt 3 (verified covering AC 5/DB 4). Security: read-only, secret-by-name never logged, spawn gated on resolvable Config, no new listeners. External calls bounded by per-pass timeout with non-blocking select on `passCtx.Done()`. New metric `executor_reconcile_redriven_total` gets a registered-names assertion in metrics_test.go (level-1) + runtime counter delta assertions. No vendor, no cross-repo writes, container-autonomous, sibling entry points: shared functions frozen (req 12); `taskEventHandler` is the only implementation, no stale `FakeTaskEventHandler` risk.
+
+**Documentation Placement** — PASS with one WARN: ~325 lines inlined Go exceeds the 200-line threshold, but largely load-bearing target code (verbatim ports); req 2's frontmatter/body extraction is a candidate for `docs/vault-task-file-format.md`. No error-wrapping/test-framework/mock collisions.
+
+**Code Reference Verification** — All verified accurate: `TaskEventHandler` interface/struct, `defaultTriggerPhases`/`defaultTriggerStatuses`, `deferredRespawnInterval`, `concurrencyCapRetryDelay`, `parseAndFilter`, `resolveConfig`, `spawnIfNeeded`, `deferIfAtConcurrencyCap`, `seedDeferredRespawnsFromStore`, `RunDeferredRespawnLoop`, main.go `Run`/`service.Run` insert point, factory `CreateConsumer`/`NewTaskEventHandler` call, all five test call sites + var block + BeforeEach (1909-line file), `zombie_sweeper.go` `Run`/`SweepOnce`, `JobsSpawnedTotal` after line 27, `AgentConfiguration` fields, `pkg.ErrConfigNotFound`, `spawner.JobSpawner`, `lib.Task`/`TaskFrontmatter`, `domain.TaskStatuses.Contains`/`TaskPhases.Contains`. Prompt-1 symbols (`gitrestclient.NewGitRestClient`, `ReadGitRestGatewaySecret`, `FakeGitRestClient`, `a.GitRestURL`/`GitRestGatewaySecret`/`TaskGlob`) verified via sibling prompt 1 — signatures match exactly; they land before prompt 2 per the dependency table.
+
+**Coding Guidelines** — Compliant: `errors.Wrapf`/`errors.Errorf`, ctx threaded incl. non-blocking select, factory zero logic `Create*`, Ginkgo/Gomega v2 + counterfeiter + coverage ≥80%, glog `event=` tags, time injection as constructor param, no test-only mutable state.
+
+**YAGNI Pass** — PASS. `defaultReconcileIntervalSeconds` (non-configurable, spec-demanded) and `reconcilePassTimeout` (Failure Mode 3) are not creep. No opt-out flag, no tunable knob with no consumer.
+
+**Critical Issues** — None.
+
+**Recommendations:**
+1. **WARN — CHANGELOG bullet claims behavior this prompt does not ship.** Req 11's bullet ends with `", with the per-assignee spawn lock taken unconditionally to prevent reconcile/event double-spawns"` — that's AC 5/DB 4, which constraint line 488 defers to prompt 3. At prompt-2 ship time the statement is factually false (lock remains conditional until prompt 3 lands). Suggested: `...and \`event=reconcile*\` log lines (the per-assignee spawn-lock hardening that prevents reconcile/event double-spawns lands in a follow-up prompt)`.
+2. **WARN — Boundary: the `"24 Tasks/*.md"` glob is not asserted as forwarded into the `List` boundary.** Add one level-1 assertion to test 10.a: `Expect(fakeGitRestClient.ListArgsForCall(0)).To(Equal("24 Tasks/*.md"))`.
+3. **WARN — minor DoD plain-language deviation** in `<summary>`/`<objective>`: swaps `spawnIfNeeded` → "the existing spawn path" and `executor_reconcile_redriven_total` → "a new Prometheus counter" would fully comply. Cosmetic.
+4. **WARN — inlined-code volume** (~325 lines); consider extracting req 2's frontmatter/body parsing to `docs/vault-task-file-format.md`.
+5. **Observation (no action):** static `branch:` frontmatter matches generator output across all four sibling prompts.
+
+**Summary:** Near-flawless — complete DoD, every reference verified, all failure modes + Security covered, fully container-autonomous, correct cross-prompt sequencing with siblings 1 and 3. Only actionable item is the changelog wording fix (recommendation 1). Recommend approval with the changelog clause trimmed.
+
+---
+
+### prompts/3-spec-005-spawn-lock.md
+
+**Prompt Audit Report: Unconditional per-assignee spawn lock + double-spawn regression test**
+**Score: 7/10 — Status: Needs Improvement (single Critical must-fix)**
+
+**DoD Checklist** — All PASS: `<summary>` (5 bullets), `<objective>`, `<context>`, `<requirements>` (exact old→new snippets), `<constraints>` (incl. do-not-commit), `<verification>` (runnable container commands). Paths valid, no bare `git`, no operator-only commands (explicitly named and forbidden), inbox file, `3-` prefix, filename matches change, `status: draft`.
+
+**Failure Mode Coverage** — PASS. The spec's "Reconcile and Kafka event race → exactly one Job" row is exactly what the regression test asserts; remaining rows covered by sibling prompt 2 (verified). Security N/A (no new surface). External calls N/A. Boundary-crossing contract test: level-2 integration — races real production paths (`h.ConsumeMessage` + `h.ReconcileOnce` → real `spawnIfNeeded`) through a stateful counterfeiter fake, asserting exactly one `SpawnJob`. No vendor, no cross-repo writes, container-autonomous. Sibling entry points: single shared `spawnIfNeeded` edit — all callers (event path :212, deferred-respawn loop :602, reconcile loop) inherit the unconditional lock; no parallel implementation.
+
+**Documentation Placement** — PASS. No inlined reusable pattern; the ~60-line test spec is the change's own artifact and mirrors the existing technique at `task_event_handler_test.go:305`. Docs referenced in `<context>`, not inlined.
+
+**Code Reference Verification** — All correct except one (see Critical Issue 1): `lockAssigneeSpawn` doc comment (:152-171), conditional lock guard (:466-473, old text verbatim), `deferIfAtConcurrencyCap` "0 = uncapped" (:540), existing capped test (:305-361), `JobSpawner` interface, `renderTaskFile` (in scope, sibling prompt 2), `domain.TaskPhaseExecution` (vault-cli v0.121.0), mock signatures all match counterfeiter-generated.
+
+**Coding Guidelines** — Compliant: Ginkgo/Gomega v2 + counterfeiter fakes, no `fmt.Errorf`, raw `go func` only in test with `defer GinkgoRecover()` (production explicitly banned), no test-only mutable state, coverage ≥80% with coverprofile.
+
+**YAGNI Pass** — PASS. No opt-out flag, no new knobs (constraints explicitly forbid), no future-proofing branches; req 3 forbids extra code. Scope matches DB 4 / AC 5 exactly.
+
+**Critical Issues**
+
+**Critical Issue 1 — `buildMsg` is not visible from the new spec's Describe block; the regression test will not compile as written.**
+
+Requirement 2 says: "This spec needs `buildMsg` (defined in the existing `task_event_handler_test.go` in the same `handler_test` package)". That is factually wrong. `buildMsg` is declared at `task_event_handler_test.go:73` as a **closure-local variable inside `var _ = Describe("TaskEventHandler", ...)`** (the anonymous function passed to `Describe` at line 41). Being in the same package does not give another file's Describe block access to a closure-local. The new spec is appended inside `Describe("TaskEventHandler reconcile loop", ...)` in `task_reconcile_test.go` — a different closure in a different file — so `buildMsg` is out of scope there. Referencing it produces `undefined: buildMsg`, a compile failure in the very test this prompt ships.
+
+Find/replace:
+- OLD: `This spec needs \`buildMsg\` (defined in the existing \`task_event_handler_test.go\` in the same \`handler_test\` package) and \`renderTaskFile\` (defined in \`task_reconcile_test.go\`). Imports \`sync\`, \`sync/atomic\`, \`time\` already in the reconcile test file if not present.`
+- NEW: `This spec needs \`renderTaskFile\` (defined in the same \`Describe("TaskEventHandler reconcile loop", ...)\` block) and a \`buildMsg\` helper. \`buildMsg\` is declared at \`task_event_handler_test.go:73\` as a closure-local inside that file's \`Describe("TaskEventHandler", ...)\` block and is NOT visible from this file's separate Describe block — define a local \`buildMsg\` at the top of this Describe block, mirroring \`task_event_handler_test.go:73\` verbatim (json.Marshal the task into \`&sarama.ConsumerMessage{Value: value}\`). Ensure imports \`sync\`, \`sync/atomic\`, \`time\`, \`encoding/json\`, and \`github.com/IBM/sarama\` are present (prompt 2's import list for this file does not include \`sync\`/\`sync/atomic\`/\`time\`/\`encoding/json\`/\`sarama\`).`
+
+**Recommendations:**
+1. **Req 2 import phrasing** (part of the fix): "already ... if not present" is self-contradictory and factually wrong for this file — make it imperative: "Ensure imports ... are present."
+2. **Summary contains identifiers:** bullets 1 and 3 name `spawnIfNeeded`, `MaxConcurrentJobs`, `SpawnJob` — style nit; reword for plain language.
+3. **`branch:` frontmatter field** — uniform generator convention across all sibling prompts; not a blocker.
+4. **Verification grep evidence claim is weak:** `grep -n 'lockAssigneeSpawn'` matches the function definition regardless of whether the guard is unconditional — suggest `grep -n 'if config != nil' pkg/handler/task_event_handler.go` or delete the evidence framing. The `-count=10` regression run is the real proof.
+
+**Summary:** Excellent, well-scoped prompt with fully verified line references and a strong boundary-crossing regression test — but it must not ship as written: the regression test references `buildMsg`, which is a closure-local in the other Describe block and will not compile in `task_reconcile_test.go`. Apply Critical Issue 1's one-line fix (define a local `buildMsg` in the new Describe block and ensure the five imports), then this is approvable.
+
+---
+
+### prompts/4-spec-005-readme-doc.md
+
+**Prompt Audit Report: README doc for executor reconcile-loop env config**
+**Score: 8/10 — Status: Good**
+
+**DoD Checklist** — All PASS: `<summary>` (4 bullets, plain-language, no code paths/struct names), `<objective>` (single sentence), `<context>` (README + docs guide + chart/operator work framed out-of-scope), `<requirements>` (2 numbered, exact markdown table inlined, insertion point pinned after intro/before `## Links`, non-negotiable substrings), `<constraints>` (documentation-only, exact semantics, do-not-edit-chart, do-not-commit, no `make precommit` for docs-only), `<verification>` (5 `grep` commands on README.md). Paths mount-backed, no bare `git` (explicitly forbidden), no operator-only commands, inbox file, `4-` prefix, filename matches change, `status: draft` (with `branch:` confirmed as tool-managed per workflows.md:168).
+
+**Failure Mode Coverage** — PASS. Spec failure modes are implementation behavior covered by siblings 1–3 (verified); prompt 4 has no failure-mode surface of its own. Security item "gateway secret by NAME, never logged/embedded" carried into README content directly (line 43; constraint "Do not document a value-in-env behavior"). External calls N/A. Docs↔code boundary: env var names verified exact match against prompt 1's `env:` tags — `GITREST_URL`/`http://vault-obsidian-openclaw:9090`, `GITREST_GATEWAY_SECRET`/empty, `TASK_GLOB`/`24 Tasks/*.md`, data key `gateway-secret`; acceptance greps enforce the match. No vendor, no cross-repo writes, container-autonomous (operator work — `secrets: get` Role grant, chart env wiring — explicitly deferred to the spec's verification ladder, line 24). Sibling entry points N/A (no code edits).
+
+**Documentation Placement** — PASS with WARN: ~15-line markdown table is the deliverable itself, not a reusable pattern (correct way to specify docs verbatim). Project `docs/` has only `agent-crd-specification.md` (irrelevant) — no missing project doc. **WARN:** references `documentation-guide.md` (correct) but the coding plugin also ships `readme-guide.md`, the README-specific guide covering env-var/configuration sections — the more targeted reference for this edit. Domain knowledge placed durably in README.md, not inlined. Good placement.
+
+**Code Reference Verification** — All correct: README.md structure (insertion point between lines 13 and 15), env declarations in prompt 1 (:297-313) match the table verbatim, reconcile-loop consumption in prompt 2 (:180-206), secret read at startup (prompt 2:15), `JOB_KAFKA_CLIENT_CERT_SECRET` NAME-not-value precedent (main.go:60,63 — the real in-repo precedent), SA `secrets: get` grant documented as chart-side operator work (prompt 1:38), `documentation-guide.md` present. No stale-reference risk (env vars don't exist yet in source; contract assertions accurate against siblings; verification self-contained).
+
+**Coding Guidelines** — N/A (no Go code; docs-only).
+
+**YAGNI Pass** — PASS. No opt-out flag, no invented knobs; the three env vars are the spec's own Constraints; no future-proofing.
+
+**Critical Issues** — None.
+
+**Recommendations:**
+1. **Summary bullet count (minor):** DoD asks 5–10; has 4. Suggested fifth: `- No Go, YAML, or chart changes — documentation only; the chart-side env wiring and RBAC grant stay on the operator verification ladder.`
+2. **Reference `readme-guide.md` in `<context>`:** append `- /home/node/.claude/plugins/marketplaces/coding/docs/readme-guide.md — README structure and env-var/configuration section guidance.`
+3. **Execution-order note (informational):** README documents env vars that only exist in code after prompts 1 and 2 land. The spec's decomposition already encodes the dependency (row 4 "Depends on: prompt 1"); fine as long as the daemon executes the batch in order — if any mechanism could run prompt 4 standalone, it should be blocked until prompts 1–2 are merged.
+
+**Summary:** Strong, well-scoped documentation-only prompt with accurate cross-prompt contract references, a self-contained verification set, and correct container/operator boundary handling. Two minor recommendations (summary has 4 bullets rather than the DoD's 5; `readme-guide.md` would be a more targeted doc reference) and one informational ordering note. No critical issues; safe to approve after the minor tweaks.
+
+---
+
+**Spec transition:** skipped — `DARK_FACTORY_MANAGED=true` (Mode 1, daemon + container); the host-side dark-factory generator will finalize `005-bug-executor-restart-drops-deferred-respawn-queue` (`approved → prompted`) after this container exits. No changes made to prompts or spec — the human reviewer owns any follow-up from the audit findings (notably **Critical Issue 1 in prompt 3**, the `buildMsg` compile failure). | duration: 945203ms | cost: $14.1547 | tokens: 640 in / 9127 out

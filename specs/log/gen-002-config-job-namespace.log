@@ -1,0 +1,2454 @@
+[19:46:07] Starting headless session...
+[19:46:07] [init] session=649c3b71 model=deepseek-v4-flash[1m] cwd=/workspace tools=28
+[claude-code:unrecognized_model] {"model":"deepseek-v4-flash[1m]","query_source":"sdk"}
+[19:46:08] [system: thinking_tokens]
+[19:46:08] [system: thinking_tokens]
+[19:46:08] [system: thinking_tokens]
+[19:46:08] [system: thinking_tokens]
+[19:46:08] [system: thinking_tokens]
+[19:46:08] [system: thinking_tokens]
+[19:46:08] [system: thinking_tokens]
+[19:46:08] [system: thinking_tokens]
+[19:46:08] [system: thinking_tokens]
+[19:46:08] [system: thinking_tokens]
+[19:46:08] [system: thinking_tokens]
+[19:46:08] [system: thinking_tokens]
+[19:46:08] [system: thinking_tokens]
+[19:46:08] [system: thinking_tokens]
+[19:46:08] [system: thinking_tokens]
+[19:46:08] [system: thinking_tokens]
+[19:46:08] [system: thinking_tokens]
+[19:46:09] [system: thinking_tokens]
+[19:46:09] [system: thinking_tokens]
+[19:46:09] [system: thinking_tokens]
+[19:46:09] [system: thinking_tokens]
+[19:46:09] [system: thinking_tokens]
+[19:46:09] [system: thinking_tokens]
+[19:46:09] [system: thinking_tokens]
+[19:46:09] [system: thinking_tokens]
+[19:46:09] [system: thinking_tokens]
+[19:46:09] [system: thinking_tokens]
+[19:46:09] [system: thinking_tokens]
+[19:46:09] [system: thinking_tokens]
+[19:46:09] [system: thinking_tokens]
+[19:46:09] [system: thinking_tokens]
+[19:46:09] [system: thinking_tokens]
+[19:46:09] [system: thinking_tokens]
+[19:46:09] [system: thinking_tokens]
+[19:46:09] [system: thinking_tokens]
+[19:46:09] [system: thinking_tokens]
+[19:46:09] [system: thinking_tokens]
+[19:46:09] [system: thinking_tokens]
+[19:46:09] [system: thinking_tokens]
+[19:46:09] [system: thinking_tokens]
+[19:46:09] [system: thinking_tokens]
+[19:46:09] [system: thinking_tokens]
+[19:46:09] [system: thinking_tokens]
+[19:46:09] [system: thinking_tokens]
+[19:46:09] [system: thinking_tokens]
+[19:46:09] [system: thinking_tokens]
+[19:46:09] [system: thinking_tokens]
+[19:46:09] [system: thinking_tokens]
+[19:46:09] [system: thinking_tokens]
+[19:46:09] [system: thinking_tokens]
+[19:46:09] [system: thinking_tokens]
+[19:46:09] [system: thinking_tokens]
+[19:46:09] [system: thinking_tokens]
+[19:46:09] [system: thinking_tokens]
+[19:46:09] [system: thinking_tokens]
+[19:46:09] [system: thinking_tokens]
+[19:46:09] [system: thinking_tokens]
+[19:46:09] [system: thinking_tokens]
+[19:46:09] [system: thinking_tokens]
+[19:46:09] [system: thinking_tokens]
+[19:46:09] [system: thinking_tokens]
+[19:46:09] [system: thinking_tokens]
+[19:46:09] [system: thinking_tokens]
+[19:46:09] [system: thinking_tokens]
+[19:46:09] [system: thinking_tokens]
+[19:46:09] [system: thinking_tokens]
+[19:46:09] [system: thinking_tokens]
+[19:46:09] [system: thinking_tokens]
+[19:46:09] [system: thinking_tokens]
+[19:46:10] [system: thinking_tokens]
+[19:46:10] [system: thinking_tokens]
+[19:46:10] [system: thinking_tokens]
+[19:46:10] [system: thinking_tokens]
+[19:46:10] [system: thinking_tokens]
+[19:46:10] [system: thinking_tokens]
+[19:46:10] [system: thinking_tokens]
+[19:46:10] [system: thinking_tokens]
+[19:46:10] [system: thinking_tokens]
+[19:46:10] [system: thinking_tokens]
+[19:46:10] [system: thinking_tokens]
+[19:46:10] [system: thinking_tokens]
+[19:46:10] [system: thinking_tokens]
+[19:46:10] [system: thinking_tokens]
+[19:46:10] [system: thinking_tokens]
+[19:46:10] [system: thinking_tokens]
+[19:46:10] [system: thinking_tokens]
+[19:46:10] [system: thinking_tokens]
+[19:46:10] [system: thinking_tokens]
+[19:46:10] [system: thinking_tokens]
+[19:46:10] [system: thinking_tokens]
+[19:46:10] [system: thinking_tokens]
+[19:46:10] [system: thinking_tokens]
+[19:46:10] [system: thinking_tokens]
+[19:46:10] [system: thinking_tokens]
+[19:46:10] [system: thinking_tokens]
+[19:46:10] [system: thinking_tokens]
+[19:46:10] [system: thinking_tokens]
+[19:46:10] [system: thinking_tokens]
+[19:46:10] [system: thinking_tokens]
+[19:46:10] [system: thinking_tokens]
+[19:46:10] [system: thinking_tokens]
+[19:46:10] [system: thinking_tokens]
+[19:46:10] [system: thinking_tokens]
+[19:46:10] [system: thinking_tokens]
+[19:46:10] [system: thinking_tokens]
+[19:46:10] [system: thinking_tokens]
+[19:46:10] [system: thinking_tokens]
+[19:46:10] [system: thinking_tokens]
+[19:46:11] [system: thinking_tokens]
+[19:46:11] [system: thinking_tokens]
+[19:46:11] [system: thinking_tokens]
+[19:46:11] [system: thinking_tokens]
+[19:46:11] [system: thinking_tokens]
+[19:46:11] [system: thinking_tokens]
+[19:46:11] [system: thinking_tokens]
+[19:46:11] [system: thinking_tokens]
+[19:46:11] [system: thinking_tokens]
+[19:46:11] [system: thinking_tokens]
+[19:46:11] [system: thinking_tokens]
+[19:46:11] [system: thinking_tokens]
+[19:46:11] [system: thinking_tokens]
+[19:46:11] [system: thinking_tokens]
+[19:46:11] [system: thinking_tokens]
+[19:46:11] [system: thinking_tokens]
+[19:46:11] [system: thinking_tokens]
+[19:46:11] [system: thinking_tokens]
+[19:46:11] [system: thinking_tokens]
+[19:46:11] [system: thinking_tokens]
+[19:46:11] [system: thinking_tokens]
+[19:46:11] [system: thinking_tokens]
+[19:46:11] [system: thinking_tokens]
+[19:46:11] [system: thinking_tokens]
+[19:46:11] [system: thinking_tokens]
+[19:46:11] [system: thinking_tokens]
+[19:46:11] [system: thinking_tokens]
+[19:46:11] [system: thinking_tokens]
+[19:46:11] [system: thinking_tokens]
+[19:46:11] [system: thinking_tokens]
+[19:46:11] [system: thinking_tokens]
+[19:46:11] [system: thinking_tokens]
+[19:46:11] [system: thinking_tokens]
+[19:46:11] [system: thinking_tokens]
+[19:46:11] [system: thinking_tokens]
+[19:46:11] [system: thinking_tokens]
+[19:46:11] [system: thinking_tokens]
+[19:46:11] [system: thinking_tokens]
+[19:46:11] [system: thinking_tokens]
+[19:46:11] [system: thinking_tokens]
+[19:46:11] [system: thinking_tokens]
+[19:46:11] [system: thinking_tokens]
+[19:46:11] [system: thinking_tokens]
+[19:46:11] [system: thinking_tokens]
+[19:46:11] [system: thinking_tokens]
+[19:46:11] [system: thinking_tokens]
+[19:46:11] [system: thinking_tokens]
+[19:46:11] [system: thinking_tokens]
+[19:46:11] [system: thinking_tokens]
+[19:46:11] [system: thinking_tokens]
+[19:46:11] [system: thinking_tokens]
+[19:46:11] [system: thinking_tokens]
+[19:46:11] [system: thinking_tokens]
+[19:46:11] [system: thinking_tokens]
+[19:46:12] [system: thinking_tokens]
+[19:46:12] [system: thinking_tokens]
+[19:46:12] [system: thinking_tokens]
+[19:46:12] [system: thinking_tokens]
+[19:46:12] [system: thinking_tokens]
+[19:46:12] [system: thinking_tokens]
+[19:46:12] [system: thinking_tokens]
+[19:46:12] [system: thinking_tokens]
+[19:46:12] [system: thinking_tokens]
+[19:46:12] [system: thinking_tokens]
+[19:46:12] [system: thinking_tokens]
+[19:46:12] [system: thinking_tokens]
+[19:46:12] [system: thinking_tokens]
+[19:46:12] [system: thinking_tokens]
+[19:46:12] [system: thinking_tokens]
+[19:46:12] [system: thinking_tokens]
+[19:46:12] [system: thinking_tokens]
+[19:46:12] [system: thinking_tokens]
+[19:46:12] [system: thinking_tokens]
+[19:46:12] [system: thinking_tokens]
+[19:46:12] [system: thinking_tokens]
+[19:46:12] [system: thinking_tokens]
+[19:46:12] [system: thinking_tokens]
+[19:46:12] [system: thinking_tokens]
+[19:46:12] [system: thinking_tokens]
+[19:46:12] [system: thinking_tokens]
+[19:46:12] [system: thinking_tokens]
+[19:46:12] [system: thinking_tokens]
+[19:46:12] [system: thinking_tokens]
+[19:46:12] [system: thinking_tokens]
+[19:46:12] [system: thinking_tokens]
+[19:46:12] [system: thinking_tokens]
+[19:46:12] 💭 Let me understand the task. The user invoked `/dark-factory:generate-prompts-for-spec` with the spec path `/Users/bborbe/Documents/workspaces/agent-task-executor/specs/in-progress/002-config-job-namespace.md`.
+
+Wait — there's an important detail here. The command message says to pass the repo-root-relative spec path. But the path given is `/Users/bborbe/Documents/workspaces/agent-task-executor/specs/in-progress/002-config-job-namespace.md`.
+
+Let me think about this. The git status shows the work…
+[19:46:13] I'll start by checking the environment and reading the spec before invoking the prompt-creator agent.
+
+
+[19:46:13] $ echo "DARK_FACTORY_MANAGED=[$DARK_FACTORY_MANAGED]"; pwd; ls -la specs/in-progress/ 2>/dev/null; which dark-factory 2>/dev/null || echo "dark-factory CLI: not found"
+[19:46:13] $ ls -la prompts/ 2>/dev/null && echo "---prompts dir exists---" || echo "prompts dir does not exist yet"; ls -la prompts/in-progress/ 2>/dev/null || true; ls -la prompts/completed/ 2>/dev/null || true
+[19:46:14] [system: thinking_tokens]
+[19:46:14] [system: thinking_tokens]
+[19:46:14] [system: thinking_tokens]
+[19:46:14] [system: thinking_tokens]
+[19:46:14] [system: thinking_tokens]
+[19:46:14] [system: thinking_tokens]
+[19:46:14] [system: thinking_tokens]
+[19:46:14] [system: thinking_tokens]
+[19:46:14] [system: thinking_tokens]
+[19:46:14] [system: thinking_tokens]
+[19:46:14] [system: thinking_tokens]
+[19:46:14] [system: thinking_tokens]
+[19:46:14] [system: thinking_tokens]
+[19:46:14] [system: thinking_tokens]
+[19:46:14] [system: thinking_tokens]
+[19:46:14] [system: thinking_tokens]
+[19:46:14] [system: thinking_tokens]
+[19:46:14] [system: thinking_tokens]
+[19:46:14] [system: thinking_tokens]
+[19:46:15] [system: thinking_tokens]
+[19:46:15] [system: thinking_tokens]
+[19:46:15] [system: thinking_tokens]
+[19:46:15] [system: thinking_tokens]
+[19:46:15] [system: thinking_tokens]
+[19:46:15] [system: thinking_tokens]
+[19:46:15] [system: thinking_tokens]
+[19:46:15] [system: thinking_tokens]
+[19:46:15] [system: thinking_tokens]
+[19:46:15] [system: thinking_tokens]
+[19:46:15] [system: thinking_tokens]
+[19:46:15] [system: thinking_tokens]
+[19:46:15] [system: thinking_tokens]
+[19:46:15] [system: thinking_tokens]
+[19:46:15] [system: thinking_tokens]
+[19:46:15] [system: thinking_tokens]
+[19:46:15] 💭 Key findings:
+- `DARK_FACTORY_MANAGED=true` — this is **Mode 1** (daemon + container). So I must **SKIP** the `mark-prompted` step.
+- The repo root is `/workspace`, and the spec is at `specs/in-progress/002-config-job-namespace.md`.
+- `dark-factory` CLI is not present in the container — which confirms Mode 1 (daemon-managed).
+
+Now let me read the spec fully. It's 8707 bytes, well under limits. Let me read it.
+[19:46:15] Environment confirmed: `DARK_FACTORY_MANAGED=true` (Mode 1 — daemon + container), so I will **skip** the `mark-prompted` step. The `dark-factory` CLI is absent (expected in daemon mode). Now let me read the spec fully.
+
+
+[19:46:15] [read] /workspace/specs/in-progress/002-config-job-namespace.md
+[19:46:15]   → 99 lines read
+[19:46:16] [system: thinking_tokens]
+[19:46:16] [system: thinking_tokens]
+[19:46:16] [system: thinking_tokens]
+[19:46:16] [system: thinking_tokens]
+[19:46:16] [system: thinking_tokens]
+[19:46:16] [system: thinking_tokens]
+[19:46:16] [system: thinking_tokens]
+[19:46:16] [system: thinking_tokens]
+[19:46:16] [system: thinking_tokens]
+[19:46:16] [system: thinking_tokens]
+[19:46:16] [system: thinking_tokens]
+[19:46:16] [system: thinking_tokens]
+[19:46:16] [system: thinking_tokens]
+[19:46:16] [system: thinking_tokens]
+[19:46:16] [system: thinking_tokens]
+[19:46:16] [system: thinking_tokens]
+[19:46:16] [system: thinking_tokens]
+[19:46:16] [system: thinking_tokens]
+[19:46:16] [system: thinking_tokens]
+[19:46:16] [system: thinking_tokens]
+[19:46:16] [system: thinking_tokens]
+[19:46:16] [system: thinking_tokens]
+[19:46:16] [system: thinking_tokens]
+[19:46:16] [system: thinking_tokens]
+[19:46:16] [system: thinking_tokens]
+[19:46:16] [system: thinking_tokens]
+[19:46:16] [system: thinking_tokens]
+[19:46:16] [system: thinking_tokens]
+[19:46:17] [system: thinking_tokens]
+[19:46:17] [system: thinking_tokens]
+[19:46:17] [system: thinking_tokens]
+[19:46:17] [system: thinking_tokens]
+[19:46:17] [system: thinking_tokens]
+[19:46:17] [system: thinking_tokens]
+[19:46:17] [system: thinking_tokens]
+[19:46:17] [system: thinking_tokens]
+[19:46:17] [system: thinking_tokens]
+[19:46:17] [system: thinking_tokens]
+[19:46:17] [system: thinking_tokens]
+[19:46:17] [system: thinking_tokens]
+[19:46:17] [system: thinking_tokens]
+[19:46:17] [system: thinking_tokens]
+[19:46:17] [system: thinking_tokens]
+[19:46:17] [system: thinking_tokens]
+[19:46:17] [system: thinking_tokens]
+[19:46:17] [system: thinking_tokens]
+[19:46:17] [system: thinking_tokens]
+[19:46:17] [system: thinking_tokens]
+[19:46:17] [system: thinking_tokens]
+[19:46:17] [system: thinking_tokens]
+[19:46:17] [system: thinking_tokens]
+[19:46:17] [system: thinking_tokens]
+[19:46:17] [system: thinking_tokens]
+[19:46:17] [system: thinking_tokens]
+[19:46:17] [system: thinking_tokens]
+[19:46:17] [system: thinking_tokens]
+[19:46:17] [system: thinking_tokens]
+[19:46:17] [system: thinking_tokens]
+[19:46:17] [system: thinking_tokens]
+[19:46:17] [system: thinking_tokens]
+[19:46:17] [system: thinking_tokens]
+[19:46:17] [system: thinking_tokens]
+[19:46:17] [system: thinking_tokens]
+[19:46:17] [system: thinking_tokens]
+[19:46:17] [system: thinking_tokens]
+[19:46:17] [system: thinking_tokens]
+[19:46:17] [system: thinking_tokens]
+[19:46:17] [system: thinking_tokens]
+[19:46:17] [system: thinking_tokens]
+[19:46:17] [system: thinking_tokens]
+[19:46:17] [system: thinking_tokens]
+[19:46:17] [system: thinking_tokens]
+[19:46:17] [system: thinking_tokens]
+[19:46:17] [system: thinking_tokens]
+[19:46:17] [system: thinking_tokens]
+[19:46:17] [system: thinking_tokens]
+[19:46:17] [system: thinking_tokens]
+[19:46:17] [system: thinking_tokens]
+[19:46:17] [system: thinking_tokens]
+[19:46:17] [system: thinking_tokens]
+[19:46:17] [system: thinking_tokens]
+[19:46:17] [system: thinking_tokens]
+[19:46:18] [system: thinking_tokens]
+[19:46:18] [system: thinking_tokens]
+[19:46:18] [system: thinking_tokens]
+[19:46:18] [system: thinking_tokens]
+[19:46:18] [system: thinking_tokens]
+[19:46:18] [system: thinking_tokens]
+[19:46:18] [system: thinking_tokens]
+[19:46:18] [system: thinking_tokens]
+[19:46:18] [system: thinking_tokens]
+[19:46:18] [system: thinking_tokens]
+[19:46:18] [system: thinking_tokens]
+[19:46:18] [system: thinking_tokens]
+[19:46:18] [system: thinking_tokens]
+[19:46:18] [system: thinking_tokens]
+[19:46:18] [system: thinking_tokens]
+[19:46:18] [system: thinking_tokens]
+[19:46:18] [system: thinking_tokens]
+[19:46:18] [system: thinking_tokens]
+[19:46:18] [system: thinking_tokens]
+[19:46:18] [system: thinking_tokens]
+[19:46:18] [system: thinking_tokens]
+[19:46:18] [system: thinking_tokens]
+[19:46:18] [system: thinking_tokens]
+[19:46:18] [system: thinking_tokens]
+[19:46:18] [system: thinking_tokens]
+[19:46:18] [system: thinking_tokens]
+[19:46:18] [system: thinking_tokens]
+[19:46:18] [system: thinking_tokens]
+[19:46:18] [system: thinking_tokens]
+[19:46:18] [system: thinking_tokens]
+[19:46:18] [system: thinking_tokens]
+[19:46:18] [system: thinking_tokens]
+[19:46:18] [system: thinking_tokens]
+[19:46:18] [system: thinking_tokens]
+[19:46:18] [system: thinking_tokens]
+[19:46:18] [system: thinking_tokens]
+[19:46:18] [system: thinking_tokens]
+[19:46:18] [system: thinking_tokens]
+[19:46:18] [system: thinking_tokens]
+[19:46:18] [system: thinking_tokens]
+[19:46:18] [system: thinking_tokens]
+[19:46:18] [system: thinking_tokens]
+[19:46:18] [system: thinking_tokens]
+[19:46:18] [system: thinking_tokens]
+[19:46:18] [system: thinking_tokens]
+[19:46:18] [system: thinking_tokens]
+[19:46:18] [system: thinking_tokens]
+[19:46:18] [system: thinking_tokens]
+[19:46:18] [system: thinking_tokens]
+[19:46:18] [system: thinking_tokens]
+[19:46:18] [system: thinking_tokens]
+[19:46:18] [system: thinking_tokens]
+[19:46:18] 💭 I've read the spec. Key facts:
+- Status: `generating` (approved)
+- Branch: `dark-factory/config-job-namespace`
+- Suggested decomposition into 3 prompts:
+  1. `JobNamespace` field on `ConfigSpec` + `ResolveJobNamespace` derivation/rejection + unit tests
+  2. Spawner wiring — resolved-namespace target, refuse-on-error, label lock + unit tests
+  3. CRD doc row covering default and rejection rule
+
+This is Mode 1 (daemon-managed), so I skip `mark-prompted`. The spec path relative to repo root is `spe…
+[19:46:23] Spec read and understood. Key facts:
+- Status: `generating` (approved), 3-prompt suggested decomposition (field+resolver → spawner wiring → CRD doc)
+- Mode 1 (`DARK_FACTORY_MANAGED=true`): skip `mark-prompted`
+- Output inbox: `prompts/`
+
+Now invoking the `prompt-creator` agent on the repo-root-relative spec path.
+
+
+[19:46:23] [agent:dark-factory:prompt-creator] Generate prompts from spec 002
+    prompt: Generate dark-factory prompt files from the approved spec at `specs/in-progress/002-config-job-namespace.md` (repo-root-relative path — resolve against the cur…
+[19:46:23] [system: task_started]
+[19:46:24] [system: task_progress]
+[19:46:24] [read] /workspace/specs/in-progress/002-config-job-namespace.md
+[19:46:24] [system: task_progress]
+[19:46:24] $ ls /workspace && echo "---PROMPTS---" && ls -la /workspace/prompts 2>/dev/null || echo "no prompts dir"
+[19:46:24]   → 99 lines read
+[19:46:26] [system: task_progress]
+[19:46:26] [read] /workspace/k8s/apis/agent.benjamin-borbe.de/v1/types.go
+[19:46:26] [system: task_progress]
+[19:46:26] $ ls -la /workspace/prompts/completed/ && echo "---INPROGRESS---" && ls -la /workspace/prompts/in-progress/
+[19:46:26]   → 292 lines read
+[19:46:27] [system: task_progress]
+[19:46:27] [read] /workspace/pkg/spawner/job_spawner.go
+[19:46:27] [system: task_progress]
+[19:46:27] [read] /workspace/prompts/completed/005-spec-004-bug-job-failure-reason.md
+[19:46:27]   → 250 lines read
+[19:46:27]   → 520 lines read
+[19:46:30] [system: task_progress]
+[19:46:30] [read] /workspace/docs/agent-crd-specification.md
+[19:46:30] [system: task_progress]
+[19:46:30] $ ls pkg/spawner/ && echo "---GREP NewJobSpawner---" && grep -rn 'NewJobSpawner' --include='*.go' . | grep -v '_test.go' && echo "---GREP AgentConfiguration---" && grep -rn 'AgentConfiguration' pkg/*.g…
+[19:46:30]   → 123 lines read
+[19:46:30] ⚠ [bash output]
+pkg/config_resolver.go:64:			return AgentConfiguration{}, errors.Wrapf(
+pkg/config_resolver.go:83:			return AgentConfiguration{}, errors.Wrapf(
+pkg/config_resolver.go:95:	return AgentConfiguration{}, errors.Wrapf(
+pkg/config_resolver.go:103:func convert(ctx context.Context, obj agentv1.Config, branch string) (AgentConfiguration, error) {
+pkg/config_resolver.go:106:		return AgentConfiguration{}, errors.Wrapf(ctx, err, "convert config %q", obj.Spec.Assignee)
+pkg/config_resolver.go:108:	return AgentConfiguration{
+pkg/agent_configuration.go:27:// AgentConfiguration defines the container image and environment for one agent type.
+pkg/agent_configuration.go:28:type AgentConfiguration struct {
+pkg/agent_configuration.go:74:func (a AgentConfiguration) EffectiveZombieJobTimeoutSeconds() int32 {
+pkg/agent_configuration.go:81:// AgentConfigurations is a list of agent configurations.
+pkg/agent_configuration.go:82:type AgentConfigurations []AgentConfiguration
+pkg/agent_configuration.go:86:func (a AgentConfigurations) FindByAssignee(assignee string) (AgentConfiguration, bool) {
+pkg/agent_configuration.go:92:	return AgentConfiguration{}, false
+pkg/agent_configuration.go:95:// TaggedConfigurations returns a new AgentConfigurations with the branch appended
+pkg/agent_configuration.go:99:func (a AgentConfigurations) TaggedConfigurations(branch string) AgentConfigurations {
+pkg/agent_configuration.go:100:	result := make(AgentConfigurations, len(a))
+pkg/agent_configuration.go:102:		result[i] = AgentConfiguration{
+pkg/k8s_connector.go:163:// Any field added to AgentConfiguration must be added here too, or the API server prunes it
+pkg/k8s_connector.go:165:// "the operator never set it": v0.5.0 shipped maxConcurrentJobs in AgentConfiguration and in
+pkg/k8s_connector.go:240:		// 0 = unlimited (see AgentConfiguration.MaxConcurrentJobs).
+[19:46:32] [system: task_progress]
+[19:46:32] [read] /workspace/pkg/agent_configuration.go
+[19:46:32] [system: task_progress]
+[19:46:32] [read] /workspace/pkg/factory/factory.go
+[19:46:32]   → 120 lines read
+[19:46:32]   → 170 lines read
+[19:46:40] [system: task_progress]
+[19:46:40] [read] /workspace/pkg/config_resolver.go
+[19:46:40] [system: task_progress]
+[19:46:40] $ grep -rn 'func.*SetApp\|"app"' $(go env GOPATH)/pkg/mod/github.com/bborbe/k8s@*/ 2>/dev/null | head -20
+[19:46:40]   → 136 lines read
+[19:46:43] [system: task_started]
+[19:46:50] [system: task_notification]
+[19:46:51] [system: task_progress]
+[19:46:51] $ ls $(go env GOPATH)/pkg/mod/github.com/bborbe/ | grep k8s && echo "---" && ls $(go env GOPATH)/pkg/mod/github.com/bborbe/k8s@*/ 2>/dev/null
+[19:46:51] ⚠ [Bash] error: Exit code 1\nls: cannot access '/home/node/go/pkg/mod/github.com/bborbe/': No such file or directory
+[19:46:52] [system: task_progress]
+[19:46:52] $ go env GOPATH GOMODCACHE && ls $(go env GOMODCACHE)/github.com/bborbe/ 2>/dev/null | head -30
+[19:46:54] [system: task_progress]
+[19:46:54] $ ls /workspace/vendor 2>/dev/null | head && echo "---GOMODCACHE ls---" && ls /home/node/go/pkg/mod/ 2>/dev/null | head && echo "---go.mod k8s---" && grep -n 'bborbe/k8s\|bborbe/agent ' /workspace/go.m…
+[19:46:55] [system: task_progress]
+[19:46:55] $ ls /home/node/go/pkg/mod/github.com/bborbe/ && echo "---k8s dir---" && ls -d /home/node/go/pkg/mod/github.com/bborbe/k8s@*/
+[19:46:55] ⚠ [Bash] error: Exit code 2\nls: cannot access '/home/node/go/pkg/mod/github.com/bborbe/': No such file or directory
+[19:46:56] [system: task_progress]
+[19:46:56] $ ls /home/node/go/pkg/mod/github.com/ | head -40 && echo "---agent---" && ls -d /home/node/go/pkg/mod/github.com/bborbe/agent@* 2>/dev/null
+[19:46:56] ⚠ [Bash] error: Exit code 1\n!abirdcfly\n!antonboom\n!burnt!sushi\n!crocmagnon\n!djarvur\n!gaijin!entertainment\n!masterminds\n!open!pee!dee!p\n4meepo\nalecthomas\nalexkohler\nalingse\nashanbrown\nbeorn7\nbkielbasa\nblizzy78\nbombsimon\nbreml\nbutuzov\ncatenacyber\nccojocar\ncespare\ncharithe\nchavacava\nckaznocha\ncurioswitch\ndaixiang0\ndavecgh\ndenis-tingaikin\nettle\nfatih\nfirefart\nfsnotify\nfzipp\nghostia…
+[19:46:59] [system: task_progress]
+[19:46:59] $ timeout 120 go mod download github.com/bborbe/k8s github.com/bborbe/agent 2>&1 | tail -5; echo "exit: $?"
+[19:47:01] [system: task_progress]
+[19:47:01] $ ls -d /home/node/go/pkg/mod/github.com/bborbe/k8s@* /home/node/go/pkg/mod/github.com/bborbe/agent@* 2>/dev/null; echo "---SetApp---"; grep -rn 'func.*SetApp\|"app"' /home/node/go/pkg/mod/github.com/b…
+[19:47:01] ⚠ [bash output]
+/home/node/go/pkg/mod/github.com/bborbe/k8s@v1.14.16/k8s_job-builder.go:100:func (j *jobBuilder) SetApp(app string) JobBuilder {
+/home/node/go/pkg/mod/github.com/bborbe/k8s@v1.14.16/k8s_job-builder.go:101:	return j.AddLabel("app", app)
+/home/node/go/pkg/mod/github.com/bborbe/k8s@v1.14.16/k8s_deployment-builder.go:186:					"app": s.name.String(),
+/home/node/go/pkg/mod/github.com/bborbe/k8s@v1.14.16/k8s_deployment-builder.go:206:						"app":       s.name.String(),
+/home/node/go/pkg/mod/github.com/bborbe/k8s@v1.14.16/k8s_service-builder.go:121:				"app": s.name.String(),
+/home/node/go/pkg/mod/github.com/bborbe/k8s@v1.14.16/k8s_statefulset-builder.go:135:	return s.AddLabel("app", name.String())
+/home/node/go/pkg/mod/github.com/bborbe/k8s@v1.14.16/k8s_statefulset-builder.go:181:					"app": s.name.String(),
+/home/node/go/pkg/mod/github.com/bborbe/k8s@v1.14.16/mocks/k8s-statefulset-interface.go:19:	ApplyStub        func(context.Context, *v1a.StatefulSetApplyConfiguration, v1b.ApplyOptions) (*v1.StatefulSet, error)
+/home/node/go/pkg/mod/github.com/bborbe/k8s@v1.14.16/mocks/k8s-statefulset-interface.go:50:	ApplyStatusStub        func(context.Context, *v1a.StatefulSetApplyConfiguration, v1b.ApplyOptions) (*v1.StatefulSet, error)
+/home/node/go/pkg/mod/github.com/bborbe/k8s@v1.14.16/mocks/k8s-statefulset-interface.go:232:func (fake *K8sStatefulSetInterface) Apply(arg1 context.Context, arg2 *v1a.StatefulSetApplyConfiguration, arg3 v1b.ApplyOptions) (*v1.StatefulSet, error) {
+/home/node/go/pkg/mod/github.com/bborbe/k8s@v1.14.16/mocks/k8s-statefulset-interface.go:259:func (fake *K8sStatefulSetInterface) ApplyCalls(stub func(context.Context, *v1a.StatefulSetApplyConfiguration, v1b.ApplyOptions) (*v1.StatefulSet, error)) {
+/home/node/go/pkg/mod/github.com/bborbe/k8s@v1.14.16/mocks/k8s-statefulset-interface.go:265:func (fake *K8sStatefulSetInterface) ApplyArgsForCall(i int) (context.Context, *v1a.StatefulSetApplyConfiguration, v1b.ApplyOptions) {
+/home/node/go/pkg/mod/github.com/bborbe/k8s@v1.14.16/mocks/k8s-statefulset-interface.go:365:func (fake *K8sStatefulSetInterface) ApplyStatus(arg1 context.Context, arg2 *v1a.StatefulSetApplyConfiguration, arg3 v1b.ApplyOptions) (*v1.StatefulSet, error) {
+/home/node/go/pkg/mod/github.com/bborbe/k8s@v1.14.16/mocks/k8s-statefulset-interface.go:392:func (fake *K8sStatefulSetInterface) ApplyStatusCalls(stub func(context.Context, *v1a.StatefulSetApplyConfiguration, v1b.ApplyOptions) (*v1.StatefulSet, error)) {
+/home/node/go/pkg/mod/github.com/bborbe/k8s@v1.14.16/mocks/k8s-statefulset-interface.go:398:func (fake *K8sStatefulSetInterface) ApplyStatusArgsForCall(i int) (context.Context, *v1a.StatefulSetApplyConfiguration, v1b.ApplyOptions) {
+/home/node/go/pkg/mod/github.com/bborbe/k8s@v1.14.16/mocks/k8s-job-builder.go:324:func (fake *K8sJobBuilder) SetApp(arg1 string) k8s.JobBuilder {
+/home/node/go/pkg/mod/github.com/bborbe/k8s@v1.14.16/mocks/k8s-job-builder.go:343:func (fake *K8sJobBuilder) SetAppCallCount() int {
+/home/node/go/pkg/mod/github.com/bborbe/k8s@v1.14.16/mocks/k8s-job-builder.go:349:func (fake *K8sJobBuilder) SetAppCalls(stub func(string) k8s.JobBuilder) {
+/home/node/go/pkg/mod/github.com/bborbe/k8s@v1.14.16/mocks/k8s-job-builder.go:355:func (fake *K8sJobBuilder) SetAppArgsForCall(i int) string {
+/home/node/go/pkg/mod/github.com/bborbe/k8s@v1.14.16/mocks/k8s-job-builder.go:362:func (fake *K8sJobBuilder) SetAppReturns(result1 k8s.JobBuilder) {
+[19:47:02] [system: task_progress]
+[19:47:02] $ sed -n '1,130p' /home/node/go/pkg/mod/github.com/bborbe/k8s@v1.14.16/k8s_job-builder.go
+[19:47:02] ⚠ [bash output]
+}
+
+func (j *jobBuilder) AddLabel(key, value string) JobBuilder {
+	j.labels[key] = value
+	return j
+}
+
+func (j *jobBuilder) SetBackoffLimit(backoffLimit int32) JobBuilder {
+	j.backoffLimit = &backoffLimit
+	return j
+}
+
+func (j *jobBuilder) SetCompletions(completions int32) JobBuilder {
+	j.completions = &completions
+	return j
+}
+
+func (j *jobBuilder) SetParallelism(parallelism int32) JobBuilder {
+	j.parallelism = &parallelism
+	return j
+[19:47:03] [system: task_progress]
+[19:47:03] $ sed -n '130,220p' /home/node/go/pkg/mod/github.com/bborbe/k8s@v1.14.16/k8s_job-builder.go
+[19:47:03] ⚠ [bash output]
+			APIVersion: "batch/v1",
+		},
+		ObjectMeta: *objectMeta,
+		Spec: batchv1.JobSpec{
+			Template: corev1.PodTemplateSpec{
+				ObjectMeta: metav1.ObjectMeta{
+					Annotations: map[string]string{},
+					Labels:      j.labels,
+				},
+				Spec: *podSpec,
+			},
+			TTLSecondsAfterFinished: j.ttlSecondsAfterFinished,
+			CompletionMode:          j.completionMode,
+			PodReplacementPolicy:    j.podReplacementPolicy,
+			BackoffLimit:            j.backoffLimit,
+			Completions:             j.completions,
+			Parallelism:             j.parallelism,
+		},
+	}, nil
+}
+[19:47:41] [system: task_progress]
+[19:47:41] [read] /workspace/pkg/spawner/job_spawner_test.go
+[19:47:41]   → 1389 lines read
+[19:47:58] [system: task_progress]
+[19:47:58] $ ls k8s/apis/agent.benjamin-borbe.de/v1/ && echo "---DARK-FACTORY---" && cat .dark-factory.yaml 2>/dev/null; echo "---Namespace type---" && grep -rn 'type Namespace' /home/node/go/pkg/mod/github.com/b…
+[19:47:58] [system: task_progress]
+[19:47:58] $ grep -rn 'SpawnJob\|IsJobActive\|CountActiveJobs' pkg/handler/*.go | grep -v '_test.go' | head -20
+[19:48:01] [system: task_progress]
+[19:48:01] $ sed -n '380,560p' pkg/handler/task_event_handler.go
+[19:48:01] ⚠ [bash output]
+		return false, nil
+	}
+	running, err := h.jobSpawner.CountActiveJobs(ctx, config.Assignee)
+	if err != nil {
+		metrics.TaskEventsTotal.WithLabelValues("error").Inc()
+		return false, errors.Wrapf(ctx, err, "count active jobs for assignee %s", config.Assignee)
+	}
+	if running < config.MaxConcurrentJobs {
+		// Log the ADMIT decision, not just the deferral. Without this, an
+		// over-cap spawn leaves no trace and overshoot can only be found by
+		// counting Jobs in the cluster by hand — which is how the 2026-08-15
+		// race went unnoticed until 17 Jobs existed against a cap of 1.
+		// Same V(1) rationale as the deferral log below.
+		glog.V(1).Infof(
+			"event=concurrency_admit task=%s assignee=%s running=%d cap=%d",
+			task.TaskIdentifier, config.Assignee, running, config.MaxConcurrentJobs,
+		)
+		return false, nil
+	}
+	// V(1), not V(0): a capped deferral is an expected steady state and repeats
+[19:48:10] [system: task_progress]
+[19:48:10] $ head -80 k8s/apis/agent.benjamin-borbe.de/v1/types_test.go && echo "===LINE COUNT===" && wc -l k8s/apis/agent.benjamin-borbe.de/v1/types_test.go
+[19:48:10] [system: task_progress]
+[19:48:10] $ sed -n '155,250p' pkg/k8s_connector.go
+[19:48:16] [system: task_progress]
+[19:48:16] $ sed -n '250,290p' pkg/k8s_connector.go && echo "---schema tests---" && grep -rn 'configSpecSchema\|configSpecProperties\|jobNamespace' pkg/*_test.go k8s/apis/agent.benjamin-borbe.de/v1/*_test.go 2>/d…
+[19:48:58] [system: task_progress]
+[19:48:58] $ grep -rn 'SetNamespace' /home/node/go/pkg/mod/github.com/bborbe/k8s@v1.14.16/k8s_object-meta-builder.go /home/node/go/pkg/mod/github.com/bborbe/k8s@v1.14.16/k8s_object-meta.go 2>/dev/null; echo "---a…
+[19:48:59] [system: task_progress]
+[19:48:59] $ grep -n 'SetNamespace\|type ObjectMetaBuilder\|func (o \*objectMetaBuilder)' /home/node/go/pkg/mod/github.com/bborbe/k8s@v1.14.16/k8s_objectmeta-builder.go | head -20 && echo "---namespace.go---" && …
+[19:48:59] ⚠ [bash output]
+75:func (o *objectMetaBuilder) AddLabel(key, value string) ObjectMetaBuilder {
+80:func (o *objectMetaBuilder) AddAnnotation(key, value string) ObjectMetaBuilder {
+85:func (o *objectMetaBuilder) SetGenerateName(generateName string) ObjectMetaBuilder {
+90:func (o *objectMetaBuilder) SetName(name Name) ObjectMetaBuilder {
+95:func (o *objectMetaBuilder) SetNamespace(namespace Namespace) ObjectMetaBuilder {
+100:func (o *objectMetaBuilder) SetComponent(component string) ObjectMetaBuilder {
+106:func (o *objectMetaBuilder) Validate(ctx context.Context) error {
+113:func (o *objectMetaBuilder) Build(ctx context.Context) (*metav1.ObjectMeta, error) {
+---namespace.go---
+// Copyright (c) 2024 Benjamin Borbe All rights reserved.
+// Use of this source code is governed by a BSD-style
+// license that can be found in the LICENSE file.
+
+package k8s
+
+type Namespace string
+
+func (f Namespace) String() string {
+	return string(f)
+}
+[19:49:05] [system: task_progress]
+[19:49:05] $ grep -rn '\.Jobs(' pkg/ --include='*.go' | grep -v '_test.go' && echo "---handler tests mock usage---" && grep -rn 'FakeJobSpawner' pkg/handler/*_test.go | head -3 && echo "---dark-factory docs---" &…
+[19:49:05] ⚠ [bash output]
+go-functional-options-pattern.md
+go-glog-guide.md
+go-http-handler-refactoring-guide.md
+go-http-service-guide.md
+go-json-error-handler-guide.md
+go-k8s-binary-conventions.md
+go-kubernetes-crd-controller-guide.md
+go-library-guide.md
+go-licensing-guide.md
+go-linting-guide.md
+go-logging-guide.md
+go-makefile-commands.md
+go-mocking-guide.md
+go-mod-dependency-fix-guide.md
+go-mod-replace-guide.md
+go-package-layout-guide.md
+go-parse-pattern.md
+go-patterns.md
+go-precommit.md
+go-prometheus-metrics-guide.md
+[19:49:07] [system: task_progress]
+[19:49:07] $ ls ~/.claude/plugins/marketplaces/dark-factory/docs/ && echo "---job_watcher informer context---" && sed -n '60,100p' pkg/job_watcher.go
+[19:49:08] ⚠ [bash output]
+
+	_, err := informer.AddEventHandler(cache.ResourceEventHandlerFuncs{
+		AddFunc: func(obj interface{}) {
+			job, ok := obj.(*batchv1.Job)
+			if !ok {
+				return
+			}
+			w.HandleJob(ctx, job)
+		},
+		UpdateFunc: func(_, newObj interface{}) {
+			job, ok := newObj.(*batchv1.Job)
+			if !ok {
+				return
+			}
+			w.HandleJob(ctx, job)
+		},
+	})
+	if err != nil {
+		return errors.Wrapf(ctx, err, "add job informer event handler")
+	}
+[19:49:10] [system: task_progress]
+[19:49:10] $ cat ~/.claude/plugins/marketplaces/dark-factory/docs/rules/prompt-writing.md
+[19:49:12] [system: task_progress]
+[19:49:12] [read] /home/node/.claude/projects/-workspace/649c3b71-f1fd-46a9-a844-34ab62b5da5e/tool-results/b0s49hjxk.txt
+[19:49:12]   → 619 lines read
+[19:49:20] [system: task_progress]
+[19:49:20] $ ls pkg/*_test.go && echo "---internal test files---" && grep -rln 'package pkg$' pkg/*_test.go && echo "---dod---" && head -40 docs/dod.md 2>/dev/null && echo "---choosing-flow head---" && head -60 ~…
+[19:49:20] ⚠ [Bash] error: Exit code 1\npkg/agent_configuration_test.go\npkg/config_resolver_test.go\npkg/job_watcher_internal_test.go\npkg/job_watcher_test.go\npkg/k8s_connector_test.go\npkg/result_publisher_test.go\npkg/result_publisher_topic_test.go\npkg/task_store_test.go\npkg/task_type_filter_test.go\npkg/zombie_reason_test.go\npkg/zombie_sweeper_test.go\n---internal test files---\npkg/job_watcher_internal_test.go\n--…
+[19:49:23] [system: task_progress]
+[19:49:23] $ ls docs/ && echo "---k8s_connector_test head---" && head -30 pkg/k8s_connector_test.go && echo "---config_resolver_test---" && grep -n 'JobNamespace\|func Test\|Describe(' pkg/config_resolver_test.go…
+[19:49:23] ⚠ [bash output]
+	. "github.com/onsi/ginkgo/v2"
+	. "github.com/onsi/gomega"
+	apiextensionsv1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
+	apiextensionsclient "k8s.io/apiextensions-apiserver/pkg/client/clientset/clientset"
+	"k8s.io/apiextensions-apiserver/pkg/client/clientset/clientset/fake"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/client-go/rest"
+	k8stesting "k8s.io/client-go/testing"
+
+	pkg "github.com/bborbe/agent-task-executor/pkg"
+)
+
+func fakeBuilder(cs apiextensionsclient.Interface) pkg.CRDClientBuilder {
+	return func(_ *rest.Config) (apiextensionsclient.Interface, error) {
+		return cs, nil
+	}
+---config_resolver_test---
+28:var _ = Describe("ConfigResolver", func() {
+[19:49:25] [system: task_progress]
+[19:49:25] $ head -25 CHANGELOG.md && echo "---errors API---" && grep -n 'func Errorf\|func Wrapf' /home/node/go/pkg/mod/github.com/bborbe/errors@*/errors.go 2>/dev/null | head && echo "---mocks dir---" && ls moc…
+[19:49:25] ⚠ [bash output]
+
+- chore: update github.com/bborbe/agent to v0.85.0, github.com/bborbe/cqrs to v0.6.10, github.com/bborbe/cron to v1.8.29, github.com/bborbe/kafka to v1.25.10, github.com/bborbe/metrics to v0.6.0, github.com/bborbe/vault-cli to v0.118.5, github.com/prometheus/client_model to v0.6.3
+
+## v0.8.2
+
+- fix: `ConfigResolver` falls back to the plain assignee when no `{assignee}-{vaultName}` Config exists — the singular shared-topic executor keeps resolving its un-suffixed (v0.6.x) Config CRs on the v0.7+ line; per-vault installs still match composed first, so vault scoping wins whenever a composed Config exists
+
+## v0.8.1
+
+- fix: split `BackoffLimitExceeded` from `DeadlineExceeded` in the job failure classifier — a Job that exhausted its backoff limit now publishes the pod's terminated reason + exit code (dedicated `pod_oom_killed` for OOM kills) instead of a misleading `deadline_exceeded`
+
+## v0.8.0
+
+- feat: scope the spawn trigger cap to `phase`+`ref` — the executor now records a `trigger_scope` (`<phase>:<ref[:8]>`) alongside `trigger_count`, so an opted-in cap no longer burns its budget across unrelated work. A re-dispatch representing real progress (a new lifecycle phase, or a new commit on the target repo) resets the budget to 1; repeated attempts at the same phase and ref burn it down, which is the shape of a deterministic failure such as a gate broken at one commit. Phase comes from the normalizing accessor so an alias cannot split a scope and grant a second budget; tasks with no `ref` (not repo-backed) scope on phase alone
+- fix: an absent `trigger_scope` is adopted, never treated as changed — every task in flight predates the field, so reading absent as "scope changed" would have granted each of them a free budget reset on the first event after deploy, including one already looping at cap. Adoption carries the existing count forward (`n+1`); a task already at cap is skipped outright with no publish at all
+- note: the cap stays **opt-in** (an absent `max_triggers` still means no cap). Scoping does not make it safe to default on: a recurring task is not repo-backed, so its scope is constant across re-dispatches and the default-3 fallback would still strip `assignee` and kill the loop — the v0.7.1 / 2026-08-27 Daily Sentry Triage incident. The regression spec for it now names that reasoning inline
+---errors API---
+(eval):1: no matches found: /home/node/go/pkg/mod/github.com/bborbe/errors@*/errors.go
+---mocks dir---
+job_spawner.go
+[19:49:28] [system: task_progress]
+[19:49:28] $ ls -d /home/node/go/pkg/mod/github.com/bborbe/errors@* 2>/dev/null && grep -n 'func Errorf\|func Wrapf\|func New(' /home/node/go/pkg/mod/github.com/bborbe/errors@*/errors.go | head
+[19:49:28] ⚠ [Bash] error: Exit code 1\n(eval):1: no matches found: /home/node/go/pkg/mod/github.com/bborbe/errors@*
+[19:49:29] [system: task_progress]
+[19:49:29] $ grep -rn 'bborbe/errors' go.mod && ls -d /home/node/go/pkg/mod/github.com/bborbe/errors@*/ 2>/dev/null || (timeout 120 go mod download github.com/bborbe/errors 2>&1 | tail -2; ls -d /home/node/go/pkg…
+[19:49:30] ⚠ [bash output]
+go.mod:10:	github.com/bborbe/errors v1.6.0
+(eval):1: no matches found: /home/node/go/pkg/mod/github.com/bborbe/errors@*/
+/home/node/go/pkg/mod/github.com/bborbe/errors@v1.6.0/
+[19:49:31] [system: task_progress]
+[19:49:31] $ grep -n 'func Errorf\|func Wrapf\|func New(' /home/node/go/pkg/mod/github.com/bborbe/errors@v1.6.0/*.go | head
+[19:49:31] ⚠ [bash output]
+/home/node/go/pkg/mod/github.com/bborbe/errors@v1.6.0/errors_wrapf.go:13:func Wrapf(ctx context.Context, err error, format string, args ...interface{}) error {
+/home/node/go/pkg/mod/github.com/bborbe/errors@v1.6.0/errors_new.go:13:func New(ctx context.Context, message string) error {
+/home/node/go/pkg/mod/github.com/bborbe/errors@v1.6.0/errors_new.go:17:func Errorf(ctx context.Context, format string, args ...interface{}) error {
+[19:49:59] [system: task_progress]
+[19:49:59] $ grep -n 'TaggedConfigurations\|JobNamespace\|DeepEqual\|Equal(' pkg/agent_configuration_test.go | head && echo "---config_resolver_test Resolve setup---" && sed -n '28,120p' pkg/config_resolver_test.…
+[19:49:59] ⚠ [bash output]
+		provider.items = []agentv1.Config{
+			{
+				Spec: agentv1.ConfigSpec{
+					Assignee:  "other-agent-personal",
+					Image:     "img",
+					Heartbeat: "1m",
+				},
+			},
+		}
+		_, err := resolver.Resolve(ctx, "claude")
+		Expect(err).NotTo(BeNil())
+		Expect(errors.Is(err, pkg.ErrConfigNotFound)).To(BeTrue())
+	})
+
+	It("returns ErrConfigNotFound when store is empty", func() {
+		provider.items = []agentv1.Config{}
+		_, err := resolver.Resolve(ctx, "claude")
+		Expect(err).NotTo(BeNil())
+		Expect(errors.Is(err, pkg.ErrConfigNotFound)).To(BeTrue())
+	})
+[19:50:00] [system: task_progress]
+[19:50:00] $ sed -n '96,140p' pkg/agent_configuration_test.go
+[19:50:03] [system: task_progress]
+[19:50:03] $ grep -n 'func (in \*ConfigSpec) DeepCopyInto' -A 15 k8s/apis/agent.benjamin-borbe.de/v1/zz_generated.deepcopy.go && echo "---register.go---" && head -40 k8s/apis/agent.benjamin-borbe.de/v1/register.go
+[19:50:03] ⚠ [bash output]
+var localSchemeBuilder = &SchemeBuilder
+
+// AddToScheme adds Config types to the scheme.
+var AddToScheme = localSchemeBuilder.AddToScheme
+
+func init() {
+	localSchemeBuilder.Register(addKnownTypes)
+}
+
+// Resource takes an unqualified resource and returns a Group-qualified GroupResource.
+func Resource(resource string) schema.GroupResource {
+	return SchemeGroupVersion.WithResource(resource).GroupResource()
+}
+
+func addKnownTypes(scheme *runtime.Scheme) error {
+	scheme.AddKnownTypes(SchemeGroupVersion,
+		&Config{},
+		&ConfigList{},
+	)
+	metav1.AddToGroupVersion(scheme, SchemeGroupVersion)
+[19:50:35] [system: task_progress]
+[19:50:35] $ grep -n 'json.Marshal\|json.Unmarshal\|Describe(' k8s/apis/agent.benjamin-borbe.de/v1/types_test.go | head -30
+[19:50:38] [system: task_progress]
+[19:50:38] $ sed -n '225,285p' k8s/apis/agent.benjamin-borbe.de/v1/types_test.go
+[19:50:40] [system: task_progress]
+[19:50:40] $ ls /workspace/scenarios 2>/dev/null || echo "no scenarios dir"; date -u +"%Y-%m-%dT%H:%M:%SZ"
+[19:51:31] [system: task_progress]
+[19:51:31] [write] /workspace/prompts/1-spec-002-config-job-namespace-model.md (14882 chars)
+[19:51:31]   → File created successfully at: /workspace/prompts/1-spec-002-config-job-namespace-model.md (file state is current in you…
+[19:51:52] [system: task_progress]
+[19:51:52] [write] /workspace/prompts/2-spec-002-config-job-namespace-spawner.md (21088 chars)
+[19:51:52]   → File created successfully at: /workspace/prompts/2-spec-002-config-job-namespace-spawner.md (file state is current in y…
+[19:51:58] [system: task_progress]
+[19:51:58] [write] /workspace/prompts/3-spec-002-config-job-namespace-doc.md (3834 chars)
+[19:51:58]   → File created successfully at: /workspace/prompts/3-spec-002-config-job-namespace-doc.md (file state is current in your …
+[19:52:05] [system: task_progress]
+[19:52:05] $ grep -rn '\.Matches(' pkg/ /home/node/go/pkg/mod/k8s.io/client-go@*/testing/fixture.go 2>/dev/null | grep -v '_test.go' | head -3; echo "---main tests spawner?---"; grep -rn 'NewJobSpawner\|jobSpawne…
+[19:52:07] [system: task_progress]
+[19:52:07] $ ls -d /home/node/go/pkg/mod/k8s.io/client-go@* 2>/dev/null | head -1; grep -rn 'Matches(verb, resource string) bool\|func (.*ActionImpl) Matches' /home/node/go/pkg/mod/k8s.io/client-go@*/testing/*.go…
+[19:52:08] [system: task_progress]
+[19:52:08] $ ls -d /home/node/go/pkg/mod/k8s.io/client-go@*/ 2>/dev/null || (timeout 120 go mod download k8s.io/client-go 2>&1 | tail -2; ls -d /home/node/go/pkg/mod/k8s.io/client-go@*/)
+[19:52:11] [system: task_progress]
+[19:52:11] $ grep -n 'Matches(verb, resource string) bool' /home/node/go/pkg/mod/k8s.io/client-go@v0.36.4/testing/actions.go && grep -n 'func (action ActionImpl) Matches' /home/node/go/pkg/mod/k8s.io/client-go@v0…
+[19:52:22] [system: task_progress]
+[19:52:22] [write] /workspace/prompts/3-spec-002-config-job-namespace-doc.md (4090 chars)
+[19:52:22]   → The file /workspace/prompts/3-spec-002-config-job-namespace-doc.md has been updated successfully. (file state is curren…
+[19:52:25] [system: task_progress]
+[19:52:25] [edit] /workspace/prompts/1-spec-002-config-job-namespace-model.md
+    - 
+    + 
+[19:52:25] ⚠ [Edit] error: <tool_use_error>Error: No such tool available: Edit. Edit is disabled for this session, in subagents as well as here.</tool_use_error>
+[19:52:36] [system: task_progress]
+[19:52:36] [write] /workspace/prompts/1-spec-002-config-job-namespace-model.md (14893 chars)
+[19:52:36]   → The file /workspace/prompts/1-spec-002-config-job-namespace-model.md has been updated successfully. (file state is curr…
+[19:52:49] [system: task_progress]
+[19:52:49] $ ls -la /workspace/prompts/ && echo "---frontmatter check---" && head -5 /workspace/prompts/1-spec-002-config-job-namespace-model.md /workspace/prompts/2-spec-002-config-job-namespace-spawner.md /work…
+[19:52:56] [system: task_updated]
+[19:52:56] [system: task_notification]
+[19:52:56]   ← agent reply: All three prompt files are in the inbox with correct frontmatter. Here is my report.
+[19:52:56] [system: thinking_tokens]
+[19:52:56] [system: thinking_tokens]
+[19:52:56] [system: thinking_tokens]
+[19:52:56] [system: thinking_tokens]
+[19:52:56] [system: thinking_tokens]
+[19:52:56] [system: thinking_tokens]
+[19:52:56] [system: thinking_tokens]
+[19:52:56] [system: thinking_tokens]
+[19:52:56] [system: thinking_tokens]
+[19:52:56] [system: thinking_tokens]
+[19:52:56] [system: thinking_tokens]
+[19:52:56] [system: thinking_tokens]
+[19:52:56] [system: thinking_tokens]
+[19:52:56] [system: thinking_tokens]
+[19:52:56] [system: thinking_tokens]
+[19:52:56] [system: thinking_tokens]
+[19:52:56] [system: thinking_tokens]
+[19:52:56] [system: thinking_tokens]
+[19:52:56] [system: thinking_tokens]
+[19:52:57] [system: thinking_tokens]
+[19:52:57] [system: thinking_tokens]
+[19:52:57] [system: thinking_tokens]
+[19:52:57] [system: thinking_tokens]
+[19:52:57] [system: thinking_tokens]
+[19:52:57] [system: thinking_tokens]
+[19:52:57] [system: thinking_tokens]
+[19:52:57] [system: thinking_tokens]
+[19:52:57] [system: thinking_tokens]
+[19:52:57] [system: thinking_tokens]
+[19:52:57] [system: thinking_tokens]
+[19:52:57] [system: thinking_tokens]
+[19:52:57] [system: thinking_tokens]
+[19:52:57] [system: thinking_tokens]
+[19:52:57] [system: thinking_tokens]
+[19:52:57] [system: thinking_tokens]
+[19:52:57] [system: thinking_tokens]
+[19:52:57] [system: thinking_tokens]
+[19:52:57] [system: thinking_tokens]
+[19:52:57] [system: thinking_tokens]
+[19:52:57] 💭 The prompt-creator produced 3 prompt files. Let me verify they exist in the prompts/ inbox, then audit each with the prompt-auditor agent.
+
+Files:
+- `/workspace/prompts/1-spec-002-config-job-namespace-model.md`
+- `/workspace/prompts/2-spec-002-config-job-namespace-spawner.md`
+- `/workspace/prompts/3-spec-002-config-job-namespace-doc.md`
+
+Wait, the creator said paths like `/workspace/prompts/...`. The actual repo-relative paths are `prompts/...`. Let me verify they exist.
+[19:52:57] The creator produced 3 prompt files. Let me verify they landed in the inbox, then audit each one.
+
+
+[19:52:57] $ ls -la /workspace/prompts/ | grep -v '^total'; echo "---"; for f in /workspace/prompts/*-spec-002-*.md; do echo "== $f =="; head -12 "$f"; echo; done
+[19:52:57] ⚠ [bash output]
+<summary>
+- Spawned Jobs are now created in the resolved namespace (default `<executor-namespace>-agents-sandbox`) instead of the executor's own namespace.
+- A Config that sets `jobNamespace` to the executor's own namespace is refused: the job is not created, an ERROR log names the Config and the rejected namespace, and the error propagates so the task stays untouched.
+- Every spawned Job's pod template carries the label `app: agent` unconditionally — a conflicting `app` value set directly on the pod template is overwritten, so no Config can suppress the NetworkPolicy selector.
+- The Job's object metadata namespace matches the resolved target namespace, not the executor's.
+- Existing spawner tests are updated for the new default target namespace, and the new acceptance tests lock the target-namespace, refuse-on-error, and label-lock behaviors.
+
+== /workspace/prompts/3-spec-002-config-job-namespace-doc.md ==
+---
+spec: ["002-config-job-namespace"]
+status: draft
+created: "2026-09-03T17:50:40Z"
+---
+
+<summary>
+- The Config CRD reference now documents the optional `spec.jobNamespace` field.
+- The doc states the field's default — a per-environment `<executor-namespace>-agents-sandbox` sandbox — so operators know the safe value is applied when the field is omitted.
+- The doc states the rejection rule — setting `jobNamespace` to the executor namespace is refused — so operators know the isolation guard exists and is not overridable.
+- The row documents the settled semantics implemented by the two prior prompts, not merely the field name.
+- No code changes — documentation only.
+[19:52:58] [system: thinking_tokens]
+[19:52:58] [system: thinking_tokens]
+[19:52:58] [system: thinking_tokens]
+[19:52:58] [system: thinking_tokens]
+[19:52:58] [system: thinking_tokens]
+[19:52:58] [system: thinking_tokens]
+[19:52:58] [system: thinking_tokens]
+[19:52:58] [system: thinking_tokens]
+[19:52:58] [system: thinking_tokens]
+[19:52:58] [system: thinking_tokens]
+[19:52:58] [system: thinking_tokens]
+[19:52:58] [system: thinking_tokens]
+[19:52:58] [system: thinking_tokens]
+[19:52:58] [system: thinking_tokens]
+[19:52:58] [system: thinking_tokens]
+[19:52:58] [system: thinking_tokens]
+[19:52:58] [system: thinking_tokens]
+[19:52:58] [system: thinking_tokens]
+[19:52:58] [system: thinking_tokens]
+[19:52:58] [system: thinking_tokens]
+[19:52:58] [system: thinking_tokens]
+[19:52:58] [system: thinking_tokens]
+[19:52:58] [system: thinking_tokens]
+[19:52:58] [system: thinking_tokens]
+[19:52:58] [system: thinking_tokens]
+[19:52:58] [system: thinking_tokens]
+[19:52:58] [system: thinking_tokens]
+[19:52:58] [system: thinking_tokens]
+[19:52:58] [system: thinking_tokens]
+[19:52:58] [system: thinking_tokens]
+[19:52:58] [system: thinking_tokens]
+[19:52:58] [system: thinking_tokens]
+[19:52:58] [system: thinking_tokens]
+[19:52:58] [system: thinking_tokens]
+[19:52:58] [system: thinking_tokens]
+[19:52:58] [system: thinking_tokens]
+[19:52:58] [system: thinking_tokens]
+[19:52:58] [system: thinking_tokens]
+[19:52:58] [system: thinking_tokens]
+[19:52:58] [system: thinking_tokens]
+[19:52:58] [system: thinking_tokens]
+[19:52:58] [system: thinking_tokens]
+[19:52:58] [system: thinking_tokens]
+[19:52:58] [system: thinking_tokens]
+[19:52:58] [system: thinking_tokens]
+[19:52:58] [system: thinking_tokens]
+[19:52:58] [system: thinking_tokens]
+[19:52:58] [system: thinking_tokens]
+[19:52:58] [system: thinking_tokens]
+[19:52:58] [system: thinking_tokens]
+[19:52:58] [system: thinking_tokens]
+[19:52:58] [system: thinking_tokens]
+[19:52:58] [system: thinking_tokens]
+[19:52:58] [system: thinking_tokens]
+[19:52:58] [system: thinking_tokens]
+[19:52:58] [system: thinking_tokens]
+[19:52:58] [system: thinking_tokens]
+[19:52:58] [system: thinking_tokens]
+[19:52:58] [system: thinking_tokens]
+[19:52:58] [system: thinking_tokens]
+[19:52:58] [system: thinking_tokens]
+[19:52:58] [system: thinking_tokens]
+[19:52:58] [system: thinking_tokens]
+[19:52:59] [system: thinking_tokens]
+[19:52:59] [system: thinking_tokens]
+[19:52:59] [system: thinking_tokens]
+[19:52:59] [system: thinking_tokens]
+[19:52:59] [system: thinking_tokens]
+[19:52:59] [system: thinking_tokens]
+[19:52:59] [system: thinking_tokens]
+[19:52:59] 💭 All three prompt files exist in the inbox with correct frontmatter. Now I need to run the audit pass: invoke the `prompt-auditor` agent on each of the 3 prompt files. These are independent audits, so I can run them in parallel in a single message.
+
+The command says: "for each prompt file the creator wrote, invoke the `prompt-auditor` agent on that path."
+
+Let me launch 3 audit agents in parallel (run_in_background: false since I need their reports before final output — actually, I can launch the…
+[19:53:01] All 3 prompts are in the inbox with correct frontmatter. Now running the audit pass — invoking `prompt-auditor` on each prompt file in parallel.
+
+
+[19:53:01] [agent:dark-factory:prompt-auditor] Audit prompt 1 (model)
+    prompt: Audit the dark-factory prompt file at `prompts/1-spec-002-config-job-namespace-model.md` (repo-root-relative path — resolve against the current working directo…
+[19:53:01] [system: task_started]
+[19:53:01] [agent:dark-factory:prompt-auditor] Audit prompt 2 (spawner)
+    prompt: Audit the dark-factory prompt file at `prompts/2-spec-002-config-job-namespace-spawner.md` (repo-root-relative path — resolve against the current working direc…
+[19:53:01] [system: task_started]
+[19:53:01] [agent:dark-factory:prompt-auditor] Audit prompt 3 (doc)
+    prompt: Audit the dark-factory prompt file at `prompts/3-spec-002-config-job-namespace-doc.md` (repo-root-relative path — resolve against the current working directory…
+[19:53:01] [system: task_started]
+[19:53:02] [system: task_progress]
+[19:53:02] [read] /workspace/prompts/1-spec-002-config-job-namespace-model.md
+[19:53:02] [system: task_progress]
+[19:53:02] [read] /workspace/prompts/3-spec-002-config-job-namespace-doc.md
+[19:53:02] [system: task_progress]
+[19:53:02] $ ls -la /workspace/prompts/ /workspace/prompts/in-progress/ 2>/dev/null; echo "---"; ls /workspace/specs/ /workspace/specs/in-progress/ 2>/dev/null
+[19:53:02] [system: task_progress]
+[19:53:02] $ ls -la /workspace/prompts/ && echo "---IN-PROGRESS---" && ls -la /workspace/prompts/in-progress/ 2>/dev/null
+[19:53:02]   → 179 lines read
+[19:53:02]   → 53 lines read
+[19:53:02] [system: task_progress]
+[19:53:02] [read] /workspace/prompts/2-spec-002-config-job-namespace-spawner.md
+[19:53:02] [system: task_progress]
+[19:53:02] $ ls -la /workspace/prompts/ && echo "---INBOX---" && ls -la /workspace/prompts/in-progress/ 2>/dev/null
+[19:53:02]   → 233 lines read
+[19:53:03] [system: task_progress]
+[19:53:03] [read] /workspace/specs/in-progress/002-config-job-namespace.md
+[19:53:03] [system: task_progress]
+[19:53:03] $ dark-factory config 2>&1 | head -60; echo "=== exit: $? ==="
+[19:53:04]   → 99 lines read
+[19:53:04] [system: task_progress]
+[19:53:04] $ ls -la && echo "---SPEC---" && ls specs/ && echo "---SPEC FILE---" && cat specs/002-config-job-namespace.md 2>/dev/null | head -100
+[19:53:04] [system: task_progress]
+[19:53:04] $ cat .dark-factory.yaml 2>/dev/null && echo "---DARK-FACTORY CONFIG---" && dark-factory config 2>&1 | head -50
+[19:53:04] [system: task_progress]
+[19:53:04] $ (dark-factory config 2>&1 | head -50 || echo "dark-factory CLI not found")
+[19:53:04] [system: task_progress]
+[19:53:04] $ ls -la && echo "---SPECS---" && ls specs/ 2>/dev/null && echo "---SPEC IN-PROGRESS---" && ls specs/in-progress/ 2>/dev/null
+[19:53:05] [system: task_progress]
+[19:53:05] $ cat /workspace/.dark-factory.yaml 2>/dev/null; echo "=== .dark-factory.yaml end ==="; ls -la /workspace/ | head -50
+[19:53:05] [system: task_progress]
+[19:53:05] [read] /workspace/prompts/2-spec-002-config-job-namespace-spawner.md
+[19:53:05]   → 233 lines read
+[19:53:05] [system: task_progress]
+[19:53:05] $ ls specs/ideas/ specs/completed/ 2>/dev/null; echo "---"; find specs -name '*002*' 2>/dev/null; echo "---GREP spec---"; grep -rl "002-config-job-namespace" specs/ 2>/dev/null
+[19:53:05] [system: task_progress]
+[19:53:05] $ ls -la docs/ && echo "---MOUNTS---" && grep -rn "workspace\|mount" .dark-factory.yaml 2>/dev/null; echo "---git remote---"; git remote get-url origin
+[19:53:05] [system: task_progress]
+[19:53:05] [read] /workspace/.dark-factory.yaml
+[19:53:05] [system: task_progress]
+[19:53:05] [read] /workspace/specs/in-progress/002-config-job-namespace.md
+[19:53:05]   → 7 lines read
+[19:53:05]   → 99 lines read
+[19:53:07] [system: task_progress]
+[19:53:07] [read] /workspace/docs/agent-crd-specification.md
+[19:53:07] [system: task_progress]
+[19:53:07] [read] /workspace/prompts/1-spec-002-config-job-namespace-model.md
+[19:53:07]   → 179 lines read
+[19:53:07]   → 123 lines read
+[19:53:08] [system: task_progress]
+[19:53:08] [read] /workspace/specs/in-progress/002-config-job-namespace.md
+[19:53:08]   → 99 lines read
+[19:53:09] [system: task_progress]
+[19:53:09] [read] /workspace/pkg/spawner/job_spawner.go
+[19:53:09] [system: task_progress]
+[19:53:09] [read] /workspace/k8s/apis/agent.benjamin-borbe.de/v1/types.go
+[19:53:09]   → 520 lines read
+[19:53:09]   → 292 lines read
+[19:53:09] [system: task_progress]
+[19:53:09] $ cat /workspace/go.mod | head -20; echo "==="; grep -n 'module ' /workspace/go.mod
+[19:53:09] [system: task_progress]
+[19:53:09] $ wc -l /workspace/k8s/apis/agent.benjamin-borbe.de/v1/types.go /workspace/k8s/apis/agent.benjamin-borbe.de/v1/types_test.go /workspace/k8s/apis/agent.benjamin-borbe.de/v1/zz_generated.deepcopy.go /wor…
+[19:53:09] ⚠ [bash output]
+go 1.27.0
+
+require (
+	github.com/IBM/sarama v1.60.2
+	github.com/bborbe/agent v0.85.1
+	github.com/bborbe/cqrs v0.6.10
+	github.com/bborbe/cron v1.8.29
+	github.com/bborbe/errors v1.6.0
+	github.com/bborbe/http v1.26.25
+	github.com/bborbe/k8s v1.14.16
+	github.com/bborbe/kafka v1.25.11
+	github.com/bborbe/log v1.6.25
+	github.com/bborbe/metrics v0.6.1
+	github.com/bborbe/run v1.10.2
+	github.com/bborbe/sentry v1.10.0
+	github.com/bborbe/service v1.10.10
+	github.com/bborbe/time v1.27.11
+	github.com/bborbe/validation v1.4.23
+===
+1:module github.com/bborbe/agent-task-executor
+[19:53:10] [system: task_progress]
+[19:53:10] [read] /workspace/k8s/apis/agent.benjamin-borbe.de/v1/types.go
+[19:53:10]   → 292 lines read
+[19:53:12] [system: task_progress]
+[19:53:12] [read] /workspace/prompts/1-spec-002-config-job-namespace-model.md
+[19:53:12]   → 179 lines read
+[19:53:13] [system: task_progress]
+[19:53:13] $ grep -rn "func Errorf" $(go env GOPATH)/pkg/mod/github.com/bborbe/errors@*/ 2>/dev/null | head; echo "=== errors package files ==="; ls $(go env GOPATH)/pkg/mod/github.com/bborbe/errors@*/ 2>/dev/nul…
+[19:53:13] [system: task_progress]
+[19:53:13] [read] /workspace/k8s/apis/agent.benjamin-borbe.de/v1/zz_generated.deepcopy.go
+[19:53:13] ⚠ [bash output]
+CHANGELOG.md
+LICENSE
+Makefile
+README.md
+docs
+error-with-cause_test.go
+error-with-message_test.go
+error-with-unwrap-list_test.go
+error-with-unwrap_test.go
+errors_as.go
+errors_as_test.go
+errors_cause.go
+errors_data-context.go
+errors_data-context_test.go
+errors_data-error.go
+errors_data-error_test.go
+errors_is.go
+errors_is_test.go
+errors_join.go
+errors_join_test.go
+[19:53:13]   → 182 lines read
+[19:53:15] [system: task_progress]
+[19:53:15] $ grep -n "agentv1\|agent.benjamin-borbe.de/v1\|JobNamespace\|ResolveJobNamespace" /workspace/pkg/config_resolver.go /workspace/pkg/agent_configuration.go /workspace/pkg/k8s_connector.go 2>/dev/null
+[19:53:15] [system: task_progress]
+[19:53:15] $ wc -l /workspace/pkg/spawner/job_spawner_test.go /workspace/pkg/config_resolver.go /workspace/pkg/agent_configuration.go /workspace/pkg/k8s_connector.go /workspace/pkg/job_watcher.go /workspace/pkg/f…
+[19:53:15] ⚠ [bash output]
+/workspace/pkg/config_resolver.go:15:	agentv1 "github.com/bborbe/agent-task-executor/k8s/apis/agent.benjamin-borbe.de/v1"
+/workspace/pkg/config_resolver.go:39:	provider k8s.Provider[agentv1.Config],
+/workspace/pkg/config_resolver.go:47:	provider  k8s.Provider[agentv1.Config]
+/workspace/pkg/config_resolver.go:103:func convert(ctx context.Context, obj agentv1.Config, branch string) (AgentConfiguration, error) {
+/workspace/pkg/agent_configuration.go:10:	agentv1 "github.com/bborbe/agent-task-executor/k8s/apis/agent.benjamin-borbe.de/v1"
+/workspace/pkg/agent_configuration.go:54:	Resources *agentv1.AgentResources
+/workspace/pkg/agent_configuration.go:64:	Trigger *agentv1.Trigger
+/workspace/pkg/agent_configuration.go:73:// the configured value when non-nil, else agentv1.DefaultZombieJobTimeoutSeconds.
+/workspace/pkg/agent_configuration.go:78:	return agentv1.DefaultZombieJobTimeoutSeconds
+/workspace/pkg/k8s_connector.go:20:	agentv1 "github.com/bborbe/agent-task-executor/k8s/apis/agent.benjamin-borbe.de/v1"
+/workspace/pkg/k8s_connector.go:32:	crdMinZombieSweeperInterval = float64(agentv1.MinZombieSweeperIntervalSeconds)
+/workspace/pkg/k8s_connector.go:33:	crdMinZombieJobTimeout      = float64(agentv1.MinZombieJobTimeoutSeconds)
+/workspace/pkg/k8s_connector.go:243:		// admission guards in k8s/apis/agent.benjamin-borbe.de/v1/types.go.
+[19:53:15] [system: task_progress]
+[19:53:15] [read] /workspace/k8s/apis/agent.benjamin-borbe.de/v1/types_test.go
+[19:53:15]   → 795 lines read
+[19:53:17] [system: task_progress]
+[19:53:17] [read] /workspace/pkg/agent_configuration.go
+[19:53:17]   → 120 lines read
+[19:53:17] [system: task_progress]
+[19:53:17] [read] /workspace/pkg/config_resolver.go
+[19:53:17]   → 136 lines read
+[19:53:18] [system: task_progress]
+[19:53:18] $ sed -n '1,80p' /workspace/pkg/spawner/job_spawner_test.go
+[19:53:18] [system: task_progress]
+[19:53:18] $ grep -n "test-ns\|Jobs(\"test-ns\"\|BeforeEach\|applyTaskIDLabel\|IsJobActive\|CountActiveJobs\|AlreadyExists\|ActiveDeadlineSeconds\|Kafka mTLS\|unexpected K8s error\|VolumeClaim is set" /workspace/…
+[19:53:18] ⚠ [bash output]
+		)
+	})
+
+	Describe("SpawnJob", func() {
+		It("creates a job with correct name and env vars", func() {
+			task := lib.Task{
+				TaskIdentifier: lib.TaskIdentifier("abc12345-rest-ignored"),
+				Frontmatter: lib.TaskFrontmatter{
+					"assignee": "claude",
+					"phase":    "planning",
+				},
+				Content: lib.TaskContent("do the work"),
+			}
+			config := pkg.AgentConfiguration{
+				Assignee: "claude",
+				Image:    "my-image:latest",
+				Env:      map[string]string{"GEMINI_API_KEY": "test-gemini-key"},
+			}
+			_, err := jobSpawner.SpawnJob(ctx, task, config)
+			Expect(err).To(BeNil())
+[19:53:18] ⚠ [bash output]
+1171:					Namespace: "test-ns",
+1179:				"test-ns",
+1189:			active, err := jobSpawner.IsJobActive(ctx, lib.TaskIdentifier("tid-5"))
+1204:				"test-ns",
+1213:			active, err := jobSpawner.IsJobActive(ctx, lib.TaskIdentifier("tid-list-err"))
+1219:	Describe("applyTaskIDLabel", func() {
+1222:			// applyTaskIDLabel is called BEFORE the K8s Create call, so the
+1260:	Describe("ActiveDeadlineSeconds", func() {
+1263:		It("stamps ActiveDeadlineSeconds from config", func() {
+1278:			job, err := fakeClient.BatchV1().Jobs("test-ns").Get(ctx, jobName, metav1.GetOptions{})
+1280:			Expect(job.Spec.ActiveDeadlineSeconds).NotTo(BeNil())
+1281:			Expect(*job.Spec.ActiveDeadlineSeconds).To(Equal(int64(900)))
+1284:		It("uses default ActiveDeadlineSeconds when config is unset", func() {
+1298:			job, err := fakeClient.BatchV1().Jobs("test-ns").Get(ctx, jobName, metav1.GetOptions{})
+1300:			Expect(job.Spec.ActiveDeadlineSeconds).NotTo(BeNil())
+1301:			Expect(*job.Spec.ActiveDeadlineSeconds).To(Equal(int64(1800)))
+1305:	// Regression guard: SpawnJob and IsJobActive must agree on the label key used
+1308:	Describe("SpawnJob + IsJobActive label contract", func() {
+1309:		It("IsJobActive returns true for a Job just spawned via SpawnJob (same taskID)", func() {
+1324:			active, err := jobSpawner.IsJobActive(ctx, taskID)
+[19:53:19] [system: task_progress]
+[19:53:19] [read] /workspace/pkg/k8s_connector.go
+[19:53:19]   → 267 lines read
+[19:53:20] [system: task_progress]
+[19:53:20] [read] /workspace/pkg/config_resolver_test.go
+[19:53:20] [system: task_progress]
+[19:53:20] [read] /workspace/pkg/agent_configuration_test.go
+[19:53:20]   → 242 lines read
+[19:53:20]   → 174 lines read
+[19:53:21] [system: task_progress]
+[19:53:21] [read] /workspace/pkg/spawner/job_spawner_test.go (offset=78, limit=130)
+[19:53:21]   → 129 lines read
+[19:53:23] [system: task_progress]
+[19:53:24] $ ls /home/node/.claude/plugins/marketplaces/coding/docs/documentation-guide.md 2>&1; echo "---"; ls /home/node/.claude/plugins/marketplaces/coding/docs/ 2>/dev/null | head -60
+[19:53:24] [system: task_progress]
+[19:53:24] $ echo "=== doc greps (current state, BEFORE change) ===" && echo "-- jobNamespace --" && grep -c 'jobNamespace' docs/agent-crd-specification.md; echo "-- agents-sandbox --" && grep -c 'agents-sandbox'…
+[19:53:24] ⚠ [bash output]
+go-logging-guide.md
+go-makefile-commands.md
+go-mocking-guide.md
+go-mod-dependency-fix-guide.md
+go-mod-replace-guide.md
+go-package-layout-guide.md
+go-parse-pattern.md
+go-patterns.md
+go-precommit.md
+go-prometheus-metrics-guide.md
+go-security-linting.md
+go-service-implementation-patterns.md
+go-state-machine-pattern.md
+go-test-types-guide.md
+go-testing-guide.md
+go-time-injection.md
+go-tools-versioning-guide.md
+go-validation-framework-guide.md
+k8s-manifest-guide.md
+markdown-todo-guide.md
+[19:53:24] [system: task_progress]
+[19:53:24] $ head -30 /workspace/pkg/job_watcher_internal_test.go; echo "=== grep package decls of all *_test.go in pkg/ ==="; grep -l "package pkg$" /workspace/pkg/*_internal_test.go 2>/dev/null; echo "---"; gre…
+[19:53:24] [system: task_progress]
+[19:53:24] $ ls /workspace/pkg/ /workspace/pkg/spawner/ 2>/dev/null; echo "=== job_watcher files ==="; ls /workspace/pkg/job_watcher* 2>/dev/null
+[19:53:24] [system: task_progress]
+[19:53:24] $ grep -n "Namespace).To(Equal\|Namespace).To\|Namespace ==\|\.Namespace" /workspace/pkg/spawner/job_spawner_test.go | head -40
+[19:53:24] [system: task_progress]
+[19:53:24] [read] /workspace/pkg/spawner/job_spawner_test.go (offset=420, limit=120)
+[19:53:24]   → 119 lines read
+[19:53:27] [system: task_progress]
+[19:53:27] [read] /workspace/pkg/spawner/job_spawner_test.go (offset=860, limit=115)
+[19:53:27]   → 114 lines read
+[19:53:28] [system: task_progress]
+[19:53:28] [read] /workspace/pkg/spawner/job_spawner_test.go (offset=1300, limit=90)
+[19:53:28]   → 89 lines read
+[19:53:31] [system: task_progress]
+[19:53:31] [read] /workspace/prompts/2-spec-002-config-job-namespace-spawner.md
+[19:53:31]   → 233 lines read
+[19:53:32] [system: task_progress]
+[19:53:32] [read] /workspace/pkg/agent_configuration.go
+[19:53:32] [system: task_progress]
+[19:53:32] [read] /workspace/pkg/config_resolver.go
+[19:53:32]   → 120 lines read
+[19:53:32]   → 136 lines read
+[19:53:34] [system: task_progress]
+[19:53:34] $ grep -n "agentv1" /workspace/pkg/spawner/job_spawner_test.go; echo "---"; grep -n "agentv1" /workspace/pkg/spawner/*.go; echo "---go.mod module---"; head -5 /workspace/go.mod; echo "---agent config t…
+[19:53:34] [system: task_progress]
+[19:53:34] $ grep -n "kubectl\|docker\|make build\|make buca\|dark-factory\|go mod vendor\|git " /workspace/prompts/2-spec-002-config-job-namespace-spawner.md
+[19:53:34] ⚠ [bash output]
+219:- Do NOT commit — dark-factory handles git.
+232:Do NOT run `docker`, `make build`, `kubectl`, `dark-factory`, or `git` commands in this prompt — the container cannot execute them and the daemon does not check their exit codes.
+[19:53:38] [system: task_progress]
+[19:53:38] $ ls /workspace/vendor 2>/dev/null && echo "VENDOR EXISTS" || echo "no vendor dir"; echo "---k8s module---"; ls -d $(go env GOPATH)/pkg/mod/github.com/bborbe/k8s* 2>/dev/null; echo "---libtime---"; ls …
+[19:53:38] ⚠ [Bash] error: Exit code 1\nno vendor dir\n---k8s module---\n/home/node/go/pkg/mod/github.com/bborbe/k8s@v1.14.16\n---libtime---\n(eval):1: no matches found: /home/node/go/pkg/mod/github.com/bborbe/time*
+[19:53:39] [system: task_progress]
+[19:53:39] $ grep -nE '^(test|precommit|test:|precommit:)' /workspace/Makefile /workspace/Makefile.precommit 2>/dev/null | head -20; echo "=== docs ==="; ls /workspace/docs/ 2>/dev/null; echo "=== coding docs ===…
+[19:53:39] [system: task_progress]
+[19:53:39] $ ls /home/node/.claude/plugins/marketplaces/coding/docs/ 2>/dev/null | head -50
+[19:53:39] ⚠ [bash output]
+/workspace/Makefile.precommit:5:precommit: ensure format generate test check addlicense
+/workspace/Makefile.precommit:38:test:
+=== docs ===
+agent-crd-specification.md
+=== coding docs ===
+-rw-r--r-- 1 node node 7388 Aug 23 22:06 /home/node/.claude/plugins/marketplaces/coding/docs/go-patterns.md
+-rw-r--r-- 1 node node 10940 Aug 23 22:06 /home/node/.claude/plugins/marketplaces/coding/docs/go-error-wrapping-guide.md
+-rw-r--r-- 1 node node 20087 Aug 23 22:06 /home/node/.claude/plugins/marketplaces/coding/docs/go-testing-guide.md
+-rw-r--r-- 1 node node 26720 Aug 23 22:06 /home/node/.claude/plugins/marketplaces/coding/docs/go-kubernetes-crd-controller-guide.md
+[19:53:39] ⚠ [bash output]
+go-functional-options-pattern.md
+go-glog-guide.md
+go-http-handler-refactoring-guide.md
+go-http-service-guide.md
+go-json-error-handler-guide.md
+go-k8s-binary-conventions.md
+go-kubernetes-crd-controller-guide.md
+go-library-guide.md
+go-licensing-guide.md
+go-linting-guide.md
+go-logging-guide.md
+go-makefile-commands.md
+go-mocking-guide.md
+go-mod-dependency-fix-guide.md
+go-mod-replace-guide.md
+go-package-layout-guide.md
+go-parse-pattern.md
+go-patterns.md
+go-precommit.md
+go-prometheus-metrics-guide.md
+[19:53:40] [system: task_progress]
+[19:53:40] $ grep -n "bborbe/time\|bborbe/k8s\|bborbe/agent " /workspace/go.mod
+[19:53:40] [system: task_progress]
+[19:53:40] $ grep -rn "func (.*ObjectMetaBuilder) SetNamespace" /home/node/go/pkg/mod/github.com/bborbe/k8s@v1.14.16/ 2>/dev/null; echo "---Namespace type---"; grep -rn "type Namespace string" /home/node/go/pkg/m…
+[19:53:40] [system: task_progress]
+[19:53:40] [read] /workspace/Makefile
+[19:53:40] [system: task_progress]
+[19:53:40] [read] /workspace/Makefile.precommit
+[19:53:40]   → 99 lines read
+[19:53:40]   → 35 lines read
+[19:53:42] [system: task_progress]
+[19:53:42] $ ls -d /home/node/go/pkg/mod/github.com/bborbe/time@* 2>/dev/null; grep -rn "func NewCurrentDateTime\|func (.*) SetNow" /home/node/go/pkg/mod/github.com/bborbe/time@v1.27.11/*.go 2>/dev/null | head; e…
+[19:53:42] [system: task_progress]
+[19:53:42] $ ls -d /home/node/go/pkg/mod/k8s.io/client-go@* 2>/dev/null | head -2; echo "---Action.Matches---"; grep -rn "func (.*Action) Matches" /home/node/go/pkg/mod/k8s.io/client-go@*/testing/actions.go 2>/de…
+[19:53:44] [system: task_progress]
+[19:53:44] $ grep -rn "Matches(" /home/node/go/pkg/mod/k8s.io/client-go@v0.36.4/testing/actions.go | head; echo "---interface def---"; sed -n '505,530p' /home/node/go/pkg/mod/k8s.io/client-go@v0.36.4/testing/acti…
+[19:54:01] [system: task_progress]
+[19:54:01] [read] /workspace/docs/dod.md
+[19:54:01] [system: task_progress]
+[19:54:01] $ ls /workspace/docs/ && echo "---" && git -C /workspace remote get-url origin 2>&1 && echo "---" && grep -n 'hideGit\|workflow' /workspace/.dark-factory.yaml
+[19:54:01] ⚠ [Read] error: File does not exist. Note: your current working directory is /workspace.
+[19:54:03] [system: task_progress]
+[19:54:03] $ grep -n 'priorityClassName' /workspace/docs/agent-crd-specification.md | head; echo "---"; awk 'NR>=49 && NR<=51' /workspace/docs/agent-crd-specification.md
+[19:54:04] [system: task_progress]
+[19:54:04] $ grep -n "Errorf\|fmt.Errorf\|new error without\|no cause" /home/node/.claude/plugins/marketplaces/coding/docs/go-error-wrapping-guide.md | head -20
+[19:54:04] [system: task_progress]
+[19:54:04] $ head -12 /workspace/pkg/k8s_connector_test.go; echo "=== Equal callers ==="; grep -rn "\.Equal(" /workspace/pkg/*.go /workspace/k8s/apis/agent.benjamin-borbe.de/v1/*.go | grep -v _test | head; echo "…
+[19:54:04] ⚠ [bash output]
+4:Never use `fmt.Errorf` or bare `return err`. The library enriches errors
+26:| `Errorf` | Create new error with formatted message | `Errorf(ctx, format, args...) error` |
+45:return errors.Errorf(ctx, "unsupported period type: %s", periodType)
+100:2. **Never `fmt.Errorf`** — use `errors.Wrapf` (wrapping) or `errors.Errorf` (new error)
+104:6. **Remove unused imports** — after replacing `fmt.Errorf`, remove `"fmt"` if unused
+126:    return errors.Errorf(context.Background(), "invalid: %s", input)
+131:    return errors.Errorf(ctx, "invalid: %s", input)
+135:### Fix: Replace fmt.Errorf
+139:return fmt.Errorf("fetch failed: %w", err)
+149:return fmt.Errorf("unknown type: %s", t)
+151:// CORRECT — no cause to wrap
+152:return errors.Errorf(ctx, "unknown type: %s", t)
+181:**fmt.Errorf**
+183:return fmt.Errorf("failed: %w", err) // No context data, no stack trace
+245:**Applies when**: any `*.go` file outside `main.go`, `*_test.go`, `vendor/` calls `fmt.Errorf(...)`.
+247:**Why**: `fmt.Errorf` loses ctx-derived structured data and stack traces. Use `errors.Wrapf(ctx, err, "...")` (wrapping) or `errors.Errorf(ctx, "...", args...)` (new error) from `github.com/bborbe/errors` instead.
+252:return fmt.Errorf("fetch failed: %w", err)
+303:    return errors.Errorf(ctx, "invalid: %s", input)
+[19:54:04] ⚠ [bash output]
+// Copyright (c) 2026 Benjamin Borbe All rights reserved.
+// Use of this source code is governed by a BSD-style
+// license that can be found in the LICENSE file.
+
+//go:generate go run github.com/maxbrunsfeld/counterfeiter/v6@v6.12.2 -generate
+
+package pkg_test
+
+import (
+	"context"
+	stderrors "errors"
+
+=== Equal callers ===
+/workspace/k8s/apis/agent.benjamin-borbe.de/v1/types.go:134:		return a.Spec.Equal(o.Spec)
+/workspace/k8s/apis/agent.benjamin-borbe.de/v1/types.go:136:		return a.Spec.Equal(o.Spec)
+=== sibling funcs ===
+/workspace/pkg/config_resolver.go:38:func NewConfigResolver(
+/workspace/pkg/config_resolver.go:52:func (r *configResolver) Resolve(
+/workspace/k8s/apis/agent.benjamin-borbe.de/v1/types.go:131:func (a Config) Equal(other libk8s.Type) bool {
+/workspace/k8s/apis/agent.benjamin-borbe.de/v1/types.go:158:func (s ConfigSpec) Equal(o ConfigSpec) bool {
+[19:54:22] [system: task_updated]
+[19:54:22] [system: task_notification]
+[19:54:22]   ← agent reply: All verification complete. Here is the full audit report.
+[19:54:23] [system: task_progress]
+[19:54:23] $ grep -rln "^func Test[A-Z]" /workspace/pkg/ /workspace/k8s/ /workspace/main* 2>/dev/null; echo "=== stdlib test files count ==="; grep -rln "^func Test[A-Z]" /workspace --include="*_test.go" 2>/dev/n…
+[19:54:23] [system: task_progress]
+[19:54:23] $ grep -rn "DescribeTable\|table-driven\|stdlib\|plain test" /home/node/.claude/plugins/marketplaces/coding/docs/go-testing-guide.md | head -10
+[19:54:23] ⚠ [Bash] error: Exit code 2\n/workspace/pkg/envtest/job_watcher_envtest_test.go\n/workspace/pkg/metrics/metrics_suite_test.go\n/workspace/pkg/agent_configuration_test.go\n/workspace/pkg/probe/probe_suite_test.go\n/workspace/pkg/spawner/job_spawner_test.go\n/workspace/k8s/apis/agent.benjamin-borbe.de/v1/types_test.go\n/workspace/pkg/handler/task_event_handler_test.go\n/workspace/main_test.go\n=== stdlib test file…
+[19:54:27] [system: task_progress]
+[19:54:27] $ ls /home/node/.claude/plugins/marketplaces/coding/docs/ 2>/dev/null | grep -iE "glog|patterns|error-wrap|testing|changelog|definition|json|http|time" ; echo "---all docs---"; ls /home/node/.claude/pl…
+[19:54:27] [system: task_progress]
+[19:54:27] $ head -15 /workspace/CHANGELOG.md; echo "---SpawnJob callers---"; grep -rn "\.SpawnJob(\|SpawnJob(" /workspace --include=*.go | grep -v _test.go | grep -v "func.*SpawnJob"
+[19:54:27] ⚠ [bash output]
+go-concurrency-patterns.md
+go-context-cancellation-in-loops.md
+go-cqrs.md
+go-doc-best-practices.md
+go-dockerfile-guide.md
+go-enum-type-pattern.md
+go-error-wrapping-guide.md
+go-factory-pattern.md
+go-filter-pattern.md
+go-functional-composition-pattern.md
+go-functional-options-pattern.md
+go-glog-guide.md
+go-http-handler-refactoring-guide.md
+go-http-service-guide.md
+go-json-error-handler-guide.md
+go-k8s-binary-conventions.md
+go-kubernetes-crd-controller-guide.md
+go-library-guide.md
+go-licensing-guide.md
+go-linting-guide.md
+[19:54:29] [system: task_progress]
+[19:54:29] $ grep -rn "SpawnJob(" /workspace/pkg /workspace/*.go 2>/dev/null | grep -v "_test.go" | grep -v "func (s \*jobSpawner) SpawnJob"
+[19:54:29] ⚠ [bash output]
+/workspace/pkg/spawner/job_spawner.go:42:	SpawnJob(ctx context.Context, task lib.Task, config pkg.AgentConfiguration) (string, error)
+/workspace/pkg/handler/task_event_handler.go:505:	jobName, err := h.jobSpawner.SpawnJob(ctx, task, *config)
+[19:54:29] [system: task_progress]
+[19:54:29] $ cat /workspace/.golangci.yml; echo "=== search for ast-grep / rules enforcement ==="; grep -rn "no-stdlib-table-tests\|no-testing-t-direct\|ast-grep\|rules/go" /workspace/.golangci.yml /workspace/Mak…
+[19:54:29] [system: task_progress]
+[19:54:29] $ grep -rn "rules/go\|no-stdlib-table-tests\|no-testing-t-direct" /home/node/.claude/plugins/marketplaces/coding/docs/go-testing-guide.md | head; echo "=== where do these rules live? ==="; find /home/n…
+[19:54:29] ⚠ [bash output]
+          - revive
+        text: "exported"
+      - linters:
+          - dupl
+        path: "_test\\.go$"
+      - linters:
+          - errcheck
+        path: "_test\\.go$"
+      - linters:
+          - unparam
+        path: "_test\\.go$"
+      - linters:
+          - gosec
+        path: "_test\\.go$"
+
+formatters:
+  enable:
+    - gofmt
+    - goimports
+=== search for ast-grep / rules enforcement ===
+[19:54:29] ⚠ [bash output]
+/home/node/.claude/plugins/marketplaces/coding/docs/go-testing-guide.md:18:### RULE go-testing/no-stdlib-table-tests (MUST)
+/home/node/.claude/plugins/marketplaces/coding/docs/go-testing-guide.md:22:**Enforcement**: `rules/go/no-stdlib-table-tests.yml`
+/home/node/.claude/plugins/marketplaces/coding/docs/go-testing-guide.md:50:### RULE go-testing/no-testing-t-direct (MUST)
+/home/node/.claude/plugins/marketplaces/coding/docs/go-testing-guide.md:54:**Enforcement**: `rules/go/no-testing-t-direct.yml` flags every `func TestXxx(t *testing.T)` declaration. The agent decides per-finding whether the function is the legitimate Ginkgo suite entry-point (`RegisterFailHandler(Fail); RunSpecs(t, "Suite")`) or a stdlib-style test that needs to be ported to Ginkgo — that distinction needs reading the function body's intent, which ast-grep can't do reliably.
+/home/node/.claude/plugins/marketplaces/coding/docs/go-testing-guide.md:83:**Enforcement**: `rules/go/no-bare-error-call.yml` (mechanical first-pass — flags bare method/selector call expression_statements inside Ginkgo It/BeforeEach/JustBeforeEach/AfterEach blocks) + judgment-tier LLM adjudication for void functions whose return is legitimately ignored
+/home/node/.claude/plugins/marketplaces/coding/docs/go-testing-guide.md:116:**Enforcement**: `rules/go/suite-test-file-required.yml` (mechanical first-pass — flags every top-level `var _ = Describe(...)` anchor in a test file) + judgment-tier LLM adjudication for whether a `*_suite_test.go` with `RunSpecs` exists in the same package directory
+/home/node/.claude/plugins/marketplaces/coding/docs/go-testing-guide.md:162:**Enforcement**: `rules/go/main-test-with-compiles.yml` (mechanical first-pass — flags `func main()` declarations in package main files) + judgment-tier LLM adjudication for whether `main_test.go` with a `gexec.Build` Compiles It-block exists in the same directory
+/home/node/.claude/plugins/marketplaces/coding/docs/go-testing-guide.md:243:**Enforcement**: `rules/go/suite-timeout-required.yml` — flags `TestXxx(t *testing.T)` bodies calling `GinkgoConfiguration()` without an assignment to `suiteConfig.Timeout`; agent dismisses helper-set, decorator-set, and aliased-import (`g.GinkgoConfiguration()`) cases.
+/home/node/.claude/plugins/marketplaces/coding/docs/go-testing-guide.md:270:**Enforcement**: `rules/go/counterfeiter-mocks-required.yml` (mechanical first-pass — flags every interface type declaration in production code) + judgment-tier LLM adjudication for whether a `//counterfeiter:generate` directive exists above the interface and a corresponding `mocks/*.go` file is present
+=== where do these rules live? ===
+/home/node/.claude/plugins/marketplaces/coding/rules/go/no-stdlib-table-tests.yml
+/home/node/.claude/plugins/marketplaces/coding/rules/go/no-testing-t-direct.yml
+[19:54:30] [system: task_progress]
+[19:54:30] [read] /workspace/pkg/handler/task_event_handler.go (offset=480, limit=80)
+[19:54:30]   → 79 lines read
+[19:54:35] [system: task_progress]
+[19:54:35] [read] /workspace/pkg/spawner/job_spawner_test.go (offset=836, limit=50)
+[19:54:35] [system: task_progress]
+[19:54:35] [read] /workspace/pkg/spawner/job_spawner_test.go (offset=986, limit=30)
+[19:54:35]   → 29 lines read
+[19:54:35]   → 49 lines read
+[19:54:37] [system: task_progress]
+[19:54:37] $ grep -n "fake.NewClientset\|PrependReactor\|func()\|It(\"\|DescribeTable\|Entry(" /workspace/pkg/spawner/job_spawner_test.go | sed -n '1,80p'
+[19:54:37] ⚠ [bash output]
+1108:		It("returns false when completed job exists (status.succeeded > 0)", func() {
+1119:			fakeClient = fake.NewClientset(job)
+1137:		It("returns false when failed job exists (status.failed > 0, active == 0)", func() {
+1149:			fakeClient = fake.NewClientset(job)
+1167:		It("returns true for newly created job (no status set yet)", func() {
+1176:			fakeClient = fake.NewClientset(job)
+1194:		It("returns error when K8s List call fails", func() {
+1195:			fakeClient.PrependReactor(
+1219:	Describe("applyTaskIDLabel", func() {
+1220:		It("creates new Labels map when job.Labels is nil (via Create reactor)", func() {
+1225:			fakeClient.PrependReactor(
+1260:	Describe("ActiveDeadlineSeconds", func() {
+1263:		It("stamps ActiveDeadlineSeconds from config", func() {
+1284:		It("uses default ActiveDeadlineSeconds when config is unset", func() {
+1308:	Describe("SpawnJob + IsJobActive label contract", func() {
+1309:		It("IsJobActive returns true for a Job just spawned via SpawnJob (same taskID)", func() {
+1330:		It("IsJobActive returns false for a different taskID than the one spawned", func() {
+1349:	Describe("applyTaskIDLabel", func() {
+1350:		It("creates new Labels map when job.Labels is nil (via Create reactor)", func() {
+1355:			fakeClient.PrependReactor(
+[19:54:40] [system: task_progress]
+[19:54:40] $ grep -n '"test-ns"' /workspace/pkg/spawner/job_spawner_test.go
+[19:54:40] [system: task_progress]
+[19:54:40] $ echo "=== git commands ==="; grep -nE '^\s*git\s' prompts/1-spec-002-config-job-namespace-model.md; echo "=== operator-only cmds in verification ==="; sed -n '/<verification>/,/<\/verification>/p' pr…
+[19:54:40] [system: task_progress]
+[19:54:40] [read] /workspace/prompts/3-spec-002-config-job-namespace-doc.md
+[19:54:40] ⚠ [bash output]
+=== git commands ===
+=== operator-only cmds in verification ===
+9:Do NOT run `docker`, `make build`, `kubectl`, `dark-factory`, or `git` commands in this prompt — the container cannot execute them and the daemon does not check their exit codes.
+=== go mod vendor ===
+=== clone/push ===
+=== ALL DONE ===
+[19:54:40]   → 53 lines read
+[19:54:43] [system: task_progress]
+[19:54:43] $ grep -n "spec.priorityClassName\|spec.trigger\|Fields\|spec.jobNamespace" /workspace/docs/agent-crd-specification.md | head; echo "=== line count ==="; wc -l /workspace/docs/agent-crd-specification.md
+[19:54:43] [system: task_progress]
+[19:54:43] $ echo "=== check context file existence ==="; for f in /workspace/k8s/apis/agent.benjamin-borbe.de/v1/types.go /workspace/k8s/apis/agent.benjamin-borbe.de/v1/types_test.go /workspace/k8s/apis/agent.be…
+[19:54:43] ⚠ [bash output]
+=== check context file existence ===
+OK /workspace/k8s/apis/agent.benjamin-borbe.de/v1/types.go
+OK /workspace/k8s/apis/agent.benjamin-borbe.de/v1/types_test.go
+OK /workspace/k8s/apis/agent.benjamin-borbe.de/v1/zz_generated.deepcopy.go
+OK /workspace/pkg/agent_configuration.go
+OK /workspace/pkg/config_resolver.go
+OK /workspace/pkg/k8s_connector.go
+OK /workspace/pkg/config_resolver_test.go
+OK /workspace/pkg/agent_configuration_test.go
+OK /workspace/pkg/job_watcher_internal_test.go
+OK /home/node/.claude/CLAUDE.md
+OK /home/node/.claude/plugins/marketplaces/coding/docs/go-patterns.md
+OK /home/node/.claude/plugins/marketplaces/coding/docs/go-error-wrapping-guide.md
+OK /home/node/.claude/plugins/marketplaces/coding/docs/go-testing-guide.md
+OK /home/node/.claude/plugins/marketplaces/coding/docs/go-kubernetes-crd-controller-guide.md
+[19:54:44] [system: task_progress]
+[19:54:44] $ cat /workspace/.golangci.yml; echo "---Makefile test target---"; grep -n "test:" /workspace/Makefile | head; echo "---precommit---"; grep -nE "precommit|ensure|vendor" /workspace/Makefile.precommit |…
+[19:54:44] ⚠ [bash output]
+formatters:
+  enable:
+    - gofmt
+    - goimports
+---Makefile test target---
+---precommit---
+3:default: precommit
+5:precommit: ensure format generate test check addlicense
+8:ensure:
+11:	rm -rf vendor
+14:	find . -type f -name 'go.mod' -not -path './vendor/*' -exec go run github.com/shoenig/go-modtool@$(GO_MODTOOL_VERSION) -w fmt "{}" \;
+15:	go run github.com/incu6us/goimports-reviser/v3@$(GOIMPORTS_REVISER_VERSION) -project-name github.com/bborbe/agent-task-executor -format -excludes vendor ./...
+16:	find . -type d -name vendor -prune -o -type f -name '*.go' -print0 | xargs -0 -n 10 go run github.com/segmentio/golines@$(GOLINES_VERSION) --max-len=100 -w
+17:	find . -type f -name '*.go' -not -path './vendor/*' -exec gofmt -w "{}" +
+39:	go test -mod=mod -p=$${GO_TEST_PARALLEL:-1} -cover $(TESTFLAGS_RACE) $(shell go list -mod=mod ./... | grep -v /vendor/)
+47:	go vet -mod=mod $(shell go list -mod=mod ./... | grep -v /vendor/)
+50:	GODEBUG=gotypesalias=1 go run github.com/kisielk/errcheck@$(ERRCHECK_VERSION) -ignore '(Close|Write|Fprint)' $(shell go list -mod=mod ./... | grep -v /vendor/ | grep -v k8s/client)
+56:	@PKGS="$(shell go list -mod=mod ./... | grep -v /vendor/)"; \
+92:	--skip-dirs vendor \
+99:	go run github.com/google/addlicense@$(ADDLICENSE_VERSION) -c "Benjamin Borbe" -y $$(date +'%Y') -l bsd $$(find . -name "*.go" -not -path './vendor/*')
+[19:55:14] [system: task_progress]
+[19:55:14] $ head -30 /workspace/prompts/3-spec-002-config-job-namespace-doc.md; echo "..."; grep -n "agents-sandbox\|executor namespace\|jobNamespace" /workspace/docs/agent-crd-specification.md | head
+[19:55:14] [system: task_progress]
+[19:55:14] $ grep -n "WithNamespace\|w.namespace\|k8sinformers" /workspace/pkg/job_watcher.go | head; echo "---factory SpawnJob wiring---"; grep -n "NewJobSpawner\|JobSpawner" /workspace/pkg/factory/factory.go | …
+[19:55:20] [system: task_progress]
+[19:55:20] $ grep -n "jobSpawner.SpawnJob\|IsJobActive\|CountActiveJobs" /workspace/pkg/spawner/job_spawner_test.go | grep -n "" | awk -F: '{print $1}' > /tmp/lineid; grep -n "SpawnJob(ctx" /workspace/pkg/spawner…
+[19:55:22] [system: task_updated]
+[19:55:22] [system: task_notification]
+[19:55:22]   ← agent reply: I have completed the full audit. All code references have been verified against the actual repo, the spec, and the sibling prompts. Here is the complete report.
+[19:55:22] [system: task_progress]
+[19:55:22] [read] /workspace/pkg/spawner/job_spawner_test.go (offset=1219, limit=45)
+[19:55:22]   → 44 lines read
+[19:55:27] [system: task_progress]
+[19:55:27] $ grep -n 'Describe("applyTaskIDLabel"' /workspace/pkg/spawner/job_spawner_test.go; echo "---check for other namespace literals in suite that verify SpawnJob output---"; grep -n 'Expect(job\.Namespace\…
+[19:55:30] [system: task_progress]
+[19:55:30] $ grep -nE "Errorf|ERROR|ErrorLevel|V\(0\)|level" /home/node/.claude/plugins/marketplaces/coding/docs/go-glog-guide.md | head -20
+[19:55:30] [system: task_progress]
+[19:55:30] $ go test -mod=mod ./pkg/spawner/... 2>&1 | tail -5
+[19:55:30] ⚠ [bash output]
+5:Google's [glog](https://github.com/golang/glog) provides more granular logging levels than standard Go logging. This guide explains when to use each level for consistent logging across Go services.
+10:**Applies when**: a Go file calls `glog.Info` / `glog.Infof` for debug, trace, internal-state, or developer-troubleshooting log lines that should be filtered out in production — instead of `glog.V(N).Info...` / `glog.V(N).Infof...` with an appropriate verbosity level (1 for sysop debug, 2 for dev default, 3+ for deep debug). Scope: applies across ALL V levels — V0 is reserved for production-default operator info; everything debug-shaped goes through `V(N)`.
+12:**Why**: V0 (bare `glog.Info`) is the *always-on* production logging level. Every line at V0 ships to log aggregators, gets indexed, and burns CPU on every request whether anyone reads it or not. Using V0 for debug-style logs ("Cache miss for key %s", "Internal state: %+v") produces gigabytes of noise in production, drowns operators in irrelevant detail, and inflates log-storage cost. The `glog.V(N)` mechanism exists exactly to gate verbosity at runtime: V0 stays operator-readable (startup, shutdown, health changes), V1+ stays off by default and turns on for troubleshooting. Inverting the levels means production logs are useless and dev debugging requires a deploy.
+48:glog.Errorf("Failed to authenticate user %s: %v", userID, err)
+68:This is the default production logging level. Only log information that IT operators need to see:
+98:Standard level for development environments:
+128:1. **Be Consistent**: Use the same level for similar types of events across services
+131:4. **Be Measured**: Higher verbosity levels should provide progressively more detail
+136:glog.Errorf("Failed to process user %s request %s: %v", userID, requestID, err)
+[19:55:33] [system: task_started]
+[19:55:57] [system: task_notification]
+[19:56:10] [system: task_progress]
+[19:56:10] $ grep -rn "func (.*JobBuilder) SetApp\|func (.*jobBuilder) SetApp\|SetApp(" /home/node/go/pkg/mod/github.com/bborbe/k8s@v1.14.16/ --include=*.go | grep -v mocks | head
+[19:56:11] [system: task_progress]
+[19:56:11] $ grep -rn "SetApp" /home/node/go/pkg/mod/github.com/bborbe/k8s@v1.14.16/ 2>/dev/null | grep -iv "mocks/" | head
+[19:56:12] [system: task_progress]
+[19:56:12] $ sed -n '95,115p' /home/node/go/pkg/mod/github.com/bborbe/k8s@v1.14.16/k8s_job-builder.go
+[19:56:14] [system: task_progress]
+[19:56:14] $ sed -n '55,95p' /home/node/go/pkg/mod/github.com/bborbe/k8s@v1.14.16/k8s_job-builder.go
+[19:56:14] ⚠ [bash output]
+	return j
+}
+
+func (j *jobBuilder) SetPodSpec(podSpec corev1.PodSpec) JobBuilder {
+	return j.SetPodSpecBuilder(
+		HasBuildPodSpecFunc(func(ctx context.Context) (*corev1.PodSpec, error) {
+			return collection.Ptr(podSpec), nil
+		}),
+	)
+}
+
+func (j *jobBuilder) SetObjectMetaBuild(objectMetaBuilder HasBuildObjectMeta) JobBuilder {
+	j.objectMetaBuilder = objectMetaBuilder
+	return j
+}
+
+func (j *jobBuilder) SetObjectMeta(objectMeta metav1.ObjectMeta) JobBuilder {
+	return j.SetObjectMetaBuild(
+		HasBuildObjectMetaFunc(func(ctx context.Context) (*metav1.ObjectMeta, error) {
+			return collection.Ptr(objectMeta), nil
+[19:56:15] [system: task_progress]
+[19:56:15] $ sed -n '115,160p' /home/node/go/pkg/mod/github.com/bborbe/k8s@v1.14.16/k8s_job-builder.go
+[19:56:15] ⚠ [bash output]
+}
+
+func (j *jobBuilder) SetPodReplacementPolicy(
+	podReplacementPolicy batchv1.PodReplacementPolicy,
+) JobBuilder {
+	j.podReplacementPolicy = &podReplacementPolicy
+	return j
+}
+
+func (j *jobBuilder) Validate(ctx context.Context) error {
+	return validation.All{
+		validation.Name("ObjectMetaBuilder", validation.NotNil(j.objectMetaBuilder)),
+		validation.Name("PodSpecBuilder", validation.NotNil(j.podSpecBuilder)),
+	}.Validate(ctx)
+}
+
+func (j *jobBuilder) Build(ctx context.Context) (*batchv1.Job, error) {
+	if err := j.Validate(ctx); err != nil {
+		return nil, errors.Wrapf(ctx, err, "validate jobBuilder failed")
+	}
+[19:56:16] [system: task_progress]
+[19:56:16] $ sed -n '160,185p' /home/node/go/pkg/mod/github.com/bborbe/k8s@v1.14.16/k8s_job-builder.go
+[19:56:16] ⚠ [bash output]
+	if err != nil {
+		return nil, errors.Wrapf(ctx, err, "build podSpec failed")
+	}
+	if podSpec.RestartPolicy != corev1.RestartPolicyNever &&
+		podSpec.RestartPolicy != corev1.RestartPolicyOnFailure {
+		return nil, errors.Wrapf(ctx, validation.Error, "invalid podSpec restart policy")
+	}
+
+	return &batchv1.Job{
+		TypeMeta: metav1.TypeMeta{
+			Kind:       "Job",
+			APIVersion: "batch/v1",
+		},
+		ObjectMeta: *objectMeta,
+		Spec: batchv1.JobSpec{
+			Template: corev1.PodTemplateSpec{
+				ObjectMeta: metav1.ObjectMeta{
+					Annotations: map[string]string{},
+					Labels:      j.labels,
+				},
+[19:56:20] [system: task_progress]
+[19:56:20] $ ls /workspace/pkg/*_internal_test.go 2>/dev/null; echo "---dod.md---"; head -20 /workspace/docs/dod.md 2>/dev/null || echo "NO docs/dod.md"; echo "---main_internal_test---"; head -5 /workspace/main_i…
+[19:56:41] [system: task_updated]
+[19:56:41] [system: task_notification]
+[19:56:41]   ← agent reply: I have completed the full audit workflow: read the prompt, read the spec, read every referenced source file, verified all external library symbols against the module cache, verified the sibling promp…
+[19:56:42] [system: thinking_tokens]
+[19:56:42] [system: thinking_tokens]
+[19:56:42] [system: thinking_tokens]
+[19:56:42] [system: thinking_tokens]
+[19:56:42] [system: thinking_tokens]
+[19:56:42] [system: thinking_tokens]
+[19:56:42] [system: thinking_tokens]
+[19:56:42] [system: thinking_tokens]
+[19:56:42] [system: thinking_tokens]
+[19:56:42] [system: thinking_tokens]
+[19:56:42] [system: thinking_tokens]
+[19:56:42] [system: thinking_tokens]
+[19:56:42] [system: thinking_tokens]
+[19:56:42] [system: thinking_tokens]
+[19:56:42] [system: thinking_tokens]
+[19:56:42] [system: thinking_tokens]
+[19:56:42] [system: thinking_tokens]
+[19:56:42] [system: thinking_tokens]
+[19:56:42] [system: thinking_tokens]
+[19:56:42] [system: thinking_tokens]
+[19:56:42] [system: thinking_tokens]
+[19:56:42] [system: thinking_tokens]
+[19:56:42] [system: thinking_tokens]
+[19:56:42] [system: thinking_tokens]
+[19:56:42] [system: thinking_tokens]
+[19:56:42] [system: thinking_tokens]
+[19:56:42] [system: thinking_tokens]
+[19:56:42] [system: thinking_tokens]
+[19:56:42] [system: thinking_tokens]
+[19:56:42] [system: thinking_tokens]
+[19:56:42] [system: thinking_tokens]
+[19:56:42] [system: thinking_tokens]
+[19:56:42] [system: thinking_tokens]
+[19:56:42] [system: thinking_tokens]
+[19:56:42] [system: thinking_tokens]
+[19:56:42] [system: thinking_tokens]
+[19:56:42] [system: thinking_tokens]
+[19:56:42] [system: thinking_tokens]
+[19:56:42] [system: thinking_tokens]
+[19:56:42] [system: thinking_tokens]
+[19:56:42] [system: thinking_tokens]
+[19:56:42] [system: thinking_tokens]
+[19:56:42] [system: thinking_tokens]
+[19:56:42] [system: thinking_tokens]
+[19:56:42] [system: thinking_tokens]
+[19:56:42] [system: thinking_tokens]
+[19:56:42] [system: thinking_tokens]
+[19:56:42] [system: thinking_tokens]
+[19:56:42] [system: thinking_tokens]
+[19:56:42] [system: thinking_tokens]
+[19:56:42] [system: thinking_tokens]
+[19:56:42] [system: thinking_tokens]
+[19:56:42] [system: thinking_tokens]
+[19:56:42] [system: thinking_tokens]
+[19:56:42] [system: thinking_tokens]
+[19:56:42] [system: thinking_tokens]
+[19:56:42] [system: thinking_tokens]
+[19:56:42] [system: thinking_tokens]
+[19:56:42] [system: thinking_tokens]
+[19:56:42] [system: thinking_tokens]
+[19:56:42] [system: thinking_tokens]
+[19:56:42] [system: thinking_tokens]
+[19:56:42] [system: thinking_tokens]
+[19:56:42] [system: thinking_tokens]
+[19:56:42] [system: thinking_tokens]
+[19:56:42] [system: thinking_tokens]
+[19:56:42] [system: thinking_tokens]
+[19:56:42] [system: thinking_tokens]
+[19:56:43] [system: thinking_tokens]
+[19:56:43] [system: thinking_tokens]
+[19:56:43] [system: thinking_tokens]
+[19:56:43] [system: thinking_tokens]
+[19:56:43] [system: thinking_tokens]
+[19:56:43] [system: thinking_tokens]
+[19:56:43] [system: thinking_tokens]
+[19:56:43] [system: thinking_tokens]
+[19:56:43] [system: thinking_tokens]
+[19:56:43] [system: thinking_tokens]
+[19:56:43] [system: thinking_tokens]
+[19:56:43] [system: thinking_tokens]
+[19:56:43] [system: thinking_tokens]
+[19:56:43] [system: thinking_tokens]
+[19:56:43] [system: thinking_tokens]
+[19:56:43] [system: thinking_tokens]
+[19:56:43] [system: thinking_tokens]
+[19:56:43] [system: thinking_tokens]
+[19:56:43] [system: thinking_tokens]
+[19:56:43] [system: thinking_tokens]
+[19:56:43] [system: thinking_tokens]
+[19:56:43] [system: thinking_tokens]
+[19:56:43] [system: thinking_tokens]
+[19:56:43] [system: thinking_tokens]
+[19:56:43] [system: thinking_tokens]
+[19:56:43] [system: thinking_tokens]
+[19:56:43] [system: thinking_tokens]
+[19:56:43] [system: thinking_tokens]
+[19:56:43] [system: thinking_tokens]
+[19:56:43] [system: thinking_tokens]
+[19:56:43] [system: thinking_tokens]
+[19:56:43] [system: thinking_tokens]
+[19:56:43] [system: thinking_tokens]
+[19:56:43] [system: thinking_tokens]
+[19:56:43] [system: thinking_tokens]
+[19:56:43] [system: thinking_tokens]
+[19:56:43] [system: thinking_tokens]
+[19:56:43] [system: thinking_tokens]
+[19:56:43] [system: thinking_tokens]
+[19:56:43] [system: thinking_tokens]
+[19:56:43] [system: thinking_tokens]
+[19:56:43] [system: thinking_tokens]
+[19:56:43] [system: thinking_tokens]
+[19:56:43] [system: thinking_tokens]
+[19:56:43] [system: thinking_tokens]
+[19:56:43] [system: thinking_tokens]
+[19:56:43] [system: thinking_tokens]
+[19:56:43] [system: thinking_tokens]
+[19:56:43] [system: thinking_tokens]
+[19:56:43] [system: thinking_tokens]
+[19:56:43] [system: thinking_tokens]
+[19:56:43] [system: thinking_tokens]
+[19:56:43] [system: thinking_tokens]
+[19:56:43] [system: thinking_tokens]
+[19:56:43] [system: thinking_tokens]
+[19:56:43] [system: thinking_tokens]
+[19:56:43] [system: thinking_tokens]
+[19:56:43] [system: thinking_tokens]
+[19:56:43] [system: thinking_tokens]
+[19:56:43] [system: thinking_tokens]
+[19:56:43] [system: thinking_tokens]
+[19:56:43] [system: thinking_tokens]
+[19:56:43] [system: thinking_tokens]
+[19:56:43] [system: thinking_tokens]
+[19:56:43] [system: thinking_tokens]
+[19:56:43] [system: thinking_tokens]
+[19:56:43] [system: thinking_tokens]
+[19:56:43] [system: thinking_tokens]
+[19:56:43] [system: thinking_tokens]
+[19:56:43] [system: thinking_tokens]
+[19:56:43] [system: thinking_tokens]
+[19:56:43] 💭 All three audits completed. Now I need to finalize:
+
+1. The command says: "Then run a single audit pass: for each prompt file the creator wrote, invoke the `prompt-auditor` agent on that path. Collect each audit report. Do NOT retry, rewrite, or merge prompts based on findings — the human reviewer owns that decision."
+
+2. Return: the creator's summary, followed by the per-prompt audit reports verbatim.
+
+3. Finally, transition the spec to `prompted` — but only in host mode. Since `DARK_FACTORY_MA…
+[19:57:11] All three audits completed (no critical issues in any). `DARK_FACTORY_MANAGED=true` → Mode 1, so the `mark-prompted` transition is **skipped** (host-side daemon finalizes the spec; the CLI is also absent in-container). Here is the full result.
+
+## Generated Prompts
+
+Three prompt files created in `prompts/` (execution order 1 → 2 → 3), matching the spec's own 3-prompt decomposition:
+
+- **`prompts/1-spec-002-config-job-namespace-model.md`** — `JobNamespace` field on `ConfigSpec` (+ `Equal`), `ResolveJobNamespace` function, `AgentConfiguration` field + `TaggedConfigurations` copy, resolver `convert` propagation, CRD schema registration, and boundary tests. Covers ACs 2, 3, 4.
+- **`prompts/2-spec-002-config-job-namespace-spawner.md`** — spawner wiring: resolved-namespace Create target, refuse-on-error with ERROR log, unconditional `app: agent` pod-template label, the three stdlib AC tests, mechanical updates to existing Ginkgo spawner tests, CHANGELOG entry. Covers ACs 5, 6, 7.
+- **`prompts/3-spec-002-config-job-namespace-doc.md`** — CRD doc Fields-table row with the default and rejection rule. Covers AC 8.
+
+**Key decisions**
+- `ResolveJobNamespace` is a package-level function in `k8s/apis/.../v1` (signature `func ResolveJobNamespace(ctx context.Context, jobNamespace string, executorNamespace string) (string, error)`), not a `Validate` hook — the rejection is a runtime per-executor guard since the same CRD is shared across dev/prod executors.
+- Prompt 1 also registers the field in `pkg/k8s_connector.go` `configSpecProperties()` — beyond the spec's decomposition, because an unregistered field is silently pruned by the API server on every executor restart (the documented v0.5.0 `maxConcurrentJobs` incident). Ships with a level-1 boundary test.
+- Prompt 2 requires updating ~25 existing Ginkgo spawner tests (`Jobs("test-ns")` → `test-ns-agents-sandbox`), the biggest ripple; the blanket replace is safe (IsJobActive fixtures use a different `fake.NewClientset(job)` pattern).
+- `app: agent` is implemented as a post-build `applyAppLabel(job)` guard (mirroring `applyTaskIDLabel`/`applyAssigneeLabel`), keeping `jobBuilder.SetApp("agent")`.
+- The 4 AC tests are plain stdlib `Test*` functions because the AC verification greps require `--- PASS: TestXxx` output that Ginkgo `It` specs can't produce — a deliberate override of the repo's Ginkgo convention for these specific tests only.
+
+**Open questions left as comments in the prompts**
+1. **`IsJobActive` / `CountActiveJobs` / `JobWatcher` namespace gap (significant).** The spec only moves the *create* path into the sandbox; these three executor-ns lookups still observe only the executor namespace, so sandboxed Jobs would be invisible to the duplicate-spawn guard, concurrency cap, and zombie/failure handling. Flagged as an OPEN QUESTION in prompt 2 — reviewer should decide whether a follow-up spec re-scopes these lookups.
+2. **"Conflicting `app` label overwritten" interpretation** — the spawner builds its own job with no injection point, so AC 6's second half is a direct unit test of `applyAppLabel` on a hand-built job. Reviewer may want to confirm intent.
+3. **stdlib-vs-Ginkgo tension** for the four AC tests — required by the ACs' `-run`/`-v` output expectations; noted so the auditor doesn't flag it as a convention violation.
+
+## Audit Findings
+
+### prompts/1-spec-002-config-job-namespace-model.md
+
+# Prompt Audit Report: 1-spec-002-config-job-namespace-model
+
+**File**: `/workspace/prompts/1-spec-002-config-job-namespace-model.md`
+**Score**: 9/10
+**Status**: Excellent
+
+## DoD Checklist
+- [x] `<summary>` present and plain-language (7 bullets, observable outcomes, no file paths/struct names/signatures)
+- [x] `<objective>` states end state (2 sentences; names the next-prompt boundary explicitly)
+- [x] `<context>` present (9 files + 4 coding docs; all verified to exist)
+- [x] `<requirements>` numbered and specific (12 requirements, exact paths, full code snippets, exact assertion strings)
+- [x] `<constraints>` present (copied from spec's Constraints, plus prompt-scoping additions)
+- [x] `<verification>` present with runnable, container-executable command
+- [x] All paths repo-relative or valid container paths (`/workspace/...`, `/home/node/.claude/...` — the established container layout; no `~/`, no host-absolute paths)
+- [x] No bare `git ` commands in `<verification>` — and the target repo is `workflow: direct` with no `hideGit` (`.dark-factory.yaml`), so git is not masked regardless
+- [x] No operator-only commands in `<verification>` (`make test`/`make precommit`/`go test`/`go tool cover` only; the block explicitly forbids `docker`/`make build`/`kubectl`/`dark-factory`/`git`)
+- [x] File in `prompts/` inbox (not `prompts/in-progress/`)
+- [x] Filename uses the allowed single-digit multi-prompt ordering prefix `1-` (pattern `^[1-9]-spec-\d{3}-.*\.md$`); no dark-factory global `NNN-` prefix
+- [x] Filename reflects primary change (`-model`: field + resolution + schema, as scoped by the spec's decomposition)
+- [x] Status is `draft`
+
+## Failure Mode Coverage
+- [x] **Spec failure modes addressed across the prompt set.** Spec `002-config-job-namespace.md` Failure Modes table (5 triggers): trigger 1 (executor-namespace rejection) → prompt 1 req 3+4 and prompt 2 req 2 (refuse + ERROR log naming Config); triggers 2-3 (404/403 on create) → operational, recovery is "deploy `bborbe/agent` manifests / RBAC", covered by the existing create-error propagation path; trigger 4 (restart mid-rollout) → addressed by design (resolution is per-spawn, no global state); trigger 5 (conflicting `app` label) → prompt 2 req 5 + `TestJobPodLabels`.
+- [x] **Security section addressed.** "Jobs beside executor's Secrets" → guard (prompt 1 req 3, prompt 2 req 2); "label escape" → `app: agent` stamp (prompt 2 req 5). The residual-risk case (third unprotected namespace) is explicitly accepted by the spec, not a code requirement.
+- [x] External calls have timeout/cancellation — N/A (no exec/HTTP/Docker in requirements).
+- [x] New strings flowing through boundary validators have contract tests — see Boundary Coverage below.
+- [x] No `go mod vendor` anywhere in the prompt (verified by grep; `make precommit`'s `ensure` target wipes `vendor/`, so this is correctly absent).
+- [x] No cross-repo writes (no `git clone`/`git push`/`gh pr create`; verified by grep).
+- [x] Container-autonomous — no kubectl/deploy/observe steps, no operator-vs-agent split; every requirement is a file edit or a test the container can run.
+- [x] Sibling entry points covered. `ConfigSpec.Equal` is delegated to by `Config.Equal` (types.go:134/136), so the new field propagates to both entry points automatically. `configResolver.Resolve` has two lookup paths (composed + plain assignee) but both funnel through the single `convert` (config_resolver.go:73/92), so req 7 covers both. Spawner entry points are explicitly out of scope and owned by sibling prompt 2.
+
+## Documentation Placement
+- [x] No inlined reusable coding patterns (>10 lines). The inlined Go is the actual new implementation (the `ResolveJobNamespace` function, the table test, the schema test) — this is precise implementation spec, not a reusable pattern like CQRS/factory wiring.
+- [x] Coding plugin docs referenced in `<context>` (go-patterns, go-error-wrapping-guide, go-testing-guide, go-kubernetes-crd-controller-guide — all four verified present and relevant).
+- [x] Domain knowledge that outlives the prompt lives in the spec, not inlined.
+- [~] `docs/agent-crd-specification.md` (project CRD doc) is not referenced in `<context>` — acceptable, since the doc row is owned by sibling prompt 3, but a one-line cross-reference would be harmless.
+
+## Code Reference Verification
+
+| Reference | File | Status |
+|-----------|------|--------|
+| `ConfigSpec` struct, `PriorityClassName` + `json:"priorityClassName,omitempty"` | `k8s/apis/.../v1/types.go:53,77` | Correct |
+| `s.PriorityClassName == o.PriorityClassName` in `ConfigSpec.Equal` | `types.go:167` | Correct |
+| `ConfigSpec.Validate`, `validateTaskTypesList` as the last helper in the file | `types.go:177,272` | Correct |
+| `errors` and `context` already imported | `types.go:8,12` | Correct |
+| `Describe("JSON round-trip for priorityClassName")` at ~line 225 | `types_test.go:225` | Correct (exact) |
+| `Describe("Equal with priorityClassName")` at ~line 252 | `types_test.go:252` | Correct (exact) |
+| `package v1_test`, `TestV1` suite entry | `types_test.go:5,23` | Correct |
+| `ConfigSpec.DeepCopyInto` does `*out = *in` first | `zz_generated.deepcopy.go:111-112` | Correct — plain `string` needs no generator run |
+| `AgentConfiguration` struct carries `PriorityClassName`, `Trigger`, `ZombieJobTimeoutSeconds` | `pkg/agent_configuration.go:58,64,69` | Correct |
+| `TaggedConfigurations` copies every field explicitly | `pkg/agent_configuration.go:102-117` | Correct |
+| `convert` literal with `PriorityClassName: obj.Spec.PriorityClassName` | `pkg/config_resolver.go:119` | Correct |
+| `configSpecSchema` doc comment re v0.5.0 `maxConcurrentJobs` prune incident | `pkg/k8s_connector.go:160-170` | Correct |
+| `configSpecProperties()` unexported, with `"secretName"`/`"volumeClaim"` entries | `pkg/k8s_connector.go:189,232-233` | Correct |
+| First `It("returns converted AgentConfiguration with image tag appended", ...)` | `pkg/config_resolver_test.go:41` | Correct |
+| `Describe("TaggedConfigurations", ...)` | `pkg/agent_configuration_test.go:96` | Correct |
+| `pkg/job_watcher_internal_test.go` is `package pkg` (internal-test precedent) | `pkg/job_watcher_internal_test.go:5` | Correct |
+| `errors.Errorf(ctx, format, args...)` exists | `github.com/bborbe/errors@v1.6.0/errors_new.go:17` | Correct |
+| Module name `github.com/bborbe/agent-task-executor` → import path for `agentv1` | `go.mod:1` | Correct |
+| `make test` / `make precommit` targets are container-safe | `Makefile.precommit:5,38` | Correct (no docker/kubectl/git) |
+| Sibling prompt 3's `docs/agent-crd-specification.md` Fields table + `spec.priorityClassName` row | `docs/agent-crd-specification.md:36,50` | Correct |
+
+No stale, renamed, or missing references found.
+
+**Boundary coverage check (contract tests):** Exemplary. Requirement 9 (`TestConfigSpecSchemaIncludesJobNamespace` calling unexported `configSpecProperties()`) is a level-1 contract test for the CRD-schema registry — exactly the silent-prune boundary the `maxConcurrentJobs` incident describes. Requirement 5 pins the JSON serialization round-trip AND the `omitempty`/additive constraint. Requirements 10 and 11 prove the value crosses the resolver and the `TaggedConfigurations` copy. Requirement 4's table covers all three `ResolveJobNamespace` branches. The downstream spawner boundary (requirement-level 2 integration) is owned by prompt 2 (`TestSpawnTargetNamespace`).
+
+## Coding Guidelines Compliance
+
+| Guideline | File | Status |
+|-----------|------|--------|
+| `errors.Errorf(ctx, ...)` for new error without cause (never `fmt.Errorf`) | `go-error-wrapping-guide.md` (lines 26, 100, 151-152) | Compliant — inlined `ResolveJobNamespace` uses `errors.Errorf(ctx, ...)`; verified against module source |
+| ctx threaded through signatures | `go-patterns.md` | Compliant — `ResolveJobNamespace(ctx context.Context, ...)` |
+| Test framework: stdlib table test in a Ginkgo-suite package | `go-testing-guide.md` (no-stdlib-table-tests, no-testing-t-direct) | Deviation — see Recommendation 1 |
+| Test-only package-level mutable state | `go-composition.md` | Compliant — none introduced |
+| No goroutines / concurrency introduced | N/A | Compliant |
+
+## YAGNI Pass (scope-creep detector)
+- [x] No opt-out flag for the shipped behavior (no `disableX`, no escape hatch that rejects the Goal)
+- [x] Every config field / branch is demanded by the spec (the `jobNamespace` field, the empty→sandbox default, the reject case, and the schema registration are all directly from the spec's Desired Behavior 1-2, Goal, and DB 1)
+- [x] No "future-proofing" knobs, no tunable thresholds, no unrequested configurability
+- [x] Negative requirements 12 (no generator run, no `Validate` hook) are defensive scope boundaries, not creep
+
+## Critical Issues
+
+None. Every DoD check passes, every code reference verified accurate, failure modes and security cases covered, the prompt is fully container-autonomous, and there are no guideline violations that would fail the pipeline.
+
+## Recommendations
+
+**1. Test-framework collision with `go-testing-guide.md` (Recommendation).** The prompt inlines stdlib `testing.T` tests in packages that otherwise use Ginkgo. I verified the two MUST rules exist in the guide — `go-testing/no-stdlib-table-tests` (fires "regardless of whether a Ginkgo suite exists in the package") and `go-testing/no-testing-t-direct` — and I confirmed they are NOT mechanically enforced by this project's `.golangci.yml` or `Makefile.precommit` (`check` = lint/vet/errcheck/vulncheck/osv-scanner/gosec/trivy; no ast-grep rules wired in), so `make precommit` will not fail. The remaining risk is agent-side: the executor reads the guide, sees a MUST rule, and may "fix" requirement 4's table test back into Ginkgo — which would silently break the spec AC (`--- PASS: TestResolveJobNamespace` is only producible by a stdlib test function, since `-run TestResolveJobNamespace` filters out the `TestV1` suite entry; the prompt's justification is correct). Requirement 4's deviation is spec-mandated and fine. Requirement 9's deviation is NOT spec-mandated — the internal-package justification is valid, but a Ginkgo `It` in `package pkg` would satisfy the boundary test equally while complying with the guide.
+
+Suggested fix — add a sentence to requirement 9's preamble so the agent treats the deviation as deliberate, or convert req 9 to Ginkgo:
+
+> Old: "Create `/workspace/pkg/k8s_connector_internal_test.go` in `package pkg` (internal test file — the schema funcs are unexported; this mirrors the `pkg/job_watcher_internal_test.go` precedent of an internal test file)."
+> New: "Create `/workspace/pkg/k8s_connector_internal_test.go` in `package pkg` (internal test file — the schema funcs are unexported; this mirrors the `pkg/job_watcher_internal_test.go` precedent of an internal test file). Note: this stdlib `testing.T` test deliberately deviates from `go-testing-guide.md`'s no-stdlib-table-tests rule for symmetry with the spec-mandated `TestResolveJobNamespace`; if you prefer, a Ginkgo `It` in `package pkg` is equally acceptable here — do NOT convert requirement 4's `TestResolveJobNamespace` to Ginkgo, the spec AC requires its `--- PASS:` name."
+
+**2. "package-level `configs` fixture" is imprecise (Recommendation).** Requirement 11 calls the fixture "package-level", but in `pkg/agent_configuration_test.go` the `configs` variable (line 39) is a `Describe`-block closure variable initialized in `BeforeEach` (line 42), not a package-level var. The executor will find it regardless, but the wording could mislead.
+
+> Old: "add `JobNamespace: \"sandbox-ns\"` to the package-level `configs` fixture used by those specs if it is not already set there"
+> New: "add `JobNamespace: \"sandbox-ns\"` to the `configs` fixture (the `var configs` closure variable assigned in the `BeforeEach` of `Describe(\"AgentConfigurations\", ...)`) used by those specs if it is not already set there"
+
+**3. Objective names the implementation symbol (Recommendation, minor).** The DoD asks the objective to avoid function signatures unless they are frozen constraints. `ResolveJobNamespace` is a new symbol, not frozen.
+
+> Old: "a `ResolveJobNamespace` derivation/rejection function"
+> New: "a namespace-resolution/rejection function"
+
+## Strengths
+
+- **Line-number precision is verified exact.** The `~line 225` / `~line 252` hints for `types_test.go` match the actual `priorityClassName` Describe blocks exactly; the `validateTaskTypesList` "last helper" claim matches the file's actual ordering.
+- **The schema-registration steps (reqs 8-9) are the right kind of defense.** Requirement 8 correctly cites the v0.5.0 `maxConcurrentJobs` prune incident from the authoritative doc comment, and requirement 9 builds a genuine level-1 contract test against the exact regression — not a shape test.
+- **Boundary-contract coverage is comprehensive** across serialization, registry, and propagation seams (reqs 4, 5, 9, 10, 11).
+- **Requirement 12's negative constraints** pre-empt the two most likely executor mistakes (running the k8s codegen unnecessarily; wiring the guard into `Validate` where the executor namespace is unknown).
+- **The verification block is a model of container autonomy** — all commands are container-executable, and it explicitly forbids the operator-only command families, correctly noting the daemon does not check their exit codes.
+- **Crisp scope boundaries across the 3-prompt set** (model / spawner / doc) match the spec's Suggested Decomposition table exactly, with the constraints section spelling out what this prompt must NOT touch.
+- Every external symbol (`errors.Errorf`) was verified against both the module source and the coding guide.
+
+## Summary
+
+A polished, fully-verified prompt: every code reference checks out against the repo, failure-mode and security coverage is complete across the sibling set, boundary-contract tests are present at every seam, and the verification is fully container-executable. The only findings are minor recommendations (a spec-mandated-but-undocumented stdlib-test deviation that is not CI-enforced, one imprecise fixture description, and one objective-wording nit). No critical issues; approve as-is or after the optional Recommendation 1 note.
+
+Cross-prompt observation (out of scope for this audit, for the reviewer): sibling prompt 3's inlined doc row has three table cells while the existing "Fields" table rows in `docs/agent-crd-specification.md` use four cells (e.g. line 50 has `| spec.priorityClassName | no | — | <description> |`) — worth confirming the row's column count matches the table when prompt 3 lands.
+
+### prompts/2-spec-002-config-job-namespace-spawner.md
+
+# Prompt Audit Report: Spec 002 Prompt 2 — Spawner Wiring (job namespace target, refuse-on-error, label lock)
+
+**File**: `/workspace/prompts/2-spec-002-config-job-namespace-spawner.md`
+**Score**: 8.5/10
+**Status**: Good (near-exemplary)
+
+## DoD Checklist
+- [x] `<summary>` present and plain-language (6 bullets, no file paths/struct names, each bullet an observable outcome)
+- [x] `<objective>` states end state (1 sentence: consume `JobNamespace`, refuse executor namespace, stamp `app: agent`)
+- [x] `<context>` present (reads-first file list, in-container doc paths, per-file annotations)
+- [x] `<requirements>` numbered and specific (1-10, exact paths, full code blocks, old→new replacements)
+- [x] `<constraints>` present (copied from spec, includes "Do NOT commit")
+- [x] `<verification>` present with runnable container-executable commands
+- [x] All project paths repo-root-resolvable (`/workspace/...` backed by the repo mount; `/home/node/.claude/plugins/marketplaces/coding/docs/...` are the in-container coding-plugin docs, same convention as sibling prompts 1/3)
+- [x] No bare `git ` commands in `<verification>` — and the repo has `workflow: direct`, no `hideGit: true` (git is not masked anyway)
+- [x] No operator-only commands in `<verification>` — only `make test`, `make precommit`, `go test`, `go tool cover`, `grep`; line 232 explicitly forbids docker/make build/kubectl/dark-factory/git
+- [x] File in `prompts/` inbox (not `prompts/in-progress/`)
+- [x] Filename `2-spec-002-...` uses the allowed single-digit multi-prompt ordering prefix (`^[1-9]-spec-\d{3}-.*\.md$`); no dark-factory global number
+- [x] Filename reflects primary change (spawner wiring)
+- [x] Status is `draft`; `spec: ["002-config-job-namespace"]` is canonical full-slug; `created` present
+
+## Failure Mode Coverage
+- [x] Spec failure modes addressed (mapping below)
+- [x] Security concerns from spec addressed
+- [x] External calls have timeout/cancellation behavior specified (N/A — no new external calls; `ctx` threaded through existing Create)
+- [x] New constants/strings through library boundaries have contract tests (via integration through the fake clientset, see Boundary-crossing)
+- [x] No `go mod vendor` anywhere (repo has no `vendor/`; `make precommit`'s `ensure` regenerates it)
+- [x] No cross-repo writes (no `git clone`/`git push`/`gh pr create`)
+- [x] Container-autonomous — no operator-only/runtime steps, no operator-vs-agent step split. The `OPEN QUESTION` in `<constraints>` explicitly says the container agent must NOT act on it; it is a reviewer decision, not a prompt step
+- [x] Sibling entry points covered — `IsJobActive`/`CountActiveJobs`/`JobWatcher` are explicitly excluded (req 8/10, constraints) and the spec scopes to the create path only; requirement 8 rewrites the one test that would break cross-namespace
+
+Failure-mode mapping:
+| Spec trigger | Addressed by |
+|---|---|
+| `JobNamespace` == executor namespace | Req 2 (refuse + ERROR log + `return "", err`) + test 6b |
+| Sandbox doesn't exist → 404 on create | Existing create-error path kept (req 4); "returns error on unexpected K8s error" test left unchanged (req 7) |
+| Executor lacks RBAC → 403 on create | Same existing create-error path |
+| Executor restarts mid-rollout | Per-spawn resolution design (req 2) |
+| Conflicting `app` label | Req 5 `applyAppLabel` + test 6c part 2 |
+
+Security section: Secrets-adjacent placement (closed by guard, test 6b), third-namespace placement (accepted residual risk, documented in spec), NetworkPolicy-label escape (closed by req 5 + test 6c).
+
+## Documentation Placement
+- [x] No reusable pattern inlined that should live in a doc (code blocks are the requirements themselves; the apply-helper style is mirrored from in-file helpers and go-patterns.md is referenced)
+- [x] Existing project docs referenced where relevant
+- [x] Coding plugin docs referenced in `<context>` (go-patterns, go-error-wrapping-guide, go-glog-guide, go-testing-guide, changelog-guide, definition-of-done) — all six files verified to exist in `/home/node/.claude/plugins/marketplaces/coding/docs/`
+- [x] Domain knowledge that outlives the prompt is in the spec, not inlined (the sandbox-vs-IsJobActive gap is documented as the spec's OPEN QUESTION)
+
+## Code Reference Verification
+All references read and verified against the actual repo.
+
+| Reference | Status |
+|-----------|--------|
+| `pkg/spawner/job_spawner.go` — `SpawnJob` flow (`jobNameFromTask` → `buildJobEnvBuilder` → `NewJobBuilder`+`SetApp("agent")` → `Build` → apply block → `Jobs(s.namespace.String()).Create`) | Verified — exact match to lines 96-176 |
+| `jobSpawner.namespace k8s.Namespace` field; `applyTaskIDLabel`/`applyAssigneeLabel` nil-map guards | Verified (lines 84-94, 349-374) |
+| `IsJobActive`/`CountActiveJobs` both list `s.namespace.String()` | Verified (lines 183, 223) |
+| `pkg/spawner/job_spawner_test.go` — `BeforeEach` builds with `"test-ns"`; every `Jobs("test-ns")` List/Get in the SpawnJob blocks; AlreadyExists fixture (line 432); Kafka DescribeTable (line 893); ActiveDeadlineSeconds Get calls (1278, 1298); `SpawnJob + IsJobActive label contract` block (1308-1347); IsJobActive/CountActiveJobs fixtures (974-1217) | Verified — all boundary statements accurate |
+| `k8s/apis/.../v1/types.go` — `ResolveJobNamespace` | NOT present yet — correctly framed as "from the previous prompt" (shipped by sibling prompt 1, which I verified defines the exact signature `(ctx, jobNamespace, executorNamespace string) (string, error)` and the exact substring `may not equal the executor namespace`) |
+| `pkg/agent_configuration.go` — `AgentConfiguration.JobNamespace` | NOT present yet — correctly framed as from prompt 1 (prompt 1 adds it + the `convert`/`TaggedConfigurations` copies) |
+| `pkg/k8s_connector.go` — `jobNamespace` schema property | NOT present yet — correctly framed as from prompt 1 |
+| `pkg/job_watcher.go` — `k8sinformers.WithNamespace(string(w.namespace))` | Verified (line 74) |
+| `pkg/factory/factory.go` — `NewJobSpawner` wiring (line 113) | Verified |
+| `CHANGELOG.md` — `## Unreleased` exists at top | Verified |
+| Handler claim (req 2: "task stays untouched") — `pkg/handler/task_event_handler.go:505` | Verified: on `SpawnJob` error the handler returns before `taskStore.Store`, `PublishSpawnNotification`, and any marking |
+| External symbols: `k8s.Namespace` (`type Namespace string`), `ObjectMetaBuilder.SetNamespace(k8s.Namespace)`, `Action.Matches(verb, resource)`, `CreateAction.GetNamespace()`, `fake.Clientset.PrependReactor`, `libtime.NewCurrentDateTime`/`SetNow`/`libtimetest.ParseDateTime`, `agentv1` alias (used in `config_resolver.go` + `job_spawner_test.go`) | All verified against module cache (bborbe/k8s v1.14.16, client-go v0.36.4, in-repo precedent) |
+| New test file's stdlib/internal-package approach | Valid — `package spawner` + `package spawner_test` coexist; precedent `pkg/job_watcher_internal_test.go` exists |
+| New `SpawnJob` refuse-branch Go correctness (`targetNamespace, err :=` then later `envBuilder, err :=` reuses `err`; later `_, err = ...Create`) | Verified — compiles correctly |
+| Requirement 7 exclude-list (`unexpected K8s error` namespace-independent reactor, `VolumeClaim/VolumeMountPath` pre-create error, `applyTaskIDLabel` capture reactor, IsJobActive/CountActiveJobs fixtures) | Verified against test file — all accurate |
+
+## Coding Guidelines Compliance
+| Guideline | Status |
+|-----------|--------|
+| Error wrapping — `errors.Wrapf`, never `fmt.Errorf` | Compliant (refuse branch returns the resolver's already-wrapped error; create path keeps `errors.Wrapf`; no `fmt.Errorf` anywhere) |
+| glog levels — ERROR for the rejection log, `V(2)` for success logs | Compliant — `glog.Errorf` matches go-glog-guide ERROR-level guidance |
+| Time injection — `currentDateTime` passed as constructor param | Compliant (mirrors existing `BeforeEach`) |
+| Test-only package-level mutable state | None introduced |
+| Coverage ≥80% for new code + test all new paths | Addressed — 6a/6b/6c exercise the resolve branch, refuse branch, and `applyAppLabel` (both spawn-path and direct overwrite) |
+| Counterfeiter / factory pattern | No interface or factory changes (correctly scoped out) |
+
+## YAGNI Pass (scope-creep detector)
+- [x] No opt-out flag for the shipped behavior
+- [x] No tunable thresholds, defaults, or "future-proofing" knobs with no named consumer
+- [x] `applyAppLabel` guard and refuse branch are directly demanded by spec DB 4/5 and AC 6
+- No YAGNI findings.
+
+## Critical Issues
+None. No guideline violations, no stale code references, no container-autonomy problems, no path-portability violations, no boundary-contract gaps (the two new boundary values — the resolved namespace and the `app: agent` label — are both verified through the production create path via `TestSpawnTargetNamespace` (create-action namespace) and `TestJobPodLabels` (create-reactor capture), satisfying the level-2 integration requirement).
+
+## Recommendations
+1. **Requirement 7 omits the one hard-coded namespace assertion that will break.** `pkg/spawner/job_spawner_test.go:88` is `Expect(job.Namespace).To(Equal("test-ns"))` — the only namespace-equality assertion in the suite. Requirement 3 changes the Job's object metadata namespace to the resolved target, so after the listed replacements this assertion fails: the List reads from `test-ns-agents-sandbox`, but the job's `.Namespace` is now `test-ns-agents-sandbox`, not `test-ns`. The requirement claims the first `It` ("job name/env vars") is covered by the List/Get replacement instruction, but that instruction does not reach this inline assertion. Self-correcting under the iterative `make test` loop, but it should be explicit.
+   - **Find/replace**: in requirement 7, after the sentence "This covers the SpawnJob `It` blocks (job name/env vars, ...)", append: "and change the `Expect(job.Namespace).To(Equal(\"test-ns\"))` assertion in the first `It` (~line 88) to `Expect(job.Namespace).To(Equal(\"test-ns-agents-sandbox\"))`."
+
+2. **Track the OPEN QUESTION as a follow-up spec.** The constraints correctly document that after this prompt, sandboxed Jobs are invisible to `IsJobActive`, `CountActiveJobs`, and the `JobWatcher` — the duplicate-spawn guard, concurrency cap, and zombie/deadline/failure handling all silently stop applying to spawned Jobs. The prompt handles this correctly (scoped out, documented, requirement 8 preserves the label-contract regression intent without cross-namespace visibility), but the behavioral gap is real and will bite in dev once the sandbox namespace ships. Ensure a follow-up spec is filed to re-scope those three paths to the resolved namespace; don't let the OPEN QUESTION rot.
+
+3. **Minor — ERROR-log "Config name" is actually the assignee.** Req 2 logs `config.Assignee` as the Config name per spec DB 5. `AgentConfiguration` has no `Name` field, so the assignee is the only identifier available at spawn time — pragmatically correct, but a one-line note clarifying that assignee stands in for the Config name would prevent a reviewer from reading it as a mismatch.
+
+4. **Minor — unused helper parameter.** `newNamespaceTestSpawner(t *testing.T, executorNS string)` never uses `t`. Not a lint failure (`unparam` and revive's `unused-parameter` are excluded for `_test.go`), so no action required — just a cleanliness nit if the author wants to drop the param.
+
+## Strengths
+- Exceptionally thorough requirement 7/8 treatment of the existing suite: it enumerates exactly which List/Get calls move to the sandbox, which fixtures stay executor-namespace-scoped, and why (per-call justification for the exclude list).
+- Requirement 8 correctly identifies the `SpawnJob + IsJobActive label contract` cross-namespace break before it ships and prescribes a rewrite that preserves the regression intent (label-key agreement) without fake cross-namespace visibility.
+- The new internal stdlib test file is the right call to satisfy the spec's literal `--- PASS: TestX` acceptance-criterion greps, with sound reasoning documented.
+- Every external symbol was verified accurate; the cross-prompt dependency on prompt 1's `ResolveJobNamespace`/`JobNamespace` is consistently framed and the exact error substring matches prompt 1's implementation.
+- Verification is fully container-executable, `-mod=mod` matches the repo's Makefile behavior (no vendor dir), and the coverage command targets exactly the new code paths.
+
+## Summary
+A meticulous, near-exemplary prompt: structure, code references, failure-mode coverage, boundary tests, and container-autonomy all check out, and the spec-dependency on sibling prompt 1 is framed correctly. One genuine under-specification to fix before approving — requirement 7 never mentions the `Expect(job.Namespace).To(Equal("test-ns"))` assertion at `job_spawner_test.go:88` that requirement 3 will break (recommendation 1, with find/replace above). Also ensure the OPEN QUESTION's known isolation gap (sandboxed Jobs invisible to `IsJobActive`/`CountActiveJobs`/`JobWatcher`) is tracked as a follow-up spec.
+
+### prompts/3-spec-002-config-job-namespace-doc.md
+
+# Prompt Audit Report: Doc — Config Job Namespace (prompt 3 of 3)
+
+**File**: `/workspace/prompts/3-spec-002-config-job-namespace-doc.md`
+**Score**: 9/10
+**Status**: Excellent
+
+## DoD Checklist
+- [x] `<summary>` present and plain-language (minor nit — see R1)
+- [x] `<objective>` states end state (document settled semantics so operators know default + guard) and why (satisfy spec AC 8)
+- [x] `<context>` present, points to the target doc and coding docs
+- [x] `<requirements>` numbered (2) and specific — exact row text inlined, exact insertion point, required substrings enumerated
+- [x] `<constraints>` present, includes "Do NOT commit", doc-only scope guard, no-behavior-invention guard
+- [x] `<verification>` present with runnable, container-executable greps
+- [x] All paths repo-relative or valid container-absolute (`/workspace/...` per DoD's allowed prefix; `/home/node/.claude/plugins/marketplaces/coding/docs/...` is a valid in-container path, same convention as sibling prompts 1 and 2)
+- [x] No bare `git ` commands in `<verification>` (and none in requirements); not masked anyway — `.dark-factory.yaml` has `workflow: direct`, no `hideGit`
+- [x] No operator-only commands in `<verification>` (only `grep` on a local file)
+- [x] File in `prompts/` inbox (not `prompts/in-progress/`)
+- [x] Filename not prefixed with dark-factory global number; `3-` single-digit ordering prefix is the documented multi-prompt convention (`^[1-9]-spec-\d{3}-.*\.md$`)
+- [x] Filename reflects primary change (`-doc`)
+- [x] Status is `draft`
+
+## Failure Mode Coverage
+- [x] Spec failure modes addressed across the batch. Spec `specs/in-progress/002-config-job-namespace.md` Failure Modes table has 5 triggers: executor-namespace rejection (covered by prompts 1/2 tests), conflicting `app` label (prompt 2, `applyAppLabel` + `TestJobPodLabels`), restart mid-rollout (per-spawn design, prompt 2), and the two deployment triggers — sandbox missing (404) and missing RBAC (403) — whose recovery is explicitly owned by the `bborbe/agent` manifests and the spec's own Verification section ("No deployed system is observed by this spec"). The executor-side contract for those two (create error → logged) is preserved by prompt 2 requirement 4, which keeps the existing `errors.Wrapf`/`IsAlreadyExists` handling. No gap.
+- [x] Security concerns from spec addressed: the guard and the unconditional `app: agent` stamp are the Security section's two controls, covered by prompts 1/2 and documented by this prompt's row.
+- [x] External calls timeout/cancellation — N/A (no external calls in this prompt)
+- [x] Boundary contract tests — N/A (doc-only; the code boundary tests live in prompts 1 and 2)
+- [x] No `go mod vendor` anywhere
+- [x] No cross-repo writes (no clone, no push, no `gh`)
+- [x] Container-autonomous — doc edit + local greps only; the prompt even explicitly forbids `docker`/`make build`/`kubectl`/`dark-factory`/`git` and explains why
+- [x] Sibling entry points — N/A (single doc insertion, no code entry points)
+
+## Documentation Placement
+- [x] No inlined reusable patterns (a single 4-line table row is project-specific content going into the project doc, not a reusable pattern)
+- [x] Existing project doc (`docs/agent-crd-specification.md`) is the target and is referenced in `<context>`
+- [x] Coding plugin doc referenced in `<context>`: `documentation-guide.md` — verified it exists at `/home/node/.claude/plugins/marketplaces/coding/docs/documentation-guide.md`
+- [x] Domain knowledge correctly lands in `docs/agent-crd-specification.md`, not inlined in the prompt
+
+## Code Reference Verification
+| Reference | File | Status |
+|-----------|------|--------|
+| "Fields" table, `\| \`spec.xxx\` \| no \| <description> \|` pattern | `/workspace/docs/agent-crd-specification.md` (lines 38–53) | Correct — pattern verified (e.g. `spec.taskTypes` line 44) |
+| `spec.priorityClassName` row (insert after) | line 50 | Correct location (currently followed by `spec.trigger` at line 51); note pre-existing malformation — see R2 |
+| `spec.trigger` row (style of default/derived semantics) | line 51 | Correct — well-formed, 3 columns, describes defaults |
+| `documentation-guide.md` | `/home/node/.claude/plugins/marketplaces/coding/docs/documentation-guide.md` | Correct — exists |
+| `ResolveJobNamespace` / `JobNamespace` ("already landed in the two prior prompts") | prose only; not read by this prompt | Forward-looking, not stale — see R4 |
+| Verification greps (`jobNamespace`, `agents-sandbox`, `executor namespace`) | `/workspace/docs/agent-crd-specification.md` | Correct — I confirmed all three currently return **0 matches**, so verification genuinely depends on the new row (no false-positive) |
+
+## Coding Guidelines Compliance
+- No Go code in this prompt — N/A. Pattern-collision mechanical checks (error wrapping, HTTP client, test framework, mocks, context threading) not applicable.
+
+## YAGNI Pass (scope-creep detector)
+- [x] No opt-out flag or escape hatch
+- [x] Every element of the row is demanded by spec AC 8 (default AND rejection rule, plus the three grep substrings)
+- [x] No tunable thresholds, no "future-proofing" knobs; requirement 2 is a scope guard, not creep
+- The row's third case ("explicit other value → that value") is not strictly demanded by AC 8's greps, but it is the settled implementation semantics and makes the row accurate — reasonable, not scope creep.
+
+## Critical Issues
+None.
+
+## Recommendations
+**R1 (minor) — Summary references a field name.** The DoD's summary rule says "no file paths/struct names/function signatures." Bullets 1–3 use `spec.jobNamespace`. For a doc prompt this is borderline (the field is the subject being documented), but plain-language wording is available.
+
+Find/replace:
+- Old: `- The Config CRD reference now documents the optional \`spec.jobNamespace\` field.`
+- New: `- The Config CRD reference now documents the optional job-namespace field on a Config.`
+- (Bullets 2 and 3 similarly — e.g. "setting `jobNamespace` to the executor namespace" → "setting the job-namespace field to the executor's namespace".)
+
+**R2 (informational) — Pre-existing malformed row in the target doc.** Line 50 of `/workspace/docs/agent-crd-specification.md`:
+`| \`spec.priorityClassName\` | no | — | Kubernetes PriorityClass name to stamp onto spawned Job PodTemplates. ... |`
+has **4 cells** (`spec.priorityClassName`, `no`, `—`, `Kubernetes PriorityClass name...`) in a 3-column table — a stray `— |` mid-row. This is pre-existing (not introduced by this prompt), and prompt 3 cites it in `<context>` as a style reference. The prompt inlines the exact new row so no contamination risk, and requirement 2 correctly forbids the agent from touching it. Flag for the human reviewer as a separate doc cleanup, not a prompt defect. Fix if desired: `| \`spec.priorityClassName\` | no | Kubernetes PriorityClass name ... |`.
+
+**R3 (very minor) — Path-form inconsistency.** `<context>` and `<requirements>` use container-absolute `/workspace/docs/agent-crd-specification.md` while `<verification>` uses repo-relative `docs/agent-crd-specification.md`. Both are valid per the DoD (repo-root-relative and `/workspace/...` are both allowed), so this is cosmetic. Unify to repo-relative if desired for consistency with `<verification>`.
+
+**R4 (informational, no action) — "already landed in the two prior prompts" is forward-looking.** I verified `ResolveJobNamespace` and `JobNamespace` do not yet exist anywhere in the repo — they ship in sibling prompts 1 and 2 of this same batch. The phrasing is correct given the `1-`→`2-`→`3-` ordering convention (spec's Suggested Decomposition: prompt 3 depends on 1), so not a stale-code-reference defect. I also cross-checked the documented semantics against prompt 1's implementation: empty → `<executorNamespace>-agents-sandbox` ✓, explicit other → returned unchanged ✓, equal to executor → rejected with `may not equal the executor namespace` ✓ — the row text and the implementation agree exactly.
+
+Out-of-scope observation (not the prompt's problem): `.dark-factory.yaml` sets `validationPrompt: docs/dod.md`, but `/workspace/docs/dod.md` does not exist. Worth confirming with the project owner whether that config reference is stale.
+
+## Strengths
+- Verification greps mirror spec AC 8 verbatim, and I confirmed all three currently match **zero** lines in the doc — the verification genuinely requires the new row, so it cannot false-positive pass.
+- Exemplary container-autonomy: doc edit + `grep` only, with an explicit prohibition on `docker`/`make build`/`kubectl`/`dark-factory`/`git` and the reasoning stated.
+- The row documents all three settled resolution cases (not a bare name-only row), exactly matching the implementation that prompt 1 ships — the precise trap AC 8 exists to catch.
+- Constraint correctly skips `make precommit` for a doc-only change (consistent with the project's own rule), while still supplying container-executable verification.
+- Anchoring by row/field names with the exact row text inlined — zero ambiguity for the executor.
+- Frontmatter, filename, ordering-prefix, inbox location, and slug (`002-config-job-namespace`, canonical full-slug form) all correct.
+
+## Summary
+A clean, well-scoped documentation-only prompt that satisfies the spec's AC 8 with container-executable verification and zero ambiguity. All code references verified; the documented semantics exactly match the sibling implementation prompts. No critical issues — only minor polish items (summary field-name wording, a pre-existing malformed table row, cosmetic path-form inconsistency). Priority action: approve as-is, optionally applying R1/R2 at your discretion.
+
+---
+
+**Spec transition:** skipped — `DARK_FACTORY_MANAGED=true` (Mode 1, daemon + container), so the host-side generator finalizes `002-config-job-namespace` from `generating` → `prompted` after this container exits. The `dark-factory` CLI is not present in-container, confirming the skip is correct.
+
+**For the human reviewer:** all three prompts passed with no critical issues. Highest-value item before approving is prompt 2's Recommendation 1 (the `Expect(job.Namespace).To(Equal("test-ns"))` assertion at `job_spawner_test.go:88` is missing from the requirement-7 replacement list and will break once requirement 3 lands — find/replace included above). Also worth deciding: the OPEN QUESTION about `IsJobActive`/`CountActiveJobs`/`JobWatcher` only observing the executor namespace (a real isolation gap for spawned Jobs — suggest filing a follow-up spec), and the unrelated pre-existing malformed `spec.priorityClassName` table row + stale `validationPrompt: docs/dod.md` config reference flagged by the prompt-3 auditor.
+[19:57:11] result: All three audits completed (no critical issues in any). `DARK_FACTORY_MANAGED=true` → Mode 1, so the `mark-prompted` transition is **skipped** (host-side daemon finalizes the spec; the CLI is also absent in-container). Here is the full result.
+
+## Generated Prompts
+
+Three prompt files created in `prompts/` (execution order 1 → 2 → 3), matching the spec's own 3-prompt decomposition:
+
+- **`prompts/1-spec-002-config-job-namespace-model.md`** — `JobNamespace` field on `ConfigSpec` (+ `Equal`), `ResolveJobNamespace` function, `AgentConfiguration` field + `TaggedConfigurations` copy, resolver `convert` propagation, CRD schema registration, and boundary tests. Covers ACs 2, 3, 4.
+- **`prompts/2-spec-002-config-job-namespace-spawner.md`** — spawner wiring: resolved-namespace Create target, refuse-on-error with ERROR log, unconditional `app: agent` pod-template label, the three stdlib AC tests, mechanical updates to existing Ginkgo spawner tests, CHANGELOG entry. Covers ACs 5, 6, 7.
+- **`prompts/3-spec-002-config-job-namespace-doc.md`** — CRD doc Fields-table row with the default and rejection rule. Covers AC 8.
+
+**Key decisions**
+- `ResolveJobNamespace` is a package-level function in `k8s/apis/.../v1` (signature `func ResolveJobNamespace(ctx context.Context, jobNamespace string, executorNamespace string) (string, error)`), not a `Validate` hook — the rejection is a runtime per-executor guard since the same CRD is shared across dev/prod executors.
+- Prompt 1 also registers the field in `pkg/k8s_connector.go` `configSpecProperties()` — beyond the spec's decomposition, because an unregistered field is silently pruned by the API server on every executor restart (the documented v0.5.0 `maxConcurrentJobs` incident). Ships with a level-1 boundary test.
+- Prompt 2 requires updating ~25 existing Ginkgo spawner tests (`Jobs("test-ns")` → `test-ns-agents-sandbox`), the biggest ripple; the blanket replace is safe (IsJobActive fixtures use a different `fake.NewClientset(job)` pattern).
+- `app: agent` is implemented as a post-build `applyAppLabel(job)` guard (mirroring `applyTaskIDLabel`/`applyAssigneeLabel`), keeping `jobBuilder.SetApp("agent")`.
+- The 4 AC tests are plain stdlib `Test*` functions because the AC verification greps require `--- PASS: TestXxx` output that Ginkgo `It` specs can't produce — a deliberate override of the repo's Ginkgo convention for these specific tests only.
+
+**Open questions left as comments in the prompts**
+1. **`IsJobActive` / `CountActiveJobs` / `JobWatcher` namespace gap (significant).** The spec only moves the *create* path into the sandbox; these three executor-ns lookups still observe only the executor namespace, so sandboxed Jobs would be invisible to the duplicate-spawn guard, concurrency cap, and zombie/failure handling. Flagged as an OPEN QUESTION in prompt 2 — reviewer should decide whether a follow-up spec re-scopes these lookups.
+2. **"Conflicting `app` label overwritten" interpretation** — the spawner builds its own job with no injection point, so AC 6's second half is a direct unit test of `applyAppLabel` on a hand-built job. Reviewer may want to confirm intent.
+3. **stdlib-vs-Ginkgo tension** for the four AC tests — required by the ACs' `-run`/`-v` output expectations; noted so the auditor doesn't flag it as a convention violation.
+
+## Audit Findings
+
+### prompts/1-spec-002-config-job-namespace-model.md
+
+# Prompt Audit Report: 1-spec-002-config-job-namespace-model
+
+**File**: `/workspace/prompts/1-spec-002-config-job-namespace-model.md`
+**Score**: 9/10
+**Status**: Excellent
+
+## DoD Checklist
+- [x] `<summary>` present and plain-language (7 bullets, observable outcomes, no file paths/struct names/signatures)
+- [x] `<objective>` states end state (2 sentences; names the next-prompt boundary explicitly)
+- [x] `<context>` present (9 files + 4 coding docs; all verified to exist)
+- [x] `<requirements>` numbered and specific (12 requirements, exact paths, full code snippets, exact assertion strings)
+- [x] `<constraints>` present (copied from spec's Constraints, plus prompt-scoping additions)
+- [x] `<verification>` present with runnable, container-executable command
+- [x] All paths repo-relative or valid container paths (`/workspace/...`, `/home/node/.claude/...` — the established container layout; no `~/`, no host-absolute paths)
+- [x] No bare `git ` commands in `<verification>` — and the target repo is `workflow: direct` with no `hideGit` (`.dark-factory.yaml`), so git is not masked regardless
+- [x] No operator-only commands in `<verification>` (`make test`/`make precommit`/`go test`/`go tool cover` only; the block explicitly forbids `docker`/`make build`/`kubectl`/`dark-factory`/`git`)
+- [x] File in `prompts/` inbox (not `prompts/in-progress/`)
+- [x] Filename uses the allowed single-digit multi-prompt ordering prefix `1-` (pattern `^[1-9]-spec-\d{3}-.*\.md$`); no dark-factory global `NNN-` prefix
+- [x] Filename reflects primary change (`-model`: field + resolution + schema, as scoped by the spec's decomposition)
+- [x] Status is `draft`
+
+## Failure Mode Coverage
+- [x] **Spec failure modes addressed across the prompt set.** Spec `002-config-job-namespace.md` Failure Modes table (5 triggers): trigger 1 (executor-namespace rejection) → prompt 1 req 3+4 and prompt 2 req 2 (refuse + ERROR log naming Config); triggers 2-3 (404/403 on create) → operational, recovery is "deploy `bborbe/agent` manifests / RBAC", covered by the existing create-error propagation path; trigger 4 (restart mid-rollout) → addressed by design (resolution is per-spawn, no global state); trigger 5 (conflicting `app` label) → prompt 2 req 5 + `TestJobPodLabels`.
+- [x] **Security section addressed.** "Jobs beside executor's Secrets" → guard (prompt 1 req 3, prompt 2 req 2); "label escape" → `app: agent` stamp (prompt 2 req 5). The residual-risk case (third unprotected namespace) is explicitly accepted by the spec, not a code requirement.
+- [x] External calls have timeout/cancellation — N/A (no exec/HTTP/Docker in requirements).
+- [x] New strings flowing through boundary validators have contract tests — see Boundary Coverage below.
+- [x] No `go mod vendor` anywhere in the prompt (verified by grep; `make precommit`'s `ensure` target wipes `vendor/`, so this is correctly absent).
+- [x] No cross-repo writes (no `git clone`/`git push`/`gh pr create`; verified by grep).
+- [x] Container-autonomous — no kubectl/deploy/observe steps, no operator-vs-agent split; every requirement is a file edit or a test the container can run.
+- [x] Sibling entry points covered. `ConfigSpec.Equal` is delegated to by `Config.Equal` (types.go:134/136), so the new field propagates to both entry points automatically. `configResolver.Resolve` has two lookup paths (composed + plain assignee) but both funnel through the single `convert` (config_resolver.go:73/92), so req 7 covers both. Spawner entry points are explicitly out of scope and owned by sibling prompt 2.
+
+## Documentation Placement
+- [x] No inlined reusable coding patterns (>10 lines). The inlined Go is the actual new implementation (the `ResolveJobNamespace` function, the table test, the schema test) — this is precise implementation spec, not a reusable pattern like CQRS/factory wiring.
+- [x] Coding plugin docs referenced in `<context>` (go-patterns, go-error-wrapping-guide, go-testing-guide, go-kubernetes-crd-controller-guide — all four verified present and relevant).
+- [x] Domain knowledge that outlives the prompt lives in the spec, not inlined.
+- [~] `docs/agent-crd-specification.md` (project CRD doc) is not referenced in `<context>` — acceptable, since the doc row is owned by sibling prompt 3, but a one-line cross-reference would be harmless.
+
+## Code Reference Verification
+
+| Reference | File | Status |
+|-----------|------|--------|
+| `ConfigSpec` struct, `PriorityClassName` + `json:"priorityClassName,omitempty"` | `k8s/apis/.../v1/types.go:53,77` | Correct |
+| `s.PriorityClassName == o.PriorityClassName` in `ConfigSpec.Equal` | `types.go:167` | Correct |
+| `ConfigSpec.Validate`, `validateTaskTypesList` as the last helper in the file | `types.go:177,272` | Correct |
+| `errors` and `context` already imported | `types.go:8,12` | Correct |
+| `Describe("JSON round-trip for priorityClassName")` at ~line 225 | `types_test.go:225` | Correct (exact) |
+| `Describe("Equal with priorityClassName")` at ~line 252 | `types_test.go:252` | Correct (exact) |
+| `package v1_test`, `TestV1` suite entry | `types_test.go:5,23` | Correct |
+| `ConfigSpec.DeepCopyInto` does `*out = *in` first | `zz_generated.deepcopy.go:111-112` | Correct — plain `string` needs no generator run |
+| `AgentConfiguration` struct carries `PriorityClassName`, `Trigger`, `ZombieJobTimeoutSeconds` | `pkg/agent_configuration.go:58,64,69` | Correct |
+| `TaggedConfigurations` copies every field explicitly | `pkg/agent_configuration.go:102-117` | Correct |
+| `convert` literal with `PriorityClassName: obj.Spec.PriorityClassName` | `pkg/config_resolver.go:119` | Correct |
+| `configSpecSchema` doc comment re v0.5.0 `maxConcurrentJobs` prune incident | `pkg/k8s_connector.go:160-170` | Correct |
+| `configSpecProperties()` unexported, with `"secretName"`/`"volumeClaim"` entries | `pkg/k8s_connector.go:189,232-233` | Correct |
+| First `It("returns converted AgentConfiguration with image tag appended", ...)` | `pkg/config_resolver_test.go:41` | Correct |
+| `Describe("TaggedConfigurations", ...)` | `pkg/agent_configuration_test.go:96` | Correct |
+| `pkg/job_watcher_internal_test.go` is `package pkg` (internal-test precedent) | `pkg/job_watcher_internal_test.go:5` | Correct |
+| `errors.Errorf(ctx, format, args...)` exists | `github.com/bborbe/errors@v1.6.0/errors_new.go:17` | Correct |
+| Module name `github.com/bborbe/agent-task-executor` → import path for `agentv1` | `go.mod:1` | Correct |
+| `make test` / `make precommit` targets are container-safe | `Makefile.precommit:5,38` | Correct (no docker/kubectl/git) |
+| Sibling prompt 3's `docs/agent-crd-specification.md` Fields table + `spec.priorityClassName` row | `docs/agent-crd-specification.md:36,50` | Correct |
+
+No stale, renamed, or missing references found.
+
+**Boundary coverage check (contract tests):** Exemplary. Requirement 9 (`TestConfigSpecSchemaIncludesJobNamespace` calling unexported `configSpecProperties()`) is a level-1 contract test for the CRD-schema registry — exactly the silent-prune boundary the `maxConcurrentJobs` incident describes. Requirement 5 pins the JSON serialization round-trip AND the `omitempty`/additive constraint. Requirements 10 and 11 prove the value crosses the resolver and the `TaggedConfigurations` copy. Requirement 4's table covers all three `ResolveJobNamespace` branches. The downstream spawner boundary (requirement-level 2 integration) is owned by prompt 2 (`TestSpawnTargetNamespace`).
+
+## Coding Guidelines Compliance
+
+| Guideline | File | Status |
+|-----------|------|--------|
+| `errors.Errorf(ctx, ...)` for new error without cause (never `fmt.Errorf`) | `go-error-wrapping-guide.md` (lines 26, 100, 151-152) | Compliant — inlined `ResolveJobNamespace` uses `errors.Errorf(ctx, ...)`; verified against module source |
+| ctx threaded through signatures | `go-patterns.md` | Compliant — `ResolveJobNamespace(ctx context.Context, ...)` |
+| Test framework: stdlib table test in a Ginkgo-suite package | `go-testing-guide.md` (no-stdlib-table-tests, no-testing-t-direct) | Deviation — see Recommendation 1 |
+| Test-only package-level mutable state | `go-composition.md` | Compliant — none introduced |
+| No goroutines / concurrency introduced | N/A | Compliant |
+
+## YAGNI Pass (scope-creep detector)
+- [x] No opt-out flag for the shipped behavior (no `disableX`, no escape hatch that rejects the Goal)
+- [x] Every config field / branch is demanded by the spec (the `jobNamespace` field, the empty→sandbox default, the reject case, and the schema registration are all directly from the spec's Desired Behavior 1-2, Goal, and DB 1)
+- [x] No "future-proofing" knobs, no tunable thresholds, no unrequested configurability
+- [x] Negative requirements 12 (no generator run, no `Validate` hook) are defensive scope boundaries, not creep
+
+## Critical Issues
+
+None. Every DoD check passes, every code reference verified accurate, failure modes and security cases covered, the prompt is fully container-autonomous, and there are no guideline violations that would fail the pipeline.
+
+## Recommendations
+
+**1. Test-framework collision with `go-testing-guide.md` (Recommendation).** The prompt inlines stdlib `testing.T` tests in packages that otherwise use Ginkgo. I verified the two MUST rules exist in the guide — `go-testing/no-stdlib-table-tests` (fires "regardless of whether a Ginkgo suite exists in the package") and `go-testing/no-testing-t-direct` — and I confirmed they are NOT mechanically enforced by this project's `.golangci.yml` or `Makefile.precommit` (`check` = lint/vet/errcheck/vulncheck/osv-scanner/gosec/trivy; no ast-grep rules wired in), so `make precommit` will not fail. The remaining risk is agent-side: the executor reads the guide, sees a MUST rule, and may "fix" requirement 4's table test back into Ginkgo — which would silently break the spec AC (`--- PASS: TestResolveJobNamespace` is only producible by a stdlib test function, since `-run TestResolveJobNamespace` filters out the `TestV1` suite entry; the prompt's justification is correct). Requirement 4's deviation is spec-mandated and fine. Requirement 9's deviation is NOT spec-mandated — the internal-package justification is valid, but a Ginkgo `It` in `package pkg` would satisfy the boundary test equally while complying with the guide.
+
+Suggested fix — add a sentence to requirement 9's preamble so the agent treats the deviation as deliberate, or convert req 9 to Ginkgo:
+
+> Old: "Create `/workspace/pkg/k8s_connector_internal_test.go` in `package pkg` (internal test file — the schema funcs are unexported; this mirrors the `pkg/job_watcher_internal_test.go` precedent of an internal test file)."
+> New: "Create `/workspace/pkg/k8s_connector_internal_test.go` in `package pkg` (internal test file — the schema funcs are unexported; this mirrors the `pkg/job_watcher_internal_test.go` precedent of an internal test file). Note: this stdlib `testing.T` test deliberately deviates from `go-testing-guide.md`'s no-stdlib-table-tests rule for symmetry with the spec-mandated `TestResolveJobNamespace`; if you prefer, a Ginkgo `It` in `package pkg` is equally acceptable here — do NOT convert requirement 4's `TestResolveJobNamespace` to Ginkgo, the spec AC requires its `--- PASS:` name."
+
+**2. "package-level `configs` fixture" is imprecise (Recommendation).** Requirement 11 calls the fixture "package-level", but in `pkg/agent_configuration_test.go` the `configs` variable (line 39) is a `Describe`-block closure variable initialized in `BeforeEach` (line 42), not a package-level var. The executor will find it regardless, but the wording could mislead.
+
+> Old: "add `JobNamespace: \"sandbox-ns\"` to the package-level `configs` fixture used by those specs if it is not already set there"
+> New: "add `JobNamespace: \"sandbox-ns\"` to the `configs` fixture (the `var configs` closure variable assigned in the `BeforeEach` of `Describe(\"AgentConfigurations\", ...)`) used by those specs if it is not already set there"
+
+**3. Objective names the implementation symbol (Recommendation, minor).** The DoD asks the objective to avoid function signatures unless they are frozen constraints. `ResolveJobNamespace` is a new symbol, not frozen.
+
+> Old: "a `ResolveJobNamespace` derivation/rejection function"
+> New: "a namespace-resolution/rejection function"
+
+## Strengths
+
+- **Line-number precision is verified exact.** The `~line 225` / `~line 252` hints for `types_test.go` match the actual `priorityClassName` Describe blocks exactly; the `validateTaskTypesList` "last helper" claim matches the file's actual ordering.
+- **The schema-registration steps (reqs 8-9) are the right kind of defense.** Requirement 8 correctly cites the v0.5.0 `maxConcurrentJobs` prune incident from the authoritative doc comment, and requirement 9 builds a genuine level-1 contract test against the exact regression — not a shape test.
+- **Boundary-contract coverage is comprehensive** across serialization, registry, and propagation seams (reqs 4, 5, 9, 10, 11).
+- **Requirement 12's negative constraints** pre-empt the two most likely executor mistakes (running the k8s codegen unnecessarily; wiring the guard into `Validate` where the executor namespace is unknown).
+- **The verification block is a model of container autonomy** — all commands are container-executable, and it explicitly forbids the operator-only command families, correctly noting the daemon does not check their exit codes.
+- **Crisp scope boundaries across the 3-prompt set** (model / spawner / doc) match the spec's Suggested Decomposition table exactly, with the constraints section spelling out what this prompt must NOT touch.
+- Every external symbol (`errors.Errorf`) was verified against both the module source and the coding guide.
+
+## Summary
+
+A polished, fully-verified prompt: every code reference checks out against the repo, failure-mode and security coverage is complete across the sibling set, boundary-contract tests are present at every seam, and the verification is fully container-executable. The only findings are minor recommendations (a spec-mandated-but-undocumented stdlib-test deviation that is not CI-enforced, one imprecise fixture description, and one objective-wording nit). No critical issues; approve as-is or after the optional Recommendation 1 note.
+
+Cross-prompt observation (out of scope for this audit, for the reviewer): sibling prompt 3's inlined doc row has three table cells while the existing "Fields" table rows in `docs/agent-crd-specification.md` use four cells (e.g. line 50 has `| spec.priorityClassName | no | — | <description> |`) — worth confirming the row's column count matches the table when prompt 3 lands.
+
+### prompts/2-spec-002-config-job-namespace-spawner.md
+
+# Prompt Audit Report: Spec 002 Prompt 2 — Spawner Wiring (job namespace target, refuse-on-error, label lock)
+
+**File**: `/workspace/prompts/2-spec-002-config-job-namespace-spawner.md`
+**Score**: 8.5/10
+**Status**: Good (near-exemplary)
+
+## DoD Checklist
+- [x] `<summary>` present and plain-language (6 bullets, no file paths/struct names, each bullet an observable outcome)
+- [x] `<objective>` states end state (1 sentence: consume `JobNamespace`, refuse executor namespace, stamp `app: agent`)
+- [x] `<context>` present (reads-first file list, in-container doc paths, per-file annotations)
+- [x] `<requirements>` numbered and specific (1-10, exact paths, full code blocks, old→new replacements)
+- [x] `<constraints>` present (copied from spec, includes "Do NOT commit")
+- [x] `<verification>` present with runnable container-executable commands
+- [x] All project paths repo-root-resolvable (`/workspace/...` backed by the repo mount; `/home/node/.claude/plugins/marketplaces/coding/docs/...` are the in-container coding-plugin docs, same convention as sibling prompts 1/3)
+- [x] No bare `git ` commands in `<verification>` — and the repo has `workflow: direct`, no `hideGit: true` (git is not masked anyway)
+- [x] No operator-only commands in `<verification>` — only `make test`, `make precommit`, `go test`, `go tool cover`, `grep`; line 232 explicitly forbids docker/make build/kubectl/dark-factory/git
+- [x] File in `prompts/` inbox (not `prompts/in-progress/`)
+- [x] Filename `2-spec-002-...` uses the allowed single-digit multi-prompt ordering prefix (`^[1-9]-spec-\d{3}-.*\.md$`); no dark-factory global number
+- [x] Filename reflects primary change (spawner wiring)
+- [x] Status is `draft`; `spec: ["002-config-job-namespace"]` is canonical full-slug; `created` present
+
+## Failure Mode Coverage
+- [x] Spec failure modes addressed (mapping below)
+- [x] Security concerns from spec addressed
+- [x] External calls have timeout/cancellation behavior specified (N/A — no new external calls; `ctx` threaded through existing Create)
+- [x] New constants/strings through library boundaries have contract tests (via integration through the fake clientset, see Boundary-crossing)
+- [x] No `go mod vendor` anywhere (repo has no `vendor/`; `make precommit`'s `ensure` regenerates it)
+- [x] No cross-repo writes (no `git clone`/`git push`/`gh pr create`)
+- [x] Container-autonomous — no operator-only/runtime steps, no operator-vs-agent step split. The `OPEN QUESTION` in `<constraints>` explicitly says the container agent must NOT act on it; it is a reviewer decision, not a prompt step
+- [x] Sibling entry points covered — `IsJobActive`/`CountActiveJobs`/`JobWatcher` are explicitly excluded (req 8/10, constraints) and the spec scopes to the create path only; requirement 8 rewrites the one test that would break cross-namespace
+
+Failure-mode mapping:
+| Spec trigger | Addressed by |
+|---|---|
+| `JobNamespace` == executor namespace | Req 2 (refuse + ERROR log + `return "", err`) + test 6b |
+| Sandbox doesn't exist → 404 on create | Existing create-error path kept (req 4); "returns error on unexpected K8s error" test left unchanged (req 7) |
+| Executor lacks RBAC → 403 on create | Same existing create-error path |
+| Executor restarts mid-rollout | Per-spawn resolution design (req 2) |
+| Conflicting `app` label | Req 5 `applyAppLabel` + test 6c part 2 |
+
+Security section: Secrets-adjacent placement (closed by guard, test 6b), third-namespace placement (accepted residual risk, documented in spec), NetworkPolicy-label escape (closed by req 5 + test 6c).
+
+## Documentation Placement
+- [x] No reusable pattern inlined that should live in a doc (code blocks are the requirements themselves; the apply-helper style is mirrored from in-file helpers and go-patterns.md is referenced)
+- [x] Existing project docs referenced where relevant
+- [x] Coding plugin docs referenced in `<context>` (go-patterns, go-error-wrapping-guide, go-glog-guide, go-testing-guide, changelog-guide, definition-of-done) — all six files verified to exist in `/home/node/.claude/plugins/marketplaces/coding/docs/`
+- [x] Domain knowledge that outlives the prompt is in the spec, not inlined (the sandbox-vs-IsJobActive gap is documented as the spec's OPEN QUESTION)
+
+## Code Reference Verification
+All references read and verified against the actual repo.
+
+| Reference | Status |
+|-----------|--------|
+| `pkg/spawner/job_spawner.go` — `SpawnJob` flow (`jobNameFromTask` → `buildJobEnvBuilder` → `NewJobBuilder`+`SetApp("agent")` → `Build` → apply block → `Jobs(s.namespace.String()).Create`) | Verified — exact match to lines 96-176 |
+| `jobSpawner.namespace k8s.Namespace` field; `applyTaskIDLabel`/`applyAssigneeLabel` nil-map guards | Verified (lines 84-94, 349-374) |
+| `IsJobActive`/`CountActiveJobs` both list `s.namespace.String()` | Verified (lines 183, 223) |
+| `pkg/spawner/job_spawner_test.go` — `BeforeEach` builds with `"test-ns"`; every `Jobs("test-ns")` List/Get in the SpawnJob blocks; AlreadyExists fixture (line 432); Kafka DescribeTable (line 893); ActiveDeadlineSeconds Get calls (1278, 1298); `SpawnJob + IsJobActive label contract` block (1308-1347); IsJobActive/CountActiveJobs fixtures (974-1217) | Verified — all boundary statements accurate |
+| `k8s/apis/.../v1/types.go` — `ResolveJobNamespace` | NOT present yet — correctly framed as "from the previous prompt" (shipped by sibling prompt 1, which I verified defines the exact signature `(ctx, jobNamespace, executorNamespace string) (string, error)` and the exact substring `may not equal the executor namespace`) |
+| `pkg/agent_configuration.go` — `AgentConfiguration.JobNamespace` | NOT present yet — correctly framed as from prompt 1 (prompt 1 adds it + the `convert`/`TaggedConfigurations` copies) |
+| `pkg/k8s_connector.go` — `jobNamespace` schema property | NOT present yet — correctly framed as from prompt 1 |
+| `pkg/job_watcher.go` — `k8sinformers.WithNamespace(string(w.namespace))` | Verified (line 74) |
+| `pkg/factory/factory.go` — `NewJobSpawner` wiring (line 113) | Verified |
+| `CHANGELOG.md` — `## Unreleased` exists at top | Verified |
+| Handler claim (req 2: "task stays untouched") — `pkg/handler/task_event_handler.go:505` | Verified: on `SpawnJob` error the handler returns before `taskStore.Store`, `PublishSpawnNotification`, and any marking |
+| External symbols: `k8s.Namespace` (`type Namespace string`), `ObjectMetaBuilder.SetNamespace(k8s.Namespace)`, `Action.Matches(verb, resource)`, `CreateAction.GetNamespace()`, `fake.Clientset.PrependReactor`, `libtime.NewCurrentDateTime`/`SetNow`/`libtimetest.ParseDateTime`, `agentv1` alias (used in `config_resolver.go` + `job_spawner_test.go`) | All verified against module cache (bborbe/k8s v1.14.16, client-go v0.36.4, in-repo precedent) |
+| New test file's stdlib/internal-package approach | Valid — `package spawner` + `package spawner_test` coexist; precedent `pkg/job_watcher_internal_test.go` exists |
+| New `SpawnJob` refuse-branch Go correctness (`targetNamespace, err :=` then later `envBuilder, err :=` reuses `err`; later `_, err = ...Create`) | Verified — compiles correctly |
+| Requirement 7 exclude-list (`unexpected K8s error` namespace-independent reactor, `VolumeClaim/VolumeMountPath` pre-create error, `applyTaskIDLabel` capture reactor, IsJobActive/CountActiveJobs fixtures) | Verified against test file — all accurate |
+
+## Coding Guidelines Compliance
+| Guideline | Status |
+|-----------|--------|
+| Error wrapping — `errors.Wrapf`, never `fmt.Errorf` | Compliant (refuse branch returns the resolver's already-wrapped error; create path keeps `errors.Wrapf`; no `fmt.Errorf` anywhere) |
+| glog levels — ERROR for the rejection log, `V(2)` for success logs | Compliant — `glog.Errorf` matches go-glog-guide ERROR-level guidance |
+| Time injection — `currentDateTime` passed as constructor param | Compliant (mirrors existing `BeforeEach`) |
+| Test-only package-level mutable state | None introduced |
+| Coverage ≥80% for new code + test all new paths | Addressed — 6a/6b/6c exercise the resolve branch, refuse branch, and `applyAppLabel` (both spawn-path and direct overwrite) |
+| Counterfeiter / factory pattern | No interface or factory changes (correctly scoped out) |
+
+## YAGNI Pass (scope-creep detector)
+- [x] No opt-out flag for the shipped behavior
+- [x] No tunable thresholds, defaults, or "future-proofing" knobs with no named consumer
+- [x] `applyAppLabel` guard and refuse branch are directly demanded by spec DB 4/5 and AC 6
+- No YAGNI findings.
+
+## Critical Issues
+None. No guideline violations, no stale code references, no container-autonomy problems, no path-portability violations, no boundary-contract gaps (the two new boundary values — the resolved namespace and the `app: agent` label — are both verified through the production create path via `TestSpawnTargetNamespace` (create-action namespace) and `TestJobPodLabels` (create-reactor capture), satisfying the level-2 integration requirement).
+
+## Recommendations
+1. **Requirement 7 omits the one hard-coded namespace assertion that will break.** `pkg/spawner/job_spawner_test.go:88` is `Expect(job.Namespace).To(Equal("test-ns"))` — the only namespace-equality assertion in the suite. Requirement 3 changes the Job's object metadata namespace to the resolved target, so after the listed replacements this assertion fails: the List reads from `test-ns-agents-sandbox`, but the job's `.Namespace` is now `test-ns-agents-sandbox`, not `test-ns`. The requirement claims the first `It` ("job name/env vars") is covered by the List/Get replacement instruction, but that instruction does not reach this inline assertion. Self-correcting under the iterative `make test` loop, but it should be explicit.
+   - **Find/replace**: in requirement 7, after the sentence "This covers the SpawnJob `It` blocks (job name/env vars, ...)", append: "and change the `Expect(job.Namespace).To(Equal(\"test-ns\"))` assertion in the first `It` (~line 88) to `Expect(job.Namespace).To(Equal(\"test-ns-agents-sandbox\"))`."
+
+2. **Track the OPEN QUESTION as a follow-up spec.** The constraints correctly document that after this prompt, sandboxed Jobs are invisible to `IsJobActive`, `CountActiveJobs`, and the `JobWatcher` — the duplicate-spawn guard, concurrency cap, and zombie/deadline/failure handling all silently stop applying to spawned Jobs. The prompt handles this correctly (scoped out, documented, requirement 8 preserves the label-contract regression intent without cross-namespace visibility), but the behavioral gap is real and will bite in dev once the sandbox namespace ships. Ensure a follow-up spec is filed to re-scope those three paths to the resolved namespace; don't let the OPEN QUESTION rot.
+
+3. **Minor — ERROR-log "Config name" is actually the assignee.** Req 2 logs `config.Assignee` as the Config name per spec DB 5. `AgentConfiguration` has no `Name` field, so the assignee is the only identifier available at spawn time — pragmatically correct, but a one-line note clarifying that assignee stands in for the Config name would prevent a reviewer from reading it as a mismatch.
+
+4. **Minor — unused helper parameter.** `newNamespaceTestSpawner(t *testing.T, executorNS string)` never uses `t`. Not a lint failure (`unparam` and revive's `unused-parameter` are excluded for `_test.go`), so no action required — just a cleanliness nit if the author wants to drop the param.
+
+## Strengths
+- Exceptionally thorough requirement 7/8 treatment of the existing suite: it enumerates exactly which List/Get calls move to the sandbox, which fixtures stay executor-namespace-scoped, and why (per-call justification for the exclude list).
+- Requirement 8 correctly identifies the `SpawnJob + IsJobActive label contract` cross-namespace break before it ships and prescribes a rewrite that preserves the regression intent (label-key agreement) without fake cross-namespace visibility.
+- The new internal stdlib test file is the right call to satisfy the spec's literal `--- PASS: TestX` acceptance-criterion greps, with sound reasoning documented.
+- Every external symbol was verified accurate; the cross-prompt dependency on prompt 1's `ResolveJobNamespace`/`JobNamespace` is consistently framed and the exact error substring matches prompt 1's implementation.
+- Verification is fully container-executable, `-mod=mod` matches the repo's Makefile behavior (no vendor dir), and the coverage command targets exactly the new code paths.
+
+## Summary
+A meticulous, near-exemplary prompt: structure, code references, failure-mode coverage, boundary tests, and container-autonomy all check out, and the spec-dependency on sibling prompt 1 is framed correctly. One genuine under-specification to fix before approving — requirement 7 never mentions the `Expect(job.Namespace).To(Equal("test-ns"))` assertion at `job_spawner_test.go:88` that requirement 3 will break (recommendation 1, with find/replace above). Also ensure the OPEN QUESTION's known isolation gap (sandboxed Jobs invisible to `IsJobActive`/`CountActiveJobs`/`JobWatcher`) is tracked as a follow-up spec.
+
+### prompts/3-spec-002-config-job-namespace-doc.md
+
+# Prompt Audit Report: Doc — Config Job Namespace (prompt 3 of 3)
+
+**File**: `/workspace/prompts/3-spec-002-config-job-namespace-doc.md`
+**Score**: 9/10
+**Status**: Excellent
+
+## DoD Checklist
+- [x] `<summary>` present and plain-language (minor nit — see R1)
+- [x] `<objective>` states end state (document settled semantics so operators know default + guard) and why (satisfy spec AC 8)
+- [x] `<context>` present, points to the target doc and coding docs
+- [x] `<requirements>` numbered (2) and specific — exact row text inlined, exact insertion point, required substrings enumerated
+- [x] `<constraints>` present, includes "Do NOT commit", doc-only scope guard, no-behavior-invention guard
+- [x] `<verification>` present with runnable, container-executable greps
+- [x] All paths repo-relative or valid container-absolute (`/workspace/...` per DoD's allowed prefix; `/home/node/.claude/plugins/marketplaces/coding/docs/...` is a valid in-container path, same convention as sibling prompts 1 and 2)
+- [x] No bare `git ` commands in `<verification>` (and none in requirements); not masked anyway — `.dark-factory.yaml` has `workflow: direct`, no `hideGit`
+- [x] No operator-only commands in `<verification>` (only `grep` on a local file)
+- [x] File in `prompts/` inbox (not `prompts/in-progress/`)
+- [x] Filename not prefixed with dark-factory global number; `3-` single-digit ordering prefix is the documented multi-prompt convention (`^[1-9]-spec-\d{3}-.*\.md$`)
+- [x] Filename reflects primary change (`-doc`)
+- [x] Status is `draft`
+
+## Failure Mode Coverage
+- [x] Spec failure modes addressed across the batch. Spec `specs/in-progress/002-config-job-namespace.md` Failure Modes table has 5 triggers: executor-namespace rejection (covered by prompts 1/2 tests), conflicting `app` label (prompt 2, `applyAppLabel` + `TestJobPodLabels`), restart mid-rollout (per-spawn design, prompt 2), and the two deployment triggers — sandbox missing (404) and missing RBAC (403) — whose recovery is explicitly owned by the `bborbe/agent` manifests and the spec's own Verification section ("No deployed system is observed by this spec"). The executor-side contract for those two (create error → logged) is preserved by prompt 2 requirement 4, which keeps the existing `errors.Wrapf`/`IsAlreadyExists` handling. No gap.
+- [x] Security concerns from spec addressed: the guard and the unconditional `app: agent` stamp are the Security section's two controls, covered by prompts 1/2 and documented by this prompt's row.
+- [x] External calls timeout/cancellation — N/A (no external calls in this prompt)
+- [x] Boundary contract tests — N/A (doc-only; the code boundary tests live in prompts 1 and 2)
+- [x] No `go mod vendor` anywhere
+- [x] No cross-repo writes (no clone, no push, no `gh`)
+- [x] Container-autonomous — doc edit + local greps only; the prompt even explicitly forbids `docker`/`make build`/`kubectl`/`dark-factory`/`git` and explains why
+- [x] Sibling entry points — N/A (single doc insertion, no code entry points)
+
+## Documentation Placement
+- [x] No inlined reusable patterns (a single 4-line table row is project-specific content going into the project doc, not a reusable pattern)
+- [x] Existing project doc (`docs/agent-crd-specification.md`) is the target and is referenced in `<context>`
+- [x] Coding plugin doc referenced in `<context>`: `documentation-guide.md` — verified it exists at `/home/node/.claude/plugins/marketplaces/coding/docs/documentation-guide.md`
+- [x] Domain knowledge correctly lands in `docs/agent-crd-specification.md`, not inlined in the prompt
+
+## Code Reference Verification
+| Reference | File | Status |
+|-----------|------|--------|
+| "Fields" table, `\| \`spec.xxx\` \| no \| <description> \|` pattern | `/workspace/docs/agent-crd-specification.md` (lines 38–53) | Correct — pattern verified (e.g. `spec.taskTypes` line 44) |
+| `spec.priorityClassName` row (insert after) | line 50 | Correct location (currently followed by `spec.trigger` at line 51); note pre-existing malformation — see R2 |
+| `spec.trigger` row (style of default/derived semantics) | line 51 | Correct — well-formed, 3 columns, describes defaults |
+| `documentation-guide.md` | `/home/node/.claude/plugins/marketplaces/coding/docs/documentation-guide.md` | Correct — exists |
+| `ResolveJobNamespace` / `JobNamespace` ("already landed in the two prior prompts") | prose only; not read by this prompt | Forward-looking, not stale — see R4 |
+| Verification greps (`jobNamespace`, `agents-sandbox`, `executor namespace`) | `/workspace/docs/agent-crd-specification.md` | Correct — I confirmed all three currently return **0 matches**, so verification genuinely depends on the new row (no false-positive) |
+
+## Coding Guidelines Compliance
+- No Go code in this prompt — N/A. Pattern-collision mechanical checks (error wrapping, HTTP client, test framework, mocks, context threading) not applicable.
+
+## YAGNI Pass (scope-creep detector)
+- [x] No opt-out flag or escape hatch
+- [x] Every element of the row is demanded by spec AC 8 (default AND rejection rule, plus the three grep substrings)
+- [x] No tunable thresholds, no "future-proofing" knobs; requirement 2 is a scope guard, not creep
+- The row's third case ("explicit other value → that value") is not strictly demanded by AC 8's greps, but it is the settled implementation semantics and makes the row accurate — reasonable, not scope creep.
+
+## Critical Issues
+None.
+
+## Recommendations
+**R1 (minor) — Summary references a field name.** The DoD's summary rule says "no file paths/struct names/function signatures." Bullets 1–3 use `spec.jobNamespace`. For a doc prompt this is borderline (the field is the subject being documented), but plain-language wording is available.
+
+Find/replace:
+- Old: `- The Config CRD reference now documents the optional \`spec.jobNamespace\` field.`
+- New: `- The Config CRD reference now documents the optional job-namespace field on a Config.`
+- (Bullets 2 and 3 similarly — e.g. "setting `jobNamespace` to the executor namespace" → "setting the job-namespace field to the executor's namespace".)
+
+**R2 (informational) — Pre-existing malformed row in the target doc.** Line 50 of `/workspace/docs/agent-crd-specification.md`:
+`| \`spec.priorityClassName\` | no | — | Kubernetes PriorityClass name to stamp onto spawned Job PodTemplates. ... |`
+has **4 cells** (`spec.priorityClassName`, `no`, `—`, `Kubernetes PriorityClass name...`) in a 3-column table — a stray `— |` mid-row. This is pre-existing (not introduced by this prompt), and prompt 3 cites it in `<context>` as a style reference. The prompt inlines the exact new row so no contamination risk, and requirement 2 correctly forbids the agent from touching it. Flag for the human reviewer as a separate doc cleanup, not a prompt defect. Fix if desired: `| \`spec.priorityClassName\` | no | Kubernetes PriorityClass name ... |`.
+
+**R3 (very minor) — Path-form inconsistency.** `<context>` and `<requirements>` use container-absolute `/workspace/docs/agent-crd-specification.md` while `<verification>` uses repo-relative `docs/agent-crd-specification.md`. Both are valid per the DoD (repo-root-relative and `/workspace/...` are both allowed), so this is cosmetic. Unify to repo-relative if desired for consistency with `<verification>`.
+
+**R4 (informational, no action) — "already landed in the two prior prompts" is forward-looking.** I verified `ResolveJobNamespace` and `JobNamespace` do not yet exist anywhere in the repo — they ship in sibling prompts 1 and 2 of this same batch. The phrasing is correct given the `1-`→`2-`→`3-` ordering convention (spec's Suggested Decomposition: prompt 3 depends on 1), so not a stale-code-reference defect. I also cross-checked the documented semantics against prompt 1's implementation: empty → `<executorNamespace>-agents-sandbox` ✓, explicit other → returned unchanged ✓, equal to executor → rejected with `may not equal the executor namespace` ✓ — the row text and the implementation agree exactly.
+
+Out-of-scope observation (not the prompt's problem): `.dark-factory.yaml` sets `validationPrompt: docs/dod.md`, but `/workspace/docs/dod.md` does not exist. Worth confirming with the project owner whether that config reference is stale.
+
+## Strengths
+- Verification greps mirror spec AC 8 verbatim, and I confirmed all three currently match **zero** lines in the doc — the verification genuinely requires the new row, so it cannot false-positive pass.
+- Exemplary container-autonomy: doc edit + `grep` only, with an explicit prohibition on `docker`/`make build`/`kubectl`/`dark-factory`/`git` and the reasoning stated.
+- The row documents all three settled resolution cases (not a bare name-only row), exactly matching the implementation that prompt 1 ships — the precise trap AC 8 exists to catch.
+- Constraint correctly skips `make precommit` for a doc-only change (consistent with the project's own rule), while still supplying container-executable verification.
+- Anchoring by row/field names with the exact row text inlined — zero ambiguity for the executor.
+- Frontmatter, filename, ordering-prefix, inbox location, and slug (`002-config-job-namespace`, canonical full-slug form) all correct.
+
+## Summary
+A clean, well-scoped documentation-only prompt that satisfies the spec's AC 8 with container-executable verification and zero ambiguity. All code references verified; the documented semantics exactly match the sibling implementation prompts. No critical issues — only minor polish items (summary field-name wording, a pre-existing malformed table row, cosmetic path-form inconsistency). Priority action: approve as-is, optionally applying R1/R2 at your discretion.
+
+---
+
+**Spec transition:** skipped — `DARK_FACTORY_MANAGED=true` (Mode 1, daemon + container), so the host-side generator finalizes `002-config-job-namespace` from `generating` → `prompted` after this container exits. The `dark-factory` CLI is not present in-container, confirming the skip is correct.
+
+**For the human reviewer:** all three prompts passed with no critical issues. Highest-value item before approving is prompt 2's Recommendation 1 (the `Expect(job.Namespace).To(Equal("test-ns"))` assertion at `job_spawner_test.go:88` is missing from the requirement-7 replacement list and will break once requirement 3 lands — find/replace included above). Also worth deciding: the OPEN QUESTION about `IsJobActive`/`CountActiveJobs`/`JobWatcher` only observing the executor namespace (a real isolation gap for spawned Jobs — suggest filing a follow-up spec), and the unrelated pre-existing malformed `spec.priorityClassName` table row + stale `validationPrompt: docs/dod.md` config reference flagged by the prompt-3 auditor. | duration: 663944ms | cost: $10.2138 | tokens: 830 in / 14878 out
