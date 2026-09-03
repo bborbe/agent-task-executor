@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/bborbe/errors"
+	"github.com/golang/glog"
 )
 
 //counterfeiter:generate -o ../../mocks/git_rest_client.go --fake-name FakeGitRestClient . GitRestClient
@@ -48,8 +49,12 @@ func NewGitRestClient(baseURL, gatewaySecret, gatewayInitiator string) GitRestCl
 }
 
 type gitRestClient struct {
-	baseURL          string
-	httpClient       *http.Client
+	baseURL    string
+	httpClient *http.Client
+	// gatewaySecret holds the git-rest gateway secret VALUE (read from a K8s
+	// Secret at startup). It is never logged, never included in error messages,
+	// and never passed to argument.Parse (this is not an application-struct
+	// field) — it is used only to set the X-Gateway-Secret header.
 	gatewaySecret    string
 	gatewayInitiator string
 }
@@ -92,6 +97,7 @@ func (g *gitRestClient) Get(ctx context.Context, relPath string) ([]byte, error)
 		return nil, errors.Wrapf(ctx, err, "GET %s", relPath)
 	}
 	defer resp.Body.Close()
+	glog.V(3).Infof("git-rest GET path=%s status=%d", relPath, resp.StatusCode)
 	body, err := io.ReadAll(io.LimitReader(resp.Body, 10*1024*1024)) // 10 MiB max
 	if err != nil {
 		return nil, errors.Wrapf(ctx, err, "read GET response body for %s", relPath)
@@ -122,6 +128,7 @@ func (g *gitRestClient) List(ctx context.Context, glob string) ([]string, error)
 		return nil, errors.Wrapf(ctx, err, "LIST glob %s", glob)
 	}
 	defer resp.Body.Close()
+	glog.V(3).Infof("git-rest LIST glob=%s status=%d", glob, resp.StatusCode)
 	body, err := io.ReadAll(io.LimitReader(resp.Body, 10*1024*1024)) // 10 MiB max
 	if err != nil {
 		return nil, errors.Wrapf(ctx, err, "read LIST response body for glob %s", glob)
@@ -157,6 +164,7 @@ func (g *gitRestClient) IsReady(ctx context.Context) (bool, error) {
 	if err != nil {
 		return false, errors.Wrapf(ctx, err, "readiness check")
 	}
+	glog.V(3).Infof("git-rest READINESS status=%d", resp.StatusCode)
 	_, _ = io.Copy(io.Discard, resp.Body)
 	_ = resp.Body.Close()
 	switch resp.StatusCode {

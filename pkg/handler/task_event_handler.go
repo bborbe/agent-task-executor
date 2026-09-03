@@ -638,6 +638,11 @@ func (h *taskEventHandler) evalDeferredRespawns(ctx context.Context) error {
 	h.deferredMu.Unlock()
 
 	for _, entry := range ready {
+		select {
+		case <-ctx.Done():
+			return nil
+		default:
+		}
 		entry := entry // capture for closure
 		spawned, err := h.spawnIfNeeded(ctx, entry.task, &entry.config)
 		if err != nil {
@@ -650,7 +655,7 @@ func (h *taskEventHandler) evalDeferredRespawns(ctx context.Context) error {
 		}
 		jobStartedAt, _ := entry.task.Frontmatter.JobStartedAt()
 		elapsed := now.Sub(jobStartedAt)
-		glog.Infof(
+		glog.V(1).Infof(
 			"event=respawn_after_grace_window task=%s current_job=%s elapsed=%.0fs",
 			entry.task.TaskIdentifier, entry.task.Frontmatter.CurrentJob(), elapsed.Seconds(),
 		)
@@ -692,6 +697,11 @@ func (h *taskEventHandler) seedDeferredRespawnsFromStore(ctx context.Context) {
 	h.deferredMu.Lock()
 	defer h.deferredMu.Unlock()
 	for taskID, task := range snapshot {
+		select {
+		case <-ctx.Done():
+			return
+		default:
+		}
 		if _, exists := h.deferredRespawns[taskID]; exists {
 			continue
 		}
