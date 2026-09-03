@@ -2,7 +2,7 @@
 
 All notable changes to this project will be documented in this file.
 
-## Unreleased
+## v0.10.0
 
 - feat: label `skipped_unknown_assignee` with the assignee name — new `agent_executor_skipped_unknown_assignee_total{assignee="..."}` counter incremented alongside the existing `task_events_total{result="skipped_unknown_assignee"}`. The bare counter says a skip happened but not which assignee; the 2026-08-26 → 2026-09-03 sentry-deep-analyzer incident stranded 12 tasks for 8 days with only the bare counter moving, invisible as a routable alert. Observability-only; routing behavior unchanged.
 
