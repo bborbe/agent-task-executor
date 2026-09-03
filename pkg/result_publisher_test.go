@@ -632,6 +632,25 @@ var _ = Describe("ResultPublisher", func() {
 			Expect(string(dataBytes)).NotTo(ContainSubstring("targetVault"))
 		})
 
+		It("stamped commands satisfy the lib slug contract", func() {
+			// The publish path itself never calls Validate — the slug rule is
+			// enforced downstream by the controller. Pin the contract here so a
+			// malformed vault slug in a task's frontmatter cannot ride through
+			// silently: what we publish must be something the consumer accepts.
+			task := lib.Task{
+				TaskIdentifier: lib.TaskIdentifier("test-task-vault-contract"),
+				Frontmatter: lib.TaskFrontmatter{
+					"status":       "in_progress",
+					"target_vault": "personal",
+				},
+			}
+			err := publisher.PublishSpawnNotification(ctx, task, "claude-20260418120000")
+			Expect(err).NotTo(HaveOccurred())
+
+			_, cmd := decodeUpdateFrontmatterCommand(producer.messages[0])
+			Expect(cmd.Validate(ctx)).To(Succeed())
+		})
+
 		It("stamps all other command constructions with the task's target_vault", func() {
 			task := lib.Task{
 				TaskIdentifier: lib.TaskIdentifier("test-task-vault-all"),
