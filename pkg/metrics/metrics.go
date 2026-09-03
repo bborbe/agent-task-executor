@@ -35,6 +35,20 @@ var ReconcileRedrivenTotal = promauto.NewCounter(
 	},
 )
 
+// SkippedUnknownAssigneeTotal counts tasks skipped because their assignee
+// matches no agent Config CR, labelled by the unknown assignee name. The bare
+// TaskEventsTotal{result="skipped_unknown_assignee"} counter says a skip
+// happened but not which assignee is failing; this label makes the signal
+// actionable. Observed 2026-08-26 → 2026-09-03: 12 tasks stranded 8 days with
+// only the bare counter moving, invisible as a routable alert.
+var SkippedUnknownAssigneeTotal = promauto.NewCounterVec(
+	prometheus.CounterOpts{
+		Name: "agent_executor_skipped_unknown_assignee_total",
+		Help: "Total number of tasks skipped because their assignee matches no agent Config CR, by assignee.",
+	},
+	[]string{"assignee"},
+)
+
 func init() {
 	TaskEventsTotal.WithLabelValues("spawned").Add(0)
 	TaskEventsTotal.WithLabelValues("skipped_status").Add(0)
