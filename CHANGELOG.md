@@ -2,6 +2,10 @@
 
 All notable changes to this project will be documented in this file.
 
+## Unreleased
+
+- fix: clear `current_job` on the job-success path — the executor's JobWatcher now publishes a `current_job=""` frontmatter command (new `ResultPublisher.PublishClearCurrentJob`, deduped per job like `PublishFailure`) before evicting a succeeded job's task from the TaskStore. Previously a succeeded job left `current_job`/`job_started_at` set forever: the agent's result write-back never clears it and the zombie sweeper is blind to the task once it leaves `Snapshot()`, so `github-update-go` fleet sweeps accumulated hundreds of stale task references.
+
 ## v0.9.0
 
 - feat: stamp every published frontmatter command with the task's `target_vault` — `UpdateFrontmatterCommand`/`IncrementFrontmatterCommand` from `pkg/result_publisher.go` now carry `TargetVault` sourced from the task's own frontmatter key, never the executor's `VAULT_NAME` (the shared executor serves all vaults), so controllers can skip cross-vault commands before scanning their vault. Tasks without the key publish exactly as before (`omitempty` keeps the wire shape stable).

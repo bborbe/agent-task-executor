@@ -156,9 +156,30 @@ func (w *jobWatcher) HandleJob(ctx context.Context, job *batchv1.Job) {
 		// implies its result was published to Kafka successfully. Do NOT publish
 		// a synthetic failure — doing so races the real result and triggers an
 		// infinite respawn loop via the vault poll on the controller side.
+		// But the vault task still carries current_job/job_started_at from the
+		// spawn notification, and nobody clears them on the success path (the
+		// controller's result_writer writes phase/status/notes only). Without a
+		// clear here the task would sit terminal with a stale current_job that
+		// the zombie sweeper can never classify — evicting the task from the
+		// store on success makes it invisible to Snapshot(). Publish the clear
+		// (deduped per job) before eviction.
 		glog.V(2).
 			Infof("job %s/%s succeeded (task %s): trusting agent publish, no synthetic result",
 				job.Namespace, job.Name, taskID)
+		if task, ok := w.taskStore.Load(taskID); ok {
+			if err := w.publisher.PublishClearCurrentJob(ctx, task, job.Name); err != nil {
+				// Keep the task in the store so the informer's terminal
+				// re-delivery (~5 min) retries the clear. Evicting on failure
+				// would drop the only cleanup path for current_job.
+				glog.Errorf(
+					"publish current_job clear for task %s (job %s): %v",
+					taskID,
+					job.Name,
+					err,
+				)
+				return
+			}
+		}
 		w.taskStore.Delete(taskID)
 	}
 }
