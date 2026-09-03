@@ -2,7 +2,7 @@
 
 All notable changes to this project will be documented in this file.
 
-## Unreleased
+## v0.9.1
 
 - fix: clear `current_job` on the job-success path — the executor's JobWatcher now publishes a `current_job=""` frontmatter command (new `ResultPublisher.PublishClearCurrentJob`, deduped per job like `PublishFailure`) before evicting a succeeded job's task from the TaskStore. Previously a succeeded job left `current_job`/`job_started_at` set forever: the agent's result write-back never clears it and the zombie sweeper is blind to the task once it leaves `Snapshot()`, so `github-update-go` fleet sweeps accumulated hundreds of stale task references.
 
