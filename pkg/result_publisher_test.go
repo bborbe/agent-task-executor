@@ -420,6 +420,96 @@ var _ = Describe("ResultPublisher", func() {
 		)
 	})
 
+	Describe("PublishClearCurrentJob", func() {
+		It(
+			"publishes exactly one UpdateFrontmatterCommand clearing current_job, no body, no other keys",
+			func() {
+				task := lib.Task{
+					TaskIdentifier: lib.TaskIdentifier("test-task-clear"),
+					Frontmatter: lib.TaskFrontmatter{
+						"status":        "in_progress",
+						"phase":         "ai_review",
+						"assignee":      "claude",
+						"current_job":   "claude-20260418120000",
+						"trigger_count": 2,
+					},
+					Content: lib.TaskContent("do the work"),
+				}
+				err := publisher.PublishClearCurrentJob(ctx, task, "claude-20260418120000")
+				Expect(err).NotTo(HaveOccurred())
+
+				Expect(producer.messages).To(HaveLen(1))
+				operation, cmd := decodeUpdateFrontmatterCommand(producer.messages[0])
+
+				Expect(
+					string(operation),
+				).To(Equal(string(taskcmd.UpdateFrontmatterCommandOperation)))
+				Expect(string(cmd.TaskIdentifier)).To(Equal("test-task-clear"))
+				Expect(cmd.Updates).To(HaveLen(1))
+				Expect(cmd.Updates["current_job"]).To(Equal(""))
+
+				_, hasStatus := cmd.Updates["status"]
+				Expect(hasStatus).To(BeFalse(), "status must not be in clear-current-job update")
+				_, hasPhase := cmd.Updates["phase"]
+				Expect(hasPhase).To(BeFalse(), "phase must not be in clear-current-job update")
+				_, hasTriggerCount := cmd.Updates["trigger_count"]
+				Expect(
+					hasTriggerCount,
+				).To(BeFalse(), "trigger_count must not be in clear-current-job update")
+				Expect(cmd.Body).To(BeNil(), "success-path clear must not append a body section")
+			},
+		)
+
+		It("suppresses a second call with the same job name (dedupe)", func() {
+			task := lib.Task{
+				TaskIdentifier: lib.TaskIdentifier("test-task-clear-dedupe"),
+				Frontmatter: lib.TaskFrontmatter{
+					"status": "in_progress",
+				},
+				Content: lib.TaskContent("do the work"),
+			}
+
+			err := publisher.PublishClearCurrentJob(ctx, task, "claude-20260418120000")
+			Expect(err).NotTo(HaveOccurred())
+			Expect(producer.messages).To(HaveLen(1))
+
+			err = publisher.PublishClearCurrentJob(ctx, task, "claude-20260418120000")
+			Expect(err).NotTo(HaveOccurred())
+			Expect(producer.messages).To(HaveLen(1), "second call should be deduped")
+		})
+
+		It("returns error when the sender fails and does NOT record dedupe", func() {
+			failingProducer := &partialFailingSyncProducer{
+				successCount: 0,
+				err:          errors.New(context.Background(), "kafka: leader not available"),
+			}
+			failingPublisher := pkg.NewResultPublisher(
+				failingProducer,
+				base.TopicPrefix("develop"),
+				currentDateTime,
+			)
+			task := lib.Task{
+				TaskIdentifier: lib.TaskIdentifier("test-task-clear-fail"),
+				Frontmatter: lib.TaskFrontmatter{
+					"status": "in_progress",
+				},
+				Content: lib.TaskContent("do the work"),
+			}
+
+			err := failingPublisher.PublishClearCurrentJob(ctx, task, "claude-20260418120000")
+			Expect(err).To(HaveOccurred())
+			Expect(err.Error()).To(ContainSubstring("current_job clear"))
+
+			// Dedupe must NOT be recorded on failure — the informer re-delivery
+			// retries the clear until it lands.
+			err = failingPublisher.PublishClearCurrentJob(ctx, task, "claude-20260418120000")
+			Expect(err).To(HaveOccurred())
+			Expect(
+				failingProducer.messages,
+			).To(HaveLen(2), "second call re-attempts the clear (dedupe was not recorded)")
+		})
+	})
+
 	Describe("PublishTypeMismatchFailure", func() {
 		It(
 			"publishes assignee='', previous_assignee=<prior>, current_job='' and Assignee bullet in body",

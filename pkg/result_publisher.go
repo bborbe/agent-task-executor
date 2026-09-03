@@ -42,6 +42,16 @@ type ResultPublisher interface {
 	// eventual operator-inbox escalation. Idempotent per current_job via a TTL'd
 	// LRU; concurrent classifications for the same job emit one event.
 	PublishFailure(ctx context.Context, task lib.Task, jobName string, reason string) error
+	// PublishClearCurrentJob clears current_job in the vault task frontmatter
+	// (writes "" only — no body section, no trigger_count bump, no status/phase
+	// touch). Used on the job-success path, where the agent already published its
+	// real result and the task is about to be evicted from the TaskStore: without
+	// this clear, a succeeded job leaves current_job/job_started_at set forever
+	// (the zombie sweeper is blind to it because the task left Snapshot()). The
+	// write is idempotent (empty → empty is a no-op visually) and deduped per
+	// jobName by the same TTL'd LRU as PublishFailure, so the informer's repeated
+	// terminal re-deliveries do not spam Kafka.
+	PublishClearCurrentJob(ctx context.Context, task lib.Task, jobName string) error
 	// PublishIncrementTriggerCount sends an IncrementFrontmatterCommand that atomically
 	// increments trigger_count by 1. Must complete before SpawnJob is called.
 	PublishIncrementTriggerCount(ctx context.Context, task lib.Task) error
@@ -241,6 +251,29 @@ func (p *resultPublisher) PublishFailure(
 	// (applyTriggerCap in result_writer.go) fires.
 	p.dedupe.recordDedupe(jobName)
 
+	return nil
+}
+
+func (p *resultPublisher) PublishClearCurrentJob(
+	ctx context.Context,
+	task lib.Task,
+	jobName string,
+) error {
+	if p.dedupe.checkDedupe(jobName) {
+		glog.V(2).Infof("event=clear_dedupe job=%s task=%s", jobName, task.TaskIdentifier)
+		return nil
+	}
+	updateCmd := taskcmd.UpdateFrontmatterCommand{
+		TaskIdentifier: task.TaskIdentifier,
+		TargetVault:    targetVaultFromTask(task),
+		Updates: lib.TaskFrontmatter{
+			"current_job": "",
+		},
+	}
+	if err := p.publishRaw(ctx, taskcmd.UpdateFrontmatterCommandOperation, updateCmd); err != nil {
+		return errors.Wrapf(ctx, err, "publish current_job clear for task %s", task.TaskIdentifier)
+	}
+	p.dedupe.recordDedupe(jobName)
 	return nil
 }
 
