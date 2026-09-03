@@ -154,8 +154,11 @@ type resultPublisher struct {
 
 // targetVaultFromTask reads the task's frontmatter "target_vault" key and
 // returns it as a string, returning "" when the key is absent or holds a
-// non-string value. The executor serves all vaults ("shared") and must never
-// inject its own vault name, so the routing stamp always comes from the task.
+// non-string value. TaskFrontmatter.String returns (string, bool) — the
+// discarded second value is the found/type-assert flag, not an error; "" on
+// false is exactly the documented fallback. The executor serves all vaults
+// ("shared") and must never inject its own vault name, so the routing stamp
+// always comes from the task.
 func targetVaultFromTask(task lib.Task) string {
 	vault, _ := task.Frontmatter.String("target_vault")
 	return vault
@@ -326,6 +329,9 @@ func (p *resultPublisher) publishRaw(
 	operation base.CommandOperation,
 	payload interface{},
 ) error {
+	// Payload validation is the publisher's test-suite contract plus the
+	// consumer's job (the controller validates each command before persisting);
+	// publishRaw intentionally does not re-validate.
 	event, err := base.ParseEvent(ctx, payload)
 	if err != nil {
 		return errors.Wrapf(ctx, err, "parse event for operation %s", operation)
