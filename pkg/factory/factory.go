@@ -22,6 +22,7 @@ import (
 	"k8s.io/client-go/tools/cache"
 
 	pkg "github.com/bborbe/agent-task-executor/pkg"
+	"github.com/bborbe/agent-task-executor/pkg/gitrestclient"
 	"github.com/bborbe/agent-task-executor/pkg/handler"
 	"github.com/bborbe/agent-task-executor/pkg/probe"
 	"github.com/bborbe/agent-task-executor/pkg/spawner"
@@ -91,6 +92,13 @@ func CreateConfigResolver(
 	return pkg.NewConfigResolver(handler, branch, vaultName)
 }
 
+// CreateGitRestClient returns the read-only git-rest vault reader the
+// reconcile loop uses. gatewayInitiator is fixed to the executor's identity
+// for git-rest's auth-failure logging.
+func CreateGitRestClient(baseURL, gatewaySecret string) gitrestclient.GitRestClient {
+	return gitrestclient.NewGitRestClient(baseURL, gatewaySecret, "agent-task-executor")
+}
+
 // CreateConsumer wires together all components and returns a Kafka Consumer that
 // reads task events and spawns K8s Jobs for qualifying tasks, along with the
 // TaskEventHandler so callers can wire RunDeferredRespawnLoop.
@@ -109,6 +117,8 @@ func CreateConsumer(
 	jobTTLSecondsAfterFinished int32,
 	jobKafkaClientCertSecret string,
 	jobKafkaCaCertSecret string,
+	gitRestClient gitrestclient.GitRestClient,
+	taskGlob string,
 ) (libkafka.Consumer, handler.TaskEventHandler) {
 	jobSpawner := spawner.NewJobSpawner(
 		kubeClient,
@@ -128,6 +138,8 @@ func CreateConsumer(
 		resultPublisher,
 		taskStore,
 		currentDateTimeGetter,
+		gitRestClient,
+		taskGlob,
 	)
 	topic := lib.TaskV1SchemaID.EventTopic(topicPrefix)
 	offsetManager := libkafka.NewSaramaOffsetManager(

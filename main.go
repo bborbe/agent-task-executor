@@ -154,6 +154,20 @@ func (a *application) Run(ctx context.Context, sentryClient libsentry.Client) er
 		currentDateTimeGetter,
 	)
 
+	// The git-rest gateway secret is read by NAME from K8s (never logged, never
+	// in env) so the reconcile loop can authenticate to git-rest without secret
+	// material entering the Deployment manifest (spec 005 Security).
+	gitRestGatewaySecretValue, err := pkg.ReadGitRestGatewaySecret(
+		ctx,
+		kubeClient,
+		a.Namespace,
+		a.GitRestGatewaySecret,
+	)
+	if err != nil {
+		return errors.Wrapf(ctx, err, "read git-rest gateway secret")
+	}
+	gitRestClient := factory.CreateGitRestClient(a.GitRestURL, gitRestGatewaySecretValue)
+
 	healthcheckRunner := factory.CreateHealthcheckRunner(
 		eventHandlerConfig,
 		syncProducer,
@@ -180,6 +194,8 @@ func (a *application) Run(ctx context.Context, sentryClient libsentry.Client) er
 		a.JobTTLSecondsAfterFinished,
 		a.JobKafkaClientCertSecret,
 		a.JobKafkaCaCertSecret,
+		gitRestClient,
+		a.TaskGlob,
 	)
 
 	return service.Run(
@@ -189,6 +205,7 @@ func (a *application) Run(ctx context.Context, sentryClient libsentry.Client) er
 		},
 		consumer.Consume,
 		taskEventHandler.RunDeferredRespawnLoop,
+		taskEventHandler.RunReconcileLoop,
 		jobWatcher.Run,
 		zombieSweeper.Run,
 		a.createHTTPServer(eventHandlerConfig, healthcheckRunner),

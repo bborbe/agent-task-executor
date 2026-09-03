@@ -26,6 +26,15 @@ var JobsSpawnedTotal = promauto.NewCounter(
 	},
 )
 
+// ReconcileRedrivenTotal counts tasks re-driven by the reconcile loop after a
+// restart dropped their in-memory deferral state (spec 005).
+var ReconcileRedrivenTotal = promauto.NewCounter(
+	prometheus.CounterOpts{
+		Name: "executor_reconcile_redriven_total",
+		Help: "Total number of tasks re-driven by the reconcile loop.",
+	},
+)
+
 func init() {
 	TaskEventsTotal.WithLabelValues("spawned").Add(0)
 	TaskEventsTotal.WithLabelValues("skipped_status").Add(0)

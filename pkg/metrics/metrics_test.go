@@ -25,6 +25,7 @@ var _ = Describe("Metrics", func() {
 
 		Expect(names).To(HaveKey("agent_executor_task_events_total"))
 		Expect(names).To(HaveKey("agent_executor_jobs_spawned_total"))
+		Expect(names).To(HaveKey("executor_reconcile_redriven_total"))
 	})
 
 	It("pre-initializes all task_events_total label combinations", func() {

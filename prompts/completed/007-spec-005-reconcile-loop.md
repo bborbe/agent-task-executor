@@ -1,8 +1,13 @@
 ---
-status: approved
+status: completed
 spec: [005-bug-executor-restart-drops-deferred-respawn-queue]
+summary: Added a periodic reconcile loop to taskEventHandler that re-derives running tasks from the vault via git-rest and live Jobs, re-driving eligible tasks through the existing spawnIfNeeded path with per-pass observability and graceful git-rest degradation
+execution_id: agent-task-executor-exec-007-spec-005-reconcile-loop
+dark-factory-version: dev
 created: "2026-09-03T18:04:37Z"
 queued: "2026-09-03T18:18:58Z"
+started: "2026-09-03T18:26:14Z"
+completed: "2026-09-03T18:34:57Z"
 branch: dark-factory/bug-executor-restart-drops-deferred-respawn-queue
 ---
 
