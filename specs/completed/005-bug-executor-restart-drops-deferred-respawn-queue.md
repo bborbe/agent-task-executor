@@ -1,9 +1,10 @@
 ---
-status: verifying
+status: completed
 approved: "2026-09-03T17:42:38Z"
 generating: "2026-09-03T17:57:12Z"
 prompted: "2026-09-03T18:13:09Z"
 verifying: "2026-09-03T18:41:37Z"
+completed: "2026-09-04T14:09:06Z"
 branch: dark-factory/bug-executor-restart-drops-deferred-respawn-queue
 ---
 
