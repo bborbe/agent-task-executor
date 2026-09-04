@@ -2,7 +2,7 @@
 
 All notable changes to this project will be documented in this file.
 
-## Unreleased
+## v0.11.3
 
 - fix: extend the respawned-second-success race fix (v0.11.1) to the job-informer path — `JobWatcher.HandleJob` now evicts the in-memory TaskStore entry only when the store entry's `current_job` matches the job being processed (a stale terminal re-delivery of a PREVIOUS job's success/failure no longer evicts the entry tracking the re-spawned job). The v0.11.1 guard covered `cleanupTerminalTask` (Kafka path); the informer re-delivers a terminal Job every ~5 min, and a re-delivered success from the first job evicted the just-re-spawned task's entry, silently no-oping the second job's `current_job` clear (observed live on prod 2026-09-04 for task 67120247: job-1's re-delivered success evicted job-2's store entry).
 
