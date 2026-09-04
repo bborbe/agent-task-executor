@@ -154,6 +154,30 @@ var _ = Describe("JobWatcher", func() {
 			},
 		)
 
+		It("does not evict a re-spawned task when a stale job's success is re-delivered", func() {
+			// Regression for the prod observation 2026-09-04 on task 67120247:
+			// job-1 succeeded + cleared + evicted, the task was re-dispatched and
+			// respawned as job-2 (the store entry carries current_job=job-2), then
+			// the informer's ~5 min re-delivery of job-1's success hit HandleJob.
+			// The success path published nothing (deduped per job) but
+			// unconditionally evicted the store entry tracking job-2 — so job-2's
+			// own success later no-oped and current_job stayed set forever.
+			taskWithCurrentJob := testTask
+			taskWithCurrentJob.Frontmatter["current_job"] = "job-2"
+			taskStore.Store(testTaskID, taskWithCurrentJob)
+
+			// 1. Stale re-delivery of job-1's success must NOT evict job-2's entry.
+			watcher.HandleJob(ctx, makeJob("job-1", string(testTaskID), succeededCondition()))
+			_, ok := taskStore.Load(testTaskID)
+			Expect(ok).To(BeTrue(), "stale success re-delivery must not evict the re-spawned task")
+
+			// 2. The current job's own success must still clear + evict.
+			watcher.HandleJob(ctx, makeJob("job-2", string(testTaskID), succeededCondition()))
+			Expect(fakePublisher.PublishClearCurrentJobCallCount()).To(Equal(2))
+			_, ok = taskStore.Load(testTaskID)
+			Expect(ok).To(BeFalse(), "current job's success evicts the store entry")
+		})
+
 		It("ignores jobs without task-id label", func() {
 			job := makeJob("job-4", "", failedCondition("crash"))
 			_, err := fakeKubeClient.BatchV1().
