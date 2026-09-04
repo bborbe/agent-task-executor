@@ -2,7 +2,7 @@
 
 All notable changes to this project will be documented in this file.
 
-## Unreleased
+## v0.11.1
 
 - fix: keep the in-memory TaskStore entry for a re-spawned task when a stale terminal event arrives — `cleanupTerminalTask` now skips eviction when the stored task's `current_job` differs from the terminal event's (the store entry is recorded under the actually-spawned job at spawn time). Previously a delayed `completed` event from a previous job's chain evicted the just-re-spawned task, so the new job's success-path `current_job` clear silently no-oped and left `current_job` set forever (respawned-second-success race, observed on prod 2026-09-03 for task 893c33b9).
 
