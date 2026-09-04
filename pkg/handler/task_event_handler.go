@@ -229,6 +229,26 @@ func (h *taskEventHandler) cleanupTerminalTask(task lib.Task) {
 	if status != "completed" && status != "aborted" {
 		return
 	}
+	// Guard against stale terminal events from an earlier job cycle. A terminal
+	// event whose current_job differs from the in-store task's means the task was
+	// re-dispatched and re-spawned under a DIFFERENT job since the event was
+	// emitted (respawned-second-success race, observed prod 2026-09-03 on task
+	// 893c33b9). Evicting here drops the only store entry the new job's success
+	// path uses to publish the current_job clear, leaving current_job set forever
+	// with no operator visibility. Evict only when the store entry tracks the
+	// same job as the terminal event — or no job at all (defensive). A stale
+	// entry kept here is cleaned when the tracked job reaches terminal via
+	// HandleJob, the same mechanism the success path already relies on.
+	if stored, ok := h.taskStore.Load(task.TaskIdentifier); ok {
+		if storedJob := stored.Frontmatter.CurrentJob(); storedJob != "" &&
+			storedJob != task.Frontmatter.CurrentJob() {
+			glog.V(3).Infof(
+				"task %s %s: stale terminal event (store current_job=%s, event current_job=%s) — keeping store entry",
+				task.TaskIdentifier, status, storedJob, task.Frontmatter.CurrentJob(),
+			)
+			return
+		}
+	}
 	h.taskStore.Delete(task.TaskIdentifier)
 	h.removeDeferredEntry(task.TaskIdentifier)
 	glog.V(3).
@@ -551,7 +571,23 @@ func (h *taskEventHandler) spawnIfNeeded(
 		return false, errors.Wrapf(ctx, err, "spawn job for task %s failed", task.TaskIdentifier)
 	}
 
-	h.taskStore.Store(task.TaskIdentifier, task)
+	// Record the task under the job that was actually spawned. The spawn
+	// notification is published to the vault asynchronously; without this the
+	// in-memory entry keeps the pre-spawn event's current_job (the previous job
+	// or none), so cleanupTerminalTask cannot tell a stale terminal event from a
+	// current one and evicts a task whose replacement job is still running — the
+	// respawned-second-success race. Clone the frontmatter: the event's task may
+	// still be held by a deferred-respawn entry.
+	storedTask := task
+	storedTask.Frontmatter = make(lib.TaskFrontmatter, len(task.Frontmatter))
+	for k, v := range task.Frontmatter {
+		storedTask.Frontmatter[k] = v
+	}
+	storedTask.Frontmatter["current_job"] = jobName
+	storedTask.Frontmatter["job_started_at"] = h.currentDateTime.Now().
+		UTC().
+		Format("2006-01-02T15:04:05Z07:00")
+	h.taskStore.Store(task.TaskIdentifier, storedTask)
 	if err := h.resultPublisher.PublishSpawnNotification(ctx, task, jobName); err != nil {
 		// Log but don't fail — job is already spawned, spawn notification is best-effort
 		glog.Warningf("publish spawn notification for task %s failed (job %s still running): %v",

@@ -2,6 +2,10 @@
 
 All notable changes to this project will be documented in this file.
 
+## Unreleased
+
+- fix: keep the in-memory TaskStore entry for a re-spawned task when a stale terminal event arrives — `cleanupTerminalTask` now skips eviction when the stored task's `current_job` differs from the terminal event's (the store entry is recorded under the actually-spawned job at spawn time). Previously a delayed `completed` event from a previous job's chain evicted the just-re-spawned task, so the new job's success-path `current_job` clear silently no-oped and left `current_job` set forever (respawned-second-success race, observed on prod 2026-09-03 for task 893c33b9).
+
 ## v0.11.0
 
 - feat: add a periodic reconcile loop that re-derives running tasks from the vault (via git-rest) and live Jobs, so a task deferred behind `maxConcurrentJobs` whose in-memory deferral was lost across an executor restart resumes without a Kafka event or vault edit; observable via `executor_reconcile_redriven_total` and `event=reconcile*` log lines, with the per-assignee spawn lock taken unconditionally to prevent reconcile/event double-spawns
