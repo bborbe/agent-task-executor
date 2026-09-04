@@ -33,6 +33,17 @@ type FakeTaskEventHandler struct {
 	evalDeferredRespawnsReturnsOnCall map[int]struct {
 		result1 error
 	}
+	ReconcileOnceStub        func(context.Context) error
+	reconcileOnceMutex       sync.RWMutex
+	reconcileOnceArgsForCall []struct {
+		arg1 context.Context
+	}
+	reconcileOnceReturns struct {
+		result1 error
+	}
+	reconcileOnceReturnsOnCall map[int]struct {
+		result1 error
+	}
 	RunDeferredRespawnLoopStub        func(context.Context) error
 	runDeferredRespawnLoopMutex       sync.RWMutex
 	runDeferredRespawnLoopArgsForCall []struct {
@@ -42,6 +53,17 @@ type FakeTaskEventHandler struct {
 		result1 error
 	}
 	runDeferredRespawnLoopReturnsOnCall map[int]struct {
+		result1 error
+	}
+	RunReconcileLoopStub        func(context.Context) error
+	runReconcileLoopMutex       sync.RWMutex
+	runReconcileLoopArgsForCall []struct {
+		arg1 context.Context
+	}
+	runReconcileLoopReturns struct {
+		result1 error
+	}
+	runReconcileLoopReturnsOnCall map[int]struct {
 		result1 error
 	}
 	invocations      map[string][][]interface{}
@@ -171,6 +193,67 @@ func (fake *FakeTaskEventHandler) EvalDeferredRespawnsReturnsOnCall(i int, resul
 	}{result1}
 }
 
+func (fake *FakeTaskEventHandler) ReconcileOnce(arg1 context.Context) error {
+	fake.reconcileOnceMutex.Lock()
+	ret, specificReturn := fake.reconcileOnceReturnsOnCall[len(fake.reconcileOnceArgsForCall)]
+	fake.reconcileOnceArgsForCall = append(fake.reconcileOnceArgsForCall, struct {
+		arg1 context.Context
+	}{arg1})
+	stub := fake.ReconcileOnceStub
+	fakeReturns := fake.reconcileOnceReturns
+	fake.recordInvocation("ReconcileOnce", []interface{}{arg1})
+	fake.reconcileOnceMutex.Unlock()
+	if stub != nil {
+		return stub(arg1)
+	}
+	if specificReturn {
+		return ret.result1
+	}
+	return fakeReturns.result1
+}
+
+func (fake *FakeTaskEventHandler) ReconcileOnceCallCount() int {
+	fake.reconcileOnceMutex.RLock()
+	defer fake.reconcileOnceMutex.RUnlock()
+	return len(fake.reconcileOnceArgsForCall)
+}
+
+func (fake *FakeTaskEventHandler) ReconcileOnceCalls(stub func(context.Context) error) {
+	fake.reconcileOnceMutex.Lock()
+	defer fake.reconcileOnceMutex.Unlock()
+	fake.ReconcileOnceStub = stub
+}
+
+func (fake *FakeTaskEventHandler) ReconcileOnceArgsForCall(i int) context.Context {
+	fake.reconcileOnceMutex.RLock()
+	defer fake.reconcileOnceMutex.RUnlock()
+	argsForCall := fake.reconcileOnceArgsForCall[i]
+	return argsForCall.arg1
+}
+
+func (fake *FakeTaskEventHandler) ReconcileOnceReturns(result1 error) {
+	fake.reconcileOnceMutex.Lock()
+	defer fake.reconcileOnceMutex.Unlock()
+	fake.ReconcileOnceStub = nil
+	fake.reconcileOnceReturns = struct {
+		result1 error
+	}{result1}
+}
+
+func (fake *FakeTaskEventHandler) ReconcileOnceReturnsOnCall(i int, result1 error) {
+	fake.reconcileOnceMutex.Lock()
+	defer fake.reconcileOnceMutex.Unlock()
+	fake.ReconcileOnceStub = nil
+	if fake.reconcileOnceReturnsOnCall == nil {
+		fake.reconcileOnceReturnsOnCall = make(map[int]struct {
+			result1 error
+		})
+	}
+	fake.reconcileOnceReturnsOnCall[i] = struct {
+		result1 error
+	}{result1}
+}
+
 func (fake *FakeTaskEventHandler) RunDeferredRespawnLoop(arg1 context.Context) error {
 	fake.runDeferredRespawnLoopMutex.Lock()
 	ret, specificReturn := fake.runDeferredRespawnLoopReturnsOnCall[len(fake.runDeferredRespawnLoopArgsForCall)]
@@ -228,6 +311,67 @@ func (fake *FakeTaskEventHandler) RunDeferredRespawnLoopReturnsOnCall(i int, res
 		})
 	}
 	fake.runDeferredRespawnLoopReturnsOnCall[i] = struct {
+		result1 error
+	}{result1}
+}
+
+func (fake *FakeTaskEventHandler) RunReconcileLoop(arg1 context.Context) error {
+	fake.runReconcileLoopMutex.Lock()
+	ret, specificReturn := fake.runReconcileLoopReturnsOnCall[len(fake.runReconcileLoopArgsForCall)]
+	fake.runReconcileLoopArgsForCall = append(fake.runReconcileLoopArgsForCall, struct {
+		arg1 context.Context
+	}{arg1})
+	stub := fake.RunReconcileLoopStub
+	fakeReturns := fake.runReconcileLoopReturns
+	fake.recordInvocation("RunReconcileLoop", []interface{}{arg1})
+	fake.runReconcileLoopMutex.Unlock()
+	if stub != nil {
+		return stub(arg1)
+	}
+	if specificReturn {
+		return ret.result1
+	}
+	return fakeReturns.result1
+}
+
+func (fake *FakeTaskEventHandler) RunReconcileLoopCallCount() int {
+	fake.runReconcileLoopMutex.RLock()
+	defer fake.runReconcileLoopMutex.RUnlock()
+	return len(fake.runReconcileLoopArgsForCall)
+}
+
+func (fake *FakeTaskEventHandler) RunReconcileLoopCalls(stub func(context.Context) error) {
+	fake.runReconcileLoopMutex.Lock()
+	defer fake.runReconcileLoopMutex.Unlock()
+	fake.RunReconcileLoopStub = stub
+}
+
+func (fake *FakeTaskEventHandler) RunReconcileLoopArgsForCall(i int) context.Context {
+	fake.runReconcileLoopMutex.RLock()
+	defer fake.runReconcileLoopMutex.RUnlock()
+	argsForCall := fake.runReconcileLoopArgsForCall[i]
+	return argsForCall.arg1
+}
+
+func (fake *FakeTaskEventHandler) RunReconcileLoopReturns(result1 error) {
+	fake.runReconcileLoopMutex.Lock()
+	defer fake.runReconcileLoopMutex.Unlock()
+	fake.RunReconcileLoopStub = nil
+	fake.runReconcileLoopReturns = struct {
+		result1 error
+	}{result1}
+}
+
+func (fake *FakeTaskEventHandler) RunReconcileLoopReturnsOnCall(i int, result1 error) {
+	fake.runReconcileLoopMutex.Lock()
+	defer fake.runReconcileLoopMutex.Unlock()
+	fake.RunReconcileLoopStub = nil
+	if fake.runReconcileLoopReturnsOnCall == nil {
+		fake.runReconcileLoopReturnsOnCall = make(map[int]struct {
+			result1 error
+		})
+	}
+	fake.runReconcileLoopReturnsOnCall[i] = struct {
 		result1 error
 	}{result1}
 }

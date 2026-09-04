@@ -44,6 +44,7 @@ var _ = Describe("TaskEventHandler", func() {
 		fakeSpawner         *mocks.FakeJobSpawner
 		fakeResolver        *mocks.FakeConfigResolver
 		fakeResultPublisher *mocks.FakeResultPublisher
+		fakeGitRestClient   *mocks.FakeGitRestClient
 		taskStore           *pkg.TaskStore
 		currentDateTime     libtime.CurrentDateTime
 		h                   handler.TaskEventHandler
@@ -58,6 +59,8 @@ var _ = Describe("TaskEventHandler", func() {
 			nil,
 		)
 		fakeResultPublisher = &mocks.FakeResultPublisher{}
+		fakeGitRestClient = &mocks.FakeGitRestClient{}
+		fakeGitRestClient.IsReadyReturns(true, nil)
 		taskStore = pkg.NewTaskStore()
 		currentDateTime = libtime.NewCurrentDateTime()
 		h = handler.NewTaskEventHandler(
@@ -67,6 +70,8 @@ var _ = Describe("TaskEventHandler", func() {
 			fakeResultPublisher,
 			taskStore,
 			currentDateTime,
+			fakeGitRestClient,
+			"24 Tasks/*.md",
 		)
 	})
 
@@ -883,6 +888,8 @@ var _ = Describe("TaskEventHandler", func() {
 				&mocks.FakeResultPublisher{},
 				pkg.NewTaskStore(),
 				libtime.NewCurrentDateTime(),
+				fakeGitRestClient,
+				"24 Tasks/*.md",
 			)
 			task := lib.Task{
 				TaskIdentifier: lib.TaskIdentifier("tid-stage-3"),
@@ -929,6 +936,8 @@ var _ = Describe("TaskEventHandler", func() {
 				&mocks.FakeResultPublisher{},
 				pkg.NewTaskStore(),
 				libtime.NewCurrentDateTime(),
+				fakeGitRestClient,
+				"24 Tasks/*.md",
 			)
 			task := lib.Task{
 				TaskIdentifier: lib.TaskIdentifier("tid-stage-4"),
@@ -1663,6 +1672,8 @@ var _ = Describe("TaskEventHandler", func() {
 						fakeResultPublisher,
 						restartStore,
 						currentDateTime,
+						fakeGitRestClient,
+						"24 Tasks/*.md",
 					)
 
 					// Clock is past grace expiry — simulating the executor coming back up
@@ -1709,6 +1720,8 @@ var _ = Describe("TaskEventHandler", func() {
 						fakeResultPublisher,
 						restartStore,
 						currentDateTime,
+						fakeGitRestClient,
+						"24 Tasks/*.md",
 					)
 
 					currentDateTime.SetNow(libtimetest.ParseDateTime(graceExpiredR))

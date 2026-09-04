@@ -26,6 +26,15 @@ var JobsSpawnedTotal = promauto.NewCounter(
 	},
 )
 
+// ReconcileRedrivenTotal counts tasks re-driven by the reconcile loop after a
+// restart dropped their in-memory deferral state (spec 005).
+var ReconcileRedrivenTotal = promauto.NewCounter(
+	prometheus.CounterOpts{
+		Name: "executor_reconcile_redriven_total",
+		Help: "Total number of tasks re-driven by the reconcile loop.",
+	},
+)
+
 // SkippedUnknownAssigneeTotal counts tasks skipped because their assignee
 // matches no agent Config CR, labelled by the unknown assignee name. The bare
 // TaskEventsTotal{result="skipped_unknown_assignee"} counter says a skip
@@ -55,4 +64,5 @@ func init() {
 	TaskEventsTotal.WithLabelValues("unknown_phase").Add(0)
 	TaskEventsTotal.WithLabelValues("respawn_grace_window").Add(0)
 	TaskEventsTotal.WithLabelValues("respawn_after_grace_window").Add(0)
+	TaskEventsTotal.WithLabelValues("deferred_concurrency_cap").Add(0)
 }

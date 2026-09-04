@@ -12,6 +12,19 @@ pin, e.g. `…/agent-claude:v0.1.1`) is used as-is; an **untagged** image gets t
 running branch appended (`…/agent-backtest` → `…/agent-backtest:dev`). Deployed
 via the `agent` Helm chart; published image `docker.io/bborbe/agent-task-executor`.
 
+## Reconcile loop configuration
+
+The reconcile loop re-derives running tasks from the vault (via git-rest) and
+live Jobs, so a task deferred behind `maxConcurrentJobs` whose in-memory
+deferral was lost across an executor restart resumes without a Kafka event or
+vault edit. It is configured by:
+
+| Env var | Default | Meaning |
+|---|---|---|
+| `GITREST_URL` | `http://vault-obsidian-openclaw:9090` | git-rest HTTP API base URL the reconcile loop reads vault task files through. |
+| `GITREST_GATEWAY_SECRET` | empty (auth disabled) | NAME of the K8s Secret carrying the git-rest gateway secret (data key `gateway-secret`) — never the secret value. The executor reads the value from the Secret at startup and uses it only in memory. The executor's ServiceAccount must be able to `get` this Secret (chart-side Role grant). |
+| `TASK_GLOB` | `24 Tasks/*.md` | git-rest single-level glob selecting the vault task files the reconcile loop evaluates. |
+
 ## Links
 
 Dev:

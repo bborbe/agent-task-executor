@@ -21,6 +21,7 @@ import (
 	"github.com/golang/glog"
 
 	pkg "github.com/bborbe/agent-task-executor/pkg"
+	"github.com/bborbe/agent-task-executor/pkg/gitrestclient"
 	"github.com/bborbe/agent-task-executor/pkg/metrics"
 	"github.com/bborbe/agent-task-executor/pkg/spawner"
 )
@@ -52,6 +53,20 @@ const deferredRespawnInterval = 30 * time.Second
 // github-update-go Job measured 11-15 minutes uncontended on 2026-08-10), so a
 // freed slot is picked up promptly without busy-polling the API server.
 const concurrencyCapRetryDelay = 60 * time.Second
+
+// defaultReconcileInterval is the interval between reconcile-loop passes
+// (spec 005). Mirrors the DefaultZombieSweeperIntervalSeconds CRD knob: a
+// package constant, not a CRD field and not env-configurable in this change.
+// 60s is a reasonable recovery latency for a task whose deferral was lost
+// across a restart.
+const defaultReconcileInterval = 60 * time.Second
+
+// reconcilePassTimeout bounds one reconcile pass so a slow or large vault
+// cannot hold a pass open indefinitely (spec 005 Failure Modes: "Pass bounded
+// by a per-pass timeout; logs evaluate count so cost is visible"). Half the
+// interval: a pass completes within a tick and leaves headroom for the next
+// tick. Package constant — not configurable in this change.
+const reconcilePassTimeout = 30 * time.Second
 
 // deferredEntry tracks a task whose respawn was suppressed by the grace window.
 // The executor re-evaluates it once retryAfter is reached.
@@ -113,6 +128,15 @@ type TaskEventHandler interface {
 	// RunDeferredRespawnLoop polls evalDeferredRespawns every deferredRespawnInterval
 	// until ctx is cancelled. Must be run alongside the Kafka consumer.
 	RunDeferredRespawnLoop(ctx context.Context) error
+	// ReconcileOnce runs one reconcile pass: lists the task files under the
+	// configured task glob via git-rest, parses each file's frontmatter, and
+	// re-drives every eligible task through the existing spawn path. Called by
+	// RunReconcileLoop on each tick; also callable directly in tests.
+	ReconcileOnce(ctx context.Context) error
+	// RunReconcileLoop runs one pass immediately at startup, then every
+	// defaultReconcileInterval until ctx is cancelled. Must be run
+	// alongside the Kafka consumer.
+	RunReconcileLoop(ctx context.Context) error
 }
 
 // NewTaskEventHandler creates a new TaskEventHandler.
@@ -123,6 +147,8 @@ func NewTaskEventHandler(
 	resultPublisher pkg.ResultPublisher,
 	taskStore *pkg.TaskStore,
 	currentDateTime libtime.CurrentDateTimeGetter,
+	gitRestClient gitrestclient.GitRestClient,
+	taskGlob string,
 ) TaskEventHandler {
 	return &taskEventHandler{
 		jobSpawner:       jobSpawner,
@@ -133,6 +159,8 @@ func NewTaskEventHandler(
 		currentDateTime:  currentDateTime,
 		deferredRespawns: make(map[lib.TaskIdentifier]deferredEntry),
 		spawnLocks:       make(map[string]*sync.Mutex),
+		gitRestClient:    gitRestClient,
+		taskGlob:         taskGlob,
 	}
 }
 
@@ -147,6 +175,8 @@ type taskEventHandler struct {
 	deferredRespawns map[lib.TaskIdentifier]deferredEntry
 	spawnLocksMu     sync.Mutex
 	spawnLocks       map[string]*sync.Mutex
+	gitRestClient    gitrestclient.GitRestClient
+	taskGlob         string
 }
 
 // lockAssigneeSpawn serializes the count-then-spawn sequence for one assignee and
@@ -165,6 +195,10 @@ type taskEventHandler struct {
 // Per-assignee rather than global: a fleet-wide lock would make one agent's spawn
 // latency everyone's. Serializing per assignee costs nothing — spawns are rare
 // against Job runtimes measured in the 11-15 minute range.
+//
+// Taken unconditionally since spec 005: the reconcile loop and the Kafka consumer
+// must also serialize for uncapped assignees, or a reconcile tick racing the event
+// path for the same task would double-spawn.
 //
 // WARNING: correct only while the executor runs replicas: 1 (verified in quant dev
 // and prod). Scaling to 2 reinstates the race across processes and requires a lease
@@ -468,10 +502,16 @@ func (h *taskEventHandler) spawnIfNeeded(
 	}
 
 	// Held across the cap check AND the SpawnJob call below, so no other goroutine
-	// can observe a stale Job count in between. Only taken when a cap is configured:
-	// an uncapped agent has nothing to serialize, and holding the lock anyway would
-	// queue its spawns behind each other for no benefit.
-	if config != nil && config.MaxConcurrentJobs > 0 {
+	// can observe a stale Job count in between. Taken unconditionally (for any
+	// resolved config, capped or not) because three goroutines reach spawnIfNeeded
+	// — the Kafka consumer, the deferred-respawn loop, and the reconcile loop
+	// (spec 005) — and for an UNCAPPED assignee they must still serialize
+	// count-then-spawn so two of them cannot both read IsJobActive=false before
+	// either creates the Job and double-spawn the same task. Spawns are rare
+	// against Job runtimes measured in minutes, so the per-assignee serialization
+	// costs nothing measurable. config is nil only for tasks that never reach this
+	// code (empty assignee is filtered upstream); the nil guard stays defensive.
+	if config != nil {
 		defer h.lockAssigneeSpawn(config.Assignee)()
 	}
 
@@ -601,6 +641,11 @@ func (h *taskEventHandler) evalDeferredRespawns(ctx context.Context) error {
 	h.deferredMu.Unlock()
 
 	for _, entry := range ready {
+		select {
+		case <-ctx.Done():
+			return nil
+		default:
+		}
 		entry := entry // capture for closure
 		spawned, err := h.spawnIfNeeded(ctx, entry.task, &entry.config)
 		if err != nil {
@@ -613,7 +658,7 @@ func (h *taskEventHandler) evalDeferredRespawns(ctx context.Context) error {
 		}
 		jobStartedAt, _ := entry.task.Frontmatter.JobStartedAt()
 		elapsed := now.Sub(jobStartedAt)
-		glog.Infof(
+		glog.V(1).Infof(
 			"event=respawn_after_grace_window task=%s current_job=%s elapsed=%.0fs",
 			entry.task.TaskIdentifier, entry.task.Frontmatter.CurrentJob(), elapsed.Seconds(),
 		)
@@ -640,14 +685,26 @@ func (h *taskEventHandler) EvalDeferredRespawns(ctx context.Context) error {
 // deferredRespawns with retryAfter = job_started_at + defaultRespawnGracePeriod.
 // Called once from RunDeferredRespawnLoop on startup. Idempotent: any entry already
 // present in deferredRespawns is left untouched. This restores deferred state lost
-// when the in-memory map is wiped by an executor restart, so a stuck task does not
-// remain stuck for want of a Kafka event that will never arrive.
-func (h *taskEventHandler) seedDeferredRespawnsFromStore() {
+// when the in-memory map is wiped by an executor restart, so a task deferred
+// behind the concurrency cap does not remain stuck for want of a Kafka event that
+// will never arrive.
+//
+// The agent configuration is resolved here at seed time (not left zero-valued):
+// a seeded entry is later evaluated by evalDeferredRespawns → spawnIfNeeded, which
+// spawns with the entry's config — a zero-valued config would spawn a Job with an
+// empty image. Tasks whose assignee config cannot be resolved are skipped; they
+// are re-evaluated when a genuine Kafka event for the task arrives.
+func (h *taskEventHandler) seedDeferredRespawnsFromStore(ctx context.Context) {
 	snapshot := h.taskStore.Snapshot()
 
 	h.deferredMu.Lock()
 	defer h.deferredMu.Unlock()
 	for taskID, task := range snapshot {
+		select {
+		case <-ctx.Done():
+			return
+		default:
+		}
 		if _, exists := h.deferredRespawns[taskID]; exists {
 			continue
 		}
@@ -663,12 +720,17 @@ func (h *taskEventHandler) seedDeferredRespawnsFromStore() {
 		if jobStartedErr != nil {
 			continue
 		}
+		config, resolveErr := h.resolver.Resolve(ctx, task.Frontmatter.Assignee().String())
+		if resolveErr != nil {
+			glog.V(2).Infof(
+				"seed deferred respawn: skip task %s (config unresolvable for assignee %s): %v",
+				taskID, task.Frontmatter.Assignee(), resolveErr,
+			)
+			continue
+		}
 		h.deferredRespawns[taskID] = deferredEntry{
-			task: task,
-			// config: the agent configuration is resolved at event time; the seed
-			// uses an empty value here. For seeded entries the config is zero-valued;
-			// this is acceptable because the next genuine Kafka event for the task
-			// will supply the correct config via the event-driven path.
+			task:       task,
+			config:     config,
 			retryAfter: jobStartedAt.Add(defaultRespawnGracePeriod),
 		}
 	}
@@ -679,7 +741,7 @@ func (h *taskEventHandler) RunDeferredRespawnLoop(ctx context.Context) error {
 	// Startup reconciliation: recover deferred entries lost across an executor
 	// restart by scanning the in-memory taskStore. See seedDeferredRespawnsFromStore
 	// for the restart-safety rationale (spec 037 AC #5).
-	h.seedDeferredRespawnsFromStore()
+	h.seedDeferredRespawnsFromStore(ctx)
 
 	// Fire one eval immediately after seeding so that tasks whose grace has
 	// already elapsed at startup are picked up without waiting for the first tick.
@@ -696,6 +758,160 @@ func (h *taskEventHandler) RunDeferredRespawnLoop(ctx context.Context) error {
 		case <-ticker.C:
 			if err := h.evalDeferredRespawns(ctx); err != nil {
 				return errors.Wrapf(ctx, err, "deferred respawn loop tick")
+			}
+		}
+	}
+}
+
+// ReconcileOnce runs a single reconcile pass: lists the task files under the
+// configured task glob via git-rest, parses each file's frontmatter, and
+// re-drives every eligible task through the existing spawnIfNeeded path.
+//
+// The reconcile loop is the source-of-truth floor (spec 005): it derives state
+// from the world — the vault via git-rest, live Jobs via the spawner — rather
+// than from the in-memory maps a restart wipes, so a task whose concurrency-cap
+// deferral was lost across an executor restart is re-driven without a new Kafka
+// event and without a current_job value. It does NOT consult deferredRespawns.
+//
+// git-rest unavailability degrades gracefully (spec 005 Failure Modes): a
+// failed readiness, List, or Get skips the pass with a log line and the next
+// tick retries. ReconcileOnce returns nil for all vault-side failures so the
+// loop can never tear down the executor via service.Run.
+func (h *taskEventHandler) ReconcileOnce(ctx context.Context) error {
+	// Bound the whole pass so a slow or large vault cannot hold it open
+	// indefinitely (spec 005 Failure Modes: "Pass bounded by a per-pass
+	// timeout; logs evaluate count so cost is visible"). On timeout the
+	// in-flight git-rest call returns a deadline error, which the gates below
+	// log and skip; the next tick retries.
+	passCtx, cancel := context.WithTimeout(ctx, reconcilePassTimeout)
+	defer cancel()
+
+	ready, err := h.gitRestClient.IsReady(passCtx)
+	if err != nil {
+		glog.Warningf("event=reconcile_vault_unavailable reason=readiness_error err=%v", err)
+		return nil
+	}
+	if !ready {
+		glog.Warningf("event=reconcile_vault_unavailable reason=not_ready")
+		return nil
+	}
+	paths, err := h.gitRestClient.List(passCtx, h.taskGlob)
+	if err != nil {
+		glog.Warningf("event=reconcile_list_failed glob=%q err=%v", h.taskGlob, err)
+		return nil
+	}
+	evaluated, redriven, deferred, skipped := 0, 0, 0, 0
+	for _, relPath := range paths {
+		select {
+		case <-passCtx.Done():
+			glog.Infof(
+				"event=reconcile_aborted reason=context_cancelled evaluated=%d re_driven=%d deferred=%d skipped=%d",
+				evaluated,
+				redriven,
+				deferred,
+				skipped,
+			)
+			return nil
+		default:
+		}
+		content, err := h.gitRestClient.Get(passCtx, relPath)
+		if err != nil {
+			glog.Warningf("event=reconcile_skip path=%s reason=get_failed err=%v", relPath, err)
+			skipped++
+			continue
+		}
+		task, config, ok, err := h.reconcileTask(passCtx, content)
+		if err != nil {
+			glog.Warningf("event=reconcile_skip path=%s reason=resolve_error err=%v", relPath, err)
+			skipped++
+			continue
+		}
+		if !ok {
+			skipped++
+			continue
+		}
+		evaluated++
+		spawned, err := h.spawnIfNeeded(passCtx, task, config)
+		if err != nil {
+			glog.Warningf(
+				"event=reconcile_skip task=%s reason=spawn_error err=%v",
+				task.TaskIdentifier,
+				err,
+			)
+			skipped++
+			continue
+		}
+		if spawned {
+			redriven++
+			metrics.ReconcileRedrivenTotal.Inc()
+			glog.Infof("event=reconcile_redrive task=%s path=%s", task.TaskIdentifier, relPath)
+		} else {
+			deferred++
+		}
+	}
+	glog.Infof(
+		"event=reconcile evaluated=%d re_driven=%d deferred=%d skipped=%d glob=%q",
+		evaluated, redriven, deferred, skipped, h.taskGlob,
+	)
+	return nil
+}
+
+// reconcileTask parses a task file and applies the reconcile eligibility filter.
+// Returns (task, config, ok, err): ok=false when the file is not an eligible
+// task (unparseable frontmatter, missing task_identifier, status != in_progress,
+// phase not in the default trigger set, stage mismatch, empty assignee, or
+// unresolvable Config) — mirroring parseAndFilter's gates. Reconcile uses the
+// DEFAULT trigger sets, not per-Config trigger overrides (spec 005 AC 1:
+// "status in_progress, phase in {planning, execution, ai_review}, assignee set");
+// the reconcile floor is the baseline contract.
+func (h *taskEventHandler) reconcileTask(
+	ctx context.Context,
+	content []byte,
+) (lib.Task, *pkg.AgentConfiguration, bool, error) {
+	task, ok := parseTaskFile(ctx, content)
+	if !ok {
+		return lib.Task{}, nil, false, nil
+	}
+	config, skip, err := h.resolveConfig(ctx, task)
+	if err != nil {
+		return lib.Task{}, nil, false, err
+	}
+	if skip {
+		return lib.Task{}, nil, false, nil
+	}
+	if !defaultTriggerStatuses.Contains(task.Frontmatter.Status()) {
+		return lib.Task{}, nil, false, nil
+	}
+	phase := task.Frontmatter.Phase()
+	if phase == nil || !defaultTriggerPhases.Contains(*phase) {
+		return lib.Task{}, nil, false, nil
+	}
+	if task.Frontmatter.Stage() != string(h.branch) {
+		return lib.Task{}, nil, false, nil
+	}
+	if task.Frontmatter.Assignee() == "" {
+		return lib.Task{}, nil, false, nil
+	}
+	return task, config, true, nil
+}
+
+// RunReconcileLoop runs one reconcile pass immediately at startup, then every
+// defaultReconcileInterval until ctx is cancelled. ReconcileOnce returns
+// nil for all vault-side failures, so this loop cannot crash the executor when
+// git-rest is unreachable — the next tick just retries (spec 005 Failure Modes).
+func (h *taskEventHandler) RunReconcileLoop(ctx context.Context) error {
+	if err := h.ReconcileOnce(ctx); err != nil {
+		glog.Errorf("event=reconcile initial pass failed: %v", err)
+	}
+	ticker := time.NewTicker(defaultReconcileInterval)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return nil
+		case <-ticker.C:
+			if err := h.ReconcileOnce(ctx); err != nil {
+				glog.Errorf("event=reconcile tick failed: %v", err)
 			}
 		}
 	}

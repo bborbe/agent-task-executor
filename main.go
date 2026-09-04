@@ -62,6 +62,21 @@ type application struct {
 	// CA cert — not the cert material itself. Same reasoning as
 	// JobKafkaClientCertSecret: a resource reference, not secret-shaped.
 	JobKafkaCaCertSecret string `required:"false" arg:"job-kafka-ca-cert-secret"       env:"JOB_KAFKA_CA_CERT_SECRET"       usage:"Name of the existing K8s secret holding the Kafka CA cert (key ca.crt) to mount into spawned Jobs; empty disables cert mounting. Must be a valid K8s Secret name (RFC 1123: lowercase alphanumeric or '-', <=253 chars) or Job creation fails"`
+	// GitRestURL is the git-rest HTTP API base URL the reconcile loop reads the
+	// vault through. Matches the controller's default git-rest service address.
+	// Consumed by the reconcile loop in the follow-up prompt.
+	GitRestURL string `required:"false" arg:"git-rest-url"                   env:"GITREST_URL"                    usage:"git-rest HTTP API base URL the reconcile loop reads vault task files through"                                                                                                                                                                                                       default:"http://vault-obsidian-openclaw:9090"`
+	// GitRestGatewaySecret holds the NAME of the K8s Secret carrying the
+	// git-rest gateway secret (data key `gateway-secret`) — not the secret
+	// value itself. Same resource-reference pattern as JobKafkaClientCertSecret:
+	// a name, not secret material, so nothing secret-shaped enters the image or
+	// the Deployment manifest. Consumed by the reconcile loop in the follow-up
+	// prompt.
+	GitRestGatewaySecret string `required:"false" arg:"git-rest-gateway-secret"        env:"GITREST_GATEWAY_SECRET"         usage:"Name of the existing K8s secret holding the git-rest gateway secret (data key gateway-secret); empty disables gateway auth"`
+	// TaskGlob is the git-rest single-level glob selecting the vault task files
+	// the reconcile loop evaluates, relative to the repo root. Consumed by the
+	// reconcile loop in the follow-up prompt.
+	TaskGlob string `required:"false" arg:"task-glob"                      env:"TASK_GLOB"                      usage:"git-rest glob selecting vault task files to reconcile"                                                                                                                                                                                                                              default:"24 Tasks/*.md"`
 }
 
 // vaultSlugRegexp mirrors the controller's VAULT_NAME validation (pkg/routing):
@@ -139,6 +154,20 @@ func (a *application) Run(ctx context.Context, sentryClient libsentry.Client) er
 		currentDateTimeGetter,
 	)
 
+	// The git-rest gateway secret is read by NAME from K8s (never logged, never
+	// in env) so the reconcile loop can authenticate to git-rest without secret
+	// material entering the Deployment manifest (spec 005 Security).
+	gitRestGatewaySecretValue, err := pkg.ReadGitRestGatewaySecret(
+		ctx,
+		kubeClient,
+		a.Namespace,
+		a.GitRestGatewaySecret,
+	)
+	if err != nil {
+		return errors.Wrapf(ctx, err, "read git-rest gateway secret")
+	}
+	gitRestClient := factory.CreateGitRestClient(a.GitRestURL, gitRestGatewaySecretValue)
+
 	healthcheckRunner := factory.CreateHealthcheckRunner(
 		eventHandlerConfig,
 		syncProducer,
@@ -165,6 +194,8 @@ func (a *application) Run(ctx context.Context, sentryClient libsentry.Client) er
 		a.JobTTLSecondsAfterFinished,
 		a.JobKafkaClientCertSecret,
 		a.JobKafkaCaCertSecret,
+		gitRestClient,
+		a.TaskGlob,
 	)
 
 	return service.Run(
@@ -174,6 +205,7 @@ func (a *application) Run(ctx context.Context, sentryClient libsentry.Client) er
 		},
 		consumer.Consume,
 		taskEventHandler.RunDeferredRespawnLoop,
+		taskEventHandler.RunReconcileLoop,
 		jobWatcher.Run,
 		zombieSweeper.Run,
 		a.createHTTPServer(eventHandlerConfig, healthcheckRunner),
