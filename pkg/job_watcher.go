@@ -167,21 +167,50 @@ func (w *jobWatcher) HandleJob(ctx context.Context, job *batchv1.Job) {
 			Infof("job %s/%s succeeded (task %s): trusting agent publish, no synthetic result",
 				job.Namespace, job.Name, taskID)
 		if task, ok := w.taskStore.Load(taskID); ok {
-			if err := w.publisher.PublishClearCurrentJob(ctx, task, job.Name); err != nil {
-				// Keep the task in the store so the informer's terminal
-				// re-delivery (~5 min) retries the clear. Evicting on failure
-				// would drop the only cleanup path for current_job.
-				glog.Errorf(
-					"publish current_job clear for task %s (job %s): %v",
-					taskID,
-					job.Name,
-					err,
-				)
-				return
-			}
+			w.handleSucceeded(ctx, taskID, task, job)
 		}
-		w.taskStore.Delete(taskID)
 	}
+}
+
+// handleSucceeded publishes the current_job clear for a succeeded job and evicts
+// the store entry — but only when the entry tracks THIS job. The informer
+// re-delivers a terminal Job every ~5 min; when the task has since been
+// re-dispatched and re-spawned under a NEWER job, the stale success re-delivery
+// must not evict the entry the current job's success path needs — the
+// respawned-second-success race via the job informer (observed prod 2026-09-04
+// on task 67120247: job-1's re-delivered success evicted job-2's store entry).
+func (w *jobWatcher) handleSucceeded(
+	ctx context.Context,
+	taskID lib.TaskIdentifier,
+	task lib.Task,
+	job *batchv1.Job,
+) {
+	if err := w.publisher.PublishClearCurrentJob(ctx, task, job.Name); err != nil {
+		// Keep the task in the store so the informer's terminal
+		// re-delivery (~5 min) retries the clear. Evicting on failure
+		// would drop the only cleanup path for current_job.
+		glog.Errorf(
+			"publish current_job clear for task %s (job %s): %v",
+			taskID,
+			job.Name,
+			err,
+		)
+		return
+	}
+	if !w.tracksJob(task, job.Name) {
+		return
+	}
+	w.taskStore.Delete(taskID)
+}
+
+// tracksJob reports whether the store entry's recorded current_job matches the
+// job being processed (or records no job at all, defensively). A mismatch means
+// the task was re-spawned under a newer job since this job's terminal event was
+// emitted, so the event is stale and must not evict the entry the newer job's
+// terminal path relies on.
+func (w *jobWatcher) tracksJob(task lib.Task, jobName string) bool {
+	currentJob := task.Frontmatter.CurrentJob()
+	return currentJob == "" || currentJob == jobName
 }
 
 // handleTerminal publishes a synthetic failure when appropriate. Job cleanup is
@@ -216,7 +245,11 @@ func (w *jobWatcher) publishSyntheticFailure(
 	} else {
 		glog.V(2).Infof("published synthetic failure for task %s (job %s)", taskID, job.Name)
 	}
-	w.taskStore.Delete(taskID)
+	// Same guard as the success path: a stale failure re-delivery for a previous
+	// job must not evict the entry tracking the current (re-spawned) job.
+	if w.tracksJob(task, job.Name) {
+		w.taskStore.Delete(taskID)
+	}
 }
 
 func (w *jobWatcher) logMissingTask(

@@ -2,6 +2,10 @@
 
 All notable changes to this project will be documented in this file.
 
+## Unreleased
+
+- fix: extend the respawned-second-success race fix (v0.11.1) to the job-informer path — `JobWatcher.HandleJob` now evicts the in-memory TaskStore entry only when the store entry's `current_job` matches the job being processed (a stale terminal re-delivery of a PREVIOUS job's success/failure no longer evicts the entry tracking the re-spawned job). The v0.11.1 guard covered `cleanupTerminalTask` (Kafka path); the informer re-delivers a terminal Job every ~5 min, and a re-delivered success from the first job evicted the just-re-spawned task's entry, silently no-oping the second job's `current_job` clear (observed live on prod 2026-09-04 for task 67120247: job-1's re-delivered success evicted job-2's store entry).
+
 ## v0.11.2
 
 - chore: update github.com/bborbe/agent to v0.85.1, github.com/bborbe/k8s to v1.14.17, github.com/bborbe/kafka to v1.25.11, github.com/bborbe/metrics to v0.6.1, github.com/bborbe/run to v1.10.2, github.com/bborbe/vault-cli to v0.121.0, k8s.io/api to v0.37.0, k8s.io/apiextensions-apiserver to v0.37.0, k8s.io/apimachinery to v0.37.0, k8s.io/client-go to v0.37.0
