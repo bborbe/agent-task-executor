@@ -1921,5 +1921,6 @@ var _ = Describe("TaskEventHandler", func() {
 				),
 			)
 		})
+
 	})
 })
