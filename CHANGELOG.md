@@ -2,7 +2,7 @@
 
 All notable changes to this project will be documented in this file.
 
-## Unreleased
+## v0.11.4
 
 - fix: hold `k8s.io/{api,apiextensions-apiserver,apimachinery,client-go}` at v0.36.4 and `github.com/bborbe/k8s` at v1.14.16, restoring the `exclude` guard against k8s.io v0.37.0 that the v0.11.2 dependency bump removed. v0.37.0 makes the executor OOMKill (exit 137) within ~16s of startup against a 2Gi limit while v0.36.4 runs the same workload at ~20Mi -- 71 restarts in 8h on nuke prod and 109 in 12h on nuke dev, taking the whole agent fleet down. The exclude block now carries a comment explaining why it exists, so a future automated dependency update does not silently drop it again (the 2026-08-27 update run added the same exclude with no recorded reason; the 2026-09-04 run removed it and shipped v0.37.0 as v0.11.2).
 
