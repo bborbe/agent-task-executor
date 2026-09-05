@@ -2,6 +2,10 @@
 
 All notable changes to this project will be documented in this file.
 
+## Unreleased
+
+- fix: hold `k8s.io/{api,apiextensions-apiserver,apimachinery,client-go}` at v0.36.4 and `github.com/bborbe/k8s` at v1.14.16, restoring the `exclude` guard against k8s.io v0.37.0 that the v0.11.2 dependency bump removed. v0.37.0 makes the executor OOMKill (exit 137) within ~16s of startup against a 2Gi limit while v0.36.4 runs the same workload at ~20Mi -- 71 restarts in 8h on nuke prod and 109 in 12h on nuke dev, taking the whole agent fleet down. The exclude block now carries a comment explaining why it exists, so a future automated dependency update does not silently drop it again (the 2026-08-27 update run added the same exclude with no recorded reason; the 2026-09-04 run removed it and shipped v0.37.0 as v0.11.2).
+
 ## v0.11.3
 
 - fix: extend the respawned-second-success race fix (v0.11.1) to the job-informer path — `JobWatcher.HandleJob` now evicts the in-memory TaskStore entry only when the store entry's `current_job` matches the job being processed (a stale terminal re-delivery of a PREVIOUS job's success/failure no longer evicts the entry tracking the re-spawned job). The v0.11.1 guard covered `cleanupTerminalTask` (Kafka path); the informer re-delivers a terminal Job every ~5 min, and a re-delivered success from the first job evicted the just-re-spawned task's entry, silently no-oping the second job's `current_job` clear (observed live on prod 2026-09-04 for task 67120247: job-1's re-delivered success evicted job-2's store entry).
