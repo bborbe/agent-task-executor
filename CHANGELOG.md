@@ -2,6 +2,10 @@
 
 All notable changes to this project will be documented in this file.
 
+## Unreleased
+
+- chore: update Go to 1.27.1
+
 ## v0.11.5
 
 - fix: `make build` refuses to stamp a version onto a tree that is not that version's tag (`check-version-tag`, escape hatch `ALLOW_UNTAGGED_BUILD=1`). `VERSION` defaults to the newest tag in the repo regardless of what is checked out, so an operator-run build from an untagged or older tree silently stamps the newest tag's number onto whatever tree is present (observed 2026-08-30: a v0.7.x checkout republished as `v0.6.8`, prod outage ~30 min). The guard compares `git describe --tags --exact-match HEAD` against `$(VERSION)` and exits non-zero on mismatch.
