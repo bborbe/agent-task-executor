@@ -2,7 +2,7 @@
 
 All notable changes to this project will be documented in this file.
 
-## Unreleased
+## v0.13.0
 
 - feat: `ConfigSpec.configMapItems` maps ConfigMap keys to file paths inside the mount. ConfigMap keys cannot contain slashes, so delivering nested paths (e.g. `.claude/CLAUDE.md`) is impossible with a plain key-name mount; `items` (mirroring `corev1.KeyToPath`) closes that. Validated: items require `configMapName`, paths must be relative and free of `..`.
 
