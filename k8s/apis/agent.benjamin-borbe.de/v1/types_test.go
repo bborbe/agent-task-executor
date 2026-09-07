@@ -213,6 +213,38 @@ var _ = Describe("ConfigSpec", func() {
 			Expect(s.Validate(ctx)).To(BeNil())
 		})
 
+		It(
+			"returns a wrapped validation.Error when ConfigMapName is set but ConfigMapMountPath is empty",
+			func() {
+				s := agentv1.ConfigSpec{
+					Assignee:      "claude",
+					Image:         "registry/agent-claude",
+					Heartbeat:     "30m",
+					TaskType:      "claude",
+					ConfigMapName: "easy-agent-goreleaser",
+				}
+				err := s.Validate(ctx)
+				Expect(err).To(HaveOccurred())
+				Expect(err).To(
+					MatchError(
+						ContainSubstring("ConfigMapMountPath required when ConfigMapName set"),
+					),
+				)
+			},
+		)
+
+		It("returns nil when both ConfigMapName and ConfigMapMountPath are set", func() {
+			s := agentv1.ConfigSpec{
+				Assignee:           "claude",
+				Image:              "registry/agent-claude",
+				Heartbeat:          "30m",
+				TaskType:           "claude",
+				ConfigMapName:      "easy-agent-goreleaser",
+				ConfigMapMountPath: "/agent",
+			}
+			Expect(s.Validate(ctx)).To(BeNil())
+		})
+
 		It("wraps error with validation.Error sentinel", func() {
 			s := agentv1.ConfigSpec{}
 			err := s.Validate(ctx)

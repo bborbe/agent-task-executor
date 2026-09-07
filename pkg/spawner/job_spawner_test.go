@@ -495,6 +495,93 @@ var _ = Describe("JobSpawner", func() {
 			Expect(container.VolumeMounts[0].MountPath).To(Equal("/data"))
 		})
 
+		It("mounts ConfigMap when ConfigMapName is set", func() {
+			task := lib.Task{
+				TaskIdentifier: lib.TaskIdentifier("abc-cm"),
+				Frontmatter: lib.TaskFrontmatter{
+					"assignee": "claude",
+				},
+			}
+			config := pkg.AgentConfiguration{
+				Assignee:           "claude",
+				Image:              "my-image:latest",
+				Env:                map[string]string{},
+				ConfigMapName:      "easy-agent-goreleaser",
+				ConfigMapMountPath: "/agent",
+			}
+			_, err := jobSpawner.SpawnJob(ctx, task, config)
+			Expect(err).To(BeNil())
+
+			jobs, err := fakeClient.BatchV1().Jobs("test-ns").List(ctx, metav1.ListOptions{})
+			Expect(err).To(BeNil())
+			Expect(jobs.Items).To(HaveLen(1))
+
+			job := jobs.Items[0]
+			Expect(job.Spec.Template.Spec.Volumes).To(HaveLen(1))
+			Expect(job.Spec.Template.Spec.Volumes[0].Name).To(Equal("agent-config"))
+			Expect(job.Spec.Template.Spec.Volumes[0].ConfigMap).NotTo(BeNil())
+			Expect(
+				job.Spec.Template.Spec.Volumes[0].ConfigMap.Name,
+			).To(Equal("easy-agent-goreleaser"))
+
+			container := job.Spec.Template.Spec.Containers[0]
+			Expect(container.VolumeMounts).To(HaveLen(1))
+			Expect(container.VolumeMounts[0].Name).To(Equal("agent-config"))
+			Expect(container.VolumeMounts[0].MountPath).To(Equal("/agent"))
+		})
+
+		It("mounts both PVC and ConfigMap without dropping either", func() {
+			task := lib.Task{
+				TaskIdentifier: lib.TaskIdentifier("abc-both"),
+				Frontmatter: lib.TaskFrontmatter{
+					"assignee": "claude",
+				},
+			}
+			config := pkg.AgentConfiguration{
+				Assignee:           "claude",
+				Image:              "my-image:latest",
+				Env:                map[string]string{},
+				VolumeClaim:        "agent-claude-pvc",
+				VolumeMountPath:    "/data",
+				ConfigMapName:      "easy-agent-goreleaser",
+				ConfigMapMountPath: "/agent",
+			}
+			_, err := jobSpawner.SpawnJob(ctx, task, config)
+			Expect(err).To(BeNil())
+
+			jobs, err := fakeClient.BatchV1().Jobs("test-ns").List(ctx, metav1.ListOptions{})
+			Expect(err).To(BeNil())
+			Expect(jobs.Items).To(HaveLen(1))
+
+			job := jobs.Items[0]
+			Expect(job.Spec.Template.Spec.Volumes).To(HaveLen(2))
+			names := []string{
+				job.Spec.Template.Spec.Volumes[0].Name,
+				job.Spec.Template.Spec.Volumes[1].Name,
+			}
+			Expect(names).To(ConsistOf("agent-data", "agent-config"))
+
+			container := job.Spec.Template.Spec.Containers[0]
+			Expect(container.VolumeMounts).To(HaveLen(2))
+		})
+
+		It("fails when ConfigMapName is set without ConfigMapMountPath", func() {
+			task := lib.Task{
+				TaskIdentifier: lib.TaskIdentifier("abc-cm-nopath"),
+				Frontmatter: lib.TaskFrontmatter{
+					"assignee": "claude",
+				},
+			}
+			config := pkg.AgentConfiguration{
+				Assignee:      "claude",
+				Image:         "my-image:latest",
+				Env:           map[string]string{},
+				ConfigMapName: "easy-agent-goreleaser",
+			}
+			_, err := jobSpawner.SpawnJob(ctx, task, config)
+			Expect(err).NotTo(BeNil())
+		})
+
 		It("has no volumes when VolumeClaim is empty", func() {
 			task := lib.Task{
 				TaskIdentifier: lib.TaskIdentifier("abc-no-pvc"),

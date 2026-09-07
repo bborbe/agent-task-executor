@@ -33,6 +33,12 @@ const taskIDLabelKey = "agent.benjamin-borbe.de/task-id"
 // single fleet-wide limit would throttle cheap agents to protect expensive ones.
 const assigneeLabelKey = "agent.benjamin-borbe.de/assignee"
 
+// volumeNameAgentData is the Pod volume name for the optional PVC mount.
+const volumeNameAgentData = "agent-data"
+
+// volumeNameAgentConfig is the Pod volume name for the optional ConfigMap mount.
+const volumeNameAgentConfig = "agent-config"
+
 //counterfeiter:generate -o ../../mocks/job_spawner.go --fake-name FakeJobSpawner . JobSpawner
 
 // JobSpawner creates a K8s Job for a task.
@@ -115,7 +121,7 @@ func (s *jobSpawner) SpawnJob(
 
 	podSpecBuilder := k8s.NewPodSpecBuilder()
 
-	if err := applyVolumeMount(ctx, config, containerBuilder, podSpecBuilder); err != nil {
+	if err := applyVolumeMounts(ctx, config, containerBuilder, podSpecBuilder); err != nil {
 		return "", err
 	}
 
@@ -242,34 +248,63 @@ func (s *jobSpawner) CountActiveJobs(ctx context.Context, assignee string) (int,
 	return count, nil
 }
 
-// applyVolumeMount configures a PVC volume mount on the container and pod spec builders
-// when config.VolumeClaim is non-empty. Returns an error if VolumeMountPath is missing.
-func applyVolumeMount(
+// applyVolumeMounts configures the optional PVC and ConfigMap mounts on the
+// container and pod spec builders.
+//
+// Both mounts are collected into a single slice before SetVolumes is called,
+// because k8s.PodSpecBuilder exposes only SetVolumes (replace) and no AddVolumes
+// (append) — applying the two mounts through separate SetVolumes calls would
+// silently drop the first volume for any agent that configures both.
+func applyVolumeMounts(
 	ctx context.Context,
 	config pkg.AgentConfiguration,
 	containerBuilder k8s.ContainerBuilder,
 	podSpecBuilder k8s.PodSpecBuilder,
 ) error {
-	if config.VolumeClaim == "" {
-		return nil
-	}
-	if config.VolumeMountPath == "" {
-		return errors.Errorf(ctx, "VolumeMountPath required when VolumeClaim is set")
-	}
-	containerBuilder.AddVolumeMounts(corev1.VolumeMount{
-		Name:      "agent-data",
-		MountPath: config.VolumeMountPath,
-	})
-	podSpecBuilder.SetVolumes([]corev1.Volume{
-		{
-			Name: "agent-data",
+	var volumes []corev1.Volume
+
+	if config.VolumeClaim != "" {
+		if config.VolumeMountPath == "" {
+			return errors.Errorf(ctx, "VolumeMountPath required when VolumeClaim is set")
+		}
+		containerBuilder.AddVolumeMounts(corev1.VolumeMount{
+			Name:      volumeNameAgentData,
+			MountPath: config.VolumeMountPath,
+		})
+		volumes = append(volumes, corev1.Volume{
+			Name: volumeNameAgentData,
 			VolumeSource: corev1.VolumeSource{
 				PersistentVolumeClaim: &corev1.PersistentVolumeClaimVolumeSource{
 					ClaimName: config.VolumeClaim,
 				},
 			},
-		},
-	})
+		})
+	}
+
+	if config.ConfigMapName != "" {
+		if config.ConfigMapMountPath == "" {
+			return errors.Errorf(ctx, "ConfigMapMountPath required when ConfigMapName is set")
+		}
+		containerBuilder.AddVolumeMounts(corev1.VolumeMount{
+			Name:      volumeNameAgentConfig,
+			MountPath: config.ConfigMapMountPath,
+		})
+		volumes = append(volumes, corev1.Volume{
+			Name: volumeNameAgentConfig,
+			VolumeSource: corev1.VolumeSource{
+				ConfigMap: &corev1.ConfigMapVolumeSource{
+					LocalObjectReference: corev1.LocalObjectReference{
+						Name: config.ConfigMapName,
+					},
+				},
+			},
+		})
+	}
+
+	if len(volumes) == 0 {
+		return nil
+	}
+	podSpecBuilder.SetVolumes(volumes)
 	return nil
 }
 

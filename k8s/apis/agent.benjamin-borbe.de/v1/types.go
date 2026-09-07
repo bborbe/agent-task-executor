@@ -73,6 +73,14 @@ type ConfigSpec struct {
 	VolumeClaim string `json:"volumeClaim,omitempty"`
 	// VolumeMountPath is the container path where the PVC is mounted.
 	VolumeMountPath string `json:"volumeMountPath,omitempty"`
+	// ConfigMapName is the name of an existing ConfigMap to mount as files.
+	// Lets an agent take its behaviour files (CLAUDE.md, prompts) from
+	// configuration instead of from the image, so a new agent needs a new
+	// ConfigMap rather than a new image.
+	ConfigMapName string `json:"configMapName,omitempty"`
+	// ConfigMapMountPath is the container path where the ConfigMap is mounted.
+	// Required when ConfigMapName is set.
+	ConfigMapMountPath string `json:"configMapMountPath,omitempty"`
 	// PriorityClassName is the Kubernetes PriorityClass name to stamp onto spawned Job PodTemplates.
 	PriorityClassName string `json:"priorityClassName,omitempty"`
 	// MaxConcurrentJobs caps how many Jobs this agent may run at once. Spawns
@@ -164,6 +172,8 @@ func (s ConfigSpec) Equal(o ConfigSpec) bool {
 		s.SecretName == o.SecretName &&
 		s.VolumeClaim == o.VolumeClaim &&
 		s.VolumeMountPath == o.VolumeMountPath &&
+		s.ConfigMapName == o.ConfigMapName &&
+		s.ConfigMapMountPath == o.ConfigMapMountPath &&
 		s.PriorityClassName == o.PriorityClassName &&
 		s.MaxConcurrentJobs == o.MaxConcurrentJobs &&
 		reflect.DeepEqual(s.Env, o.Env) &&
@@ -186,6 +196,13 @@ func (s ConfigSpec) Validate(ctx context.Context) error {
 	}
 	if s.VolumeClaim != "" && s.VolumeMountPath == "" {
 		return errors.Wrapf(ctx, validation.Error, "VolumeMountPath required when VolumeClaim set")
+	}
+	if s.ConfigMapName != "" && s.ConfigMapMountPath == "" {
+		return errors.Wrapf(
+			ctx,
+			validation.Error,
+			"ConfigMapMountPath required when ConfigMapName set",
+		)
 	}
 	if err := validateTrigger(ctx, s.Trigger); err != nil {
 		return err

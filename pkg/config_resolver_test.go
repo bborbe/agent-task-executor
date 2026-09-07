@@ -42,13 +42,15 @@ var _ = Describe("ConfigResolver", func() {
 		provider.items = []agentv1.Config{
 			{
 				Spec: agentv1.ConfigSpec{
-					Assignee:        "claude-personal",
-					Image:           "foo/bar",
-					Heartbeat:       "30m",
-					Env:             map[string]string{"KEY": "val"},
-					SecretName:      "my-secret",
-					VolumeClaim:     "my-pvc",
-					VolumeMountPath: "/mnt/data",
+					Assignee:           "claude-personal",
+					Image:              "foo/bar",
+					Heartbeat:          "30m",
+					Env:                map[string]string{"KEY": "val"},
+					SecretName:         "my-secret",
+					VolumeClaim:        "my-pvc",
+					VolumeMountPath:    "/mnt/data",
+					ConfigMapName:      "easy-agent-goreleaser",
+					ConfigMapMountPath: "/agent",
 					Resources: &agentv1.AgentResources{
 						Requests: agentv1.AgentResourceList{
 							CPU:              "500m",
@@ -72,6 +74,8 @@ var _ = Describe("ConfigResolver", func() {
 		Expect(config.SecretName).To(Equal("my-secret"))
 		Expect(config.VolumeClaim).To(Equal("my-pvc"))
 		Expect(config.VolumeMountPath).To(Equal("/mnt/data"))
+		Expect(config.ConfigMapName).To(Equal("easy-agent-goreleaser"))
+		Expect(config.ConfigMapMountPath).To(Equal("/agent"))
 		Expect(config.Resources).NotTo(BeNil())
 		Expect(config.Resources.Requests.CPU).To(Equal("500m"))
 		Expect(config.Resources.Requests.Memory).To(Equal("1Gi"))
