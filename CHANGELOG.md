@@ -4,6 +4,10 @@ All notable changes to this project will be documented in this file.
 
 ## Unreleased
 
+- feat: `ConfigSpec.configMapItems` maps ConfigMap keys to file paths inside the mount. ConfigMap keys cannot contain slashes, so delivering nested paths (e.g. `.claude/CLAUDE.md`) is impossible with a plain key-name mount; `items` (mirroring `corev1.KeyToPath`) closes that. Validated: items require `configMapName`, paths must be relative and free of `..`.
+
+## v0.12.0
+
 - feat: `ConfigSpec.configMapName` / `configMapMountPath` mount a ConfigMap into the spawned agent Job, so an agent can take its behaviour files (`CLAUDE.md`, prompts) from configuration instead of from its image -- a new agent becomes a new ConfigMap rather than a new image build. Wired through `AgentConfiguration`, the config resolver, the self-installed CRD schema (`configSpecProperties`) and the `/agents` handler; `ConfigMapMountPath` is required when `ConfigMapName` is set.
 - fix: the PVC and ConfigMap mounts are collected into a single `SetVolumes` call (`applyVolumeMounts`, formerly `applyVolumeMount`). `k8s.PodSpecBuilder` exposes only `SetVolumes` (replace) and no `AddVolumes` (append), so applying the two mounts through separate calls would have silently dropped the PVC volume for any agent configuring both -- with the Job spawning successfully and reporting no error.
 

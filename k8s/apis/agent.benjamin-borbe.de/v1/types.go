@@ -8,6 +8,7 @@ import (
 	"context"
 	"reflect"
 	"regexp"
+	"strings"
 
 	"github.com/bborbe/errors"
 	libk8s "github.com/bborbe/k8s"
@@ -49,6 +50,18 @@ type Trigger struct {
 	Statuses domain.TaskStatuses `json:"statuses,omitempty"`
 }
 
+// ConfigMapItem maps a ConfigMap key to a file path inside the ConfigMap mount.
+// Mirrors corev1.KeyToPath; required so a ConfigMap can deliver nested files
+// (e.g. key "CLAUDE.md" -> path ".claude/CLAUDE.md"), since ConfigMap keys
+// themselves cannot contain slashes.
+type ConfigMapItem struct {
+	// Key is the ConfigMap key to map.
+	Key string `json:"key"`
+	// Path is the relative file path inside the mount to write the key's value to.
+	// Must be relative, must not contain "..", must not start with "..".
+	Path string `json:"path"`
+}
+
 // ConfigSpec defines the desired state of a Config.
 type ConfigSpec struct {
 	// Assignee is the task frontmatter assignee value that routes to this agent.
@@ -81,6 +94,11 @@ type ConfigSpec struct {
 	// ConfigMapMountPath is the container path where the ConfigMap is mounted.
 	// Required when ConfigMapName is set.
 	ConfigMapMountPath string `json:"configMapMountPath,omitempty"`
+	// ConfigMapItems maps ConfigMap keys to file paths inside the mount. Empty
+	// means the whole ConfigMap is mounted as-is (key names become file names).
+	// Required to deliver nested paths (e.g. .claude/CLAUDE.md), which plain
+	// key-name mounts cannot express.
+	ConfigMapItems []ConfigMapItem `json:"configMapItems,omitempty"`
 	// PriorityClassName is the Kubernetes PriorityClass name to stamp onto spawned Job PodTemplates.
 	PriorityClassName string `json:"priorityClassName,omitempty"`
 	// MaxConcurrentJobs caps how many Jobs this agent may run at once. Spawns
@@ -162,6 +180,34 @@ func (a Config) String() string {
 	return a.Name
 }
 
+// validateConfigMapItems checks the key/path mapping for the ConfigMap mount.
+// Extracted from ConfigSpec.Validate to keep its cognitive complexity in check.
+func validateConfigMapItems(ctx context.Context, s ConfigSpec) error {
+	if s.ConfigMapName == "" && len(s.ConfigMapItems) > 0 {
+		return errors.Wrapf(
+			ctx,
+			validation.Error,
+			"configMapItems requires ConfigMapName to be set",
+		)
+	}
+	for i, item := range s.ConfigMapItems {
+		if item.Key == "" {
+			return errors.Wrapf(ctx, validation.Error, "configMapItems[%d].key is empty", i)
+		}
+		if item.Path == "" || strings.HasPrefix(item.Path, "/") ||
+			strings.Contains(item.Path, "..") {
+			return errors.Wrapf(
+				ctx,
+				validation.Error,
+				"configMapItems[%d].path %q must be relative and contain no '..'",
+				i,
+				item.Path,
+			)
+		}
+	}
+	return nil
+}
+
 // Equal returns true if the two ConfigSpec values are identical.
 func (s ConfigSpec) Equal(o ConfigSpec) bool {
 	return s.Assignee == o.Assignee &&
@@ -174,6 +220,7 @@ func (s ConfigSpec) Equal(o ConfigSpec) bool {
 		s.VolumeMountPath == o.VolumeMountPath &&
 		s.ConfigMapName == o.ConfigMapName &&
 		s.ConfigMapMountPath == o.ConfigMapMountPath &&
+		reflect.DeepEqual(s.ConfigMapItems, o.ConfigMapItems) &&
 		s.PriorityClassName == o.PriorityClassName &&
 		s.MaxConcurrentJobs == o.MaxConcurrentJobs &&
 		reflect.DeepEqual(s.Env, o.Env) &&
@@ -203,6 +250,9 @@ func (s ConfigSpec) Validate(ctx context.Context) error {
 			validation.Error,
 			"ConfigMapMountPath required when ConfigMapName set",
 		)
+	}
+	if err := validateConfigMapItems(ctx, s); err != nil {
+		return err
 	}
 	if err := validateTrigger(ctx, s.Trigger); err != nil {
 		return err

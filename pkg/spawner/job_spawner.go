@@ -289,14 +289,23 @@ func applyVolumeMounts(
 			Name:      volumeNameAgentConfig,
 			MountPath: config.ConfigMapMountPath,
 		})
+		cmSource := &corev1.ConfigMapVolumeSource{
+			LocalObjectReference: corev1.LocalObjectReference{
+				Name: config.ConfigMapName,
+			},
+		}
+		// items: ConfigMap keys cannot contain slashes, so delivering nested
+		// paths (e.g. .claude/CLAUDE.md) requires explicit key -> path mapping.
+		for _, item := range config.ConfigMapItems {
+			cmSource.Items = append(cmSource.Items, corev1.KeyToPath{
+				Key:  item.Key,
+				Path: item.Path,
+			})
+		}
 		volumes = append(volumes, corev1.Volume{
 			Name: volumeNameAgentConfig,
 			VolumeSource: corev1.VolumeSource{
-				ConfigMap: &corev1.ConfigMapVolumeSource{
-					LocalObjectReference: corev1.LocalObjectReference{
-						Name: config.ConfigMapName,
-					},
-				},
+				ConfigMap: cmSource,
 			},
 		})
 	}
