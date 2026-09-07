@@ -46,6 +46,12 @@ type AgentConfiguration struct {
 	// VolumeMountPath is the container path where the PVC is mounted.
 	// Required when VolumeClaim is set.
 	VolumeMountPath string
+	// ConfigMapName is the name of an existing ConfigMap to mount as files.
+	// Empty means no ConfigMap mount.
+	ConfigMapName string
+	// ConfigMapMountPath is the container path where the ConfigMap is mounted.
+	// Required when ConfigMapName is set.
+	ConfigMapMountPath string
 	// SecretName is the name of a K8s Secret to mount as envFrom on the container.
 	// Empty means no secret is mounted.
 	SecretName string
@@ -107,6 +113,8 @@ func (a AgentConfigurations) TaggedConfigurations(branch string) AgentConfigurat
 			Env:                     c.Env,
 			VolumeClaim:             c.VolumeClaim,
 			VolumeMountPath:         c.VolumeMountPath,
+			ConfigMapName:           c.ConfigMapName,
+			ConfigMapMountPath:      c.ConfigMapMountPath,
 			SecretName:              c.SecretName,
 			Resources:               c.Resources.DeepCopy(),
 			MaxConcurrentJobs:       c.MaxConcurrentJobs,

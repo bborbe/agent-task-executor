@@ -46,24 +46,28 @@ func (h *agentsHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	type agentEntry struct {
-		Name            string `json:"name"`
-		Assignee        string `json:"assignee"`
-		Image           string `json:"image"`
-		Heartbeat       string `json:"heartbeat"`
-		SecretName      string `json:"secretName,omitempty"`
-		VolumeClaim     string `json:"volumeClaim,omitempty"`
-		VolumeMountPath string `json:"volumeMountPath,omitempty"`
+		Name               string `json:"name"`
+		Assignee           string `json:"assignee"`
+		Image              string `json:"image"`
+		Heartbeat          string `json:"heartbeat"`
+		SecretName         string `json:"secretName,omitempty"`
+		VolumeClaim        string `json:"volumeClaim,omitempty"`
+		VolumeMountPath    string `json:"volumeMountPath,omitempty"`
+		ConfigMapName      string `json:"configMapName,omitempty"`
+		ConfigMapMountPath string `json:"configMapMountPath,omitempty"`
 	}
 	entries := make([]agentEntry, 0, len(configs))
 	for _, c := range configs {
 		entries = append(entries, agentEntry{
-			Name:            c.Name,
-			Assignee:        c.Spec.Assignee,
-			Image:           c.Spec.Image,
-			Heartbeat:       c.Spec.Heartbeat,
-			SecretName:      c.Spec.SecretName,
-			VolumeClaim:     c.Spec.VolumeClaim,
-			VolumeMountPath: c.Spec.VolumeMountPath,
+			Name:               c.Name,
+			Assignee:           c.Spec.Assignee,
+			Image:              c.Spec.Image,
+			Heartbeat:          c.Spec.Heartbeat,
+			SecretName:         c.Spec.SecretName,
+			VolumeClaim:        c.Spec.VolumeClaim,
+			VolumeMountPath:    c.Spec.VolumeMountPath,
+			ConfigMapName:      c.Spec.ConfigMapName,
+			ConfigMapMountPath: c.Spec.ConfigMapMountPath,
 		})
 	}
 	w.Header().Set("Content-Type", "application/json")
