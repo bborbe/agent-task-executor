@@ -4,21 +4,21 @@ go 1.27.1
 
 require (
 	github.com/IBM/sarama v1.60.2
-	github.com/bborbe/agent v0.86.0
+	github.com/bborbe/agent v0.87.0
 	github.com/bborbe/cqrs v0.6.10
-	github.com/bborbe/cron v1.8.29
-	github.com/bborbe/errors v1.6.0
-	github.com/bborbe/http v1.26.25
+	github.com/bborbe/cron v1.8.32
+	github.com/bborbe/errors v1.6.1
+	github.com/bborbe/http v1.26.26
 	github.com/bborbe/k8s v1.14.16
-	github.com/bborbe/kafka v1.25.11
+	github.com/bborbe/kafka v1.25.16
 	github.com/bborbe/log v1.6.25
-	github.com/bborbe/metrics v0.6.1
+	github.com/bborbe/metrics v0.6.3
 	github.com/bborbe/run v1.10.2
-	github.com/bborbe/sentry v1.10.0
-	github.com/bborbe/service v1.10.10
-	github.com/bborbe/time v1.27.11
-	github.com/bborbe/validation v1.4.23
-	github.com/bborbe/vault-cli v0.121.0
+	github.com/bborbe/sentry v1.10.1
+	github.com/bborbe/service v1.10.13
+	github.com/bborbe/time v1.27.14
+	github.com/bborbe/validation v1.5.0
+	github.com/bborbe/vault-cli v0.126.3
 	github.com/golang/glog v1.2.5
 	github.com/google/uuid v1.6.0
 	github.com/gorilla/mux v1.8.1
@@ -38,10 +38,10 @@ require (
 require (
 	github.com/Masterminds/semver/v3 v3.5.0 // indirect
 	github.com/bborbe/argument/v2 v2.13.2 // indirect
-	github.com/bborbe/collection v1.20.25 // indirect
-	github.com/bborbe/kv v1.21.12 // indirect
+	github.com/bborbe/collection v1.20.26 // indirect
+	github.com/bborbe/kv v1.21.14 // indirect
 	github.com/bborbe/math v1.4.8 // indirect
-	github.com/bborbe/parse v1.11.0 // indirect
+	github.com/bborbe/parse v1.11.4 // indirect
 	github.com/bborbe/strimzi v1.8.16 // indirect
 	github.com/beorn7/perks v1.0.1 // indirect
 	github.com/cespare/xxhash/v2 v2.3.0 // indirect
@@ -53,24 +53,24 @@ require (
 	github.com/getsentry/sentry-go v0.49.0 // indirect
 	github.com/go-errors/errors v1.5.1 // indirect
 	github.com/go-logr/logr v1.4.4 // indirect
-	github.com/go-openapi/jsonpointer v1.0.0 // indirect
-	github.com/go-openapi/jsonreference v1.0.1 // indirect
-	github.com/go-openapi/swag v0.29.1 // indirect
-	github.com/go-openapi/swag/cmdutils v0.29.1 // indirect
-	github.com/go-openapi/swag/conv v0.29.1 // indirect
-	github.com/go-openapi/swag/fileutils v0.29.1 // indirect
-	github.com/go-openapi/swag/jsonutils v0.29.1 // indirect
-	github.com/go-openapi/swag/loading v0.29.1 // indirect
-	github.com/go-openapi/swag/mangling v0.29.1 // indirect
-	github.com/go-openapi/swag/netutils v0.29.1 // indirect
-	github.com/go-openapi/swag/pools v0.29.1 // indirect
-	github.com/go-openapi/swag/stringutils v0.29.1 // indirect
-	github.com/go-openapi/swag/typeutils v0.29.1 // indirect
-	github.com/go-openapi/swag/yamlutils v0.29.1 // indirect
+	github.com/go-openapi/jsonpointer v1.0.1 // indirect
+	github.com/go-openapi/jsonreference v1.0.2 // indirect
+	github.com/go-openapi/swag v0.29.2 // indirect
+	github.com/go-openapi/swag/cmdutils v0.29.2 // indirect
+	github.com/go-openapi/swag/conv v0.29.2 // indirect
+	github.com/go-openapi/swag/fileutils v0.29.2 // indirect
+	github.com/go-openapi/swag/jsonutils v0.29.2 // indirect
+	github.com/go-openapi/swag/loading v0.29.2 // indirect
+	github.com/go-openapi/swag/mangling v0.29.2 // indirect
+	github.com/go-openapi/swag/netutils v0.29.2 // indirect
+	github.com/go-openapi/swag/pools v0.29.2 // indirect
+	github.com/go-openapi/swag/stringutils v0.29.2 // indirect
+	github.com/go-openapi/swag/typeutils v0.29.2 // indirect
+	github.com/go-openapi/swag/yamlutils v0.29.2 // indirect
 	github.com/go-task/slim-sprig/v3 v3.0.0 // indirect
 	github.com/google/gnostic-models v0.7.1 // indirect
 	github.com/google/go-cmp v0.7.0 // indirect
-	github.com/google/pprof v0.0.0-20260902005441-ca85771921e4 // indirect
+	github.com/google/pprof v0.0.0-20260906184651-6331bc6350fe // indirect
 	github.com/hashicorp/go-uuid v1.0.3 // indirect
 	github.com/jcmturner/aescts/v2 v2.0.0 // indirect
 	github.com/jcmturner/dnsutils/v2 v2.0.0 // indirect
