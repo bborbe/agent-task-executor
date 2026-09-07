@@ -127,6 +127,15 @@ func (in *ConfigSpec) DeepCopyInto(out *ConfigSpec) {
 			(*out)[key] = val
 		}
 	}
+	// NOTE: hand-added 2026-09-07 pending [[Repair agent-task-executor Codegen
+	// After Monorepo Split]]. make generatek8s is broken on master; without this
+	// block a ConfigMapItems slice would share its backing array across DeepCopy
+	// calls. The repair task must regenerate and confirm this block matches.
+	if in.ConfigMapItems != nil {
+		in, out := &in.ConfigMapItems, &out.ConfigMapItems
+		*out = make([]ConfigMapItem, len(*in))
+		copy(*out, *in)
+	}
 	if in.Trigger != nil {
 		in, out := &in.Trigger, &out.Trigger
 		*out = new(Trigger)

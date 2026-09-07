@@ -186,6 +186,24 @@ func configSpecValidations() apiextensionsv1.ValidationRules {
 	}
 }
 
+// configMapItemsSchema is the OpenAPI schema for ConfigSpec.configMapItems.
+// Extracted from configSpecProperties to keep that function under the funlen
+// limit.
+func configMapItemsSchema() apiextensionsv1.JSONSchemaProps {
+	return apiextensionsv1.JSONSchemaProps{
+		Type: "array",
+		Items: &apiextensionsv1.JSONSchemaPropsOrArray{
+			Schema: &apiextensionsv1.JSONSchemaProps{
+				Type: "object",
+				Properties: map[string]apiextensionsv1.JSONSchemaProps{
+					"key":  {Type: "string"},
+					"path": {Type: "string"},
+				},
+			},
+		},
+	}
+}
+
 func configSpecProperties() map[string]apiextensionsv1.JSONSchemaProps {
 	minLen := int64(1)
 	maxLen63 := int64(63)
@@ -234,6 +252,7 @@ func configSpecProperties() map[string]apiextensionsv1.JSONSchemaProps {
 		"volumeMountPath":    {Type: "string"},
 		"configMapName":      {Type: "string"},
 		"configMapMountPath": {Type: "string"},
+		"configMapItems":     configMapItemsSchema(),
 		"priorityClassName": {
 			Type:    "string",
 			Pattern: "^[a-z0-9]([-a-z0-9]*[a-z0-9])?$",

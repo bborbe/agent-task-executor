@@ -51,6 +51,9 @@ var _ = Describe("ConfigResolver", func() {
 					VolumeMountPath:    "/mnt/data",
 					ConfigMapName:      "easy-agent-goreleaser",
 					ConfigMapMountPath: "/agent",
+					ConfigMapItems: []agentv1.ConfigMapItem{
+						{Key: "CLAUDE.md", Path: ".claude/CLAUDE.md"},
+					},
 					Resources: &agentv1.AgentResources{
 						Requests: agentv1.AgentResourceList{
 							CPU:              "500m",
@@ -76,6 +79,9 @@ var _ = Describe("ConfigResolver", func() {
 		Expect(config.VolumeMountPath).To(Equal("/mnt/data"))
 		Expect(config.ConfigMapName).To(Equal("easy-agent-goreleaser"))
 		Expect(config.ConfigMapMountPath).To(Equal("/agent"))
+		Expect(config.ConfigMapItems).To(Equal([]agentv1.ConfigMapItem{
+			{Key: "CLAUDE.md", Path: ".claude/CLAUDE.md"},
+		}))
 		Expect(config.Resources).NotTo(BeNil())
 		Expect(config.Resources.Requests.CPU).To(Equal("500m"))
 		Expect(config.Resources.Requests.Memory).To(Equal("1Gi"))

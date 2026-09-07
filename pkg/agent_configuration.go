@@ -52,6 +52,9 @@ type AgentConfiguration struct {
 	// ConfigMapMountPath is the container path where the ConfigMap is mounted.
 	// Required when ConfigMapName is set.
 	ConfigMapMountPath string
+	// ConfigMapItems maps ConfigMap keys to file paths inside the mount.
+	// Empty means the whole ConfigMap is mounted as-is.
+	ConfigMapItems []agentv1.ConfigMapItem
 	// SecretName is the name of a K8s Secret to mount as envFrom on the container.
 	// Empty means no secret is mounted.
 	SecretName string
@@ -115,6 +118,7 @@ func (a AgentConfigurations) TaggedConfigurations(branch string) AgentConfigurat
 			VolumeMountPath:         c.VolumeMountPath,
 			ConfigMapName:           c.ConfigMapName,
 			ConfigMapMountPath:      c.ConfigMapMountPath,
+			ConfigMapItems:          c.ConfigMapItems,
 			SecretName:              c.SecretName,
 			Resources:               c.Resources.DeepCopy(),
 			MaxConcurrentJobs:       c.MaxConcurrentJobs,

@@ -233,6 +233,46 @@ var _ = Describe("ConfigSpec", func() {
 			},
 		)
 
+		It(
+			"returns a wrapped validation.Error when configMapItems is set without ConfigMapName",
+			func() {
+				s := agentv1.ConfigSpec{
+					Assignee:  "claude",
+					Image:     "registry/agent-claude",
+					Heartbeat: "30m",
+					TaskType:  "claude",
+					ConfigMapItems: []agentv1.ConfigMapItem{
+						{Key: "CLAUDE.md", Path: ".claude/CLAUDE.md"},
+					},
+				}
+				err := s.Validate(ctx)
+				Expect(err).To(HaveOccurred())
+				Expect(
+					err,
+				).To(MatchError(ContainSubstring("configMapItems requires ConfigMapName")))
+			},
+		)
+
+		It(
+			"rejects an item path that is absolute or contains ..",
+			func() {
+				s := agentv1.ConfigSpec{
+					Assignee:           "claude",
+					Image:              "registry/agent-claude",
+					Heartbeat:          "30m",
+					TaskType:           "claude",
+					ConfigMapName:      "easy-agent-goreleaser",
+					ConfigMapMountPath: "/agent",
+					ConfigMapItems: []agentv1.ConfigMapItem{
+						{Key: "CLAUDE.md", Path: "/etc/CLAUDE.md"},
+					},
+				}
+				err := s.Validate(ctx)
+				Expect(err).To(HaveOccurred())
+				Expect(err).To(MatchError(ContainSubstring("must be relative")))
+			},
+		)
+
 		It("returns nil when both ConfigMapName and ConfigMapMountPath are set", func() {
 			s := agentv1.ConfigSpec{
 				Assignee:           "claude",

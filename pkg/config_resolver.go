@@ -116,6 +116,7 @@ func convert(ctx context.Context, obj agentv1.Config, branch string) (AgentConfi
 		VolumeMountPath:         obj.Spec.VolumeMountPath,
 		ConfigMapName:           obj.Spec.ConfigMapName,
 		ConfigMapMountPath:      obj.Spec.ConfigMapMountPath,
+		ConfigMapItems:          obj.Spec.ConfigMapItems,
 		Resources:               obj.Spec.Resources.DeepCopy(),
 		MaxConcurrentJobs:       obj.Spec.MaxConcurrentJobs,
 		PriorityClassName:       obj.Spec.PriorityClassName,

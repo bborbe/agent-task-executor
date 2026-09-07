@@ -530,6 +530,40 @@ var _ = Describe("JobSpawner", func() {
 			Expect(container.VolumeMounts[0].MountPath).To(Equal("/agent"))
 		})
 
+		It("maps configMapItems to key->path on the volume source", func() {
+			task := lib.Task{
+				TaskIdentifier: lib.TaskIdentifier("abc-items"),
+				Frontmatter: lib.TaskFrontmatter{
+					"assignee": "claude",
+				},
+			}
+			config := pkg.AgentConfiguration{
+				Assignee:           "claude",
+				Image:              "my-image:latest",
+				Env:                map[string]string{},
+				ConfigMapName:      "easy-agent-goreleaser",
+				ConfigMapMountPath: "/agent",
+				ConfigMapItems: []agentv1.ConfigMapItem{
+					{Key: "CLAUDE.md", Path: ".claude/CLAUDE.md"},
+					{Key: "prompt.md", Path: "prompt.md"},
+				},
+			}
+			_, err := jobSpawner.SpawnJob(ctx, task, config)
+			Expect(err).To(BeNil())
+
+			jobs, err := fakeClient.BatchV1().Jobs("test-ns").List(ctx, metav1.ListOptions{})
+			Expect(err).To(BeNil())
+			Expect(jobs.Items).To(HaveLen(1))
+
+			cm := jobs.Items[0].Spec.Template.Spec.Volumes[0].ConfigMap
+			Expect(cm).NotTo(BeNil())
+			Expect(cm.Items).To(HaveLen(2))
+			Expect(cm.Items[0].Key).To(Equal("CLAUDE.md"))
+			Expect(cm.Items[0].Path).To(Equal(".claude/CLAUDE.md"))
+			Expect(cm.Items[1].Key).To(Equal("prompt.md"))
+			Expect(cm.Items[1].Path).To(Equal("prompt.md"))
+		})
+
 		It("mounts both PVC and ConfigMap without dropping either", func() {
 			task := lib.Task{
 				TaskIdentifier: lib.TaskIdentifier("abc-both"),
