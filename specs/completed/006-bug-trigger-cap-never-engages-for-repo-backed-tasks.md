@@ -1,9 +1,10 @@
 ---
-status: verifying
+status: completed
 approved: "2026-09-08T19:14:49Z"
 generating: "2026-09-08T19:15:10Z"
 prompted: "2026-09-08T19:20:46Z"
 verifying: "2026-09-08T19:33:04Z"
+completed: "2026-09-08T20:08:57Z"
 branch: dark-factory/bug-trigger-cap-never-engages-for-repo-backed-tasks
 ---
 
