@@ -173,12 +173,19 @@ func (w *jobWatcher) HandleJob(ctx context.Context, job *batchv1.Job) {
 }
 
 // handleSucceeded publishes the current_job clear for a succeeded job and evicts
-// the store entry — but only when the entry tracks THIS job. The informer
-// re-delivers a terminal Job every ~5 min; when the task has since been
-// re-dispatched and re-spawned under a NEWER job, the stale success re-delivery
-// must not evict the entry the current job's success path needs — the
-// respawned-second-success race via the job informer (observed prod 2026-09-04
-// on task 67120247: job-1's re-delivered success evicted job-2's store entry).
+// the store entry — but only when the entry tracks THIS job, or the tracked job
+// is no longer active. The informer re-delivers a terminal Job every ~5 min;
+// when the task has since been re-dispatched and re-spawned under a NEWER job,
+// the stale success re-delivery must not evict the entry the current job's
+// success path needs — the respawned-second-success race via the job informer
+// (observed prod 2026-09-04 on task 67120247: job-1's re-delivered success
+// evicted job-2's store entry). The mirror case (observed prod 2026-09-05 on
+// task e79ada78) is a stale STORE: a late first-job clear left the entry pinned
+// to an already-terminal job while the second job's success arrives — tracksJob
+// then compares storedJob (first job) vs eventJob (second job) and skips,
+// pinning current_job to the dead job name. When the tracked job is no longer
+// active, the entry is stale and must converge (evict), so the task's terminal
+// state is not left pointing at a dead job.
 func (w *jobWatcher) handleSucceeded(
 	ctx context.Context,
 	taskID lib.TaskIdentifier,
@@ -198,9 +205,61 @@ func (w *jobWatcher) handleSucceeded(
 		return
 	}
 	if !w.tracksJob(task, job.Name) {
-		return
+		// Mismatch between the store's current_job and the succeeded job. Two
+		// orderings reach here: (a) the event is stale — a terminal re-delivery
+		// for a previous job while a NEWER job still runs (PR #45, task
+		// 67120247) — the entry must be kept for the running job's terminal
+		// path; or (b) the store is stale — a late first-job clear left the
+		// entry pinned to an already-terminal job while the second job's
+		// success arrives (task e79ada78) — the entry must converge. Distinguish
+		// by liveness: if any job for the task is still active, keep the entry;
+		// otherwise the tracked current_job is terminal/gone and the stale
+		// entry is evicted.
+		active, err := w.taskHasActiveJob(ctx, taskID)
+		if err != nil {
+			glog.Errorf(
+				"check active job for task %s after tracksJob mismatch: %v",
+				taskID,
+				err,
+			)
+			return
+		}
+		if active {
+			return
+		}
 	}
 	w.taskStore.Delete(taskID)
+}
+
+// taskHasActiveJob reports whether any non-terminal Job exists for the task.
+// Mirrors jobSpawner.IsJobActive: a Job is terminal (not active) when it carries
+// a Failed/Succeeded condition, has Succeeded>0, or has Failed>0 with no active
+// pods. Used by handleSucceeded/publishSyntheticFailure to tell a stale terminal
+// event (task still running, entry must be kept) from a stale store entry (task
+// terminal, entry pinned to a dead job name, entry must converge).
+func (w *jobWatcher) taskHasActiveJob(
+	ctx context.Context,
+	taskID lib.TaskIdentifier,
+) (bool, error) {
+	jobs, err := w.kubeClient.BatchV1().Jobs(w.namespace.String()).List(ctx, metav1.ListOptions{
+		LabelSelector: "agent.benjamin-borbe.de/task-id=" + string(taskID),
+	})
+	if err != nil {
+		return false, errors.Wrapf(ctx, err, "list jobs for task %s", taskID)
+	}
+	for _, job := range jobs.Items {
+		if IsJobFailed(&job) || IsJobSucceeded(&job) {
+			continue
+		}
+		if job.Status.Succeeded > 0 {
+			continue
+		}
+		if job.Status.Failed > 0 && job.Status.Active == 0 {
+			continue
+		}
+		return true, nil
+	}
+	return false, nil
 }
 
 // tracksJob reports whether the store entry's recorded current_job matches the
@@ -246,10 +305,24 @@ func (w *jobWatcher) publishSyntheticFailure(
 		glog.V(2).Infof("published synthetic failure for task %s (job %s)", taskID, job.Name)
 	}
 	// Same guard as the success path: a stale failure re-delivery for a previous
-	// job must not evict the entry tracking the current (re-spawned) job.
-	if w.tracksJob(task, job.Name) {
-		w.taskStore.Delete(taskID)
+	// job must not evict the entry tracking the current (re-spawned) job — unless
+	// the tracked job is itself no longer active, in which case the store entry
+	// is stale and must converge (see handleSucceeded).
+	if !w.tracksJob(task, job.Name) {
+		active, err := w.taskHasActiveJob(ctx, taskID)
+		if err != nil {
+			glog.Errorf(
+				"check active job for task %s after tracksJob mismatch: %v",
+				taskID,
+				err,
+			)
+			return
+		}
+		if active {
+			return
+		}
 	}
+	w.taskStore.Delete(taskID)
 }
 
 func (w *jobWatcher) logMissingTask(

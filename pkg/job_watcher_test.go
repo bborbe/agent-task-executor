@@ -165,6 +165,14 @@ var _ = Describe("JobWatcher", func() {
 			taskWithCurrentJob := testTask
 			taskWithCurrentJob.Frontmatter["current_job"] = "job-2"
 			taskStore.Store(testTaskID, taskWithCurrentJob)
+			// job-2 is the current, still-running job in the cluster — the store
+			// entry must survive the stale job-1 re-delivery because the running
+			// job's terminal path still needs it.
+			runningJob2 := makeJob("job-2", string(testTaskID))
+			_, err := fakeKubeClient.BatchV1().
+				Jobs("test-ns").
+				Create(ctx, runningJob2, metav1.CreateOptions{})
+			Expect(err).To(BeNil())
 
 			// 1. Stale re-delivery of job-1's success must NOT evict job-2's entry.
 			watcher.HandleJob(ctx, makeJob("job-1", string(testTaskID), succeededCondition()))
@@ -177,6 +185,51 @@ var _ = Describe("JobWatcher", func() {
 			_, ok = taskStore.Load(testTaskID)
 			Expect(ok).To(BeFalse(), "current job's success evicts the store entry")
 		})
+
+		It(
+			"evicts the stale store entry when the second success arrives in the late-clear ordering",
+			func() {
+				// Regression for the prod observation 2026-09-05 on task e79ada78
+				// (v0.11.4): job-1 succeeded + cleared + evicted, the task respawned
+				// as job-2, but the store entry was re-admitted with the STALE first-job
+				// name (the second spawn's notification had not refreshed the
+				// frontmatter). The informer re-delivered job-1's success ~60s late,
+				// after job-2 spawned — it hit the publisher dedupe (event=clear_dedupe)
+				// and tracksJob saw a match (store held job-1), evicting the entry.
+				// When job-2's own success then arrived, tracksJob compared storedJob
+				// (job-1) vs eventJob (job-2) and skipped — pinning the store entry to
+				// the dead job-1 name so current_job never converged. The entry must
+				// converge: the second success's clear fires AND the stale entry is
+				// evicted (both jobs are terminal, no active job remains).
+				taskWithStaleJob := testTask
+				taskWithStaleJob.Frontmatter["current_job"] = "job-1"
+				taskStore.Store(testTaskID, taskWithStaleJob)
+
+				job1 := makeJob("job-1", string(testTaskID), succeededCondition())
+				_, err := fakeKubeClient.BatchV1().
+					Jobs("test-ns").
+					Create(ctx, job1, metav1.CreateOptions{})
+				Expect(err).To(BeNil())
+				job2 := makeJob("job-2", string(testTaskID), succeededCondition())
+				_, err = fakeKubeClient.BatchV1().
+					Jobs("test-ns").
+					Create(ctx, job2, metav1.CreateOptions{})
+				Expect(err).To(BeNil())
+
+				watcher.HandleJob(ctx, job2)
+
+				// The second success's clear fires (published before the guard).
+				Expect(fakePublisher.PublishClearCurrentJobCallCount()).To(Equal(1))
+				_, calledTask, calledJobName := fakePublisher.PublishClearCurrentJobArgsForCall(0)
+				Expect(string(calledTask.TaskIdentifier)).To(Equal(string(testTaskID)))
+				Expect(calledJobName).To(Equal("job-2"))
+				// And the stale entry must converge — evicted, not pinned to job-1.
+				_, ok := taskStore.Load(testTaskID)
+				Expect(
+					ok,
+				).To(BeFalse(), "stale store entry must be evicted so current_job converges")
+			},
+		)
 
 		It("ignores jobs without task-id label", func() {
 			job := makeJob("job-4", "", failedCondition("crash"))
