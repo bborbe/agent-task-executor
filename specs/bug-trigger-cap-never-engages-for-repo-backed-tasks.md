@@ -62,6 +62,15 @@ Dark-factory: `dark-factory --version` — the executor is deployed via the `age
 
 The cap's own design rationale (recorded in the anchor task's 2026-08-31 design note and in `task_event_handler.go`'s comment) identified the safe default-on form explicitly: *"the safe form of default-on is to gate it on `ref` being present."* The shipped #29 kept the cap opt-in instead, and the consequence — an uncapped repo-backed loop — is exactly what the anchor task's SC #2 and the DoD gate ("verified on prod: a task with a deliberately failing gate parks/aborts after the retry cap instead of respawning past it") require. Today's live loop is the repro that disproves the DoD gate.
 
+## Desired Behavior
+
+1. A repo-backed task (frontmatter carries `ref`) engages the scoped spawn-trigger cap even without an explicit `max_triggers`, using the lib default of 3.
+2. A repo-backed task at `trigger_count >= 3` in an unchanged `phase`+`ref` scope is skipped — no new Job is spawned for that spawn decision.
+3. A repo-backed task below the cap still spawns and records the trigger (increment or scope write, per existing semantics).
+4. A task with an explicit `max_triggers` is capped exactly as before, with or without a `ref`.
+5. A task with neither `ref` nor `max_triggers` (the recurring-task shape) is uncapped exactly as before — the v0.7.1 regression guard holds.
+6. A changed `phase` or `ref` still resets the budget, so a repo that advances to a new commit earns a fresh retry.
+
 ## Constraints
 
 - Repo conventions are frozen: Ginkgo/Gomega v2 tests, `github.com/bborbe/errors` wrapping (never `fmt.Errorf`), counterfeiter mocks for new dependencies (`//counterfeiter:generate`), glog `V(n)` gating.
@@ -69,7 +78,7 @@ The cap's own design rationale (recorded in the anchor task's 2026-08-31 design 
 - A task that carries `ref` but also an explicit `max_triggers` keeps the explicit value (the lib `MaxTriggers()` returns the field value; default 3 only when absent — `github.com/bborbe/agent v0.86.0` `agent_task-frontmatter.go`).
 - Scope-change semantics unchanged: a changed `phase` or `ref` still resets the budget (fresh count 1), so a repo that moves to a new commit earns a retry.
 - Scope adoption semantics unchanged: an absent `trigger_scope` adopts the current scope carrying the count forward — never a reset.
-- The engagement gate is `ref` presence via `Frontmatter.String("ref")` — the same key `triggerScope` already uses to build `<phase>:<ref[:8]>`. A task with no `ref` scopes on phase alone (constant) and stays uncapped.
+- The default-engage gate is `ref` presence via `Frontmatter.String("ref")` — the same key `triggerScope` already uses to build `<phase>:<ref[:8]>`. The explicit `max_triggers` opt-in path is **retained**: the cap engages when `ref` is present OR `max_triggers` is present. A task with no `ref` scopes on phase alone (constant) and stays uncapped **only when `max_triggers` is also absent** — an explicit `max_triggers` without a `ref` (the existing `test-task-cap-1` shape) must still cap.
 - CHANGELOG: add an `## Unreleased` bullet for this fix (section currently absent — HEAD is `## v0.13.1`).
 
 ## Acceptance Criteria
@@ -79,7 +88,7 @@ The cap's own design rationale (recorded in the anchor task's 2026-08-31 design 
 - [ ] The recurring-task regression guard is unchanged — evidence: the existing `does not skip spawn when max_triggers is absent (recurring task)` spec (no `ref`, no `max_triggers`, `trigger_count: 5`) still asserts `SpawnJobCallCount() == 1` (test exit 0)
 - [ ] An explicit `max_triggers` still caps — evidence: the existing `skips spawn when trigger_count >= max_triggers (cap reached)` spec (`max_triggers: 3`, `trigger_count: 3`) still asserts `SpawnJobCallCount() == 0` (test exit 0)
 - [ ] Scope change still resets the budget for a repo-backed task — evidence: the existing `resets the budget when the ref changes` spec still asserts a scope-reset write (test exit 0)
-- [ ] The engagement-gate comment in `applyTriggerBudget` is updated to state that `ref` presence default-engages the cap (no stale "stays OPT-IN" claim) — evidence: `grep -n 'ref.*default\|default.*ref\|repo-backed\|stays OPT-IN' pkg/handler/task_event_handler.go` returns the updated wording and no line asserts `absent max_triggers still means no cap` as a current contract
+- [ ] The engagement-gate comment in `applyTriggerBudget` is updated to state that `ref` presence default-engages the cap (no stale "stays OPT-IN" claim) — evidence: `grep -nE 'String\\("ref"\\)|default-engage|repo-backed' pkg/handler/task_event_handler.go` returns ≥1 line stating the default-engage rule, and `grep -c 'absent max_triggers still means no cap' pkg/handler/task_event_handler.go` returns 0
 
 ## Verification
 
@@ -90,8 +99,9 @@ The cap's own design rationale (recorded in the anchor task's 2026-08-31 design 
 
 ### Operator-executable (runs on the host after PR merge, spec verification ladder)
 
-- `gh pr diff <n> | grep -c 'hasRef\|String("ref")'` — ≥1 (the gate lands)
-- No live-cluster step: the runtime effect is a spawn-decision skip already proven by the unit specs at the `applyTriggerBudget` seam; the anchor task's DoD gate (re-observe a parked repo-backed loop on prod) is the anchor task's closure step, not this spec's.
+- `git show --stat HEAD | grep -c 'task_event_handler.go'` — ≥1 (the gate change landed in the handler)
+- `gh pr diff <n> | grep -cE 'String\\("ref"\\)|Frontmatter\\["ref"\\]'` — ≥1 (the gate reads the `ref` key)
+- **Seam-adequacy note (why no live-cluster replay here):** the bug is a pure spawn-decision gate condition inside `applyTriggerBudget` — no external system (cluster, Kafka, vault) participates in the decision, so the unit specs at that seam exercise the full behavior (skip / increment / scope-write per frontmatter input). The bug-workflow "replay the reproduction" mandate applies to runtime-symptom bugs whose defect crosses an external boundary; this one does not. The anchor task's DoD gate (re-observe a repo-backed loop parked on prod after deploy) is the anchor task's closure step, not this spec's.
 
 ## Failure Modes
 
