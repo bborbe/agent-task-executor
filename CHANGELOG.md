@@ -2,6 +2,10 @@
 
 All notable changes to this project will be documented in this file.
 
+## Unreleased
+
+- fix: default-engage the scoped spawn-trigger cap for repo-backed tasks — a task whose frontmatter carries a `ref` is now capped at the lib default of 3 spawns per `phase`+`ref` scope even when `max_triggers` is absent, closing the uncapped respawn loop for the `github-update-go` watcher; an explicit `max_triggers` still overrides the default, and recurring tasks (no `ref`, no `max_triggers`) stay uncapped
+
 ## v0.13.1
 
 - fix: `tracksJob` guard stall on respawned-second-success with a late first-job clear. When a task's first job succeeded and was cleared, the task respawned, but the store entry was re-admitted with the stale first-job name, a late first-job `clear_dedupe` arrived after the second spawn, and the second job's success then compared storedJob (first job) vs eventJob (second job) and skipped — pinning `current_job` to the dead first-job name until the agent-publish path resolved it. `handleSucceeded`/`publishSyntheticFailure` now evict a mismatched entry when the tracked job is no longer active (any job for the task still running keeps the entry — the PR #45 stale-re-delivery protection is unchanged).

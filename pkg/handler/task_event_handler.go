@@ -554,7 +554,7 @@ func (h *taskEventHandler) spawnIfNeeded(
 		return false, nil
 	}
 
-	// Scoped trigger budget: evaluates the opt-in cap against the task's current
+	// Scoped trigger budget: evaluates the spawn-trigger cap (default-engages on
 	// phase+ref scope and publishes the counter write for the spawn about to
 	// happen. Extracted so spawnIfNeeded stays legible; it owns one decision.
 	capped, err = h.applyTriggerBudget(ctx, task)
@@ -988,18 +988,22 @@ func triggerScope(fm lib.TaskFrontmatter) string {
 // when the spawn may proceed, publishes exactly one counter write recording it.
 // Returns capped=true when the cap is reached and the spawn must be skipped.
 //
-// The cap stays OPT-IN: an absent max_triggers still means no cap.
+// The cap default-engages for repo-backed tasks: a task whose frontmatter
+// carries a ref (written by the agents that clone a repo, alongside clone_url
+// and base_ref) scopes its budget to phase+ref via triggerScope, and that scope
+// moves with the repo, so accrual against a constant scope cannot occur — the
+// safe default-on form. An explicit max_triggers engages the cap for any task,
+// with or without a ref. A task with neither ref nor max_triggers is a
+// recurring task: it is not repo-backed, sits at a stable phase, and its scope
+// is a constant, so a default cap would accrue across re-dispatches and fire at
+// 3, re-creating the 2026-08-27 Daily Sentry Triage incident (the v0.7.1
+// regression). That task stays uncapped by default.
 //
-// Scoping does not make it safe to default on, which was the original plan for
-// this change. A recurring task is exactly the case v0.7.1 protected after the
-// 2026-08-27 prod incident (Daily Sentry Triage: the lib default-3 fallback
-// stripped assignee on the 3rd trigger and silently killed the re-dispatch loop),
-// and such a task is NOT repo-backed — it carries no ref and sits at a stable
-// phase, so its scope is a constant. The counter would accrue across re-dispatches
-// exactly as before and the cap would fire at 3, re-creating the incident.
-// Scoping only helps where the scope actually moves.
+// The cap value is always MaxTriggers(): the explicit max_triggers field, or
+// the lib default of 3 when it is absent — a repo-backed task with no
+// max_triggers is therefore capped at 3.
 //
-// What scoping DOES fix is the opt-in cap's correctness: a task that opts in no
+// Scoping also fixes the opt-in cap's correctness: a task that opts in no
 // longer burns its budget across unrelated attempts, so an operator can set a
 // tight max_triggers without it leaking into the next phase or the next commit.
 func (h *taskEventHandler) applyTriggerBudget(
@@ -1017,7 +1021,8 @@ func (h *taskEventHandler) applyTriggerBudget(
 	scopeChanged := hasScope && storedScope != currentScope
 
 	_, optedIn := task.Frontmatter["max_triggers"]
-	if optedIn && !scopeChanged &&
+	_, hasRef := task.Frontmatter.String("ref")
+	if (optedIn || hasRef) && !scopeChanged &&
 		task.Frontmatter.TriggerCount() >= task.Frontmatter.MaxTriggers() {
 		glog.V(2).Infof("skip task %s: trigger_count %d >= max_triggers %d in scope %q",
 			task.TaskIdentifier,
