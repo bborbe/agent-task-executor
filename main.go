@@ -62,6 +62,14 @@ type application struct {
 	// CA cert — not the cert material itself. Same reasoning as
 	// JobKafkaClientCertSecret: a resource reference, not secret-shaped.
 	JobKafkaCaCertSecret string `required:"false" arg:"job-kafka-ca-cert-secret"       env:"JOB_KAFKA_CA_CERT_SECRET"       usage:"Name of the existing K8s secret holding the Kafka CA cert (key ca.crt) to mount into spawned Jobs; empty disables cert mounting. Must be a valid K8s Secret name (RFC 1123: lowercase alphanumeric or '-', <=253 chars) or Job creation fails"`
+	// JobFsGroup is the pod-level fsGroup stamped onto spawned Jobs when Kafka
+	// cert mounting is active (both cert secrets set). Cert files are projected
+	// with defaultMode 0440 (owner+group read, root-owned), so a non-root agent
+	// image can only read them if the pod fsGroup is added to its supplementary
+	// groups. 65534 (nobody) is the fleet convention (watcher-github-pr StatefulSet).
+	// Ignored when cert mounting is disabled — the produced pod spec stays
+	// byte-identical to pre-fsGroup behavior for plaintext (quant) deployments.
+	JobFsGroup int64 `required:"false" arg:"job-fs-group"                   env:"JOB_FS_GROUP"                   usage:"Pod fsGroup stamped onto spawned Jobs when Kafka cert mounting is active (0 disables); 65534 is the fleet convention"                                                                                                                                                               default:"65534"`
 	// GitRestURL is the git-rest HTTP API base URL the reconcile loop reads the
 	// vault through. Matches the controller's default git-rest service address.
 	// Consumed by the reconcile loop in the follow-up prompt.
@@ -194,6 +202,7 @@ func (a *application) Run(ctx context.Context, sentryClient libsentry.Client) er
 		a.JobTTLSecondsAfterFinished,
 		a.JobKafkaClientCertSecret,
 		a.JobKafkaCaCertSecret,
+		a.JobFsGroup,
 		gitRestClient,
 		a.TaskGlob,
 	)

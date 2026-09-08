@@ -62,6 +62,8 @@ type JobSpawner interface {
 // before Kubernetes' TTL controller garbage-collects them.
 // jobKafkaClientCertSecret and jobKafkaCaCertSecret are the names of K8s secrets
 // to mount into spawned Jobs for Kafka mTLS; empty strings mean no cert mounting.
+// jobFsGroup is the pod-level fsGroup stamped onto spawned Jobs when cert
+// mounting is active (see applyKafkaCertVolumes); 0 disables it.
 func NewJobSpawner(
 	kubeClient kubernetes.Interface,
 	namespace k8s.Namespace,
@@ -72,6 +74,7 @@ func NewJobSpawner(
 	jobTTLSecondsAfterFinished int32,
 	jobKafkaClientCertSecret string,
 	jobKafkaCaCertSecret string,
+	jobFsGroup int64,
 ) JobSpawner {
 	return &jobSpawner{
 		kubeClient:                 kubeClient,
@@ -83,6 +86,7 @@ func NewJobSpawner(
 		jobTTLSecondsAfterFinished: jobTTLSecondsAfterFinished,
 		jobKafkaClientCertSecret:   jobKafkaClientCertSecret,
 		jobKafkaCaCertSecret:       jobKafkaCaCertSecret,
+		jobFsGroup:                 jobFsGroup,
 	}
 }
 
@@ -97,6 +101,7 @@ type jobSpawner struct {
 	jobTTLSecondsAfterFinished int32
 	jobKafkaClientCertSecret   string
 	jobKafkaCaCertSecret       string
+	jobFsGroup                 int64
 }
 
 func (s *jobSpawner) SpawnJob(
@@ -447,6 +452,18 @@ func applyActiveDeadlineSeconds(
 func (s *jobSpawner) applyKafkaCertVolumes(job *batchv1.Job) {
 	if s.jobKafkaClientCertSecret == "" || s.jobKafkaCaCertSecret == "" {
 		return
+	}
+	// The cert files are projected with defaultMode 0440 and owned by root, so a
+	// non-root agent image can only read them when the pod fsGroup is added to
+	// the container's supplementary groups. Without this, any agent image that
+	// runs as a non-root USER crashes on `open /client-cert/file: permission
+	// denied` — the first occurrence was the cloud-build-watcher Pattern B Job
+	// on octopus dev (2026-09-08), which deliberately runs as USER app to hold
+	// CDB basic-auth credentials.
+	if s.jobFsGroup != 0 {
+		job.Spec.Template.Spec.SecurityContext = &corev1.PodSecurityContext{
+			FSGroup: &s.jobFsGroup,
+		}
 	}
 	mode := int32(0o440) // decimal 288; owner+group read only
 	job.Spec.Template.Spec.Volumes = append(job.Spec.Template.Spec.Volumes,

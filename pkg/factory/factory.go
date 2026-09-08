@@ -117,6 +117,7 @@ func CreateConsumer(
 	jobTTLSecondsAfterFinished int32,
 	jobKafkaClientCertSecret string,
 	jobKafkaCaCertSecret string,
+	jobFsGroup int64,
 	gitRestClient gitrestclient.GitRestClient,
 	taskGlob string,
 ) (libkafka.Consumer, handler.TaskEventHandler) {
@@ -130,6 +131,7 @@ func CreateConsumer(
 		jobTTLSecondsAfterFinished,
 		jobKafkaClientCertSecret,
 		jobKafkaCaCertSecret,
+		jobFsGroup,
 	)
 	taskEventHandler := handler.NewTaskEventHandler(
 		jobSpawner,

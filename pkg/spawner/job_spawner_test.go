@@ -58,6 +58,7 @@ var _ = Describe("JobSpawner", func() {
 			1800,
 			"",
 			"",
+			0,
 		)
 	})
 
@@ -130,6 +131,7 @@ var _ = Describe("JobSpawner", func() {
 				1800,
 				"",
 				"",
+				0,
 			)
 			task := lib.Task{
 				TaskIdentifier: lib.TaskIdentifier("no-prefix-task"),
@@ -170,6 +172,7 @@ var _ = Describe("JobSpawner", func() {
 				customTTL,
 				"",
 				"",
+				0,
 			)
 			task := lib.Task{
 				TaskIdentifier: lib.TaskIdentifier("ttl-custom"),
@@ -443,6 +446,7 @@ var _ = Describe("JobSpawner", func() {
 				1800,
 				"",
 				"",
+				0,
 			)
 
 			task := lib.Task{
@@ -1006,6 +1010,7 @@ var _ = Describe("JobSpawner", func() {
 						1800,
 						clientCertSecret,
 						caCertSecret,
+						65534,
 					)
 					_, err := spawner.SpawnJob(ctx, makeTask(), makeConfig())
 					Expect(err).To(BeNil())
@@ -1030,6 +1035,14 @@ var _ = Describe("JobSpawner", func() {
 					}
 
 					if expectCerts {
+						// pod fsGroup stamped so non-root images can read the
+						// 0440 root-owned cert files
+						Expect(job.Spec.Template.Spec.SecurityContext).NotTo(BeNil())
+						Expect(job.Spec.Template.Spec.SecurityContext.FSGroup).NotTo(BeNil())
+						Expect(
+							*job.Spec.Template.Spec.SecurityContext.FSGroup,
+						).To(Equal(int64(65534)))
+
 						// client-cert volume
 						Expect(volumeMap).To(HaveKey("client-cert"))
 						clientCertVol := volumeMap["client-cert"]
@@ -1078,6 +1091,8 @@ var _ = Describe("JobSpawner", func() {
 						Expect(mountMap).NotTo(HaveKey("/client-cert"))
 						Expect(mountMap).NotTo(HaveKey("/client-key"))
 						Expect(mountMap).NotTo(HaveKey("/server-cert"))
+						// No securityContext either — fsGroup only lands with certs
+						Expect(job.Spec.Template.Spec.SecurityContext).To(BeNil())
 					}
 				},
 				Entry("both secrets set — mounts three cert volumes",
@@ -1121,6 +1136,7 @@ var _ = Describe("JobSpawner", func() {
 				1800,
 				"",
 				"",
+				0,
 			)
 
 			active, err := jobSpawner.IsJobActive(ctx, lib.TaskIdentifier("tid-2"))
@@ -1174,6 +1190,7 @@ var _ = Describe("JobSpawner", func() {
 				1800,
 				"",
 				"",
+				0,
 			)
 
 			count, err := jobSpawner.CountActiveJobs(ctx, "github-update-go-agent")
@@ -1219,6 +1236,7 @@ var _ = Describe("JobSpawner", func() {
 				1800,
 				"",
 				"",
+				0,
 			)
 
 			active, err := jobSpawner.IsJobActive(ctx, lib.TaskIdentifier("tid-deadline"))
@@ -1248,6 +1266,7 @@ var _ = Describe("JobSpawner", func() {
 				1800,
 				"",
 				"",
+				0,
 			)
 
 			active, err := jobSpawner.IsJobActive(ctx, lib.TaskIdentifier("tid-3"))
@@ -1278,6 +1297,7 @@ var _ = Describe("JobSpawner", func() {
 				1800,
 				"",
 				"",
+				0,
 			)
 
 			active, err := jobSpawner.IsJobActive(ctx, lib.TaskIdentifier("tid-4"))
@@ -1305,6 +1325,7 @@ var _ = Describe("JobSpawner", func() {
 				1800,
 				"",
 				"",
+				0,
 			)
 
 			active, err := jobSpawner.IsJobActive(ctx, lib.TaskIdentifier("tid-5"))
@@ -1330,6 +1351,7 @@ var _ = Describe("JobSpawner", func() {
 				1800,
 				"",
 				"",
+				0,
 			)
 			active, err := jobSpawner.IsJobActive(ctx, lib.TaskIdentifier("tid-list-err"))
 			Expect(err).NotTo(BeNil())
