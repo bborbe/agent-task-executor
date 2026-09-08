@@ -248,6 +248,11 @@ func (w *jobWatcher) taskHasActiveJob(
 		return false, errors.Wrapf(ctx, err, "list jobs for task %s", taskID)
 	}
 	for _, job := range jobs.Items {
+		select {
+		case <-ctx.Done():
+			return false, errors.Wrapf(ctx, ctx.Err(), "list jobs for task %s cancelled", taskID)
+		default:
+		}
 		if IsJobFailed(&job) || IsJobSucceeded(&job) {
 			continue
 		}
