@@ -2,6 +2,10 @@
 
 All notable changes to this project will be documented in this file.
 
+## Unreleased
+
+- fix: `tracksJob` guard stall on respawned-second-success with a late first-job clear. When a task's first job succeeded and was cleared, the task respawned, but the store entry was re-admitted with the stale first-job name, a late first-job `clear_dedupe` arrived after the second spawn, and the second job's success then compared storedJob (first job) vs eventJob (second job) and skipped — pinning `current_job` to the dead first-job name until the agent-publish path resolved it. `handleSucceeded`/`publishSyntheticFailure` now evict a mismatched entry when the tracked job is no longer active (any job for the task still running keeps the entry — the PR #45 stale-re-delivery protection is unchanged).
+
 ## v0.13.0
 
 - feat: `ConfigSpec.configMapItems` maps ConfigMap keys to file paths inside the mount. ConfigMap keys cannot contain slashes, so delivering nested paths (e.g. `.claude/CLAUDE.md`) is impossible with a plain key-name mount; `items` (mirroring `corev1.KeyToPath`) closes that. Validated: items require `configMapName`, paths must be relative and free of `..`.
