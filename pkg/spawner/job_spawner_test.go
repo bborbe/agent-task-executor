@@ -998,8 +998,9 @@ var _ = Describe("JobSpawner", func() {
 				}
 			}
 
-			DescribeTable("Kafka mTLS cert volume mounts",
-				func(clientCertSecret, caCertSecret string, expectCerts bool) {
+			DescribeTable(
+				"Kafka mTLS cert volume mounts",
+				func(clientCertSecret, caCertSecret string, fsGroup int64, expectCerts bool) {
 					spawner := spawner.NewJobSpawner(
 						fakeClient,
 						"test-ns",
@@ -1010,7 +1011,7 @@ var _ = Describe("JobSpawner", func() {
 						1800,
 						clientCertSecret,
 						caCertSecret,
-						65534,
+						fsGroup,
 					)
 					_, err := spawner.SpawnJob(ctx, makeTask(), makeConfig())
 					Expect(err).To(BeNil())
@@ -1035,13 +1036,19 @@ var _ = Describe("JobSpawner", func() {
 					}
 
 					if expectCerts {
-						// pod fsGroup stamped so non-root images can read the
-						// 0440 root-owned cert files
-						Expect(job.Spec.Template.Spec.SecurityContext).NotTo(BeNil())
-						Expect(job.Spec.Template.Spec.SecurityContext.FSGroup).NotTo(BeNil())
-						Expect(
-							*job.Spec.Template.Spec.SecurityContext.FSGroup,
-						).To(Equal(int64(65534)))
+						if fsGroup != 0 {
+							// pod fsGroup stamped so non-root images can read the
+							// 0440 root-owned cert files
+							Expect(job.Spec.Template.Spec.SecurityContext).NotTo(BeNil())
+							Expect(job.Spec.Template.Spec.SecurityContext.FSGroup).NotTo(BeNil())
+							Expect(
+								*job.Spec.Template.Spec.SecurityContext.FSGroup,
+							).To(Equal(fsGroup))
+						} else {
+							// explicit disable: fsGroup=0 skips SecurityContext even
+							// with certs mounted
+							Expect(job.Spec.Template.Spec.SecurityContext).To(BeNil())
+						}
 
 						// client-cert volume
 						Expect(volumeMap).To(HaveKey("client-cert"))
@@ -1095,14 +1102,23 @@ var _ = Describe("JobSpawner", func() {
 						Expect(job.Spec.Template.Spec.SecurityContext).To(BeNil())
 					}
 				},
-				Entry("both secrets set — mounts three cert volumes",
-					"kafka-client-cert", "kafka-ca-cert", true),
+				Entry("both secrets set + fsGroup 65534 — certs mounted + fsGroup stamped",
+					"kafka-client-cert", "kafka-ca-cert", int64(65534), true),
+				Entry("both secrets set + custom fsGroup 1000 — passes through, not hardcoded",
+					"kafka-client-cert", "kafka-ca-cert", int64(1000), true),
+				Entry(
+					"both secrets set + fsGroup 0 — certs mounted, SecurityContext absent (disable)",
+					"kafka-client-cert",
+					"kafka-ca-cert",
+					int64(0),
+					true,
+				),
 				Entry("neither secret set — no cert volumes",
-					"", "", false),
+					"", "", int64(65534), false),
 				Entry("only client cert set — no cert volumes",
-					"kafka-client-cert", "", false),
+					"kafka-client-cert", "", int64(65534), false),
 				Entry("only CA cert set — no cert volumes",
-					"", "kafka-ca-cert", false),
+					"", "kafka-ca-cert", int64(65534), false),
 			)
 		})
 	})

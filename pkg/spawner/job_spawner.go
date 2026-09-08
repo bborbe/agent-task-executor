@@ -461,9 +461,12 @@ func (s *jobSpawner) applyKafkaCertVolumes(job *batchv1.Job) {
 	// on octopus dev (2026-09-08), which deliberately runs as USER app to hold
 	// CDB basic-auth credentials.
 	if s.jobFsGroup != 0 {
-		job.Spec.Template.Spec.SecurityContext = &corev1.PodSecurityContext{
-			FSGroup: &s.jobFsGroup,
+		// Only set when absent — never clobber a SecurityContext a future
+		// caller may have attached before applyKafkaCertVolumes runs.
+		if job.Spec.Template.Spec.SecurityContext == nil {
+			job.Spec.Template.Spec.SecurityContext = &corev1.PodSecurityContext{}
 		}
+		job.Spec.Template.Spec.SecurityContext.FSGroup = &s.jobFsGroup
 	}
 	mode := int32(0o440) // decimal 288; owner+group read only
 	job.Spec.Template.Spec.Volumes = append(job.Spec.Template.Spec.Volumes,
