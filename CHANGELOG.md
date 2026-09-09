@@ -2,9 +2,12 @@
 
 All notable changes to this project will be documented in this file.
 
-## v0.14.0
+## Unreleased
 
 - feat: stamp pod `fsGroup` (new global config `job-fs-group` / `JOB_FS_GROUP`, default 65534) onto spawned agent Jobs when Kafka cert mounting is active (both cert secrets set). Cert files are projected with defaultMode 0440 and root-owned, so a non-root agent image (e.g. cloud-build-watcher, which runs as `USER app` to hold CDB credentials) cannot read `/client-cert/file` without the pod fsGroup being added to its supplementary groups — the first occurrence crashed the watcher Pattern B Job on octopus dev (2026-09-08). `0` disables; cert mounting disabled ⇒ pod spec byte-identical to before.
+
+## v0.14.0
+
 - feat: add .reviewignore for the PR size gate
 
 ## v0.13.2
