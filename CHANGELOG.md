@@ -2,7 +2,7 @@
 
 All notable changes to this project will be documented in this file.
 
-## Unreleased
+## v0.15.1
 
 - fix: refuse to start when `TASK_GLOB` is empty instead of running the reconcile loop with an empty pattern (git-rest treats an empty glob as match-everything over the whole vault, so a misconfigured executor looked like a healthy quiet fleet) and remove the built-in `24 Tasks/*.md` default — the glob now has to be supplied by the deployment
 
