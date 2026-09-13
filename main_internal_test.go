@@ -12,6 +12,16 @@ import (
 	. "github.com/onsi/gomega"
 )
 
+// This file is `package main` (internal) and declares specs without a
+// RunSpecs entry point of its own. That is deliberate, and the specs DO run:
+// Ginkgo keeps its suite registry per *process*, not per Go test package, so
+// the single RunSpecs in main_test.go (package main_test) discovers the specs
+// declared here. Verified: `go test -v . -args -ginkgo.v` lists these specs by
+// name and reports them in the "Ran N of N" count.
+//
+// Adding a main_suite_test.go here would be a bug, not a fix — a second
+// RunSpecs in the same binary would re-run the whole suite.
+
 var _ = Describe("application struct field guards", func() {
 	Describe("VaultName field", func() {
 		It("declares the env and required tags", func() {
