@@ -6,6 +6,7 @@ package main
 
 import (
 	"context"
+	stderrors "errors"
 	"os"
 	"regexp"
 	"time"
@@ -82,9 +83,10 @@ type application struct {
 	// prompt.
 	GitRestGatewaySecret string `required:"false" arg:"git-rest-gateway-secret"        env:"GITREST_GATEWAY_SECRET"         usage:"Name of the existing K8s secret holding the git-rest gateway secret (data key gateway-secret); empty disables gateway auth"`
 	// TaskGlob is the git-rest single-level glob selecting the vault task files
-	// the reconcile loop evaluates, relative to the repo root. Consumed by the
-	// reconcile loop in the follow-up prompt.
-	TaskGlob string `required:"false" arg:"task-glob"                      env:"TASK_GLOB"                      usage:"git-rest glob selecting vault task files to reconcile"                                                                                                                                                                                                                              default:"24 Tasks/*.md"`
+	// the reconcile loop evaluates, relative to the repo root. It has no built-in
+	// default: the glob names a vault directory the binary cannot know, so an
+	// empty value is rejected at startup with ErrTaskGlobEmpty.
+	TaskGlob string `required:"false" arg:"task-glob"                      env:"TASK_GLOB"                      usage:"git-rest glob selecting vault task files to reconcile"`
 }
 
 // vaultSlugRegexp mirrors the controller's VAULT_NAME validation (pkg/routing):
@@ -92,6 +94,13 @@ type application struct {
 // {assignee}-{vaultName} lookup key depends on a well-formed vault slug — a
 // malformed value would silently never match a Config CR.
 var vaultSlugRegexp = regexp.MustCompile(`^[a-z][a-z0-9-]*$`)
+
+// ErrTaskGlobEmpty is returned by application.Run when TaskGlob is empty. An
+// unset glob is indistinguishable from a healthy quiet fleet once the reconcile
+// loop is running: git-rest treats an empty pattern as match-everything, so the
+// loop would silently widen to the whole vault instead of failing. The executor
+// is the only component that knows the glob is unset, so it refuses at startup.
+var ErrTaskGlobEmpty = stderrors.New("task-glob is empty")
 
 //nolint:funlen // Initialization sequence; wiring is linear with no branching.
 func (a *application) Run(ctx context.Context, sentryClient libsentry.Client) error {
@@ -111,6 +120,13 @@ func (a *application) Run(ctx context.Context, sentryClient libsentry.Client) er
 			ctx,
 			"vault-name must match ^[a-z][a-z0-9-]*$ (lowercase letter, then lowercase/digits/hyphens), got %q",
 			a.VaultName,
+		)
+	}
+	if a.TaskGlob == "" {
+		return errors.Wrapf(
+			ctx,
+			ErrTaskGlobEmpty,
+			"task-glob (TASK_GLOB) must be set: it selects the vault task files the reconcile loop evaluates, and an empty glob makes git-rest match every file in the vault",
 		)
 	}
 

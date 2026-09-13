@@ -23,7 +23,7 @@ vault edit. It is configured by:
 |---|---|---|
 | `GITREST_URL` | `http://vault-obsidian-openclaw:9090` | git-rest HTTP API base URL the reconcile loop reads vault task files through. |
 | `GITREST_GATEWAY_SECRET` | empty (auth disabled) | NAME of the K8s Secret carrying the git-rest gateway secret (data key `gateway-secret`) — never the secret value. The executor reads the value from the Secret at startup and uses it only in memory. The executor's ServiceAccount must be able to `get` this Secret (chart-side Role grant). |
-| `TASK_GLOB` | `24 Tasks/*.md` | git-rest single-level glob selecting the vault task files the reconcile loop evaluates. |
+| `TASK_GLOB` | empty (required) | git-rest single-level glob selecting the vault task files the reconcile loop evaluates. Required: the executor refuses to start when it is empty, because git-rest treats an empty glob as match-everything over the whole vault. |
 
 ## Links
 

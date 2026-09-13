@@ -5,6 +5,7 @@
 package main
 
 import (
+	"context"
 	"reflect"
 
 	. "github.com/onsi/ginkgo/v2"
@@ -50,6 +51,29 @@ var _ = Describe("application struct field guards", func() {
 			Expect(versionIdx).To(BeNumerically(">=", 0))
 			Expect(commitIdx).To(BeNumerically(">=", 0))
 			Expect(versionIdx).To(BeNumerically("<", commitIdx))
+		})
+	})
+})
+
+var _ = Describe("application.Run startup validation", func() {
+	Describe("empty TaskGlob", func() {
+		It("fails before the k8s client is constructed, naming the glob setting", func() {
+			a := &application{VaultName: "personal", TaskGlob: ""}
+			err := a.Run(context.Background(), nil)
+			Expect(err).To(HaveOccurred())
+			// Off-cluster rest.InClusterConfig() fails too, so asserting only
+			// HaveOccurred() would pass whichever check ran first. Naming the
+			// glob setting proves the guard precedes the k8s client.
+			Expect(err.Error()).To(ContainSubstring("task-glob"))
+		})
+
+		It("declares no built-in default on the flag", func() {
+			typ := reflect.TypeOf(application{})
+			f, ok := typ.FieldByName("TaskGlob")
+			Expect(ok).To(BeTrue())
+			Expect(f.Tag.Get("env")).To(Equal("TASK_GLOB"))
+			Expect(f.Tag.Get("arg")).To(Equal("task-glob"))
+			Expect(f.Tag.Get("default")).To(BeEmpty())
 		})
 	})
 })
