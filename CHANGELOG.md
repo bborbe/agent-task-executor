@@ -2,7 +2,7 @@
 
 All notable changes to this project will be documented in this file.
 
-## Unreleased
+## v0.16.0
 
 - feat: count reconcile pass outcomes in `executor_reconcile_passes_total{result}` (ok, vault_unavailable, list_failed, aborted; pre-initialised in `init()` so `rate()` sees a 0 series rather than no data) — the reconcile backstop logged `reconcile_list_failed` once a minute for months with no metric behind it and no successful pass ever recorded. Counting the `ok` side is what makes `rate(ok)==0` an alertable "the backstop is dead" signal; a failure-only counter saturates and then looks identical to a healthy quiet fleet.
 
