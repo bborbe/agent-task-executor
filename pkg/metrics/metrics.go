@@ -35,6 +35,22 @@ var ReconcileRedrivenTotal = promauto.NewCounter(
 	},
 )
 
+// ReconcilePassesTotal counts reconcile pass outcomes, labelled by result. The
+// failure reasons mirror ReconcileOnce's log events, and `ok` is counted on
+// every pass that gets past its List — so an alert can fire on a backstop that
+// never succeeds. That is the exact shape of the 2026-09 outage: the reconcile
+// loop logged `reconcile_list_failed` once a minute and no other reconcile
+// outcome was ever recorded, for months. A failure-only counter cannot express
+// it — it saturates and then looks identical to a healthy quiet fleet, which is
+// why the pass is counted on both sides of the outcome.
+var ReconcilePassesTotal = promauto.NewCounterVec(
+	prometheus.CounterOpts{
+		Name: "executor_reconcile_passes_total",
+		Help: "Total number of reconcile passes by outcome (ok, vault_unavailable, list_failed, aborted).",
+	},
+	[]string{"result"},
+)
+
 // SkippedUnknownAssigneeTotal counts tasks skipped because their assignee
 // matches no agent Config CR, labelled by the unknown assignee name. The bare
 // TaskEventsTotal{result="skipped_unknown_assignee"} counter says a skip
@@ -65,4 +81,15 @@ func init() {
 	TaskEventsTotal.WithLabelValues("respawn_grace_window").Add(0)
 	TaskEventsTotal.WithLabelValues("respawn_after_grace_window").Add(0)
 	TaskEventsTotal.WithLabelValues("deferred_concurrency_cap").Add(0)
+	// Pre-initialise every reconcile outcome so rate() sees a 0 series rather
+	// than no data — an absent series makes `rate(...)==0` skip silently and the
+	// "backstop never succeeds" alert never fire.
+	for _, result := range []string{
+		"ok",
+		"vault_unavailable",
+		"list_failed",
+		"aborted",
+	} {
+		ReconcilePassesTotal.WithLabelValues(result).Add(0)
+	}
 }

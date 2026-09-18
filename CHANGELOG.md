@@ -2,6 +2,10 @@
 
 All notable changes to this project will be documented in this file.
 
+## Unreleased
+
+- feat: count reconcile pass outcomes in `executor_reconcile_passes_total{result}` (ok, vault_unavailable, list_failed, aborted; pre-initialised in `init()` so `rate()` sees a 0 series rather than no data) — the reconcile backstop logged `reconcile_list_failed` once a minute for months with no metric behind it and no successful pass ever recorded. Counting the `ok` side is what makes `rate(ok)==0` an alertable "the backstop is dead" signal; a failure-only counter saturates and then looks identical to a healthy quiet fleet.
+
 ## v0.15.1
 
 - fix: refuse to start when `TASK_GLOB` is empty instead of running the reconcile loop with an empty pattern (git-rest treats an empty glob as match-everything over the whole vault, so a misconfigured executor looked like a healthy quiet fleet) and remove the built-in `24 Tasks/*.md` default — the glob now has to be supplied by the deployment
