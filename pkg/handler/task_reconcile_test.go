@@ -257,6 +257,50 @@ var _ = Describe("TaskEventHandler reconcile loop", func() {
 		Expect(fakeSpawner.SpawnJobCallCount()).To(Equal(0))
 	})
 
+	// SC4: a sustained reconcile failure must be alertable, not a warn line
+	// repeating once a minute forever. The backstop was dead for months because
+	// `reconcile_list_failed` was a bare glog.Warningf with no metric behind it.
+	// These three assert the pass outcome is counted, including the `ok` series —
+	// an alert on rate(ok)==0 is what catches "the backstop never succeeds",
+	// which a failure-only counter cannot express.
+	It("counts the pass as list_failed when List errors (SC4)", func() {
+		fakeGitRestClient.IsReadyReturns(true, nil)
+		fakeGitRestClient.ListReturns(nil, errors.Errorf(ctx, "rate limited"))
+
+		before := testutil.ToFloat64(metrics.ReconcilePassesTotal.WithLabelValues("list_failed"))
+		Expect(h.ReconcileOnce(ctx)).To(BeNil())
+		Expect(
+			testutil.ToFloat64(metrics.ReconcilePassesTotal.WithLabelValues("list_failed")),
+		).To(Equal(before + 1))
+	})
+
+	It("counts the pass as ok when it completes (SC4)", func() {
+		fakeGitRestClient.ListReturns([]string{"24 Tasks/tid-a.md"}, nil)
+		fakeGitRestClient.GetReturns(
+			[]byte(renderTaskFile(eligibleTask(domain.TaskPhasePlanning))),
+			nil,
+		)
+		fakeSpawner.IsJobActiveReturns(false, nil)
+
+		before := testutil.ToFloat64(metrics.ReconcilePassesTotal.WithLabelValues("ok"))
+		Expect(h.ReconcileOnce(ctx)).To(BeNil())
+		Expect(
+			testutil.ToFloat64(metrics.ReconcilePassesTotal.WithLabelValues("ok")),
+		).To(Equal(before + 1))
+	})
+
+	It("counts the pass as vault_unavailable when readiness fails (SC4)", func() {
+		fakeGitRestClient.IsReadyReturns(false, errors.Errorf(ctx, "boom"))
+
+		before := testutil.ToFloat64(
+			metrics.ReconcilePassesTotal.WithLabelValues("vault_unavailable"),
+		)
+		Expect(h.ReconcileOnce(ctx)).To(BeNil())
+		Expect(
+			testutil.ToFloat64(metrics.ReconcilePassesTotal.WithLabelValues("vault_unavailable")),
+		).To(Equal(before + 1))
+	})
+
 	It("skips the file when Get errors and returns nil (failure mode)", func() {
 		fakeGitRestClient.IsReadyReturns(true, nil)
 		fakeGitRestClient.ListReturns([]string{"24 Tasks/bad.md"}, nil)

@@ -824,15 +824,18 @@ func (h *taskEventHandler) ReconcileOnce(ctx context.Context) error {
 
 	ready, err := h.gitRestClient.IsReady(passCtx)
 	if err != nil {
+		metrics.ReconcilePassesTotal.WithLabelValues("vault_unavailable").Inc()
 		glog.Warningf("event=reconcile_vault_unavailable reason=readiness_error err=%v", err)
 		return nil
 	}
 	if !ready {
+		metrics.ReconcilePassesTotal.WithLabelValues("vault_unavailable").Inc()
 		glog.Warningf("event=reconcile_vault_unavailable reason=not_ready")
 		return nil
 	}
 	paths, err := h.gitRestClient.List(passCtx, h.taskGlob)
 	if err != nil {
+		metrics.ReconcilePassesTotal.WithLabelValues("list_failed").Inc()
 		glog.Warningf("event=reconcile_list_failed glob=%q err=%v", h.taskGlob, err)
 		return nil
 	}
@@ -840,6 +843,7 @@ func (h *taskEventHandler) ReconcileOnce(ctx context.Context) error {
 	for _, relPath := range paths {
 		select {
 		case <-passCtx.Done():
+			metrics.ReconcilePassesTotal.WithLabelValues("aborted").Inc()
 			glog.Infof(
 				"event=reconcile_aborted reason=context_cancelled evaluated=%d re_driven=%d deferred=%d skipped=%d",
 				evaluated,
@@ -885,6 +889,9 @@ func (h *taskEventHandler) ReconcileOnce(ctx context.Context) error {
 			deferred++
 		}
 	}
+	// Counted on every pass that got past List, so rate(ok)==0 is a true
+	// "the backstop is not running" signal rather than an absence of errors.
+	metrics.ReconcilePassesTotal.WithLabelValues("ok").Inc()
 	glog.Infof(
 		"event=reconcile evaluated=%d re_driven=%d deferred=%d skipped=%d glob=%q",
 		evaluated, redriven, deferred, skipped, h.taskGlob,
