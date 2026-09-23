@@ -2,7 +2,7 @@
 
 All notable changes to this project will be documented in this file.
 
-## Unreleased
+## v0.17.0
 
 - feat: count concurrency-cap deferrals by assignee in `agent_executor_deferred_concurrency_cap_total{assignee}`, incremented alongside the bare `TaskEventsTotal{result="deferred_concurrency_cap"}` counter which is kept for continuity — the bare counter says a deferral happened but not which agent is queuing, so `AgentQueueHigh` cannot exclude an agent that is capped on purpose. `github-update-go-agent` runs at `maxConcurrentJobs: 1` by the owner's explicit choice, and its intended backpressure fired the alert on nukeprod for that assignee alone (2026-09-08), costing a manual silence every morning. Filtering the bare counter is not an option: it carries no `assignee` label, so an `assignee!="..."` matcher matches no series and silently disables the alert entirely. Deliberately not pre-initialised — the alert is a positive threshold (`increase(...) > 5`), where an absent series correctly means "no deferrals", and the assignee domain comes from agent Config CRs so it cannot be enumerated at init.
 
