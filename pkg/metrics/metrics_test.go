@@ -10,7 +10,7 @@ import (
 	"github.com/prometheus/client_golang/prometheus"
 	dto "github.com/prometheus/client_model/go"
 
-	_ "github.com/bborbe/agent-task-executor/pkg/metrics"
+	"github.com/bborbe/agent-task-executor/pkg/metrics"
 )
 
 var _ = Describe("Metrics", func() {
@@ -43,6 +43,20 @@ var _ = Describe("Metrics", func() {
 			"error",
 			"type_mismatch",
 		))
+	})
+
+	It("exposes the concurrency-cap deferral counter labelled by assignee", func() {
+		// Asserted here rather than in the registry-name spec above: a
+		// CounterVec with no observed label values emits no metric family at
+		// all, so the family only exists once a label value has been touched.
+		metrics.DeferredConcurrencyCapTotal.WithLabelValues("test-assignee").Add(0)
+
+		mfs, err := prometheus.DefaultGatherer.Gather()
+		Expect(err).NotTo(HaveOccurred())
+
+		Expect(
+			gatherLabels(mfs, "agent_executor_deferred_concurrency_cap_total", "assignee"),
+		).To(ContainElement("test-assignee"))
 	})
 })
 

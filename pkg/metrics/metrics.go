@@ -65,6 +65,33 @@ var SkippedUnknownAssigneeTotal = promauto.NewCounterVec(
 	[]string{"assignee"},
 )
 
+// DeferredConcurrencyCapTotal counts tasks deferred because their assignee was
+// already at its configured concurrency cap, labelled by that assignee. The
+// bare TaskEventsTotal{result="deferred_concurrency_cap"} counter says a
+// deferral happened but not which agent is queuing, so an alert on it cannot
+// exclude an agent that is throttled on purpose — github-update-go-agent runs
+// at maxConcurrentJobs: 1 by the owner's explicit choice, and its intended
+// backpressure reads as a fault. Observed 2026-09-08: AgentQueueHigh fired on
+// nukeprod for update-go alone, costing a manual silence every morning.
+// Filtering the bare counter instead is not an option: it carries no assignee
+// label, so an `assignee!="..."` matcher matches no series and silently
+// disables the alert entirely.
+//
+// Deliberately NOT pre-initialised, unlike ReconcilePassesTotal. That counter
+// seeds a 0 series because its alert is `rate(...) == 0` — an absent series
+// would make a dead backstop look healthy. This one backs a positive threshold
+// (`increase(...) > 5`), where an absent series correctly means "no deferrals"
+// and silence is the right answer. The assignee domain is also dynamic — it
+// comes from agent Config CRs, so it cannot be enumerated at init — and it is
+// bounded by the number of those CRs, which keeps cardinality in check.
+var DeferredConcurrencyCapTotal = promauto.NewCounterVec(
+	prometheus.CounterOpts{
+		Name: "agent_executor_deferred_concurrency_cap_total",
+		Help: "Total number of tasks deferred because their assignee was at its concurrency cap, by assignee.",
+	},
+	[]string{"assignee"},
+)
+
 func init() {
 	TaskEventsTotal.WithLabelValues("spawned").Add(0)
 	TaskEventsTotal.WithLabelValues("skipped_status").Add(0)
