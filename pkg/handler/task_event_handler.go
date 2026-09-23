@@ -647,6 +647,9 @@ func (h *taskEventHandler) deferIfAtConcurrencyCap(
 		concurrencyCapRetryDelay,
 	)
 	metrics.TaskEventsTotal.WithLabelValues("deferred_concurrency_cap").Inc()
+	// The bare counter above is kept for continuity; this one carries the
+	// assignee so an alert can exclude an agent that is capped on purpose.
+	metrics.DeferredConcurrencyCapTotal.WithLabelValues(config.Assignee).Inc()
 	h.deferredMu.Lock()
 	h.deferredRespawns[task.TaskIdentifier] = deferredEntry{
 		task:       task,

@@ -278,10 +278,19 @@ var _ = Describe("TaskEventHandler", func() {
 					"assignee": "claude",
 				},
 			}
+			// Asserted as a delta, not an absolute value: the counter is
+			// package-global, so an absolute assertion breaks as soon as another
+			// spec in this suite defers for the same assignee.
+			deferredBefore := testutil.ToFloat64(
+				metrics.DeferredConcurrencyCapTotal.WithLabelValues("claude"),
+			)
 
 			err := h.ConsumeMessage(ctx, buildMsg(task))
 			Expect(err).To(BeNil())
 			Expect(fakeSpawner.SpawnJobCallCount()).To(Equal(0))
+			Expect(testutil.ToFloat64(
+				metrics.DeferredConcurrencyCapTotal.WithLabelValues("claude"),
+			)).To(Equal(deferredBefore + 1))
 		})
 
 		It("spawns when the assignee is below MaxConcurrentJobs", func() {
