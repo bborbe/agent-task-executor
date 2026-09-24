@@ -2,7 +2,7 @@
 
 All notable changes to this project will be documented in this file.
 
-## Unreleased
+## v0.17.1
 
 - fix: honour the Config's `trigger.phases`/`trigger.statuses` on the reconcile path — `reconcileTask` gated on the hardcoded `defaultTriggerPhases`/`defaultTriggerStatuses`, so a Config that narrowed its phase list was authoritative on the Kafka path (`parseAndFilter`) and silently ignored by the reconcile floor. A task sitting at a dropped phase was therefore re-driven every reconcile tick (`defaultReconcileInterval`, 60s) indefinitely, and narrowing the Config to stop it provably changed nothing. Observed 2026-09-24 on the build-fix lane: its Config was narrowed to `[execution]` to match the single phase `bborbe/security-review-agent` registers for `build-fix`, and a hand-written `planning` fixture kept being re-driven at ~1/min (`event=reconcile_redrive`, `trigger_count` 37 → 54) until the executor was patched. `effectiveTriggerPhases`/`effectiveTriggerStatuses` still fall back to the defaults when a Config omits `trigger`, so a Config without the block behaves exactly as before. Supersedes spec 005 AC 1's literal wording, which wrote the default set into the criterion; the floor's purpose is unaffected, since an orphaned task sits at a phase its own Config lists.
 
