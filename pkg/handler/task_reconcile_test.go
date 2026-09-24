@@ -22,6 +22,7 @@ import (
 	"github.com/prometheus/client_golang/prometheus/testutil"
 	"gopkg.in/yaml.v3"
 
+	agentv1 "github.com/bborbe/agent-task-executor/k8s/apis/agent.benjamin-borbe.de/v1"
 	"github.com/bborbe/agent-task-executor/mocks"
 	pkg "github.com/bborbe/agent-task-executor/pkg"
 	"github.com/bborbe/agent-task-executor/pkg/handler"
@@ -94,6 +95,20 @@ var _ = Describe("TaskEventHandler reconcile loop", func() {
 		}
 	}
 
+	// narrowedTriggerConfig is a Config whose trigger.phases lists only
+	// `execution` — the shape the build-fix Config was narrowed to on 2026-09-24
+	// to match the single phase its lane binary registers.
+	narrowedTriggerConfig := func() pkg.AgentConfiguration {
+		return pkg.AgentConfiguration{
+			Assignee: "claude",
+			Image:    "my-image:latest",
+			Trigger: &agentv1.Trigger{
+				Phases:   domain.TaskPhases{domain.TaskPhaseExecution},
+				Statuses: domain.TaskStatuses{domain.TaskStatusInProgress},
+			},
+		}
+	}
+
 	It("re-drives an eligible task from the vault (AC 1)", func() {
 		fakeGitRestClient.ListReturns([]string{"24 Tasks/tid-a.md"}, nil)
 		fakeGitRestClient.GetReturns(
@@ -107,6 +122,43 @@ var _ = Describe("TaskEventHandler reconcile loop", func() {
 		Expect(err).To(BeNil())
 		Expect(fakeSpawner.SpawnJobCallCount()).To(Equal(1))
 		Expect(testutil.ToFloat64(metrics.ReconcileRedrivenTotal)).To(Equal(before + 1))
+	})
+
+	It("honours the Config trigger phases — a phase the Config does not list is not re-driven", func() {
+		// Regression (2026-09-24): reconcileTask gated on the HARDCODED
+		// defaultTriggerPhases instead of the Config's trigger.phases, so a Config
+		// that narrowed its phase list was ignored on this path and a task sitting
+		// at a dropped phase was re-driven every reconcile tick (60s) forever —
+		// while the Kafka path (parseAndFilter) honoured the same Config. That
+		// asymmetry is what made the build-fix lane's ~1/min spawn loop survive a
+		// Config narrowing that should have stopped it.
+		fakeResolver.ResolveReturns(narrowedTriggerConfig(), nil)
+		fakeGitRestClient.ListReturns([]string{"24 Tasks/tid-a.md"}, nil)
+		fakeGitRestClient.GetReturns(
+			[]byte(renderTaskFile(eligibleTask(domain.TaskPhasePlanning))),
+			nil,
+		)
+		fakeSpawner.IsJobActiveReturns(false, nil)
+
+		err := h.ReconcileOnce(ctx)
+		Expect(err).To(BeNil())
+		Expect(fakeSpawner.SpawnJobCallCount()).To(Equal(0))
+	})
+
+	It("still re-drives a phase the Config does list", func() {
+		// The discriminating half: the narrowed Config must not stop the phases it
+		// DOES list, or the fix would trade a loop for a dead lane.
+		fakeResolver.ResolveReturns(narrowedTriggerConfig(), nil)
+		fakeGitRestClient.ListReturns([]string{"24 Tasks/tid-a.md"}, nil)
+		fakeGitRestClient.GetReturns(
+			[]byte(renderTaskFile(eligibleTask(domain.TaskPhaseExecution))),
+			nil,
+		)
+		fakeSpawner.IsJobActiveReturns(false, nil)
+
+		err := h.ReconcileOnce(ctx)
+		Expect(err).To(BeNil())
+		Expect(fakeSpawner.SpawnJobCallCount()).To(Equal(1))
 	})
 
 	It("recovers a deferred task after a restart with an empty task store (AC 2)", func() {

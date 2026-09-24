@@ -904,12 +904,26 @@ func (h *taskEventHandler) ReconcileOnce(ctx context.Context) error {
 
 // reconcileTask parses a task file and applies the reconcile eligibility filter.
 // Returns (task, config, ok, err): ok=false when the file is not an eligible
-// task (unparseable frontmatter, missing task_identifier, status != in_progress,
-// phase not in the default trigger set, stage mismatch, empty assignee, or
-// unresolvable Config) — mirroring parseAndFilter's gates. Reconcile uses the
-// DEFAULT trigger sets, not per-Config trigger overrides (spec 005 AC 1:
-// "status in_progress, phase in {planning, execution, ai_review}, assignee set");
-// the reconcile floor is the baseline contract.
+// task (unparseable frontmatter, missing task_identifier, status not in the
+// Config's trigger set, phase not in the Config's trigger set, stage mismatch,
+// empty assignee, or unresolvable Config) — mirroring parseAndFilter's gates.
+//
+// The trigger sets come from the resolved Config via effectiveTriggerPhases /
+// effectiveTriggerStatuses, NOT from the hardcoded defaults. Those helpers still
+// fall back to the defaults when the Config carries no trigger, so a Config that
+// omits the block behaves exactly as before; a Config that declares a narrower
+// list is now honoured on this path too.
+//
+// This supersedes spec 005 AC 1, which wrote the default set into the criterion
+// ("phase in {planning, execution, ai_review}"). That wording predates per-Config
+// trigger narrowing and made the Config authoritative on the Kafka path only:
+// parseAndFilter honoured trigger.phases while this floor ignored it, so a Config
+// narrowing had no effect here and a task sitting at a dropped phase was re-driven
+// every tick forever. Observed 2026-09-24 on the build-fix lane — narrowing its
+// Config to [execution] left a `planning` fixture re-driven at ~1/min by
+// `event=reconcile_redrive`, because this function gated on the default set.
+// The floor's purpose (recover tasks a restart orphaned) is unaffected: an
+// orphaned task is at a phase its own Config lists, so it is still re-driven.
 func (h *taskEventHandler) reconcileTask(
 	ctx context.Context,
 	content []byte,
@@ -925,11 +939,11 @@ func (h *taskEventHandler) reconcileTask(
 	if skip {
 		return lib.Task{}, nil, false, nil
 	}
-	if !defaultTriggerStatuses.Contains(task.Frontmatter.Status()) {
+	if !effectiveTriggerStatuses(config).Contains(task.Frontmatter.Status()) {
 		return lib.Task{}, nil, false, nil
 	}
 	phase := task.Frontmatter.Phase()
-	if phase == nil || !defaultTriggerPhases.Contains(*phase) {
+	if phase == nil || !effectiveTriggerPhases(config).Contains(*phase) {
 		return lib.Task{}, nil, false, nil
 	}
 	if task.Frontmatter.Stage() != string(h.branch) {
