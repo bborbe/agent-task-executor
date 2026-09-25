@@ -194,6 +194,20 @@ var _ = Describe("ConfigSpec", func() {
 			Expect(err).To(MatchError(ContainSubstring("at least one of taskType or taskTypes")))
 		})
 
+		It("returns a wrapped validation.Error when an untyped spec carries no taskType", func() {
+			// An omitted type resolves to job, so it must not be exempt from the
+			// taskType requirement — only an explicit type: service is. This is the
+			// case the CRD's CEL rule must also reject.
+			s := agentv1.ConfigSpec{
+				Assignee:  "claude",
+				Image:     "registry/agent-claude",
+				Heartbeat: "30m",
+			}
+			err := s.Validate(ctx)
+			Expect(err).To(HaveOccurred())
+			Expect(err).To(MatchError(ContainSubstring("at least one of taskType or taskTypes")))
+		})
+
 		It("returns a wrapped validation.Error for an unknown type", func() {
 			// An unrecognised type must fail loudly rather than be treated as a job,
 			// which would silently route an identity agent down the task path.

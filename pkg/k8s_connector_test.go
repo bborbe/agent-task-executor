@@ -194,9 +194,12 @@ var _ = Describe("desiredCRDSpec (via SetupCustomResourceDefinition)", func() {
 		specProps := crd.Spec.Versions[0].Schema.OpenAPIV3Schema.Properties["spec"]
 		Expect(specProps.XValidations).To(HaveLen(1))
 		rule := specProps.XValidations[0].Rule
-		Expect(rule).To(ContainSubstring("!has(self.type)"))
-		Expect(rule).To(ContainSubstring("self.type == 'service'"))
+		Expect(rule).To(ContainSubstring("has(self.type) && self.type == 'service'"))
 		Expect(rule).To(ContainSubstring("has(self.taskType)"))
+		// An untyped Config resolves to job and must still carry a taskType, so the
+		// exemption must not be reachable by omitting the field. A `!has(self.type)`
+		// leading clause would exempt exactly that case.
+		Expect(rule).NotTo(ContainSubstring("!has(self.type)"))
 	})
 
 	It("sets heartbeat pattern", func() {

@@ -182,9 +182,12 @@ func configSpecValidations() apiextensionsv1.ValidationRules {
 		{
 			// A service agent is addressed directly and is never task-routed, so it
 			// carries no taskType/taskTypes and the requirement applies to job agents
-			// only. The !has(self.type) guard covers a Config that omits the field
-			// entirely, which resolves to job. Keep in sync with ConfigSpec.Validate.
-			Rule:    "!has(self.type) || self.type == 'service' || (has(self.taskType) && size(self.taskType) > 0) || (has(self.taskTypes) && size(self.taskTypes) > 0)",
+			// only. Only an explicit `type: service` is exempt: a Config that omits
+			// `type` resolves to job and must still carry a taskType, so the clause
+			// is `has(self.type) && self.type == 'service'` rather than a
+			// `!has(self.type) ||` leading guard, which would wrongly let an
+			// untyped job Config through. Keep in sync with ConfigSpec.Validate.
+			Rule:    "(has(self.type) && self.type == 'service') || (has(self.taskType) && size(self.taskType) > 0) || (has(self.taskTypes) && size(self.taskTypes) > 0)",
 			Message: "at least one of spec.taskType or spec.taskTypes must be non-empty (unless spec.type is service)",
 		},
 	}
