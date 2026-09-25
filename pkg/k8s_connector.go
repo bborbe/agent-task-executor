@@ -180,8 +180,29 @@ func configSpecSchema() apiextensionsv1.JSONSchemaProps {
 func configSpecValidations() apiextensionsv1.ValidationRules {
 	return apiextensionsv1.ValidationRules{
 		{
-			Rule:    "(has(self.taskType) && size(self.taskType) > 0) || (has(self.taskTypes) && size(self.taskTypes) > 0)",
-			Message: "at least one of spec.taskType or spec.taskTypes must be non-empty",
+			// A service agent is addressed directly and is never task-routed, so it
+			// carries no taskType/taskTypes and the requirement applies to job agents
+			// only. The !has(self.type) guard covers a Config that omits the field
+			// entirely, which resolves to job. Keep in sync with ConfigSpec.Validate.
+			Rule:    "!has(self.type) || self.type == 'service' || (has(self.taskType) && size(self.taskType) > 0) || (has(self.taskTypes) && size(self.taskTypes) > 0)",
+			Message: "at least one of spec.taskType or spec.taskTypes must be non-empty (unless spec.type is service)",
+		},
+	}
+}
+
+// agentTypeSchema is the OpenAPI schema for ConfigSpec.type. Extracted from
+// configSpecProperties to keep that function under the funlen limit, mirroring
+// configMapItemsSchema.
+//
+// The enum mirrors AvailableAgentTypes in k8s/apis/agent.benjamin-borbe.de/v1/types.go.
+// Absent means "job", so existing Configs are unaffected; an unknown value is
+// rejected at admission rather than silently routed down the Job path.
+func agentTypeSchema() apiextensionsv1.JSONSchemaProps {
+	return apiextensionsv1.JSONSchemaProps{
+		Type: "string",
+		Enum: []apiextensionsv1.JSON{
+			{Raw: []byte(`"job"`)},
+			{Raw: []byte(`"service"`)},
 		},
 	}
 }
@@ -219,6 +240,7 @@ func configSpecProperties() map[string]apiextensionsv1.JSONSchemaProps {
 		"assignee":  {Type: "string", MinLength: &minLen},
 		"image":     {Type: "string", MinLength: &minLen},
 		"heartbeat": {Type: "string", Pattern: "^[0-9]+(s|m|h)$"},
+		"type":      agentTypeSchema(),
 		"taskType": {
 			Type:      "string",
 			Pattern:   `^[a-z0-9-]+$`,
