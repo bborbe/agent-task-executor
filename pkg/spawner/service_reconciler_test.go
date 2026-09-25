@@ -201,6 +201,36 @@ var _ = Describe("ServiceReconciler", func() {
 		})
 	})
 
+	Describe("session volume storage class", func() {
+		It("omits it when none is configured, so the cluster default applies", func() {
+			// An empty StorageClassName is NOT "use the default". Kubernetes reads
+			// an explicit "" as "bind to a PV that has no storage class", which
+			// never binds when the cluster's default is something else; only a nil
+			// pointer selects the default. The builder always emits the pointer
+			// (hardcoding "standard"), so the reconciler has to unset it.
+			defaulted := spawner.NewServiceReconciler(
+				libk8s.NewStatefulSetDeployer(fakeClient),
+				fakeClient.AppsV1().StatefulSets(namespace),
+				namespace,
+				"",
+			)
+			Expect(defaulted.ReconcileService(ctx, serviceConf, serviceCfg)).To(Succeed())
+
+			sts := getStatefulSet("identity")
+			Expect(sts.Spec.VolumeClaimTemplates).To(HaveLen(1))
+			Expect(sts.Spec.VolumeClaimTemplates[0].Spec.StorageClassName).To(BeNil())
+		})
+
+		It("uses the configured class when one is set", func() {
+			Expect(reconciler.ReconcileService(ctx, serviceConf, serviceCfg)).To(Succeed())
+
+			sts := getStatefulSet("identity")
+			Expect(sts.Spec.VolumeClaimTemplates).To(HaveLen(1))
+			Expect(sts.Spec.VolumeClaimTemplates[0].Spec.StorageClassName).NotTo(BeNil())
+			Expect(*sts.Spec.VolumeClaimTemplates[0].Spec.StorageClassName).To(Equal("standard"))
+		})
+	})
+
 	Describe("UndeployService", func() {
 		It("removes a StatefulSet this executor owns", func() {
 			Expect(reconciler.ReconcileService(ctx, serviceConf, serviceCfg)).To(Succeed())

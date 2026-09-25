@@ -196,9 +196,6 @@ func (r *serviceReconciler) buildStatefulSet(
 	statefulSetBuilder.SetName(k8s.Name(config.Name))
 	statefulSetBuilder.SetReplicas(1)
 	statefulSetBuilder.SetDatadirSize(serviceStorageSize)
-	// Always set it, including when empty: the builder otherwise hardcodes
-	// "standard", whereas an empty StorageClassName means "use the cluster's
-	// default class" — which is what the chart's own PVC does.
 	statefulSetBuilder.SetStorageClass(r.storageClass)
 	statefulSetBuilder.AddImagePullSecrets(imagePullSecretName(resolved))
 	statefulSetBuilder.AddLabel(assigneeLabelKey, resolved.Assignee)
@@ -206,6 +203,20 @@ func (r *serviceReconciler) buildStatefulSet(
 	statefulSet, err := statefulSetBuilder.Build(ctx)
 	if err != nil {
 		return nil, errors.Wrapf(ctx, err, "build statefulset for config %s", config.Name)
+	}
+
+	// An empty StorageClassName must become nil, not "".
+	//
+	// The builder always emits a StorageClassName pointer — hardcoding "standard"
+	// when unset — so neither leaving it alone nor passing "" expresses "use the
+	// cluster's default class". Kubernetes reads an explicit "" as "bind to a PV
+	// that has *no* storage class", which never binds on a cluster whose default
+	// is something else; only a nil pointer selects the default. Observed live:
+	// a service agent's PVC sat Pending with an empty STORAGECLASS and the pod
+	// never scheduled ("pod has unbound immediate PersistentVolumeClaims"), while
+	// every chart-managed claim on the same cluster carried `local-path` explicitly.
+	if r.storageClass == "" && len(statefulSet.Spec.VolumeClaimTemplates) > 0 {
+		statefulSet.Spec.VolumeClaimTemplates[0].Spec.StorageClassName = nil
 	}
 
 	// The Config owns the workload: deleting the CR garbage-collects the
