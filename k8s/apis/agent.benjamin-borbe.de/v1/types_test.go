@@ -8,7 +8,6 @@ import (
 	"context"
 	"encoding/json"
 	"strings"
-	"testing"
 
 	libk8s "github.com/bborbe/k8s"
 	"github.com/bborbe/validation"
@@ -19,11 +18,6 @@ import (
 
 	agentv1 "github.com/bborbe/agent-task-executor/k8s/apis/agent.benjamin-borbe.de/v1"
 )
-
-func TestV1(t *testing.T) {
-	RegisterFailHandler(Fail)
-	RunSpecs(t, "V1 Suite")
-}
 
 var _ = Describe("Config", func() {
 	var ctx context.Context
