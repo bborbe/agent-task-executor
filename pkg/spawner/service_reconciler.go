@@ -12,6 +12,7 @@ import (
 	"github.com/golang/glog"
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	agentv1 "github.com/bborbe/agent-task-executor/k8s/apis/agent.benjamin-borbe.de/v1"
@@ -59,10 +60,17 @@ type ServiceReconciler interface {
 		resolved pkg.AgentConfiguration,
 	) error
 	// UndeployService removes the StatefulSet a Config owns, in the reconciler's
-	// own namespace. Idempotent: a missing StatefulSet is not an error, because
-	// the ownerRef may already have collected it — and because the reconcile loop
-	// calls this for every Config that is not a service, most of which never had
-	// a StatefulSet at all.
+	// own namespace — but only if the executor actually owns it.
+	//
+	// The ownership check is not defensive decoration. The loop calls this for
+	// every Config that is not a service, and a StatefulSet's name here is just
+	// the Config's name, which any other chart in the namespace may also use
+	// (recurring-task-creator is itself a StatefulSet). Deleting by name alone
+	// would therefore let a job Config tear down an unrelated workload.
+	//
+	// Idempotent and honest: a missing StatefulSet is not an error (the ownerRef
+	// may already have collected it), and a StatefulSet this executor does not
+	// own is left untouched and reported as such, never as a removal.
 	UndeployService(ctx context.Context, name string) error
 }
 
@@ -70,11 +78,13 @@ type ServiceReconciler interface {
 // through the given deployer.
 func NewServiceReconciler(
 	deployer k8s.StatefulSetDeployer,
+	statefulSets k8s.StatefulSetInterface,
 	namespace k8s.Namespace,
 	storageClass string,
 ) ServiceReconciler {
 	return &serviceReconciler{
 		deployer:     deployer,
+		statefulSets: statefulSets,
 		namespace:    namespace,
 		storageClass: storageClass,
 	}
@@ -82,6 +92,7 @@ func NewServiceReconciler(
 
 type serviceReconciler struct {
 	deployer     k8s.StatefulSetDeployer
+	statefulSets k8s.StatefulSetInterface
 	namespace    k8s.Namespace
 	storageClass string
 }
@@ -114,11 +125,41 @@ func (r *serviceReconciler) UndeployService(
 	ctx context.Context,
 	name string,
 ) error {
+	existing, err := r.statefulSets.Get(ctx, name, metav1.GetOptions{})
+	if err != nil {
+		if apierrors.IsNotFound(err) {
+			// Nothing to remove — the ownerRef may already have collected it, and
+			// the loop calls this for every non-service Config, most of which never
+			// had a StatefulSet at all. Silent, and *not* reported as a removal.
+			return nil
+		}
+		return errors.Wrapf(ctx, err, "get statefulset %s", name)
+	}
+	if !ownedByConfig(existing) {
+		// Someone else's workload, sharing this Config's name. Leave it alone and
+		// say so — reporting it as a removal is how a no-op becomes a false alarm.
+		glog.V(2).
+			Infof("kept statefulset %s: not owned by a Config, refusing to undeploy", name)
+		return nil
+	}
 	if err := r.deployer.Undeploy(ctx, r.namespace, k8s.Name(name)); err != nil {
 		return errors.Wrapf(ctx, err, "undeploy statefulset %s", name)
 	}
 	glog.V(2).Infof("removed service statefulset %s", name)
 	return nil
+}
+
+// ownedByConfig reports whether a StatefulSet was created by this executor for a
+// Config. buildStatefulSet sets the Config as the controller owner, so that
+// ownerRef is the executor's own mark: a StatefulSet without it belongs to
+// another chart in the namespace that happens to use the same name.
+func ownedByConfig(statefulSet *appsv1.StatefulSet) bool {
+	for _, owner := range statefulSet.OwnerReferences {
+		if owner.Kind == "Config" && owner.APIVersion == agentv1.SchemeGroupVersion.String() {
+			return true
+		}
+	}
+	return false
 }
 
 // buildStatefulSet renders the StatefulSet for one service Config.
