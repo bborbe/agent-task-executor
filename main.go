@@ -54,6 +54,7 @@ type application struct {
 	BuildDate                  *libtime.DateTime `required:"false" arg:"build-date"                     env:"BUILD_DATE"                     usage:"Build timestamp (RFC3339)"`
 	HealthcheckCronExpression  string            `required:"true"  arg:"healthcheck-cron-expression"    env:"HEALTHCHECK_CRON_EXPRESSION"    usage:"Cron expression for agent liveness health checks"                                                                                                                                                                                                                                   default:"0 0 8 * * 1"`
 	JobTTLSecondsAfterFinished int32             `required:"false" arg:"job-ttl-seconds-after-finished" env:"JOB_TTL_SECONDS_AFTER_FINISHED" usage:"K8s Job TTL after completion (seconds) — completed Job pods are GCed after this delay"                                                                                                                                                                                              default:"1800"`
+	ServiceStorageClass        string            `required:"false" arg:"service-storage-class"          env:"SERVICE_STORAGE_CLASS"          usage:"StorageClass for a service agent's session volume; empty uses the cluster default"`
 	// JobKafkaClientCertSecret holds the NAME of the K8s Secret carrying the
 	// Kafka client cert/key — not the cert material itself. The value is a
 	// resource reference (already public in the Deployment manifest), so no
@@ -150,6 +151,16 @@ func (a *application) Run(ctx context.Context, sentryClient libsentry.Client) er
 	)
 	resolver := factory.CreateConfigResolver(eventHandlerConfig, a.Branch, a.VaultName)
 
+	// Service (identity) agents are reconciled as StatefulSets, alongside the
+	// per-task Jobs the rest of this binary spawns. Both read the same Config CR;
+	// spec.type picks the shape.
+	serviceReconcileLoop := factory.CreateServiceReconcileLoop(
+		eventHandlerConfig,
+		resolver,
+		factory.CreateServiceReconciler(kubeClient, a.Namespace, a.ServiceStorageClass),
+		0,
+	)
+
 	saramaClient, err := libkafka.CreateSaramaClient(
 		ctx,
 		libkafka.ParseBrokersFromString(a.KafkaBrokers),
@@ -231,6 +242,7 @@ func (a *application) Run(ctx context.Context, sentryClient libsentry.Client) er
 		consumer.Consume,
 		taskEventHandler.RunDeferredRespawnLoop,
 		taskEventHandler.RunReconcileLoop,
+		serviceReconcileLoop.Run,
 		jobWatcher.Run,
 		zombieSweeper.Run,
 		a.createHTTPServer(eventHandlerConfig, healthcheckRunner),

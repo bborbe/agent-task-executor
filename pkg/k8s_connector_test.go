@@ -171,6 +171,37 @@ var _ = Describe("desiredCRDSpec (via SetupCustomResourceDefinition)", func() {
 		Expect(*specProps.Properties["zombieJobTimeoutSeconds"].Minimum).To(Equal(float64(30)))
 	})
 
+	It("declares the type discriminator and constrains it to the known agent types", func() {
+		// Same defect class as maxConcurrentJobs: a field added to ConfigSpec but not
+		// to this schema is pruned from every Config on the next executor start, and
+		// the failure reads as "the operator never set it".
+		crd := getCRDFromCreateAction(cs.Actions())
+		specProps := crd.Spec.Versions[0].Schema.OpenAPIV3Schema.Properties["spec"]
+		Expect(specProps.Properties).To(HaveKey("type"))
+		Expect(specProps.Properties["type"].Type).To(Equal("string"))
+		Expect(specProps.Properties["type"].Enum).To(ConsistOf(
+			apiextensionsv1.JSON{Raw: []byte(`"job"`)},
+			apiextensionsv1.JSON{Raw: []byte(`"service"`)},
+		))
+	})
+
+	It("exempts a service agent from the taskType requirement", func() {
+		// A service agent is addressed directly and never task-routed, so it carries
+		// no taskType/taskTypes; without this guard every type: service Config would
+		// be rejected at admission. The rule must still fire when type is unset,
+		// which resolves to job — hence the !has(self.type) leading clause.
+		crd := getCRDFromCreateAction(cs.Actions())
+		specProps := crd.Spec.Versions[0].Schema.OpenAPIV3Schema.Properties["spec"]
+		Expect(specProps.XValidations).To(HaveLen(1))
+		rule := specProps.XValidations[0].Rule
+		Expect(rule).To(ContainSubstring("has(self.type) && self.type == 'service'"))
+		Expect(rule).To(ContainSubstring("has(self.taskType)"))
+		// An untyped Config resolves to job and must still carry a taskType, so the
+		// exemption must not be reachable by omitting the field. A `!has(self.type)`
+		// leading clause would exempt exactly that case.
+		Expect(rule).NotTo(ContainSubstring("!has(self.type)"))
+	})
+
 	It("sets heartbeat pattern", func() {
 		crd := getCRDFromCreateAction(cs.Actions())
 		schema := crd.Spec.Versions[0].Schema.OpenAPIV3Schema

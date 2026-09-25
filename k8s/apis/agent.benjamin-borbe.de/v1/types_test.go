@@ -8,7 +8,6 @@ import (
 	"context"
 	"encoding/json"
 	"strings"
-	"testing"
 
 	libk8s "github.com/bborbe/k8s"
 	"github.com/bborbe/validation"
@@ -19,11 +18,6 @@ import (
 
 	agentv1 "github.com/bborbe/agent-task-executor/k8s/apis/agent.benjamin-borbe.de/v1"
 )
-
-func TestV1(t *testing.T) {
-	RegisterFailHandler(Fail)
-	RunSpecs(t, "V1 Suite")
-}
 
 var _ = Describe("Config", func() {
 	var ctx context.Context
@@ -66,6 +60,26 @@ var _ = Describe("Config", func() {
 					Assignee:  "claude",
 					Image:     "registry/agent-claude-v2",
 					Heartbeat: "30m",
+				},
+			}
+			Expect(a.Equal(b)).To(BeFalse())
+		})
+
+		It("returns false when Type differs", func() {
+			a := agentv1.Config{
+				Spec: agentv1.ConfigSpec{
+					Assignee:  "claude",
+					Image:     "registry/agent-claude",
+					Heartbeat: "30m",
+					Type:      agentv1.AgentTypeJob,
+				},
+			}
+			b := agentv1.Config{
+				Spec: agentv1.ConfigSpec{
+					Assignee:  "claude",
+					Image:     "registry/agent-claude",
+					Heartbeat: "30m",
+					Type:      agentv1.AgentTypeService,
 				},
 			}
 			Expect(a.Equal(b)).To(BeFalse())
@@ -148,6 +162,59 @@ var _ = Describe("ConfigSpec", func() {
 				TaskType:  "claude",
 			}
 			Expect(s.Validate(ctx)).To(BeNil())
+		})
+
+		It("returns nil for a service spec that carries no taskType", func() {
+			// A service agent is addressed directly and never task-routed, so the
+			// taskType requirement does not apply to it.
+			s := agentv1.ConfigSpec{
+				Assignee:  "identity",
+				Image:     "registry/agent-pi",
+				Heartbeat: "30m",
+				Type:      agentv1.AgentTypeService,
+			}
+			Expect(s.Validate(ctx)).To(BeNil())
+		})
+
+		It("returns a wrapped validation.Error when a job spec carries no taskType", func() {
+			s := agentv1.ConfigSpec{
+				Assignee:  "claude",
+				Image:     "registry/agent-claude",
+				Heartbeat: "30m",
+				Type:      agentv1.AgentTypeJob,
+			}
+			err := s.Validate(ctx)
+			Expect(err).To(HaveOccurred())
+			Expect(err).To(MatchError(ContainSubstring("at least one of taskType or taskTypes")))
+		})
+
+		It("returns a wrapped validation.Error when an untyped spec carries no taskType", func() {
+			// An omitted type resolves to job, so it must not be exempt from the
+			// taskType requirement — only an explicit type: service is. This is the
+			// case the CRD's CEL rule must also reject.
+			s := agentv1.ConfigSpec{
+				Assignee:  "claude",
+				Image:     "registry/agent-claude",
+				Heartbeat: "30m",
+			}
+			err := s.Validate(ctx)
+			Expect(err).To(HaveOccurred())
+			Expect(err).To(MatchError(ContainSubstring("at least one of taskType or taskTypes")))
+		})
+
+		It("returns a wrapped validation.Error for an unknown type", func() {
+			// An unrecognised type must fail loudly rather than be treated as a job,
+			// which would silently route an identity agent down the task path.
+			s := agentv1.ConfigSpec{
+				Assignee:  "claude",
+				Image:     "registry/agent-claude",
+				Heartbeat: "30m",
+				TaskType:  "claude",
+				Type:      agentv1.AgentType("bogus"),
+			}
+			err := s.Validate(ctx)
+			Expect(err).To(HaveOccurred())
+			Expect(err).To(MatchError(ContainSubstring("is not one of")))
 		})
 
 		It("returns a wrapped validation.Error when Assignee is empty", func() {
@@ -863,5 +930,55 @@ var _ = Describe("JSON round-trip for trigger", func() {
 		data, err := json.Marshal(spec)
 		Expect(err).To(BeNil())
 		Expect(string(data)).NotTo(ContainSubstring("trigger"))
+	})
+})
+
+var _ = Describe("AgentType", func() {
+	Describe("AvailableAgentTypes", func() {
+		It("lists job and service", func() {
+			Expect(agentv1.AvailableAgentTypes).To(ConsistOf(
+				agentv1.AgentTypeJob,
+				agentv1.AgentTypeService,
+			))
+		})
+	})
+
+	Describe("IsKnownAgentType", func() {
+		It("treats the empty string as known, because it resolves to job", func() {
+			Expect(agentv1.IsKnownAgentType("")).To(BeTrue())
+		})
+
+		It("accepts every listed type", func() {
+			for _, t := range agentv1.AvailableAgentTypes {
+				Expect(agentv1.IsKnownAgentType(t)).To(BeTrue())
+			}
+		})
+
+		It("rejects an unlisted type", func() {
+			Expect(agentv1.IsKnownAgentType(agentv1.AgentType("bogus"))).To(BeFalse())
+		})
+	})
+
+	Describe("JSON round-trip", func() {
+		It("round-trips type through JSON", func() {
+			spec := agentv1.ConfigSpec{
+				Assignee:  "identity",
+				Image:     "registry/agent-pi",
+				Heartbeat: "30m",
+				Type:      agentv1.AgentTypeService,
+			}
+			data, err := json.Marshal(spec)
+			Expect(err).To(BeNil())
+			var decoded agentv1.ConfigSpec
+			Expect(json.Unmarshal(data, &decoded)).To(Succeed())
+			Expect(decoded.Type).To(Equal(agentv1.AgentTypeService))
+		})
+
+		It("omits type from JSON when empty", func() {
+			spec := agentv1.ConfigSpec{Assignee: "agent", Image: "img:latest", Heartbeat: "1m"}
+			data, err := json.Marshal(spec)
+			Expect(err).To(BeNil())
+			Expect(string(data)).NotTo(ContainSubstring(`"type"`))
+		})
 	})
 })

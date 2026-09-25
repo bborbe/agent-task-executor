@@ -62,6 +62,41 @@ type ConfigMapItem struct {
 	Path string `json:"path"`
 }
 
+// AgentType discriminates how the executor runs an agent's Config.
+//
+// The zero value means "unset" and resolves to AgentTypeJob, so every Config that
+// predates this field — and every Config that omits it — keeps the original
+// short-lived Job behaviour. An unrecognised value is rejected by Validate rather
+// than silently treated as a Job, so a typo fails loudly at admission instead of
+// routing an identity agent down the task path.
+type AgentType string
+
+const (
+	// AgentTypeJob spawns one short-lived Kubernetes Job per matching task and phase.
+	AgentTypeJob AgentType = "job"
+	// AgentTypeService reconciles one long-running workload per identity instead of
+	// spawning Jobs. A service agent is addressed directly and is never task-routed,
+	// so it carries no taskType/taskTypes and is exempt from that requirement.
+	AgentTypeService AgentType = "service"
+)
+
+// AvailableAgentTypes lists every AgentType the executor accepts.
+var AvailableAgentTypes = []AgentType{AgentTypeJob, AgentTypeService}
+
+// IsKnownAgentType reports whether t is one of AvailableAgentTypes. The empty
+// string counts as known because it means "unset", which resolves to AgentTypeJob.
+func IsKnownAgentType(t AgentType) bool {
+	if t == "" {
+		return true
+	}
+	for _, known := range AvailableAgentTypes {
+		if t == known {
+			return true
+		}
+	}
+	return false
+}
+
 // ConfigSpec defines the desired state of a Config.
 type ConfigSpec struct {
 	// Assignee is the task frontmatter assignee value that routes to this agent.
@@ -70,6 +105,10 @@ type ConfigSpec struct {
 	Image string `json:"image"`
 	// Heartbeat is the interval at which the agent re-spawns (e.g. "30m").
 	Heartbeat string `json:"heartbeat"`
+	// Type selects how the executor runs this agent. Empty means AgentTypeJob, so
+	// existing Configs are unaffected. An AgentTypeService Config is reconciled as a
+	// long-running workload and is exempt from the taskType/taskTypes requirement.
+	Type AgentType `json:"type,omitempty"`
 	// Deprecated: prefer TaskTypes (list). Stays functional indefinitely; use taskTypes for new agents.
 	// TaskType is the task_type value in task frontmatter that routes to this agent.
 	TaskType string `json:"taskType"`
@@ -213,6 +252,7 @@ func (s ConfigSpec) Equal(o ConfigSpec) bool {
 	return s.Assignee == o.Assignee &&
 		s.Image == o.Image &&
 		s.Heartbeat == o.Heartbeat &&
+		s.Type == o.Type &&
 		s.TaskType == o.TaskType &&
 		reflect.DeepEqual(s.TaskTypes, o.TaskTypes) &&
 		s.SecretName == o.SecretName &&
@@ -257,7 +297,13 @@ func (s ConfigSpec) Validate(ctx context.Context) error {
 	if err := validateTrigger(ctx, s.Trigger); err != nil {
 		return err
 	}
-	if s.TaskType == "" && len(s.TaskTypes) == 0 {
+	if err := validateAgentType(ctx, s.Type); err != nil {
+		return err
+	}
+	// A service agent is addressed directly and is never task-routed, so it carries
+	// no taskType/taskTypes. The requirement below therefore applies to job agents
+	// only — the CEL rule in the CRD schema is relaxed to match.
+	if s.Type != AgentTypeService && s.TaskType == "" && len(s.TaskTypes) == 0 {
 		return errors.Wrapf(
 			ctx,
 			validation.Error,
@@ -321,6 +367,22 @@ func validateTrigger(ctx context.Context, trigger *Trigger) error {
 		}
 	}
 	return nil
+}
+
+// validateAgentType rejects an AgentType that is not in AvailableAgentTypes. The
+// empty string is accepted — it means "unset" and resolves to AgentTypeJob — so
+// every Config predating the field keeps validating.
+func validateAgentType(ctx context.Context, t AgentType) error {
+	if IsKnownAgentType(t) {
+		return nil
+	}
+	return errors.Wrapf(
+		ctx,
+		validation.Error,
+		"type %q is not one of %v",
+		t,
+		AvailableAgentTypes,
+	)
 }
 
 func validateTaskTypeValue(ctx context.Context, taskType string) error {

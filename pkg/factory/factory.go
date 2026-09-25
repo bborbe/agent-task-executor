@@ -6,6 +6,7 @@ package factory
 
 import (
 	"context"
+	"time"
 
 	"github.com/IBM/sarama"
 	lib "github.com/bborbe/agent"
@@ -21,12 +22,38 @@ import (
 	"k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/cache"
 
+	agentv1 "github.com/bborbe/agent-task-executor/k8s/apis/agent.benjamin-borbe.de/v1"
 	pkg "github.com/bborbe/agent-task-executor/pkg"
 	"github.com/bborbe/agent-task-executor/pkg/gitrestclient"
 	"github.com/bborbe/agent-task-executor/pkg/handler"
 	"github.com/bborbe/agent-task-executor/pkg/probe"
 	"github.com/bborbe/agent-task-executor/pkg/spawner"
 )
+
+// CreateServiceReconciler returns a ServiceReconciler that deploys the StatefulSet
+// for a service Config through the given clientset.
+func CreateServiceReconciler(
+	kubeClient kubernetes.Interface,
+	namespace libk8s.Namespace,
+	storageClass string,
+) spawner.ServiceReconciler {
+	return spawner.NewServiceReconciler(
+		libk8s.NewStatefulSetDeployer(kubeClient),
+		namespace,
+		storageClass,
+	)
+}
+
+// CreateServiceReconcileLoop returns the loop that keeps one StatefulSet per
+// service Config in sync. An interval of 0 uses the loop's own default.
+func CreateServiceReconcileLoop(
+	provider libk8s.Provider[agentv1.Config],
+	resolver pkg.ConfigResolver,
+	reconciler spawner.ServiceReconciler,
+	interval time.Duration,
+) spawner.ServiceReconcileLoop {
+	return spawner.NewServiceReconcileLoop(provider, resolver, reconciler, interval)
+}
 
 // CreateJobWatcher creates a JobWatcher that reacts to terminal batch/v1 Job states.
 func CreateJobWatcher(

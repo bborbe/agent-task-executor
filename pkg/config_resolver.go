@@ -107,6 +107,7 @@ func convert(ctx context.Context, obj agentv1.Config, branch string) (AgentConfi
 	}
 	return AgentConfiguration{
 		Assignee:                obj.Spec.Assignee,
+		Type:                    obj.Spec.Type,
 		TaskType:                obj.Spec.TaskType,
 		TaskTypes:               append([]string(nil), obj.Spec.TaskTypes...),
 		Image:                   appendBranchTag(obj.Spec.Image, branch),

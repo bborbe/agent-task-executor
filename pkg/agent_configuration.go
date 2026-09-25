@@ -28,6 +28,11 @@ func appendBranchTag(image string, branch string) string {
 type AgentConfiguration struct {
 	// Assignee is the task frontmatter assignee value that routes to this agent.
 	Assignee string
+	// Type is how the executor runs this agent, from ConfigSpec.Type. Empty means
+	// AgentTypeJob, so a Config predating the field behaves exactly as before. An
+	// AgentTypeService agent is reconciled as a long-running workload rather than
+	// spawned per task.
+	Type agentv1.AgentType
 	// TaskType is the singular task_type value from ConfigSpec.TaskType.
 	// Deprecated in favour of TaskTypes; stays functional.
 	TaskType string
