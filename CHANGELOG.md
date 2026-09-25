@@ -2,7 +2,7 @@
 
 All notable changes to this project will be documented in this file.
 
-## Unreleased
+## v0.18.2
 
 - fix: give a service agent's session volume the cluster's default StorageClass when none is configured, rather than an explicit empty one. `SetStorageClass("")` emits `storageClassName: ""`, which Kubernetes reads as *"bind to a PV that has no storage class"* — not as "use the default" — so the claim never bound and the pod never scheduled (`pod has unbound immediate PersistentVolumeClaims`). The builder always emits the pointer and hardcodes `standard` when unset, so neither leaving it alone nor passing `""` expresses the default; the reconciler now nils it after building. Observed live on nuke dev: `datadir-pi-service-0` sat Pending with an empty STORAGECLASS while every chart-managed claim on the same cluster carried `local-path` explicitly. Worth recording how it survived review: the flag's own usage text said *"empty uses the cluster default"* and the code comment said the same, so the belief was written twice and the two agreed with each other — both wrong. No spec covered the empty case at all; it is now the first thing the suite pins.
 
