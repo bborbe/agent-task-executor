@@ -23,6 +23,12 @@ import (
 const defaultServiceReconcileInterval = time.Minute
 
 //counterfeiter:generate -o ../../mocks/service_reconcile_loop.go --fake-name FakeServiceReconcileLoop . ServiceReconcileLoop
+//
+// This directive names ServiceReconcileLoop — not the ServiceReconciler declared in
+// service_reconciler.go — and its output is mocks/service_reconcile_loop.go. The doc
+// comment below sits between the directive and the interface, which is the shape
+// every other interface in this package uses (see job_spawner.go, k8s_connector.go);
+// `go generate` reads it correctly, so the mock regenerates when the interface changes.
 
 // ServiceReconcileLoop ensures one StatefulSet exists per Config whose
 // spec.type is service, and removes the StatefulSet when a Config stops being one.
