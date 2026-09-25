@@ -4,12 +4,9 @@
 
 package spawner_test
 
-//go:generate go run github.com/maxbrunsfeld/counterfeiter/v6@v6.12.2 -generate
-
 import (
 	"context"
 	"fmt"
-	"testing"
 
 	lib "github.com/bborbe/agent"
 	libtime "github.com/bborbe/time"
@@ -29,11 +26,6 @@ import (
 	pkg "github.com/bborbe/agent-task-executor/pkg"
 	"github.com/bborbe/agent-task-executor/pkg/spawner"
 )
-
-func TestSpawner(t *testing.T) {
-	RegisterFailHandler(Fail)
-	RunSpecs(t, "Spawner Suite")
-}
 
 var _ = Describe("JobSpawner", func() {
 	var (
