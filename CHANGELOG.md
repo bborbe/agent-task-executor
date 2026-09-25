@@ -2,7 +2,7 @@
 
 All notable changes to this project will be documented in this file.
 
-## Unreleased
+## v0.18.1
 
 - fix: `ServiceReconciler.UndeployService` now removes a StatefulSet only when this executor owns it, and stops reporting removals that never happened. The loop calls it for every Config that is not a service, and a StatefulSet's name here is just the Config's name — so deleting by name alone let a job Config tear down any workload in the namespace that happened to share that name (`recurring-task-creator` is itself a StatefulSet, and the unit charts deploy workloads matching leaf-agent Config names). The ownership mark is the Config controller ownerRef `buildStatefulSet` already sets; a StatefulSet without it is left untouched and logged as *kept*, never as removed. The log mattered as much as the delete: the deployer's `Undeploy` returns nil for a missing object while logging at V(4), so the previous wrapper printed `removed service statefulset <name>` for every non-service Config — 16 false removals on the first live reconcile in dev, none of which deleted anything. That is the same silent-failure class this repo keeps hitting, inverted: manufacturing evidence instead of hiding it, and it made a no-op read as an outage.
 
