@@ -2,7 +2,7 @@
 
 All notable changes to this project will be documented in this file.
 
-## Unreleased
+## v0.18.0
 
 - feat: add a `type` discriminator to the Config CRD (`job` | `service`; absent means `job`) and exempt `service` from the `taskType`/`taskTypes` requirement — the executor only knew one shape, a short-lived `batch/v1` Job spawned per task and phase, so there was no way to declare a long-running identity agent that is addressed directly rather than routed by task. `ConfigSpec.Type` is a typed enum (`AgentTypeJob`/`AgentTypeService` plus `AvailableAgentTypes`, rejected by `Validate()` when unrecognised), never a bare string, and the schema constrains it to a two-value enum so a typo fails at admission instead of silently routing an identity agent down the Job path. The `taskType` requirement — enforced twice, by the CEL rule in `configSpecValidations()` and by `ConfigSpec.Validate()` — now applies to job agents only: a service agent is addressed directly and carries neither field, so without the exemption every `type: service` Config would have been rejected at admission. Only an explicit `type: service` is exempt — the clause is `has(self.type) && self.type == 'service'`, not a `!has(self.type) ||` leading guard, which would wrongly exempt an untyped Config that resolves to job and must still carry a taskType. `type` is declared in `configSpecProperties()` **and** the Helm chart's `crds/config-crd.yaml`, because this connector overwrites the cluster CRD on every executor start and a field present only in the chart is pruned within seconds — the v0.5.0 `maxConcurrentJobs` failure, where a pruned integer read as 0 and the feature was inert in prod for weeks. Both copies are covered by the guard tests that exist for that defect class.
 
