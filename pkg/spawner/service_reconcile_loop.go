@@ -22,6 +22,8 @@ import (
 // replacement, and the ownerRef owns garbage collection.
 const defaultServiceReconcileInterval = time.Minute
 
+//counterfeiter:generate -o ../../mocks/service_reconcile_loop.go --fake-name FakeServiceReconcileLoop . ServiceReconcileLoop
+
 // ServiceReconcileLoop ensures one StatefulSet exists per Config whose
 // spec.type is service, and removes the StatefulSet when a Config stops being one.
 //
@@ -95,6 +97,13 @@ func (l *serviceReconcileLoop) ReconcileOnce(ctx context.Context) error {
 	var failures []error
 	services := 0
 	for _, config := range configs {
+		// Each iteration resolves a Config and deploys a StatefulSet, so a
+		// cancelled context must stop the pass mid-way rather than run it out.
+		select {
+		case <-ctx.Done():
+			return errors.Wrapf(ctx, ctx.Err(), "service reconcile cancelled")
+		default:
+		}
 		if agentTypeOrDefault(config.Spec.Type) != agentv1.AgentTypeService {
 			continue
 		}

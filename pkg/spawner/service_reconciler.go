@@ -40,6 +40,8 @@ const serviceStorageSize = "1Gi"
 // stays the single source of truth.
 const agentTypeEnvKey = "AGENT_TYPE"
 
+//counterfeiter:generate -o ../../mocks/service_reconciler.go --fake-name FakeServiceReconciler . ServiceReconciler
+
 // ServiceReconciler reconciles one long-running StatefulSet per Config whose
 // spec.type is service.
 //
