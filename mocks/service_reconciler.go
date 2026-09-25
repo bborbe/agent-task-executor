@@ -8,7 +8,6 @@ import (
 	v1 "github.com/bborbe/agent-task-executor/k8s/apis/agent.benjamin-borbe.de/v1"
 	"github.com/bborbe/agent-task-executor/pkg"
 	"github.com/bborbe/agent-task-executor/pkg/spawner"
-	"github.com/bborbe/k8s"
 )
 
 type FakeServiceReconciler struct {
@@ -25,12 +24,11 @@ type FakeServiceReconciler struct {
 	reconcileServiceReturnsOnCall map[int]struct {
 		result1 error
 	}
-	UndeployServiceStub        func(context.Context, k8s.Namespace, string) error
+	UndeployServiceStub        func(context.Context, string) error
 	undeployServiceMutex       sync.RWMutex
 	undeployServiceArgsForCall []struct {
 		arg1 context.Context
-		arg2 k8s.Namespace
-		arg3 string
+		arg2 string
 	}
 	undeployServiceReturns struct {
 		result1 error
@@ -105,20 +103,19 @@ func (fake *FakeServiceReconciler) ReconcileServiceReturnsOnCall(i int, result1 
 	}{result1}
 }
 
-func (fake *FakeServiceReconciler) UndeployService(arg1 context.Context, arg2 k8s.Namespace, arg3 string) error {
+func (fake *FakeServiceReconciler) UndeployService(arg1 context.Context, arg2 string) error {
 	fake.undeployServiceMutex.Lock()
 	ret, specificReturn := fake.undeployServiceReturnsOnCall[len(fake.undeployServiceArgsForCall)]
 	fake.undeployServiceArgsForCall = append(fake.undeployServiceArgsForCall, struct {
 		arg1 context.Context
-		arg2 k8s.Namespace
-		arg3 string
-	}{arg1, arg2, arg3})
+		arg2 string
+	}{arg1, arg2})
 	stub := fake.UndeployServiceStub
 	fakeReturns := fake.undeployServiceReturns
-	fake.recordInvocation("UndeployService", []interface{}{arg1, arg2, arg3})
+	fake.recordInvocation("UndeployService", []interface{}{arg1, arg2})
 	fake.undeployServiceMutex.Unlock()
 	if stub != nil {
-		return stub(arg1, arg2, arg3)
+		return stub(arg1, arg2)
 	}
 	if specificReturn {
 		return ret.result1
@@ -132,17 +129,17 @@ func (fake *FakeServiceReconciler) UndeployServiceCallCount() int {
 	return len(fake.undeployServiceArgsForCall)
 }
 
-func (fake *FakeServiceReconciler) UndeployServiceCalls(stub func(context.Context, k8s.Namespace, string) error) {
+func (fake *FakeServiceReconciler) UndeployServiceCalls(stub func(context.Context, string) error) {
 	fake.undeployServiceMutex.Lock()
 	defer fake.undeployServiceMutex.Unlock()
 	fake.UndeployServiceStub = stub
 }
 
-func (fake *FakeServiceReconciler) UndeployServiceArgsForCall(i int) (context.Context, k8s.Namespace, string) {
+func (fake *FakeServiceReconciler) UndeployServiceArgsForCall(i int) (context.Context, string) {
 	fake.undeployServiceMutex.RLock()
 	defer fake.undeployServiceMutex.RUnlock()
 	argsForCall := fake.undeployServiceArgsForCall[i]
-	return argsForCall.arg1, argsForCall.arg2, argsForCall.arg3
+	return argsForCall.arg1, argsForCall.arg2
 }
 
 func (fake *FakeServiceReconciler) UndeployServiceReturns(result1 error) {

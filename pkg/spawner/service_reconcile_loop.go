@@ -102,6 +102,7 @@ func (l *serviceReconcileLoop) ReconcileOnce(ctx context.Context) error {
 
 	var failures []error
 	services := 0
+	undeployed := 0
 	for _, config := range configs {
 		// Each iteration resolves a Config and deploys a StatefulSet, so a
 		// cancelled context must stop the pass mid-way rather than run it out.
@@ -111,6 +112,17 @@ func (l *serviceReconcileLoop) ReconcileOnce(ctx context.Context) error {
 		default:
 		}
 		if agentTypeOrDefault(config.Spec.Type) != agentv1.AgentTypeService {
+			// A Config that stopped being a service must lose its StatefulSet.
+			// The ownerRef only collects it when the CR is *deleted*, so an edit
+			// from service to job — or dropping the field — would otherwise
+			// orphan a running workload for the life of the cluster.
+			// UndeployService is idempotent, so this is a no-op for the job
+			// Configs that never had one, which is most of them.
+			if err := l.reconciler.UndeployService(ctx, config.Name); err != nil {
+				failures = append(failures, err)
+				continue
+			}
+			undeployed++
 			continue
 		}
 		services++
@@ -120,14 +132,14 @@ func (l *serviceReconcileLoop) ReconcileOnce(ctx context.Context) error {
 	}
 
 	glog.V(2).
-		Infof("event=service_reconcile done configs=%d services=%d failures=%d", len(configs), services, len(failures))
+		Infof("event=service_reconcile done configs=%d services=%d undeployed=%d failures=%d", len(configs), services, undeployed, len(failures))
 	if len(failures) > 0 {
 		return errors.Wrapf(
 			ctx,
 			failures[0],
-			"reconcile %d of %d service configs failed",
+			"reconcile %d of %d configs failed",
 			len(failures),
-			services,
+			services+undeployed+len(failures),
 		)
 	}
 	return nil

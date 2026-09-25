@@ -58,10 +58,12 @@ type ServiceReconciler interface {
 		config agentv1.Config,
 		resolved pkg.AgentConfiguration,
 	) error
-	// UndeployService removes the StatefulSet a Config owns. Idempotent: a
-	// missing StatefulSet is not an error, because the ownerRef may already have
-	// collected it.
-	UndeployService(ctx context.Context, namespace k8s.Namespace, name string) error
+	// UndeployService removes the StatefulSet a Config owns, in the reconciler's
+	// own namespace. Idempotent: a missing StatefulSet is not an error, because
+	// the ownerRef may already have collected it — and because the reconcile loop
+	// calls this for every Config that is not a service, most of which never had
+	// a StatefulSet at all.
+	UndeployService(ctx context.Context, name string) error
 }
 
 // NewServiceReconciler returns a ServiceReconciler that deploys StatefulSets
@@ -110,10 +112,9 @@ func (r *serviceReconciler) ReconcileService(
 
 func (r *serviceReconciler) UndeployService(
 	ctx context.Context,
-	namespace k8s.Namespace,
 	name string,
 ) error {
-	if err := r.deployer.Undeploy(ctx, namespace, k8s.Name(name)); err != nil {
+	if err := r.deployer.Undeploy(ctx, r.namespace, k8s.Name(name)); err != nil {
 		return errors.Wrapf(ctx, err, "undeploy statefulset %s", name)
 	}
 	glog.V(2).Infof("removed service statefulset %s", name)

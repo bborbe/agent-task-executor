@@ -203,7 +203,7 @@ var _ = Describe("ServiceReconciler", func() {
 	Describe("UndeployService", func() {
 		It("removes the StatefulSet", func() {
 			Expect(reconciler.ReconcileService(ctx, serviceConf, serviceCfg)).To(Succeed())
-			Expect(reconciler.UndeployService(ctx, namespace, "identity")).To(Succeed())
+			Expect(reconciler.UndeployService(ctx, "identity")).To(Succeed())
 
 			list, err := fakeClient.AppsV1().StatefulSets(namespace).List(ctx, metav1.ListOptions{})
 			Expect(err).NotTo(HaveOccurred())

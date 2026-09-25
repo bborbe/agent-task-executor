@@ -70,22 +70,43 @@ var _ = Describe("ServiceReconcileLoop", func() {
 		Expect(reconciler.ReconcileServiceCallCount()).To(Equal(1))
 	})
 
-	It("ignores a job Config, leaving the Job path alone", func() {
+	It("does not deploy a job Config, and removes any StatefulSet it once owned", func() {
 		job := serviceConfig("claude")
 		job.Spec.Type = agentv1.AgentTypeJob
 		provider.configs = []agentv1.Config{job}
 
 		Expect(loop.ReconcileOnce(ctx)).To(Succeed())
 		Expect(reconciler.ReconcileServiceCallCount()).To(Equal(0))
+		Expect(reconciler.UndeployServiceCallCount()).To(Equal(1))
+		_, name := reconciler.UndeployServiceArgsForCall(0)
+		Expect(name).To(Equal("claude"))
 	})
 
-	It("treats an unset type as job, matching the CRD contract", func() {
+	It("treats an unset type as job, matching the CRD contract, and undeploys it", func() {
 		unset := serviceConfig("claude")
 		unset.Spec.Type = ""
 		provider.configs = []agentv1.Config{unset}
 
 		Expect(loop.ReconcileOnce(ctx)).To(Succeed())
 		Expect(reconciler.ReconcileServiceCallCount()).To(Equal(0))
+		Expect(reconciler.UndeployServiceCallCount()).To(Equal(1))
+	})
+
+	It("does not undeploy a Config that is still a service", func() {
+		provider.configs = []agentv1.Config{serviceConfig("identity")}
+
+		Expect(loop.ReconcileOnce(ctx)).To(Succeed())
+		Expect(reconciler.UndeployServiceCallCount()).To(Equal(0))
+	})
+
+	It("reports an undeploy failure without aborting the pass", func() {
+		job := serviceConfig("claude")
+		job.Spec.Type = agentv1.AgentTypeJob
+		provider.configs = []agentv1.Config{job, serviceConfig("identity")}
+		reconciler.UndeployServiceReturns(errors.Errorf(ctx, "undeploy failed"))
+
+		Expect(loop.ReconcileOnce(ctx)).To(HaveOccurred())
+		Expect(reconciler.ReconcileServiceCallCount()).To(Equal(1))
 	})
 
 	It("keeps going when one Config fails, so a single bad agent cannot stop the rest", func() {
