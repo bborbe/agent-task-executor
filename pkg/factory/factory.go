@@ -39,6 +39,7 @@ func CreateServiceReconciler(
 ) spawner.ServiceReconciler {
 	return spawner.NewServiceReconciler(
 		libk8s.NewStatefulSetDeployer(kubeClient),
+		kubeClient.AppsV1().StatefulSets(namespace.String()),
 		namespace,
 		storageClass,
 	)

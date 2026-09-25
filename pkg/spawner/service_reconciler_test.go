@@ -36,6 +36,7 @@ var _ = Describe("ServiceReconciler", func() {
 		fakeClient = fake.NewClientset()
 		reconciler = spawner.NewServiceReconciler(
 			libk8s.NewStatefulSetDeployer(fakeClient),
+			fakeClient.AppsV1().StatefulSets(namespace),
 			namespace,
 			"standard",
 		)
@@ -201,13 +202,42 @@ var _ = Describe("ServiceReconciler", func() {
 	})
 
 	Describe("UndeployService", func() {
-		It("removes the StatefulSet", func() {
+		It("removes a StatefulSet this executor owns", func() {
 			Expect(reconciler.ReconcileService(ctx, serviceConf, serviceCfg)).To(Succeed())
 			Expect(reconciler.UndeployService(ctx, "identity")).To(Succeed())
 
 			list, err := fakeClient.AppsV1().StatefulSets(namespace).List(ctx, metav1.ListOptions{})
 			Expect(err).NotTo(HaveOccurred())
 			Expect(list.Items).To(BeEmpty())
+		})
+
+		It("leaves a StatefulSet another owner created under the same name", func() {
+			// The loop calls UndeployService for every Config that is not a service,
+			// and a StatefulSet's name is just the Config's name — so a job Config
+			// must never tear down a workload that merely shares that name.
+			foreign := &appsv1.StatefulSet{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "claude-agent",
+					Namespace: namespace,
+					OwnerReferences: []metav1.OwnerReference{
+						{APIVersion: "apps/v1", Kind: "Deployment", Name: "someone-else"},
+					},
+				},
+			}
+			_, err := fakeClient.AppsV1().
+				StatefulSets(namespace).
+				Create(ctx, foreign, metav1.CreateOptions{})
+			Expect(err).NotTo(HaveOccurred())
+
+			Expect(reconciler.UndeployService(ctx, "claude-agent")).To(Succeed())
+
+			list, err := fakeClient.AppsV1().StatefulSets(namespace).List(ctx, metav1.ListOptions{})
+			Expect(err).NotTo(HaveOccurred())
+			Expect(list.Items).To(HaveLen(1), "an unowned StatefulSet must survive")
+		})
+
+		It("is a silent no-op for a name that has no StatefulSet", func() {
+			Expect(reconciler.UndeployService(ctx, "never-deployed")).To(Succeed())
 		})
 	})
 })
