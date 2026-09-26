@@ -2,7 +2,7 @@
 
 All notable changes to this project will be documented in this file.
 
-## Unreleased
+## v0.18.3
 
 - fix: give a service agent a readiness probe, so its `Ready` state means something. The reconciler built the service container and never set a probe nor declared a port, so `/readiness` was served and **nothing ever called it**: `Ready` was true from the moment the container started and stayed true, and the criterion "readiness fails when the provider is unreachable" was **unobservable rather than false** — the distinction that matters, because the only way to tell a working probe from a missing one is to look for the probe before trusting a green pod. The probe now targets `/readiness` on the agent's listen port (`http`, 9090) and the container declares that port. **The timings are set by the criterion's own budget** — NotReady within 30s — against an endpoint that *dials* the provider with a 5s timeout before it can answer 503, so a failing probe costs ~5s and the kubelet's cycle is the period **plus** that cost. Worst case is therefore `initialDelay + failureThreshold*(period + timeout)` = 2 + 2*12 = **26s**. The first cut used `failureThreshold: 3` at an 8s period, which is **44s** by that same arithmetic — comfortably outside the budget it was written for, and the kind of number that looks fine until someone does the sum; the spec now asserts the worst case rather than the tidy one. Two consecutive failures rather than one, so a single transient dial cannot take a healthy agent out of service. Audited the rest of the service path for the same defect while here — the `whenDeleted: Delete` retention policy and the `prometheus.io/scrape` annotations are both genuinely wired, so this was the last one.
 
