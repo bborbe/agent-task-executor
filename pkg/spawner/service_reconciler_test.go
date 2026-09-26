@@ -231,6 +231,54 @@ var _ = Describe("ServiceReconciler", func() {
 		})
 	})
 
+	Describe("readiness probe", func() {
+		// Before this existed the service container declared no probe at all, so
+		// `Ready` meant only "the container started": the endpoint was served and
+		// nothing ever called it. That made SC5 unobservable rather than false,
+		// which is the failure mode a probe that is never wired always has.
+		It("probes the service agent's own readiness endpoint", func() {
+			Expect(reconciler.ReconcileService(ctx, serviceConf, serviceCfg)).To(Succeed())
+
+			probe := getStatefulSet("identity").Spec.Template.Spec.Containers[0].ReadinessProbe
+			Expect(probe).NotTo(BeNil())
+			Expect(probe.HTTPGet).NotTo(BeNil())
+			Expect(probe.HTTPGet.Path).To(Equal("/readiness"))
+			Expect(probe.HTTPGet.Port.StrVal).To(Equal("http"))
+		})
+
+		It("declares the container port the probe names", func() {
+			Expect(reconciler.ReconcileService(ctx, serviceConf, serviceCfg)).To(Succeed())
+
+			ports := getStatefulSet("identity").Spec.Template.Spec.Containers[0].Ports
+			Expect(ports).To(HaveLen(1))
+			Expect(ports[0].Name).To(Equal("http"))
+			Expect(ports[0].ContainerPort).To(Equal(int32(9090)))
+		})
+
+		It("goes NotReady inside SC5's 30s budget, worst case", func() {
+			// The endpoint dials the provider with a 5s timeout before it can answer,
+			// so the kubelet's cycle is the period *plus* that cost. Asserting the
+			// worst case rather than the tidy one is the point: the first cut of this
+			// probe used failureThreshold 3 at an 8s period, which is 44s by this
+			// arithmetic and would have missed the budget it was written for.
+			Expect(reconciler.ReconcileService(ctx, serviceConf, serviceCfg)).To(Succeed())
+
+			probe := getStatefulSet("identity").Spec.Template.Spec.Containers[0].ReadinessProbe
+			Expect(probe).NotTo(BeNil())
+			worstCase := int(probe.InitialDelaySeconds) +
+				int(probe.FailureThreshold)*(int(probe.PeriodSeconds)+int(probe.TimeoutSeconds))
+			Expect(worstCase).To(BeNumerically("<", 30))
+		})
+
+		It("needs more than one failure, so a single transient dial does not take it out", func() {
+			Expect(reconciler.ReconcileService(ctx, serviceConf, serviceCfg)).To(Succeed())
+
+			probe := getStatefulSet("identity").Spec.Template.Spec.Containers[0].ReadinessProbe
+			Expect(probe).NotTo(BeNil())
+			Expect(probe.FailureThreshold).To(BeNumerically(">", 1))
+		})
+	})
+
 	Describe("UndeployService", func() {
 		It("removes a StatefulSet this executor owns", func() {
 			Expect(reconciler.ReconcileService(ctx, serviceConf, serviceCfg)).To(Succeed())

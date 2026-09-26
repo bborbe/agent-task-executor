@@ -14,6 +14,7 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/util/intstr"
 
 	agentv1 "github.com/bborbe/agent-task-executor/k8s/apis/agent.benjamin-borbe.de/v1"
 	pkg "github.com/bborbe/agent-task-executor/pkg"
@@ -40,6 +41,20 @@ const serviceStorageSize = "1Gi"
 // the executor from spec.type rather than hand-written into the CR, so the type
 // stays the single source of truth.
 const agentTypeEnvKey = "AGENT_TYPE"
+
+// serviceReadinessPortName, serviceReadinessPort and serviceReadinessPath are the
+// contract between this reconciler and the service agent's own readiness endpoint:
+// bborbe/agent-pi defaults LISTEN to :9090 and serves /readiness there.
+//
+// Like AgentTypeService, the coupling is silent when it breaks. Before these
+// existed the service container declared **no probe at all**, so `Ready` meant only
+// "the container started" and a pod that was not ready was indistinguishable from
+// one that was — the endpoint was served and nothing ever called it.
+const (
+	serviceReadinessPortName = "http"
+	serviceReadinessPort     = 9090
+	serviceReadinessPath     = "/readiness"
+)
 
 //counterfeiter:generate -o ../../mocks/service_reconciler.go --fake-name FakeServiceReconciler . ServiceReconciler
 
@@ -182,6 +197,12 @@ func (r *serviceReconciler) buildStatefulSet(
 		MountPath: mountPath,
 	})
 	applyCPUMemoryResources(resolved, containerBuilder)
+	containerBuilder.SetPorts([]corev1.ContainerPort{{
+		Name:          serviceReadinessPortName,
+		ContainerPort: serviceReadinessPort,
+		Protocol:      corev1.ProtocolTCP,
+	}})
+	containerBuilder.SetReadinessProbe(serviceReadinessProbe())
 
 	containersBuilder := k8s.NewContainersBuilder()
 	containersBuilder.SetContainerBuilders([]k8s.HasBuildContainer{containerBuilder})
@@ -234,6 +255,36 @@ func (r *serviceReconciler) buildStatefulSet(
 
 	applyServiceSecretEnvFrom(resolved, statefulSet)
 	return statefulSet, nil
+}
+
+// serviceReadinessProbe renders the readiness probe for a service agent.
+//
+// The timings are set by SC5's budget — the pod must go NotReady **within 30s** of
+// its provider becoming unreachable — and the endpoint on the other side *dials*
+// the provider with a 5s timeout before it can answer 503. So a failing probe
+// costs ~5s, and the kubelet's cycle is the period plus that cost.
+//
+// Worst case is therefore `initialDelay + failureThreshold*(period + timeout)`,
+// which here is 2 + 2*12 = **26s**: inside the budget with room. The first cut of
+// this used failureThreshold 3 at an 8s period, which is 44s by the same
+// arithmetic — comfortably outside the budget it was written for, and the kind of
+// number that only looks fine until someone does the sum. Two consecutive
+// failures rather than one, so a single transient dial cannot take a healthy agent
+// out of service; more than two does not fit the budget this probe exists to meet.
+func serviceReadinessProbe() corev1.Probe {
+	return corev1.Probe{
+		ProbeHandler: corev1.ProbeHandler{
+			HTTPGet: &corev1.HTTPGetAction{
+				Path: serviceReadinessPath,
+				Port: intstr.FromString(serviceReadinessPortName),
+			},
+		},
+		InitialDelaySeconds: 2,
+		PeriodSeconds:       6,
+		TimeoutSeconds:      6,
+		FailureThreshold:    2,
+		SuccessThreshold:    1,
+	}
 }
 
 // buildServiceEnvBuilder renders the env for a service agent's container. Unlike a
