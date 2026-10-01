@@ -1,7 +1,11 @@
 ---
-status: draft
+status: executing
 spec: [007-bug-service-env-order-rolls-pod-every-minute]
+execution_id: agent-task-executor-envorder-exec-012-spec-007-deterministic-service-env-order
+dark-factory-version: v0.196.0
 created: "2026-10-01T21:40:01Z"
+queued: "2026-10-01T21:55:14Z"
+started: "2026-10-01T21:55:15Z"
 branch: dark-factory/bug-service-env-order-rolls-pod-every-minute
 ---
 
