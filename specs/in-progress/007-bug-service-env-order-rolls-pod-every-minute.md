@@ -1,6 +1,7 @@
 ---
-status: draft
-kind: bug
+status: approved
+approved: "2026-10-01T21:34:51Z"
+branch: dark-factory/bug-service-env-order-rolls-pod-every-minute
 ---
 
 ## Summary
