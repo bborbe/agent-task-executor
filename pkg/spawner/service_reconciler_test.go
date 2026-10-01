@@ -6,6 +6,8 @@ package spawner_test
 
 import (
 	"context"
+	"fmt"
+	"strings"
 
 	libk8s "github.com/bborbe/k8s"
 	. "github.com/onsi/ginkgo/v2"
@@ -66,6 +68,14 @@ var _ = Describe("ServiceReconciler", func() {
 			Get(ctx, name, metav1.GetOptions{})
 		Expect(err).NotTo(HaveOccurred())
 		return sts
+	}
+
+	envNames := func(env []corev1.EnvVar) []string {
+		names := make([]string, 0, len(env))
+		for _, e := range env {
+			names = append(names, e.Name)
+		}
+		return names
 	}
 
 	Describe("ReconcileService", func() {
@@ -198,6 +208,147 @@ var _ = Describe("ServiceReconciler", func() {
 			envFrom := sts.Spec.Template.Spec.Containers[0].EnvFrom
 			Expect(envFrom).To(HaveLen(1))
 			Expect(envFrom[0].SecretRef.Name).To(Equal("identity-secret"))
+		})
+
+		It("renders the container env in exactly one order across 50 reconciles", func() {
+			multiEnv := serviceCfg
+			multiEnv.Env = map[string]string{
+				"MODEL":           "claude-sonnet-4-5",
+				"PUSHGATEWAY_URL": "http://pushgateway:9091",
+				"ALLOWED_TOOLS":   "Read,Grep,Bash",
+				"LOG_LEVEL":       "debug",
+			}
+
+			orderings := map[string]struct{}{}
+			for i := 0; i < 50; i++ {
+				Expect(reconciler.ReconcileService(ctx, serviceConf, multiEnv)).To(Succeed())
+				env := getStatefulSet("identity").Spec.Template.Spec.Containers[0].Env
+				orderings[strings.Join(envNames(env), ",")] = struct{}{}
+			}
+
+			Expect(orderings).To(HaveLen(1),
+				"an unchanged Config must render one env ordering, not a distribution over several")
+
+			// The order must be the SORTED one, not merely *a* stable one: a deterministic
+			// but wrong order satisfies the count above while still being a defect, and
+			// this exact assertion is also what makes the ordering reproducible across
+			// process restarts rather than merely within one.
+			Expect(envNames(getStatefulSet("identity").Spec.Template.Spec.Containers[0].Env)).
+				To(Equal([]string{"AGENT_TYPE", "ALLOWED_TOOLS", "LOG_LEVEL", "MODEL", "PUSHGATEWAY_URL"}),
+					"AGENT_TYPE first, then the Config-declared keys in ascending order")
+		})
+
+		It("renders one env order for a map larger than one Go map bucket", func() {
+			bigEnv := serviceCfg
+			bigEnv.Env = map[string]string{}
+			for i := 0; i < 20; i++ {
+				bigEnv.Env[fmt.Sprintf("KEY_%02d", i)] = fmt.Sprintf("value-%d", i)
+			}
+
+			orderings := map[string]struct{}{}
+			for i := 0; i < 50; i++ {
+				Expect(reconciler.ReconcileService(ctx, serviceConf, bigEnv)).To(Succeed())
+				env := getStatefulSet("identity").Spec.Template.Spec.Containers[0].Env
+				orderings[strings.Join(envNames(env), ",")] = struct{}{}
+			}
+
+			Expect(orderings).To(HaveLen(1),
+				"ordering must not depend on the single-bucket case")
+		})
+
+		It("produces a byte-identical pod template across two consecutive reconciles", func() {
+			multiEnv := serviceCfg
+			multiEnv.Env = map[string]string{
+				"MODEL":           "claude-sonnet-4-5",
+				"PUSHGATEWAY_URL": "http://pushgateway:9091",
+				"ALLOWED_TOOLS":   "Read,Grep,Bash",
+				"LOG_LEVEL":       "debug",
+			}
+
+			Expect(reconciler.ReconcileService(ctx, serviceConf, multiEnv)).To(Succeed())
+			first := getStatefulSet("identity").Spec.Template
+
+			Expect(reconciler.ReconcileService(ctx, serviceConf, multiEnv)).To(Succeed())
+			second := getStatefulSet("identity").Spec.Template
+
+			// Element-for-element, same index order — NOT set-equal. ConsistOf/ContainElements
+			// would pass even while the order churns, which is exactly the bug this pins.
+			Expect(second.Spec.Containers[0].Env).To(Equal(first.Spec.Containers[0].Env))
+			Expect(second).To(Equal(first))
+		})
+
+		It("still rolls the pod when the image changes, leaving the env order stable", func() {
+			multiEnv := serviceCfg
+			multiEnv.Env = map[string]string{
+				"MODEL":           "claude-sonnet-4-5",
+				"PUSHGATEWAY_URL": "http://pushgateway:9091",
+				"ALLOWED_TOOLS":   "Read,Grep,Bash",
+				"LOG_LEVEL":       "debug",
+			}
+
+			Expect(reconciler.ReconcileService(ctx, serviceConf, multiEnv)).To(Succeed())
+			before := getStatefulSet("identity").Spec.Template.Spec.Containers[0]
+
+			updated := multiEnv
+			updated.Image = "docker.io/bborbe/agent-pi:v0.1.8"
+			Expect(reconciler.ReconcileService(ctx, serviceConf, updated)).To(Succeed())
+			after := getStatefulSet("identity").Spec.Template.Spec.Containers[0]
+
+			Expect(after.Image).To(Equal("docker.io/bborbe/agent-pi:v0.1.8"))
+			Expect(after.Image).NotTo(Equal(before.Image))
+			Expect(after.Env).To(Equal(before.Env))
+		})
+
+		It("still rolls the pod when an env value changes, leaving the key order stable", func() {
+			multiEnv := serviceCfg
+			multiEnv.Env = map[string]string{
+				"MODEL":           "claude-sonnet-4-5",
+				"PUSHGATEWAY_URL": "http://pushgateway:9091",
+				"ALLOWED_TOOLS":   "Read,Grep,Bash",
+				"LOG_LEVEL":       "debug",
+			}
+
+			Expect(reconciler.ReconcileService(ctx, serviceConf, multiEnv)).To(Succeed())
+			before := getStatefulSet("identity").Spec.Template.Spec.Containers[0].Env
+
+			changed := multiEnv
+			changed.Env = map[string]string{
+				"MODEL":           "claude-opus-4-5",
+				"PUSHGATEWAY_URL": "http://pushgateway:9091",
+				"ALLOWED_TOOLS":   "Read,Grep,Bash",
+				"LOG_LEVEL":       "debug",
+			}
+			Expect(reconciler.ReconcileService(ctx, serviceConf, changed)).To(Succeed())
+			after := getStatefulSet("identity").Spec.Template.Spec.Containers[0].Env
+
+			Expect(envNames(after)).To(Equal(envNames(before)))
+			Expect(after).NotTo(Equal(before))
+			Expect(after).To(ContainElement(corev1.EnvVar{Name: "MODEL", Value: "claude-opus-4-5"}))
+		})
+
+		It("renders two Configs with the same key set independently and deterministically", func() {
+			cfgA := serviceCfg
+			cfgA.Env = map[string]string{"MODEL": "claude-sonnet-4-5", "LOG_LEVEL": "debug"}
+			confA := serviceConf
+			confA.Name = "identity-a"
+
+			cfgB := serviceCfg
+			cfgB.Env = map[string]string{"MODEL": "claude-opus-4-1", "LOG_LEVEL": "info"}
+			confB := serviceConf
+			confB.Name = "identity-b"
+
+			for i := 0; i < 50; i++ {
+				Expect(reconciler.ReconcileService(ctx, confA, cfgA)).To(Succeed())
+				Expect(reconciler.ReconcileService(ctx, confB, cfgB)).To(Succeed())
+			}
+
+			Expect(envNames(getStatefulSet("identity-a").Spec.Template.Spec.Containers[0].Env)).
+				To(Equal([]string{"AGENT_TYPE", "LOG_LEVEL", "MODEL"}))
+			Expect(envNames(getStatefulSet("identity-b").Spec.Template.Spec.Containers[0].Env)).
+				To(Equal([]string{"AGENT_TYPE", "LOG_LEVEL", "MODEL"}))
+			Expect(getStatefulSet("identity-a").Spec.Template).
+				NotTo(Equal(getStatefulSet("identity-b").Spec.Template),
+					"a differing env value must still change the rendered template")
 		})
 	})
 

@@ -1,11 +1,13 @@
 ---
-status: executing
+status: completed
 spec: [007-bug-service-env-order-rolls-pod-every-minute]
+summary: Made buildServiceEnvBuilder emit a service container's env in deterministic key-sorted order (AGENT_TYPE first, then Config keys via sort.Strings) so an unchanged Config renders a byte-identical StatefulSet and the pod stops rolling; added six specs pinning the ordering and a CHANGELOG entry.
 execution_id: agent-task-executor-envorder-exec-012-spec-007-deterministic-service-env-order
 dark-factory-version: v0.196.0
 created: "2026-10-01T21:40:01Z"
 queued: "2026-10-01T21:55:14Z"
 started: "2026-10-01T21:55:15Z"
+completed: "2026-10-01T22:01:23Z"
 branch: dark-factory/bug-service-env-order-rolls-pod-every-minute
 ---
 
