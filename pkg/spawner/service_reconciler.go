@@ -300,6 +300,11 @@ func serviceReadinessProbe() corev1.Probe {
 func buildServiceEnvBuilder(resolved pkg.AgentConfiguration) k8s.EnvBuilder {
 	envBuilder := k8s.NewEnvBuilder()
 	envBuilder.Add(agentTypeEnvKey, string(agentTypeOrDefault(resolved.Type)))
+	// Neither loop below carries a ctx.Done() check, deliberately. This function
+	// takes no context — it is a pure render — and both walks are over the
+	// Config's own env map, a handful of entries held in memory. Neither can
+	// block, so a cancellation check would have nothing to observe; adding a ctx
+	// parameter to satisfy the shape would widen a pure function to no end.
 	keys := make([]string, 0, len(resolved.Env))
 	for key := range resolved.Env {
 		keys = append(keys, key)
