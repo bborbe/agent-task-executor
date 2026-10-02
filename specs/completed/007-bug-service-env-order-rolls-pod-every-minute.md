@@ -1,9 +1,10 @@
 ---
-status: verifying
+status: completed
 approved: "2026-10-01T21:34:51Z"
 generating: "2026-10-01T21:36:38Z"
 prompted: "2026-10-01T21:47:23Z"
 verifying: "2026-10-01T22:01:23Z"
+completed: "2026-10-02T06:54:39Z"
 branch: dark-factory/bug-service-env-order-rolls-pod-every-minute
 ---
 
