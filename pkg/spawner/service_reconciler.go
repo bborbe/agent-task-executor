@@ -6,6 +6,7 @@ package spawner
 
 import (
 	"context"
+	"sort"
 
 	"github.com/bborbe/errors"
 	k8s "github.com/bborbe/k8s"
@@ -290,11 +291,27 @@ func serviceReadinessProbe() corev1.Probe {
 // buildServiceEnvBuilder renders the env for a service agent's container. Unlike a
 // Job, a service agent has no task, so there is no TASK_CONTENT/TASK_ID/PHASE —
 // only the Config's own env plus the type stamp.
+//
+// The Config-declared keys are emitted in sorted order because the reconciler
+// re-renders this StatefulSet on every pass and the result is compared: ranging
+// over a Go map yields a different order each iteration, so an unchanged Config
+// produced a different pod template every minute and the StatefulSet controller
+// rolled the pod with it. AGENT_TYPE stays first; the sorted keys follow.
 func buildServiceEnvBuilder(resolved pkg.AgentConfiguration) k8s.EnvBuilder {
 	envBuilder := k8s.NewEnvBuilder()
 	envBuilder.Add(agentTypeEnvKey, string(agentTypeOrDefault(resolved.Type)))
-	for key, value := range resolved.Env {
-		envBuilder.Add(key, value)
+	// Neither loop below carries a ctx.Done() check, deliberately. This function
+	// takes no context — it is a pure render — and both walks are over the
+	// Config's own env map, a handful of entries held in memory. Neither can
+	// block, so a cancellation check would have nothing to observe; adding a ctx
+	// parameter to satisfy the shape would widen a pure function to no end.
+	keys := make([]string, 0, len(resolved.Env))
+	for key := range resolved.Env {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+	for _, key := range keys {
+		envBuilder.Add(key, resolved.Env[key])
 	}
 	return envBuilder
 }
