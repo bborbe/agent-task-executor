@@ -124,29 +124,26 @@ var _ = Describe("TaskEventHandler reconcile loop", func() {
 		Expect(testutil.ToFloat64(metrics.ReconcileRedrivenTotal)).To(Equal(before + 1))
 	})
 
-	It(
-		"honours the Config trigger phases — a phase the Config does not list is not re-driven",
-		func() {
-			// Regression (2026-09-24): reconcileTask gated on the HARDCODED
-			// defaultTriggerPhases instead of the Config's trigger.phases, so a Config
-			// that narrowed its phase list was ignored on this path and a task sitting
-			// at a dropped phase was re-driven every reconcile tick (60s) forever —
-			// while the Kafka path (parseAndFilter) honoured the same Config. That
-			// asymmetry is what made the build-fix lane's ~1/min spawn loop survive a
-			// Config narrowing that should have stopped it.
-			fakeResolver.ResolveReturns(narrowedTriggerConfig(), nil)
-			fakeGitRestClient.ListReturns([]string{"24 Tasks/tid-a.md"}, nil)
-			fakeGitRestClient.GetReturns(
-				[]byte(renderTaskFile(eligibleTask(domain.TaskPhasePlanning))),
-				nil,
-			)
-			fakeSpawner.IsJobActiveReturns(false, nil)
+	It("honours the Config trigger phases — a phase the Config does not list is not re-driven", func() {
+		// Regression (2026-09-24): reconcileTask gated on the HARDCODED
+		// defaultTriggerPhases instead of the Config's trigger.phases, so a Config
+		// that narrowed its phase list was ignored on this path and a task sitting
+		// at a dropped phase was re-driven every reconcile tick (60s) forever —
+		// while the Kafka path (parseAndFilter) honoured the same Config. That
+		// asymmetry is what made the build-fix lane's ~1/min spawn loop survive a
+		// Config narrowing that should have stopped it.
+		fakeResolver.ResolveReturns(narrowedTriggerConfig(), nil)
+		fakeGitRestClient.ListReturns([]string{"24 Tasks/tid-a.md"}, nil)
+		fakeGitRestClient.GetReturns(
+			[]byte(renderTaskFile(eligibleTask(domain.TaskPhasePlanning))),
+			nil,
+		)
+		fakeSpawner.IsJobActiveReturns(false, nil)
 
-			err := h.ReconcileOnce(ctx)
-			Expect(err).To(BeNil())
-			Expect(fakeSpawner.SpawnJobCallCount()).To(Equal(0))
-		},
-	)
+		err := h.ReconcileOnce(ctx)
+		Expect(err).To(BeNil())
+		Expect(fakeSpawner.SpawnJobCallCount()).To(Equal(0))
+	})
 
 	It("still re-drives a phase the Config does list", func() {
 		// The discriminating half: the narrowed Config must not stop the phases it
