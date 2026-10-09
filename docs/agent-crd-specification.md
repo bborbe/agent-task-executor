@@ -73,7 +73,7 @@ metadata:
   name: trade-analysis-agent
 spec:
   assignee: trade-analysis-agent
-  image: docker.quant.benjamin-borbe.de:443/agent-trade-analysis
+  image: docker.prod.nuke.benjamin-borbe.de:443/agent-trade-analysis
   heartbeat: 5m
   resources:
     cpu: 1

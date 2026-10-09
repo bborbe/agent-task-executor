@@ -2,6 +2,10 @@
 
 All notable changes to this project will be documented in this file.
 
+## Unreleased
+
+- docs: repoint the CRD example in `docs/agent-crd-specification.md` at the live registry — `docker.quant.benjamin-borbe.de:443` is decommissioned (404), so the example now reads `docker.prod.nuke.benjamin-borbe.de:443`.
+
 ## v0.18.4
 
 - fix: render a service agent's container env in a deterministic key-sorted order, so an unchanged Config produces a byte-identical StatefulSet and the pod stops rolling once a minute
