@@ -32,6 +32,7 @@ spec:
 |-----------|------|-----|
 | Controller | `spec.assignee`, `spec.heartbeat`, `spec.taskType`, `spec.taskTypes` | Match tasks, enforce heartbeat |
 | Job Creator | `spec.image`, `spec.resources`, `spec.env`, `spec.secretName`, `spec.volumeClaim`, `spec.volumeMountPath` | Spawn K8s Job with correct image/limits/env/secret/volume |
+| Service Reconciler | `spec.type`, `spec.image`, `spec.resources`, `spec.env`, `spec.secretName`, `spec.volumeMountPath`, `spec.priorityClassName` | Reconcile a long-running StatefulSet for a `type: service` agent |
 
 ## Fields
 
@@ -47,7 +48,7 @@ spec:
 | `spec.secretName` | no | Name of an existing K8s Secret mounted on the container via `envFrom` |
 | `spec.volumeClaim` | no | Name of an existing PVC mounted into the container |
 | `spec.volumeMountPath` | conditional | Container path for `volumeClaim` mount — required when `volumeClaim` is set |
-| `spec.priorityClassName` | no | — | Kubernetes PriorityClass name to stamp onto spawned Job PodTemplates. When set, a matching `ResourceQuota` scoped to this class enforces the concurrent pod cap. Absent means no PriorityClass (unbounded concurrency, pre-spec-013 behavior). |
+| `spec.priorityClassName` | no | — | Kubernetes PriorityClass name to stamp onto the pod templates of every workload this Config causes — spawned Job PodTemplates and the service StatefulSet's pod template. When set, a matching `ResourceQuota` scoped to this class enforces the concurrent pod cap. Absent means no PriorityClass (unbounded concurrency, pre-spec-013 behavior). |
 | `spec.trigger` | no | Per-agent trigger conditions (optional nested object with `phases` and `statuses` lists). When absent or empty, defaults apply: phases `[planning, in_progress, ai_review]` and statuses `[in_progress]`. |
 | `spec.trigger.phases` | no | Task phases that allow spawning. Valid values: `todo`, `planning`, `in_progress`, `ai_review`, `human_review`, `done`. Empty or absent means default phases apply. |
 | `spec.trigger.statuses` | no | Task statuses that allow spawning. Valid values: `todo`, `in_progress`, `backlog`, `completed`, `hold`, `aborted`. Empty or absent means default statuses apply. |
@@ -114,7 +115,7 @@ spec:
 
 ## Future Extensions
 
-Concurrency is now enforced K8s-natively: set `spec.priorityClassName` on a Config CR and apply a `ResourceQuota` with a `scopeSelector` matching that PriorityClass. The quota caps how many pods of that class can run simultaneously in a namespace; Jobs beyond the cap create successfully but block on pod admission until a slot frees. See `agent/claude/k8s/` for the four-file bundle (PriorityClass + per-env ResourceQuota + updated Config CR).
+Concurrency is now enforced K8s-natively: set `spec.priorityClassName` on a Config CR and apply a `ResourceQuota` with a `scopeSelector` matching that PriorityClass. The quota caps how many pods of that class can run simultaneously in a namespace; Jobs beyond the cap create successfully but block on pod admission until a slot frees. See `agent/claude/k8s/` for the four-file bundle (PriorityClass + per-env ResourceQuota + updated Config CR). The same class is stamped onto a `type: service` agent's StatefulSet pod template, so a service agent competes at its declared priority too.
 
 | Field | Purpose |
 |-------|---------|

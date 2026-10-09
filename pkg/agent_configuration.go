@@ -69,7 +69,7 @@ type AgentConfiguration struct {
 	// MaxConcurrentJobs caps how many Jobs this agent may run at once.
 	// 0 means unlimited.
 	MaxConcurrentJobs int
-	// PriorityClassName is the Kubernetes PriorityClass name to stamp onto spawned Job PodTemplates.
+	// PriorityClassName is stamped on Job PodTemplates and on a service StatefulSet pod template.
 	PriorityClassName string
 	// ImagePullSecret is the name of the K8s Secret used for image pulls.
 	// Empty uses the cluster default (typically "docker").

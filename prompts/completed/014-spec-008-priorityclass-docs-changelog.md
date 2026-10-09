@@ -1,8 +1,13 @@
 ---
-status: approved
+status: completed
 spec: [008-bug-service-sts-ignores-priorityclass]
+summary: 'Corrected spec.priorityClassName documentation to cover both the Job and service StatefulSet spawn paths across the CRD source comment, generated apply-configuration copy, resolved AgentConfiguration field, and the CRD specification doc, and recorded the fix as a fix: bullet under a new ## Unreleased heading.'
+execution_id: agent-task-executor-priorityclass-exec-014-spec-008-priorityclass-docs-changelog
+dark-factory-version: v0.196.0
 created: "2026-10-09T18:32:36Z"
 queued: "2026-10-09T18:44:51Z"
+started: "2026-10-09T18:46:54Z"
+completed: "2026-10-09T18:53:14Z"
 branch: dark-factory/bug-service-sts-ignores-priorityclass
 ---
 
