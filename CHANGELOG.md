@@ -2,6 +2,10 @@
 
 All notable changes to this project will be documented in this file.
 
+## Unreleased
+
+- fix: bump `golang.org/x/net` to v0.60.0 and ignore the Go 1.27.1 stdlib advisories in `VULNCHECK_IGNORE` and `.osv-scanner.toml`, so `make precommit` goes green again. Advisories published after the last CI run (2026-10-02) made `vulncheck` and `osv-scanner` fail on the **untouched** tree — CI runs `make precommit` with Go pinned from `go.mod`, so any push today would have failed, not just this branch. ⚠️ **The stdlib half is ignored, not fixed, and the blocker is a tool rather than this repo.** The real fix is the `go 1.27.2` directive, and it cannot pass `make precommit`: gosec v2.29.0 — the newest release — cannot type-check a 1.27.2 module, failing SSA analysis for 24 packages with `export data version 5 is greater than maximum supported version 4` (reproduced with a clean `GOCACHE` and the toolchain pinned), and `-no-fail` would only mask that while silently degrading the scan to its non-SSA findings. `golangci-lint` v2.14.0 and the retirement of the standalone `errcheck:` target are required by the same bump and are deferred with it. **The x/net advisories in the same scans are fixed for real** — x/net v0.60.0 needs only Go 1.26, so it is independent of the block. Remove the `GO-2026-6599…6617` ignores from both files once gosec supports Go 1.27.2 and the `go` directive here moves to it; see `coding/docs/go-tools-versioning-guide.md` § "Adding a transient stdlib OSV ignore". Also bumps `osv-scanner` v2.3.1 → v2.6.0: the pinned v2.3.1 panics on CI during call-graph analysis in `golang.org/x/tools@v0.38.0/go/ssa` (`panic: unexpected expr: *ast.KeyValueExpr`), and it is deterministic — reproduced on a re-run of the same job — while v2.6.0 carries a fixed x/tools and scans this tree clean.
+
 ## v0.18.4
 
 - fix: render a service agent's container env in a deterministic key-sorted order, so an unchanged Config produces a byte-identical StatefulSet and the pod stops rolling once a minute
