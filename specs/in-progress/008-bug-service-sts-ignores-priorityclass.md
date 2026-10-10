@@ -1,11 +1,12 @@
 ---
-status: prompted
+status: verifying
 tags:
     - dark-factory
     - spec
 approved: "2026-10-09T18:17:40Z"
 generating: "2026-10-09T18:18:55Z"
 prompted: "2026-10-09T18:38:05Z"
+verifying: "2026-10-09T18:53:14Z"
 branch: dark-factory/bug-service-sts-ignores-priorityclass
 ---
 
@@ -94,7 +95,7 @@ The CRD documents `spec.priorityClassName` as the field that gives an agent a Ku
 - [ ] **`make precommit` exits 0** in the repo root, run from the worktree `/Users/bborbe/Documents/workspaces/agent-task-executor-priorityclass`. Evidence: exit code 0 (format + generate + test + check + addlicense).
 - [ ] **Post-Deploy (Rung-2):** on nuke dev, the live service agent's StatefulSet carries the class and its pod is admitted at that priority. Evidence: after the executor rolls and one reconcile interval passes, `kubectlnukedev -n dev get sts claude-interactive -o jsonpath='{.spec.template.spec.priorityClassName}'` returns `claude-interactive`, and `kubectlnukedev -n dev get pod claude-interactive-0 -o jsonpath='{.spec.priority}'` returns the `value` declared by PriorityClass `claude-interactive` — non-zero, no longer 0. The same two reads for `pi-interactive`; all four quoted in the PR body.
   - `deploy_check:` `kubectlnukedev -n dev get deploy/agent-task-executor -o jsonpath='{.spec.template.spec.containers[0].image}' | awk -F: '{print $NF}'`
-  - `deploy_target:` `v0.18.5`
+  - `deploy_target:` `v0.18.7`
 
 ## Verification
 
@@ -140,7 +141,7 @@ The CRD documents `spec.priorityClassName` as the field that gives an agent a Ku
 - `make precommit` must pass, run from the worktree `/Users/bborbe/Documents/workspaces/agent-task-executor-priorityclass` — never from the main checkout `/Users/bborbe/Documents/workspaces/agent-task-executor`, which is on master and bypasses the PR gate.
 - The repo has no `CLAUDE.md`/`AGENTS.md`. `.dark-factory.yaml` sets `workflow: direct`, `pr: false`, `autoRelease: false`, `autoGeneratePrompts: true` — the PR is opened by hand and no release is cut automatically.
 - **CHANGELOG: the `## Unreleased` heading already exists.** At HEAD `4ea042b` it holds the `fix:` bullet for the x/net + osv-scanner prerequisite work. The new bullet must be **appended under that existing heading**, not placed under a second `## Unreleased` heading — `grep -c '^## Unreleased' CHANGELOG.md` must stay 1. The bullet must begin with `- fix:` (a wrong or missing prefix breaks the auto version bump) and must name the service StatefulSet path.
-- The dev deploy's image tag is the release semver, not a commit SHA: `Makefile.docker`'s `check-version-tag` target refuses to build `vX.Y.Z` from a tree whose HEAD is not tagged `vX.Y.Z`, and `nuke/agent/Makefile:100` deploys `EXECUTOR_VERSION` (currently `v0.18.4`). So the post-deploy criterion's `deploy_target:` is the next release tag — expected `v0.18.5`, a patch bump because `## Unreleased` carries only `fix:` bullets — and it is updated at prompt time to whatever tag `EXECUTOR_VERSION` is bumped to. Do not substitute `$(git rev-parse --short HEAD)`: the deploy check reads the image tag and would never match a SHA.
+- The dev deploy's image tag is the release semver, not a commit SHA: `Makefile.docker`'s `check-version-tag` target refuses to build `vX.Y.Z` from a tree whose HEAD is not tagged `vX.Y.Z`, and `nuke/agent/Makefile:105` deploys `EXECUTOR_VERSION` (still `v0.18.4` — neither v0.18.5 nor v0.18.6 was ever deployed). So the post-deploy criterion's `deploy_target:` is the next release tag — `v0.18.7`, a patch bump because `## Unreleased` carries only `fix:` bullets; v0.18.5 and v0.18.6 were both cut on master by unrelated work while this branch was open, so the predicted tag moved twice — and it is updated at prompt time to whatever tag `EXECUTOR_VERSION` is bumped to. Do not substitute `$(git rev-parse --short HEAD)`: the deploy check reads the image tag and would never match a SHA.
 
 ## Failure Modes
 
