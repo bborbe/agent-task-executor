@@ -2,7 +2,7 @@
 
 All notable changes to this project will be documented in this file.
 
-## Unreleased
+## v0.18.7
 
 - fix: stamp the Config's declared priority class onto a service agent's StatefulSet pod template, so a `type: service` agent is admitted at its declared priority instead of 0 and is no longer the first workload a higher-priority Job evicts
 
