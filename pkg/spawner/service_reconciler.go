@@ -241,6 +241,15 @@ func (r *serviceReconciler) buildStatefulSet(
 		statefulSet.Spec.VolumeClaimTemplates[0].Spec.StorageClassName = nil
 	}
 
+	// A Config that declares a priority class gets it on the pod template, stamped
+	// after the StatefulSet is built — the same idiom as the Job path. Guarded on a
+	// non-empty value so a Config that declares none renders exactly as before:
+	// PriorityClassName is a string with omitempty, so assigning "" marshals the same
+	// as leaving it unset, and an agent that does not use the field is not rolled.
+	if resolved.PriorityClassName != "" {
+		statefulSet.Spec.Template.Spec.PriorityClassName = resolved.PriorityClassName
+	}
+
 	// The Config owns the workload: deleting the CR garbage-collects the
 	// StatefulSet, which is SC4's "CR delete → cleanup" half.
 	statefulSet.OwnerReferences = []metav1.OwnerReference{

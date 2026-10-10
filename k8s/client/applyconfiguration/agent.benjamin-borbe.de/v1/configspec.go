@@ -32,7 +32,7 @@ type ConfigSpecApplyConfiguration struct {
 	VolumeClaim *string `json:"volumeClaim,omitempty"`
 	// VolumeMountPath is the container path where the PVC is mounted.
 	VolumeMountPath *string `json:"volumeMountPath,omitempty"`
-	// PriorityClassName is the Kubernetes PriorityClass name to stamp onto spawned Job PodTemplates.
+	// PriorityClassName is stamped on Job PodTemplates and on a service StatefulSet pod template.
 	PriorityClassName *string `json:"priorityClassName,omitempty"`
 	// Trigger declares the per-agent phase and status conditions under which the executor spawns a Job.
 	Trigger *TriggerApplyConfiguration `json:"trigger,omitempty"`

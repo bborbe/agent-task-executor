@@ -138,7 +138,7 @@ type ConfigSpec struct {
 	// Required to deliver nested paths (e.g. .claude/CLAUDE.md), which plain
 	// key-name mounts cannot express.
 	ConfigMapItems []ConfigMapItem `json:"configMapItems,omitempty"`
-	// PriorityClassName is the Kubernetes PriorityClass name to stamp onto spawned Job PodTemplates.
+	// PriorityClassName is stamped on Job PodTemplates and on a service StatefulSet pod template.
 	PriorityClassName string `json:"priorityClassName,omitempty"`
 	// MaxConcurrentJobs caps how many Jobs this agent may run at once. Spawns
 	// beyond the cap are deferred and retried, never dropped. 0 (the default)

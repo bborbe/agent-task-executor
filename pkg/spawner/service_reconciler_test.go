@@ -6,6 +6,7 @@ package spawner_test
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"strings"
 
@@ -324,6 +325,41 @@ var _ = Describe("ServiceReconciler", func() {
 			Expect(envNames(after)).To(Equal(envNames(before)))
 			Expect(after).NotTo(Equal(before))
 			Expect(after).To(ContainElement(corev1.EnvVar{Name: "MODEL", Value: "claude-opus-4-5"}))
+		})
+
+		It("stamps the resolved priority class on the StatefulSet's pod template", func() {
+			withPriority := serviceCfg
+			withPriority.PriorityClassName = "claude-interactive"
+
+			Expect(reconciler.ReconcileService(ctx, serviceConf, withPriority)).To(Succeed())
+
+			sts := getStatefulSet("identity")
+			Expect(sts.Spec.Template.Spec.PriorityClassName).To(Equal("claude-interactive"))
+		})
+
+		It("leaves the priority class unset when the Config declares none", func() {
+			Expect(reconciler.ReconcileService(ctx, serviceConf, serviceCfg)).To(Succeed())
+
+			sts := getStatefulSet("identity")
+			Expect(sts.Spec.Template.Spec.PriorityClassName).To(BeEmpty())
+
+			marshalled, err := json.Marshal(sts.Spec.Template)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(strings.Count(string(marshalled), `"priorityClassName"`)).To(Equal(0),
+				"an unset priority class must not appear as a key in the marshalled pod template")
+		})
+
+		It("renders a byte-identical pod template across two reconciles with a class set", func() {
+			withPriority := serviceCfg
+			withPriority.PriorityClassName = "claude-interactive"
+
+			Expect(reconciler.ReconcileService(ctx, serviceConf, withPriority)).To(Succeed())
+			first := getStatefulSet("identity").Spec.Template
+
+			Expect(reconciler.ReconcileService(ctx, serviceConf, withPriority)).To(Succeed())
+			second := getStatefulSet("identity").Spec.Template
+
+			Expect(second).To(Equal(first))
 		})
 
 		It("renders two Configs with the same key set independently and deterministically", func() {
