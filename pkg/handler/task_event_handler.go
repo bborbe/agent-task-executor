@@ -61,31 +61,44 @@ const concurrencyCapRetryDelay = 60 * time.Second
 // across a restart.
 const defaultReconcileInterval = 60 * time.Second
 
-// maxConsecutiveReconcileRedrives bounds how many times in a row the reconcile
-// floor may re-drive the same task with nothing else driving it.
+// maxConsecutiveRedrives bounds how many times in a row the executor may spawn
+// the same task at the same phase with nothing advancing it.
 //
-// The floor's contract (spec 005) is that it re-drives an eligible task through
-// spawnIfNeeded, so the concurrency cap and the scoped trigger budget apply to
-// it identically to an event-driven spawn. This cap is the bound for the case
-// where neither of those engages: a task with no `ref` and no `max_triggers`
-// keeps the trigger budget disarmed by design (see applyTriggerBudget — arming
-// it would re-create the 2026-08-27 Daily Sentry Triage incident), and a task
-// whose scope flips between phases gets a fresh budget on every pass anyway,
-// because triggerScope scopes a no-ref task on phase alone.
+// It is the bound for the case where neither of the other two engages. A task
+// with no `ref` and no `max_triggers` keeps the trigger budget disarmed by
+// design (see applyTriggerBudget — arming it would re-create the 2026-08-27
+// Daily Sentry Triage incident), and a task whose scope reads as changed on
+// every spawn is handed a fresh budget of 1 each time (see triggerBudgetWrite).
+// Between them, a task that stops advancing is spawned forever.
 //
-// Observed on dev 2026-10-13: one parked hypothesis task produced four Jobs in
-// ~35 min, each from event=reconcile_redrive, while trigger_count never rose
-// above 1 and trigger_scope alternated planning: <-> execution:.
+// The streak counts EVERY spawn of a task, on every path, because it is checked
+// and recorded inside spawnIfNeeded — the one funnel the Kafka consumer, the
+// deferred-respawn loop and the reconcile floor all pass through.
 //
-// The streak is in-memory and deliberately so. A persisted counter would have
-// to be written to the task file, and that write is itself a vault change that
-// re-triggers the event path — the counter would reset the loop it exists to
-// bound. It also costs nothing to lose: the floor's purpose is recovering
-// tasks a restart orphaned, and after a restart every streak is empty, which is
-// exactly the state in which re-driving is correct. The cost is that a task
-// stuck across a restart is re-driven up to N more times, not that it loops
-// forever.
-const maxConsecutiveReconcileRedrives = 3
+// Counting only the floor's own spawns does not bound the loop, and dev proved
+// it on 2026-10-14: four Jobs in 70 min, `capped=0` on all 68 reconcile passes.
+// The floor initiated only two of the four; the other two arrived on the Kafka
+// path, and each one cleared the floor-only streak before it could reach the cap.
+//
+// The reset is the phase. A task that moved phase has advanced and earns a fresh
+// streak; a task pinned at one phase across three consecutive spawns has not, and
+// stays capped until something moves it — an operator re-arm (which changes the
+// phase) or a restart (which empties the streak).
+//
+// The streak is in-memory, and that is load-bearing rather than an optimisation.
+// A counter persisted in the task file is not merely redundant, it is defeated:
+// the agent pods rewrite the frontmatter from a snapshot taken at the start of
+// their run, so `trigger_scope` and `job_started_at` are clobbered back to their
+// pre-spawn values every time a Job completes (measured on the dev fixture,
+// 2026-10-14 — the file showed `trigger_scope: 'planning:'` under
+// `phase: execution`, and `job_started_at` from the task's creation). That
+// clobber is what makes `scopeChanged` true on every spawn and resets the
+// persisted `trigger_count` to 1, so any counter living in that file is reset by
+// the very loop it must count.
+//
+// The cost of in-memory: a task stuck across a restart is re-driven up to N more
+// times, not that it loops forever.
+const maxConsecutiveRedrives = 3
 
 // reconcilePassTimeout bounds one reconcile pass so a slow or large vault
 // cannot hold a pass open indefinitely (spec 005 Failure Modes: "Pass bounded
@@ -187,7 +200,7 @@ func NewTaskEventHandler(
 		spawnLocks:       make(map[string]*sync.Mutex),
 		gitRestClient:    gitRestClient,
 		taskGlob:         taskGlob,
-		reconcileStreaks: make(map[lib.TaskIdentifier]reconcileStreak),
+		redriveStreaks:   make(map[lib.TaskIdentifier]redriveStreak),
 	}
 }
 
@@ -204,8 +217,8 @@ type taskEventHandler struct {
 	spawnLocks       map[string]*sync.Mutex
 	gitRestClient    gitrestclient.GitRestClient
 	taskGlob         string
-	reconcileMu      sync.Mutex
-	reconcileStreaks map[lib.TaskIdentifier]reconcileStreak
+	redriveMu        sync.Mutex
+	redriveStreaks   map[lib.TaskIdentifier]redriveStreak
 }
 
 // lockAssigneeSpawn serializes the count-then-spawn sequence for one assignee and
@@ -280,6 +293,7 @@ func (h *taskEventHandler) cleanupTerminalTask(task lib.Task) {
 	}
 	h.taskStore.Delete(task.TaskIdentifier)
 	h.removeDeferredEntry(task.TaskIdentifier)
+	h.clearRedriveStreak(task.TaskIdentifier)
 	glog.V(3).
 		Infof("task %s %s: cleared task store + deferred respawn", task.TaskIdentifier, status)
 }
@@ -575,6 +589,15 @@ func (h *taskEventHandler) spawnIfNeeded(
 		return false, nil
 	}
 
+	// The last bound, and the only one that covers every path: a task that has
+	// been spawned maxConsecutiveRedrives times in a row at an unchanged phase is
+	// looping, not advancing. Checked here rather than at the call sites because
+	// the Kafka consumer, the deferred-respawn loop and the reconcile floor all
+	// funnel through this function — see maxConsecutiveRedrives.
+	if h.redriveStreakCapped(task, "") {
+		return false, nil
+	}
+
 	capped, err := h.deferIfAtConcurrencyCap(ctx, task, config)
 	if err != nil {
 		return false, err
@@ -629,6 +652,7 @@ func (h *taskEventHandler) spawnIfNeeded(
 	)
 	metrics.TaskEventsTotal.WithLabelValues("spawned").Inc()
 	metrics.JobsSpawnedTotal.Inc()
+	h.recordRedriveSpawn(task)
 	return true, nil
 }
 
@@ -946,17 +970,16 @@ func (h *taskEventHandler) reconcileOne(
 		return reconcileOutcomeSkipped
 	}
 	if !ok {
-		// Left the eligibility filter — it advanced, or its assignee was
-		// cleared. Either way the floor is no longer its only driver.
-		h.clearReconcileRedrive(task.TaskIdentifier)
+		// Left the eligibility filter — it advanced, or its assignee was cleared.
+		// Nothing to clear here: the streak's phase key is what retires a task
+		// that genuinely moved on, and a task that left the filter is not spawned
+		// again either way.
 		return reconcileOutcomeSkipped
 	}
-	streak, hasStreak := h.reconcileRedriveStreak(task.TaskIdentifier)
-	if hasStreak && h.reconcileStreakSuperseded(ctx, task, streak) {
-		h.clearReconcileRedrive(task.TaskIdentifier)
-		streak, hasStreak = reconcileStreak{}, false
-	}
-	if hasStreak && h.cappedByReconcileRedrive(task.TaskIdentifier, relPath, streak) {
+	// Checked here as well as in spawnIfNeeded so the pass summary can report the
+	// skip as `capped` rather than folding it into `deferred`. Only the capped
+	// branch signals, so the two checks cannot double-count.
+	if h.redriveStreakCapped(task, relPath) {
 		return reconcileOutcomeCapped
 	}
 	spawned, err := h.spawnIfNeeded(ctx, task, config)
@@ -971,9 +994,6 @@ func (h *taskEventHandler) reconcileOne(
 	if !spawned {
 		return reconcileOutcomeDeferred
 	}
-	h.recordReconcileRedrive(
-		task.TaskIdentifier, streak.count+1, h.spawnedJobName(task.TaskIdentifier),
-	)
 	metrics.ReconcileRedrivenTotal.Inc()
 	glog.Infof("event=reconcile_redrive task=%s path=%s", task.TaskIdentifier, relPath)
 	return reconcileOutcomeRedriven
@@ -1032,122 +1052,85 @@ func (h *taskEventHandler) reconcileTask(
 	return task, config, true, nil
 }
 
-// reconcileStreak is the floor's record of consecutive re-drives for one task:
-// how many, and which Job the floor created on the last one. The job name is what
-// lets the floor tell its own spawn apart from another driver's — see
-// reconcileStreakSuperseded.
-type reconcileStreak struct {
-	count   int
-	jobName string
+// redriveStreak is the executor's record of consecutive spawns for one task at
+// one phase: how many, and which phase they accrued in. See maxConsecutiveRedrives
+// for why the phase is the reset and why the streak is deliberately not persisted.
+type redriveStreak struct {
+	count int
+	phase string
 }
 
-// reconcileRedriveStreak returns the floor's streak for this task, if any.
-func (h *taskEventHandler) reconcileRedriveStreak(
-	id lib.TaskIdentifier,
-) (reconcileStreak, bool) {
-	h.reconcileMu.Lock()
-	defer h.reconcileMu.Unlock()
-	streak, ok := h.reconcileStreaks[id]
-	return streak, ok
-}
-
-// recordReconcileRedrive extends this task's streak with the Job the floor just
-// created. The job name comes from TaskStore, where spawnIfNeeded stores the task
-// with current_job set to the Job it created — reading it back is how the floor
-// learns which Job is its own without changing spawnIfNeeded's signature.
-func (h *taskEventHandler) recordReconcileRedrive(
-	id lib.TaskIdentifier,
-	count int,
-	jobName string,
-) {
-	h.reconcileMu.Lock()
-	defer h.reconcileMu.Unlock()
-	h.reconcileStreaks[id] = reconcileStreak{count: count, jobName: jobName}
-}
-
-// spawnedJobName returns the Job spawnIfNeeded recorded for this task, or "" when
-// it recorded none.
-func (h *taskEventHandler) spawnedJobName(id lib.TaskIdentifier) string {
-	stored, ok := h.taskStore.Load(id)
-	if !ok {
-		return ""
-	}
-	return stored.Frontmatter.CurrentJob()
-}
-
-// clearReconcileRedrive ends this task's streak: something other than the floor
-// drove it, or it left the eligibility filter. Either way the floor is no longer
-// the only thing keeping the task moving, which is the condition the cap detects.
-func (h *taskEventHandler) clearReconcileRedrive(id lib.TaskIdentifier) {
-	h.reconcileMu.Lock()
-	defer h.reconcileMu.Unlock()
-	delete(h.reconcileStreaks, id)
-}
-
-// reconcileStreakSuperseded reports whether another driver has spawned this task
-// since the floor's last re-drive, in which case the streak no longer describes a
-// floor-only loop and must be cleared.
+// redriveStreakCapped reports whether the executor must skip this task because it
+// has spawned it maxConsecutiveRedrives times in a row at an unchanged phase, and
+// records the skip signal when it must.
 //
-// All three clauses are load-bearing. A non-empty current_job differing from the
-// floor's own Job means someone else spawned. But a spawn notification is written
-// ASYNCHRONOUSLY, so for a pass or two after the floor's own spawn the task still
-// shows the PREVIOUS Job — non-empty and different — and clearing on that alone
-// would reset the streak the floor just recorded. That is precisely the defect
-// this cap exists to fix: the floor's own spawn notification re-enters as a task
-// event and would clear the streak every pass. The liveness clause is what
-// separates the two — while the floor's own Job is still running, a differing
-// value is a lagging write, not a second spawner.
+// Skipping is the whole bound. The streak is deliberately NOT cleared here, so the
+// task stays capped until something moves it — clearing on the cap would let the
+// next spawn through and make the cap a no-op.
 //
-// IsJobActive is per task, not per Job, so a genuine second spawner is only
-// detected once ITS Job finishes. That defers the clear by a pass rather than
-// losing it, which is the safe direction: a late clear costs one extra re-drive,
-// a spurious clear costs the whole cap.
-func (h *taskEventHandler) reconcileStreakSuperseded(
-	ctx context.Context,
-	task lib.Task,
-	streak reconcileStreak,
-) bool {
-	current := task.Frontmatter.CurrentJob()
-	if current == "" || current == streak.jobName {
+// Logged at V(1), not V(0): a capped task repeats this line on every event and
+// every pass for as long as it stays capped, which is an expected steady state —
+// the same reason event=concurrency_cap is V(1). The metric carries the alerting
+// signal.
+//
+// relPath is empty on the Kafka path, which has no vault path to name.
+//
+// The phase comparison is not redundant with recordRedriveSpawn's reset. The
+// streak is only ever rewritten AFTER a spawn succeeds, so a task that advanced
+// to a new phase still carries its old phase in the streak until that spawn
+// happens — and a count-only check would cap it before it ever could, stranding
+// exactly the task the reset exists to release.
+func (h *taskEventHandler) redriveStreakCapped(task lib.Task, relPath string) bool {
+	id := task.TaskIdentifier
+	phase := taskPhaseString(task)
+	h.redriveMu.Lock()
+	streak, ok := h.redriveStreaks[id]
+	h.redriveMu.Unlock()
+	if !ok || streak.phase != phase || streak.count < maxConsecutiveRedrives {
 		return false
 	}
-	active, err := h.jobSpawner.IsJobActive(ctx, task.TaskIdentifier)
-	if err != nil {
-		// Fail safe: an unreadable liveness signal must not clear the streak.
-		glog.Warningf(
-			"event=reconcile_streak_liveness_unknown task=%s err=%v",
-			task.TaskIdentifier, err,
-		)
-		return false
-	}
-	return !active
-}
-
-// cappedByReconcileRedrive reports whether the floor must skip this task because
-// it has re-driven it maxConsecutiveReconcileRedrives times in a row with nothing
-// else driving it, and records the skip signal when it must.
-//
-// Skipping is the whole bound. The streak is deliberately NOT cleared here, so
-// the task stays capped until something else moves it — clearing on the cap would
-// let the next pass re-drive it and make the cap a no-op.
-//
-// Logged at V(1), not V(0): a capped task repeats this line every pass for as long
-// as it stays capped, which is an expected steady state — the same reason
-// event=concurrency_cap is V(1). The metric carries the alerting signal.
-func (h *taskEventHandler) cappedByReconcileRedrive(
-	id lib.TaskIdentifier,
-	relPath string,
-	streak reconcileStreak,
-) bool {
-	if streak.count < maxConsecutiveReconcileRedrives {
-		return false
-	}
-	metrics.ReconcileRedriveCappedTotal.Inc()
+	metrics.RedriveCappedTotal.Inc()
 	glog.V(1).Infof(
-		"event=reconcile_redrive_capped task=%s path=%s streak=%d cap=%d",
-		id, relPath, streak.count, maxConsecutiveReconcileRedrives,
+		"event=redrive_capped task=%s path=%s streak=%d cap=%d phase=%q",
+		id, relPath, streak.count, maxConsecutiveRedrives, streak.phase,
 	)
 	return true
+}
+
+// taskPhaseString returns the task's phase as a string, or "" when it carries
+// none. Shared by the cap check and the streak record so the two can never
+// disagree about which phase a streak belongs to.
+func taskPhaseString(task lib.Task) string {
+	if p := task.Frontmatter.Phase(); p != nil {
+		return string(*p)
+	}
+	return ""
+}
+
+// recordRedriveSpawn extends this task's streak with the spawn that just happened,
+// resetting it when the task has moved phase since the previous one.
+//
+// Called only after SpawnJob returned successfully, so a suppressed, deferred or
+// capped spawn does not count — the streak measures spawns, not attempts.
+func (h *taskEventHandler) recordRedriveSpawn(task lib.Task) {
+	id := task.TaskIdentifier
+	phase := taskPhaseString(task)
+	h.redriveMu.Lock()
+	defer h.redriveMu.Unlock()
+	if prev, ok := h.redriveStreaks[id]; ok && prev.phase == phase {
+		h.redriveStreaks[id] = redriveStreak{count: prev.count + 1, phase: phase}
+		return
+	}
+	h.redriveStreaks[id] = redriveStreak{count: 1, phase: phase}
+}
+
+// clearRedriveStreak ends this task's streak. Called when the task reaches a
+// terminal state, where a further spawn is an operator decision rather than a
+// re-drive of the loop this cap exists to bound.
+func (h *taskEventHandler) clearRedriveStreak(id lib.TaskIdentifier) {
+	h.redriveMu.Lock()
+	defer h.redriveMu.Unlock()
+	delete(h.redriveStreaks, id)
 }
 
 // RunReconcileLoop runs one reconcile pass immediately at startup, then every

@@ -35,16 +35,21 @@ var ReconcileRedrivenTotal = promauto.NewCounter(
 	},
 )
 
-// ReconcileRedriveCappedTotal counts tasks the reconcile floor declined to
-// re-drive because it had already re-driven them maxConsecutiveReconcileRedrives
-// times in a row with nothing else driving them. Without this counter the cap
-// is silent: a capped task produces no Job, so the burn stops and looks exactly
-// like a healthy quiet fleet — the same failure shape ReconcilePassesTotal was
-// introduced to make visible.
-var ReconcileRedriveCappedTotal = promauto.NewCounter(
+// RedriveCappedTotal counts spawns the executor declined because it had already
+// spawned the task maxConsecutiveRedrives times in a row at an unchanged phase.
+// Without this counter the cap is silent: a capped task produces no Job, so the
+// burn stops and looks exactly like a healthy quiet fleet — the same failure
+// shape ReconcilePassesTotal was introduced to make visible.
+//
+// Not reconcile-scoped, and named accordingly. The cap is enforced in
+// spawnIfNeeded, which the Kafka consumer and the deferred-respawn loop pass
+// through as well as the reconcile floor; on the dev fixture (2026-10-14) the
+// floor initiated only two of four spawns, so a reconcile-only counter would
+// have missed the loop's dominant path.
+var RedriveCappedTotal = promauto.NewCounter(
 	prometheus.CounterOpts{
-		Name: "executor_reconcile_redrive_capped_total",
-		Help: "Total number of reconcile re-drives skipped by the consecutive-re-drive cap.",
+		Name: "executor_redrive_capped_total",
+		Help: "Total number of spawns skipped by the consecutive-re-drive cap.",
 	},
 )
 
