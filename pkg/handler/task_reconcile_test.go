@@ -679,4 +679,95 @@ var _ = Describe("TaskEventHandler reconcile loop", func() {
 			Expect(fakeResolver.ResolveCallCount()).To(BeNumerically(">=", 1))
 		},
 	)
+
+	// ownedTask builds an eligible task with the given identifier. The reconcile
+	// pass is what teaches an instance which identifiers live in its vault.
+	ownedTask := func(id string) lib.Task {
+		return lib.Task{
+			TaskIdentifier: lib.TaskIdentifier(id),
+			Frontmatter: lib.TaskFrontmatter{
+				"status":   "in_progress",
+				"phase":    string(domain.TaskPhaseExecution),
+				"assignee": "claude",
+				"stage":    "prod",
+			},
+		}
+	}
+
+	It(
+		"does not spawn a task event for a file outside its own vault",
+		func() {
+			// A task event carries no vault — lib.Task is identifier + frontmatter +
+			// content — and the Kafka consumer group is shared across every executor
+			// deployment, so an event reaches whichever instance owns the partition
+			// rather than the instance whose vault holds the file. Measured on dev
+			// 2026-10-14: one OpenClaw fixture was spawned by three different pods
+			// (openclaw 18:19/18:33/18:48, trading 19:03/19:49, personal 19:34), each
+			// starting its own consecutive-re-drive streak at zero, so the loop
+			// produced >=7 Jobs against a cap of 3. The instance that owns the file
+			// drives it through its own floor, so skipping here drops a duplicate,
+			// not the only driver.
+			buildMsg := func(t lib.Task) *sarama.ConsumerMessage {
+				value, err := json.Marshal(t)
+				Expect(err).To(BeNil())
+				return &sarama.ConsumerMessage{Value: value}
+			}
+			fakeGitRestClient.ListReturns([]string{"24 Tasks/tid-mine.md"}, nil)
+			fakeGitRestClient.GetReturns(
+				[]byte(renderTaskFile(ownedTask("tid-mine"))),
+				nil,
+			)
+			fakeSpawner.IsJobActiveReturns(false, nil)
+
+			// The pass spawns the one task it owns and publishes that as the set.
+			Expect(h.ReconcileOnce(ctx)).To(BeNil())
+			Expect(fakeSpawner.SpawnJobCallCount()).To(Equal(1))
+
+			Expect(h.ConsumeMessage(ctx, buildMsg(ownedTask("tid-foreign")))).To(Succeed())
+			Expect(fakeSpawner.SpawnJobCallCount()).To(Equal(1))
+		},
+	)
+
+	It(
+		"still spawns a task event for a file inside its own vault",
+		func() {
+			buildMsg := func(t lib.Task) *sarama.ConsumerMessage {
+				value, err := json.Marshal(t)
+				Expect(err).To(BeNil())
+				return &sarama.ConsumerMessage{Value: value}
+			}
+			fakeGitRestClient.ListReturns([]string{"24 Tasks/tid-mine.md"}, nil)
+			fakeGitRestClient.GetReturns(
+				[]byte(renderTaskFile(ownedTask("tid-mine"))),
+				nil,
+			)
+			fakeSpawner.IsJobActiveReturns(false, nil)
+
+			Expect(h.ReconcileOnce(ctx)).To(BeNil())
+			Expect(fakeSpawner.SpawnJobCallCount()).To(Equal(1))
+
+			// Same task, second driver: the floor's spawn must not have made the
+			// instance deaf to the event path for its own vault.
+			Expect(h.ConsumeMessage(ctx, buildMsg(ownedTask("tid-mine")))).To(Succeed())
+			Expect(fakeSpawner.SpawnJobCallCount()).To(Equal(2))
+		},
+	)
+
+	It(
+		"spawns an event before the first reconcile pass completes (fail-open window)",
+		func() {
+			// A freshly started instance has not scanned yet. Dropping every event in
+			// that window would leave each task to be picked up only by the next tick;
+			// the window is one pass (<=60s) and the floor covers whatever it misses.
+			buildMsg := func(t lib.Task) *sarama.ConsumerMessage {
+				value, err := json.Marshal(t)
+				Expect(err).To(BeNil())
+				return &sarama.ConsumerMessage{Value: value}
+			}
+			fakeSpawner.IsJobActiveReturns(false, nil)
+
+			Expect(h.ConsumeMessage(ctx, buildMsg(ownedTask("tid-any")))).To(Succeed())
+			Expect(fakeSpawner.SpawnJobCallCount()).To(Equal(1))
+		},
+	)
 })
