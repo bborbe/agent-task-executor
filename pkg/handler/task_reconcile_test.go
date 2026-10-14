@@ -182,6 +182,129 @@ var _ = Describe("TaskEventHandler reconcile loop", func() {
 		Expect(testutil.ToFloat64(metrics.ReconcileRedrivenTotal)).To(Equal(before + 1))
 	})
 
+	It(
+		"caps consecutive re-drives of a stuck task and stops spawning (regression: unbounded 60s re-drive)",
+		func() {
+			// Observed on dev 2026-10-13: a parked hypothesis task carrying neither
+			// `ref` nor `max_triggers` produced four Jobs in ~35 min, each from
+			// event=reconcile_redrive. The trigger budget cannot bound it — with
+			// neither field set, applyTriggerBudget's cap branch is disarmed by
+			// design (arming it re-creates the 2026-08-27 Daily Sentry Triage
+			// incident) — and triggerScope scopes a no-ref task on phase alone, so
+			// the observed planning:/execution: flip handed out a fresh budget on
+			// every pass and trigger_count never rose above 1.
+			fakeGitRestClient.ListReturns([]string{"24 Tasks/tid-a.md"}, nil)
+			fakeGitRestClient.GetReturns(
+				[]byte(renderTaskFile(eligibleTask(domain.TaskPhaseExecution))),
+				nil,
+			)
+			fakeSpawner.IsJobActiveReturns(false, nil)
+			fakeSpawner.SpawnJobReturns("job-1", nil)
+
+			before := testutil.ToFloat64(metrics.ReconcileRedriveCappedTotal)
+
+			// Five passes is two past the cap: a pre-fix build spawns on all five.
+			for i := 0; i < 5; i++ {
+				Expect(h.ReconcileOnce(ctx)).To(Succeed())
+			}
+
+			Expect(fakeSpawner.SpawnJobCallCount()).To(Equal(3))
+			Expect(testutil.ToFloat64(metrics.ReconcileRedriveCappedTotal)).To(Equal(before + 2))
+
+			// The production steady state: the vault now carries the Job the floor
+			// just spawned. That equality is the load-bearing clause — a floor
+			// spawn must not read as another driver — and a SpawnJobReturns stub is
+			// what makes it a non-empty comparison rather than "" == "".
+			own := eligibleTask(domain.TaskPhaseExecution)
+			own.Frontmatter["current_job"] = "job-1"
+			fakeGitRestClient.GetReturns([]byte(renderTaskFile(own)), nil)
+			Expect(h.ReconcileOnce(ctx)).To(Succeed())
+			Expect(fakeSpawner.SpawnJobCallCount()).To(Equal(3))
+		},
+	)
+
+	It("clears the streak when the task leaves the eligibility filter", func() {
+		// The cap bounds a STREAK, not a task. A task that drops out of the
+		// trigger set and comes back is a new situation and earns a fresh
+		// allowance — otherwise the cap would strand a lane that legitimately
+		// re-enters the filter, which is the over-capping regression spec 006
+		// guards.
+		ineligible := lib.Task{
+			TaskIdentifier: "tid-a",
+			Frontmatter: lib.TaskFrontmatter{
+				"status":   "todo",
+				"phase":    string(domain.TaskPhaseExecution),
+				"assignee": "claude",
+				"stage":    "prod",
+			},
+		}
+
+		fakeGitRestClient.ListReturns([]string{"24 Tasks/tid-a.md"}, nil)
+		fakeSpawner.IsJobActiveReturns(false, nil)
+
+		fakeGitRestClient.GetReturns(
+			[]byte(renderTaskFile(eligibleTask(domain.TaskPhaseExecution))),
+			nil,
+		)
+		for i := 0; i < 3; i++ {
+			Expect(h.ReconcileOnce(ctx)).To(Succeed())
+		}
+		Expect(fakeSpawner.SpawnJobCallCount()).To(Equal(3))
+
+		// One ineligible pass clears the streak; the task is not re-driven.
+		fakeGitRestClient.GetReturns([]byte(renderTaskFile(ineligible)), nil)
+		Expect(h.ReconcileOnce(ctx)).To(Succeed())
+		Expect(fakeSpawner.SpawnJobCallCount()).To(Equal(3))
+
+		// Eligible again: the floor re-drives it rather than staying capped.
+		fakeGitRestClient.GetReturns(
+			[]byte(renderTaskFile(eligibleTask(domain.TaskPhaseExecution))),
+			nil,
+		)
+		Expect(h.ReconcileOnce(ctx)).To(Succeed())
+		Expect(fakeSpawner.SpawnJobCallCount()).To(Equal(4))
+	})
+
+	It(
+		"clears the streak only when another driver's job is no longer running (SC5)",
+		func() {
+			// SC5's guard, and the reason the cap does not re-create the v0.7.1
+			// regression spec 006 protects against. The clear is keyed on the JOB
+			// the floor created, not on the task event — the floor's own spawn
+			// notification is written asynchronously and re-enters as a task
+			// event, so an event-keyed clear would reset the streak the floor had
+			// just recorded and the cap would never engage.
+			task := eligibleTask(domain.TaskPhaseExecution)
+			fakeGitRestClient.ListReturns([]string{"24 Tasks/tid-a.md"}, nil)
+			fakeGitRestClient.GetReturns([]byte(renderTaskFile(task)), nil)
+			fakeSpawner.IsJobActiveReturns(false, nil)
+			fakeSpawner.SpawnJobReturns("job-1", nil)
+
+			// Drive the floor to its cap.
+			for i := 0; i < 3; i++ {
+				Expect(h.ReconcileOnce(ctx)).To(Succeed())
+			}
+			Expect(fakeSpawner.SpawnJobCallCount()).To(Equal(3))
+			Expect(h.ReconcileOnce(ctx)).To(Succeed())
+			Expect(fakeSpawner.SpawnJobCallCount()).To(Equal(3))
+
+			// Another driver's job now appears on the task. While it is still
+			// RUNNING the difference is indistinguishable from the floor's own
+			// lagging spawn notification, so the streak must survive.
+			other := eligibleTask(domain.TaskPhaseExecution)
+			other.Frontmatter["current_job"] = "another-drivers-job"
+			fakeGitRestClient.GetReturns([]byte(renderTaskFile(other)), nil)
+			fakeSpawner.IsJobActiveReturns(true, nil)
+			Expect(h.ReconcileOnce(ctx)).To(Succeed())
+			Expect(fakeSpawner.SpawnJobCallCount()).To(Equal(3))
+
+			// Once that job is done the clear fires and the floor re-drives.
+			fakeSpawner.IsJobActiveReturns(false, nil)
+			Expect(h.ReconcileOnce(ctx)).To(Succeed())
+			Expect(fakeSpawner.SpawnJobCallCount()).To(Equal(4))
+		},
+	)
+
 	DescribeTable("skips ineligible tasks — SpawnJob not called (AC 3)",
 		func(task lib.Task, setup func()) {
 			if setup != nil {

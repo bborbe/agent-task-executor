@@ -35,6 +35,19 @@ var ReconcileRedrivenTotal = promauto.NewCounter(
 	},
 )
 
+// ReconcileRedriveCappedTotal counts tasks the reconcile floor declined to
+// re-drive because it had already re-driven them maxConsecutiveReconcileRedrives
+// times in a row with nothing else driving them. Without this counter the cap
+// is silent: a capped task produces no Job, so the burn stops and looks exactly
+// like a healthy quiet fleet — the same failure shape ReconcilePassesTotal was
+// introduced to make visible.
+var ReconcileRedriveCappedTotal = promauto.NewCounter(
+	prometheus.CounterOpts{
+		Name: "executor_reconcile_redrive_capped_total",
+		Help: "Total number of reconcile re-drives skipped by the consecutive-re-drive cap.",
+	},
+)
+
 // ReconcilePassesTotal counts reconcile pass outcomes, labelled by result. The
 // failure reasons mirror ReconcileOnce's log events, and `ok` is counted on
 // every pass that gets past its List — so an alert can fire on a backstop that
