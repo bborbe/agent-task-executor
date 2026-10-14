@@ -199,6 +199,7 @@ var _ = Describe("TaskEventHandler reconcile loop", func() {
 				nil,
 			)
 			fakeSpawner.IsJobActiveReturns(false, nil)
+			fakeSpawner.SpawnJobReturns("job-1", nil)
 
 			before := testutil.ToFloat64(metrics.ReconcileRedriveCappedTotal)
 
@@ -209,6 +210,16 @@ var _ = Describe("TaskEventHandler reconcile loop", func() {
 
 			Expect(fakeSpawner.SpawnJobCallCount()).To(Equal(3))
 			Expect(testutil.ToFloat64(metrics.ReconcileRedriveCappedTotal)).To(Equal(before + 2))
+
+			// The production steady state: the vault now carries the Job the floor
+			// just spawned. That equality is the load-bearing clause — a floor
+			// spawn must not read as another driver — and a SpawnJobReturns stub is
+			// what makes it a non-empty comparison rather than "" == "".
+			own := eligibleTask(domain.TaskPhaseExecution)
+			own.Frontmatter["current_job"] = "job-1"
+			fakeGitRestClient.GetReturns([]byte(renderTaskFile(own)), nil)
+			Expect(h.ReconcileOnce(ctx)).To(Succeed())
+			Expect(fakeSpawner.SpawnJobCallCount()).To(Equal(3))
 		},
 	)
 
@@ -267,6 +278,7 @@ var _ = Describe("TaskEventHandler reconcile loop", func() {
 			fakeGitRestClient.ListReturns([]string{"24 Tasks/tid-a.md"}, nil)
 			fakeGitRestClient.GetReturns([]byte(renderTaskFile(task)), nil)
 			fakeSpawner.IsJobActiveReturns(false, nil)
+			fakeSpawner.SpawnJobReturns("job-1", nil)
 
 			// Drive the floor to its cap.
 			for i := 0; i < 3; i++ {
