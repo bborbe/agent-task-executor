@@ -254,6 +254,44 @@ var _ = Describe("TaskEventHandler reconcile loop", func() {
 		Expect(fakeSpawner.SpawnJobCallCount()).To(Equal(4))
 	})
 
+	It(
+		"is not capped when the event path drives the task in between (SC5: a recurring no-ref task keeps spawning)",
+		func() {
+			// SC5's guard, and the reason the cap does not re-create the v0.7.1
+			// regression spec 006 protects against. A recurring task carrying
+			// neither `ref` nor `max_triggers` is driven by its own schedule
+			// through the Kafka event path; that spawn clears the floor's streak,
+			// so the floor keeps re-driving it rather than capping it. Without
+			// the clear the cap would strand exactly the class 006 protects.
+			task := eligibleTask(domain.TaskPhaseExecution)
+			fakeGitRestClient.ListReturns([]string{"24 Tasks/tid-a.md"}, nil)
+			fakeGitRestClient.GetReturns([]byte(renderTaskFile(task)), nil)
+			fakeSpawner.IsJobActiveReturns(false, nil)
+
+			buildMsg := func(t lib.Task) *sarama.ConsumerMessage {
+				value, err := json.Marshal(t)
+				Expect(err).To(BeNil())
+				return &sarama.ConsumerMessage{Value: value}
+			}
+
+			// Drive the floor to its cap: three re-drives, then it stops.
+			for i := 0; i < 3; i++ {
+				Expect(h.ReconcileOnce(ctx)).To(Succeed())
+			}
+			Expect(fakeSpawner.SpawnJobCallCount()).To(Equal(3))
+			Expect(h.ReconcileOnce(ctx)).To(Succeed())
+			Expect(fakeSpawner.SpawnJobCallCount()).To(Equal(3))
+
+			// The schedule fires: a spawn from the event path ends the streak.
+			Expect(h.ConsumeMessage(ctx, buildMsg(task))).To(Succeed())
+			Expect(fakeSpawner.SpawnJobCallCount()).To(Equal(4))
+
+			// The floor is no longer capped for this task.
+			Expect(h.ReconcileOnce(ctx)).To(Succeed())
+			Expect(fakeSpawner.SpawnJobCallCount()).To(Equal(5))
+		},
+	)
+
 	DescribeTable("skips ineligible tasks — SpawnJob not called (AC 3)",
 		func(task lib.Task, setup func()) {
 			if setup != nil {
