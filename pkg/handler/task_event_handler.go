@@ -201,6 +201,7 @@ func NewTaskEventHandler(
 		gitRestClient:    gitRestClient,
 		taskGlob:         taskGlob,
 		redriveStreaks:   make(map[lib.TaskIdentifier]redriveStreak),
+		vaultTasks:       make(map[lib.TaskIdentifier]struct{}),
 	}
 }
 
@@ -219,6 +220,9 @@ type taskEventHandler struct {
 	taskGlob         string
 	redriveMu        sync.Mutex
 	redriveStreaks   map[lib.TaskIdentifier]redriveStreak
+	vaultMu          sync.RWMutex
+	vaultTasks       map[lib.TaskIdentifier]struct{}
+	vaultScanned     bool
 }
 
 // lockAssigneeSpawn serializes the count-then-spawn sequence for one assignee and
@@ -552,6 +556,11 @@ func (h *taskEventHandler) spawnIfNeeded(
 	task lib.Task,
 	config *pkg.AgentConfiguration,
 ) (bool, error) {
+	// Not this instance's task — see skipForeignVaultTask.
+	if h.skipForeignVaultTask(task) {
+		return false, nil
+	}
+
 	// If current_job is set in frontmatter, a prior spawn notification was written
 	// to the task file. Verify the job is still active; if not, proceed to spawn.
 	if currentJob := task.Frontmatter.CurrentJob(); currentJob != "" {
@@ -623,23 +632,7 @@ func (h *taskEventHandler) spawnIfNeeded(
 		return false, errors.Wrapf(ctx, err, "spawn job for task %s failed", task.TaskIdentifier)
 	}
 
-	// Record the task under the job that was actually spawned. The spawn
-	// notification is published to the vault asynchronously; without this the
-	// in-memory entry keeps the pre-spawn event's current_job (the previous job
-	// or none), so cleanupTerminalTask cannot tell a stale terminal event from a
-	// current one and evicts a task whose replacement job is still running — the
-	// respawned-second-success race. Clone the frontmatter: the event's task may
-	// still be held by a deferred-respawn entry.
-	storedTask := task
-	storedTask.Frontmatter = make(lib.TaskFrontmatter, len(task.Frontmatter))
-	for k, v := range task.Frontmatter {
-		storedTask.Frontmatter[k] = v
-	}
-	storedTask.Frontmatter["current_job"] = jobName
-	storedTask.Frontmatter["job_started_at"] = h.currentDateTime.Now().
-		UTC().
-		Format("2006-01-02T15:04:05Z07:00")
-	h.taskStore.Store(task.TaskIdentifier, storedTask)
+	h.storeSpawnedJob(task, jobName)
 	if err := h.resultPublisher.PublishSpawnNotification(ctx, task, jobName); err != nil {
 		// Log but don't fail — job is already spawned, spawn notification is best-effort
 		glog.Warningf("publish spawn notification for task %s failed (job %s still running): %v",
@@ -654,6 +647,28 @@ func (h *taskEventHandler) spawnIfNeeded(
 	metrics.JobsSpawnedTotal.Inc()
 	h.recordRedriveSpawn(task)
 	return true, nil
+}
+
+// storeSpawnedJob records the task under the job that was actually spawned. The
+// spawn notification is published to the vault asynchronously; without this the
+// in-memory entry keeps the pre-spawn event's current_job (the previous job or
+// none), so cleanupTerminalTask cannot tell a stale terminal event from a current
+// one and evicts a task whose replacement job is still running — the
+// respawned-second-success race.
+//
+// Clone the frontmatter: the event's task may still be held by a deferred-respawn
+// entry, so mutating it in place would corrupt that entry.
+func (h *taskEventHandler) storeSpawnedJob(task lib.Task, jobName string) {
+	stored := task
+	stored.Frontmatter = make(lib.TaskFrontmatter, len(task.Frontmatter))
+	for k, v := range task.Frontmatter {
+		stored.Frontmatter[k] = v
+	}
+	stored.Frontmatter["current_job"] = jobName
+	stored.Frontmatter["job_started_at"] = h.currentDateTime.Now().
+		UTC().
+		Format("2006-01-02T15:04:05Z07:00")
+	h.taskStore.Store(task.TaskIdentifier, stored)
 }
 
 // deferIfAtConcurrencyCap reports whether the agent is already running its
@@ -896,6 +911,10 @@ func (h *taskEventHandler) ReconcileOnce(ctx context.Context) error {
 		return nil
 	}
 	evaluated, redriven, deferred, skipped, capped := 0, 0, 0, 0, 0
+	// Collected across the whole pass and published only once it completes: an
+	// aborted pass would otherwise disown every task it had not reached yet, and
+	// the instance would refuse to spawn its own tasks until the next tick.
+	seen := make(map[lib.TaskIdentifier]struct{}, len(paths))
 	for _, relPath := range paths {
 		select {
 		case <-passCtx.Done():
@@ -910,7 +929,7 @@ func (h *taskEventHandler) ReconcileOnce(ctx context.Context) error {
 			return nil
 		default:
 		}
-		switch outcome := h.reconcileOne(passCtx, relPath); outcome {
+		switch outcome := h.reconcileOne(passCtx, relPath, seen); outcome {
 		case reconcileOutcomeSkipped:
 			skipped++
 		case reconcileOutcomeRedriven:
@@ -924,6 +943,7 @@ func (h *taskEventHandler) ReconcileOnce(ctx context.Context) error {
 			capped++
 		}
 	}
+	h.publishVaultTasks(seen)
 	// Counted on every pass that got past List, so rate(ok)==0 is a true
 	// "the backstop is not running" signal rather than an absence of errors.
 	metrics.ReconcilePassesTotal.WithLabelValues("ok").Inc()
@@ -955,9 +975,15 @@ const (
 // owns the whole per-file decision — read, eligibility filter, the
 // consecutive-re-drive cap, and the spawn — so ReconcileOnce stays a pass-level
 // loop over paths.
+//
+// seen collects every identifier this pass parsed, eligible or not; ReconcileOnce
+// publishes it as the instance's ownership set once the pass completes. Recording
+// before the eligibility gate is deliberate: the ownership test answers "is this
+// file in my vault", which eligibility does not change.
 func (h *taskEventHandler) reconcileOne(
 	ctx context.Context,
 	relPath string,
+	seen map[lib.TaskIdentifier]struct{},
 ) reconcileOutcome {
 	content, err := h.gitRestClient.Get(ctx, relPath)
 	if err != nil {
@@ -965,6 +991,9 @@ func (h *taskEventHandler) reconcileOne(
 		return reconcileOutcomeSkipped
 	}
 	task, config, ok, err := h.reconcileTask(ctx, content)
+	if task.TaskIdentifier != "" {
+		seen[task.TaskIdentifier] = struct{}{}
+	}
 	if err != nil {
 		glog.Warningf("event=reconcile_skip path=%s reason=resolve_error err=%v", relPath, err)
 		return reconcileOutcomeSkipped
@@ -1131,6 +1160,65 @@ func (h *taskEventHandler) clearRedriveStreak(id lib.TaskIdentifier) {
 	h.redriveMu.Lock()
 	defer h.redriveMu.Unlock()
 	delete(h.redriveStreaks, id)
+}
+
+// vaultTasksOwned reports whether this executor instance owns the task — that is,
+// whether the task's file lives in the vault this instance serves.
+//
+// Ownership is decided from the vault, not from the event: a task event carries
+// only TaskIdentifier, frontmatter and content (lib.Task), so it names no vault,
+// and the Kafka consumer group is shared across every executor deployment — a
+// task's events reach whichever instance owns the partition, not the instance
+// whose vault holds the file. Without this test every instance drives every
+// vault's tasks. That is what made the consecutive-re-drive cap per-pod instead
+// of per-task: measured on dev 2026-10-14, one OpenClaw fixture was spawned by
+// three different pods (openclaw 18:19/18:33/18:48, trading 19:03/19:49,
+// personal 19:34), each starting its own streak at zero, so the loop produced
+// >=7 Jobs against a cap of 3.
+//
+// The set is refreshed wholesale at the end of every completed reconcile pass,
+// which already Lists and parses this vault's glob — so the test costs one map
+// lookup and no extra vault read, and a file deleted from the vault stops being
+// owned on the next tick.
+//
+// Fail-open until the first completed pass: a freshly started instance has not
+// scanned yet, and dropping every event in that window would leave each task to
+// be picked up only by the next tick. The window is one pass (<=60s) and the
+// instance's own floor covers whatever it misses.
+func (h *taskEventHandler) vaultTasksOwned(id lib.TaskIdentifier) bool {
+	h.vaultMu.RLock()
+	defer h.vaultMu.RUnlock()
+	if !h.vaultScanned {
+		return true
+	}
+	_, ok := h.vaultTasks[id]
+	return ok
+}
+
+// publishVaultTasks replaces this instance's view of which tasks live in its
+// vault, from the identifiers one completed reconcile pass parsed.
+func (h *taskEventHandler) publishVaultTasks(seen map[lib.TaskIdentifier]struct{}) {
+	h.vaultMu.Lock()
+	defer h.vaultMu.Unlock()
+	h.vaultTasks = seen
+	h.vaultScanned = true
+}
+
+// skipForeignVaultTask reports whether the spawn must be dropped because the
+// task's file is not in this instance's vault, recording the skip signal when it
+// must. It is the cheapest and the widest gate in spawnIfNeeded — a foreign task
+// is not this instance's to spawn, whatever path delivered the event — so it runs
+// first, and it is factored out only to keep spawnIfNeeded inside funlen.
+func (h *taskEventHandler) skipForeignVaultTask(task lib.Task) bool {
+	if h.vaultTasksOwned(task.TaskIdentifier) {
+		return false
+	}
+	metrics.TaskEventsTotal.WithLabelValues("skipped_foreign_vault").Inc()
+	glog.V(2).Infof(
+		"skip task %s: not in this executor's vault glob=%q",
+		task.TaskIdentifier, h.taskGlob,
+	)
+	return true
 }
 
 // RunReconcileLoop runs one reconcile pass immediately at startup, then every
