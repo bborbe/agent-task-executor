@@ -255,26 +255,20 @@ var _ = Describe("TaskEventHandler reconcile loop", func() {
 	})
 
 	It(
-		"is not capped when the event path drives the task in between (SC5: a recurring no-ref task keeps spawning)",
+		"clears the streak only when another driver's job is no longer running (SC5)",
 		func() {
 			// SC5's guard, and the reason the cap does not re-create the v0.7.1
-			// regression spec 006 protects against. A recurring task carrying
-			// neither `ref` nor `max_triggers` is driven by its own schedule
-			// through the Kafka event path; that spawn clears the floor's streak,
-			// so the floor keeps re-driving it rather than capping it. Without
-			// the clear the cap would strand exactly the class 006 protects.
+			// regression spec 006 protects against. The clear is keyed on the JOB
+			// the floor created, not on the task event — the floor's own spawn
+			// notification is written asynchronously and re-enters as a task
+			// event, so an event-keyed clear would reset the streak the floor had
+			// just recorded and the cap would never engage.
 			task := eligibleTask(domain.TaskPhaseExecution)
 			fakeGitRestClient.ListReturns([]string{"24 Tasks/tid-a.md"}, nil)
 			fakeGitRestClient.GetReturns([]byte(renderTaskFile(task)), nil)
 			fakeSpawner.IsJobActiveReturns(false, nil)
 
-			buildMsg := func(t lib.Task) *sarama.ConsumerMessage {
-				value, err := json.Marshal(t)
-				Expect(err).To(BeNil())
-				return &sarama.ConsumerMessage{Value: value}
-			}
-
-			// Drive the floor to its cap: three re-drives, then it stops.
+			// Drive the floor to its cap.
 			for i := 0; i < 3; i++ {
 				Expect(h.ReconcileOnce(ctx)).To(Succeed())
 			}
@@ -282,13 +276,20 @@ var _ = Describe("TaskEventHandler reconcile loop", func() {
 			Expect(h.ReconcileOnce(ctx)).To(Succeed())
 			Expect(fakeSpawner.SpawnJobCallCount()).To(Equal(3))
 
-			// The schedule fires: a spawn from the event path ends the streak.
-			Expect(h.ConsumeMessage(ctx, buildMsg(task))).To(Succeed())
-			Expect(fakeSpawner.SpawnJobCallCount()).To(Equal(4))
-
-			// The floor is no longer capped for this task.
+			// Another driver's job now appears on the task. While it is still
+			// RUNNING the difference is indistinguishable from the floor's own
+			// lagging spawn notification, so the streak must survive.
+			other := eligibleTask(domain.TaskPhaseExecution)
+			other.Frontmatter["current_job"] = "another-drivers-job"
+			fakeGitRestClient.GetReturns([]byte(renderTaskFile(other)), nil)
+			fakeSpawner.IsJobActiveReturns(true, nil)
 			Expect(h.ReconcileOnce(ctx)).To(Succeed())
-			Expect(fakeSpawner.SpawnJobCallCount()).To(Equal(5))
+			Expect(fakeSpawner.SpawnJobCallCount()).To(Equal(3))
+
+			// Once that job is done the clear fires and the floor re-drives.
+			fakeSpawner.IsJobActiveReturns(false, nil)
+			Expect(h.ReconcileOnce(ctx)).To(Succeed())
+			Expect(fakeSpawner.SpawnJobCallCount()).To(Equal(4))
 		},
 	)
 

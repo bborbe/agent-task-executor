@@ -187,7 +187,7 @@ func NewTaskEventHandler(
 		spawnLocks:       make(map[string]*sync.Mutex),
 		gitRestClient:    gitRestClient,
 		taskGlob:         taskGlob,
-		reconcileStreaks: make(map[lib.TaskIdentifier]int),
+		reconcileStreaks: make(map[lib.TaskIdentifier]reconcileStreak),
 	}
 }
 
@@ -205,7 +205,7 @@ type taskEventHandler struct {
 	gitRestClient    gitrestclient.GitRestClient
 	taskGlob         string
 	reconcileMu      sync.Mutex
-	reconcileStreaks map[lib.TaskIdentifier]int
+	reconcileStreaks map[lib.TaskIdentifier]reconcileStreak
 }
 
 // lockAssigneeSpawn serializes the count-then-spawn sequence for one assignee and
@@ -292,12 +292,6 @@ func (h *taskEventHandler) ConsumeMessage(ctx context.Context, msg *sarama.Consu
 	if skip {
 		return nil
 	}
-	// The event path is a non-floor driver: a message arriving for this task
-	// means the vault changed and something other than the reconcile floor is
-	// moving it, so its consecutive floor-re-drive streak ends here. This is
-	// what keeps a legitimate recurring task uncapped — its schedule fires an
-	// event, which clears the streak, so the floor keeps re-driving it.
-	h.clearReconcileRedrive(task.TaskIdentifier)
 	_, err = h.spawnIfNeeded(ctx, task, config)
 	return err
 }
@@ -730,10 +724,6 @@ func (h *taskEventHandler) evalDeferredRespawns(ctx context.Context) error {
 		if !spawned {
 			continue
 		}
-		// The deferred-respawn loop is a non-floor driver too: it re-spawns a
-		// task the floor had deferred, so the floor is no longer the only thing
-		// moving it.
-		h.clearReconcileRedrive(entry.task.TaskIdentifier)
 		jobStartedAt, _ := entry.task.Frontmatter.JobStartedAt()
 		elapsed := now.Sub(jobStartedAt)
 		glog.V(1).Infof(
@@ -921,9 +911,13 @@ func (h *taskEventHandler) ReconcileOnce(ctx context.Context) error {
 }
 
 // reconcileOutcome is what one vault file contributed to a pass's counters.
-// Skipped covers every path that reached no spawn decision: an unreadable file,
-// an ineligible task, or a spawn error. The other three each count as evaluated,
-// preserving the pre-extraction accounting exactly.
+// The three decision outcomes count as evaluated; Skipped covers an unreadable
+// file, an ineligible task, or a spawn error.
+//
+// One deliberate difference from the pre-extraction accounting: a spawn error
+// used to increment BOTH evaluated and skipped, because evaluated was incremented
+// before spawnIfNeeded was called. It now counts as skipped only, so evaluated is
+// lower by one per spawn error.
 type reconcileOutcome int
 
 const (
@@ -957,7 +951,12 @@ func (h *taskEventHandler) reconcileOne(
 		h.clearReconcileRedrive(task.TaskIdentifier)
 		return reconcileOutcomeSkipped
 	}
-	if h.cappedByReconcileRedrive(task.TaskIdentifier, relPath) {
+	streak, hasStreak := h.reconcileRedriveStreak(task.TaskIdentifier)
+	if hasStreak && h.reconcileStreakSuperseded(ctx, task, streak) {
+		h.clearReconcileRedrive(task.TaskIdentifier)
+		streak, hasStreak = reconcileStreak{}, false
+	}
+	if hasStreak && h.cappedByReconcileRedrive(task.TaskIdentifier, relPath, streak) {
 		return reconcileOutcomeCapped
 	}
 	spawned, err := h.spawnIfNeeded(ctx, task, config)
@@ -972,7 +971,9 @@ func (h *taskEventHandler) reconcileOne(
 	if !spawned {
 		return reconcileOutcomeDeferred
 	}
-	h.recordReconcileRedrive(task.TaskIdentifier)
+	h.recordReconcileRedrive(
+		task.TaskIdentifier, streak.count+1, h.spawnedJobName(task.TaskIdentifier),
+	)
 	metrics.ReconcileRedrivenTotal.Inc()
 	glog.Infof("event=reconcile_redrive task=%s path=%s", task.TaskIdentifier, relPath)
 	return reconcileOutcomeRedriven
@@ -1031,51 +1032,120 @@ func (h *taskEventHandler) reconcileTask(
 	return task, config, true, nil
 }
 
-// reconcileRedriveStreak reports how many times in a row the floor has re-driven
-// this task with nothing else driving it. See maxConsecutiveReconcileRedrives.
-func (h *taskEventHandler) reconcileRedriveStreak(id lib.TaskIdentifier) int {
-	h.reconcileMu.Lock()
-	defer h.reconcileMu.Unlock()
-	return h.reconcileStreaks[id]
+// reconcileStreak is the floor's record of consecutive re-drives for one task:
+// how many, and which Job the floor created on the last one. The job name is what
+// lets the floor tell its own spawn apart from another driver's — see
+// reconcileStreakSuperseded.
+type reconcileStreak struct {
+	count   int
+	jobName string
 }
 
-// recordReconcileRedrive extends this task's consecutive floor-re-drive streak.
-// Called by ReconcileOnce after a floor-driven spawn actually happened.
-func (h *taskEventHandler) recordReconcileRedrive(id lib.TaskIdentifier) {
+// reconcileRedriveStreak returns the floor's streak for this task, if any.
+func (h *taskEventHandler) reconcileRedriveStreak(
+	id lib.TaskIdentifier,
+) (reconcileStreak, bool) {
 	h.reconcileMu.Lock()
 	defer h.reconcileMu.Unlock()
-	h.reconcileStreaks[id]++
+	streak, ok := h.reconcileStreaks[id]
+	return streak, ok
 }
 
-// clearReconcileRedrive ends this task's streak: either something other than
-// the floor drove it, or it left the eligibility filter. Both mean the floor is
-// no longer the only thing keeping the task moving, which is the condition the
-// cap exists to detect.
+// recordReconcileRedrive extends this task's streak with the Job the floor just
+// created. The job name comes from TaskStore, where spawnIfNeeded stores the task
+// with current_job set to the Job it created — reading it back is how the floor
+// learns which Job is its own without changing spawnIfNeeded's signature.
+func (h *taskEventHandler) recordReconcileRedrive(
+	id lib.TaskIdentifier,
+	count int,
+	jobName string,
+) {
+	h.reconcileMu.Lock()
+	defer h.reconcileMu.Unlock()
+	h.reconcileStreaks[id] = reconcileStreak{count: count, jobName: jobName}
+}
+
+// spawnedJobName returns the Job spawnIfNeeded recorded for this task, or "" when
+// it recorded none.
+func (h *taskEventHandler) spawnedJobName(id lib.TaskIdentifier) string {
+	stored, ok := h.taskStore.Load(id)
+	if !ok {
+		return ""
+	}
+	return stored.Frontmatter.CurrentJob()
+}
+
+// clearReconcileRedrive ends this task's streak: something other than the floor
+// drove it, or it left the eligibility filter. Either way the floor is no longer
+// the only thing keeping the task moving, which is the condition the cap detects.
 func (h *taskEventHandler) clearReconcileRedrive(id lib.TaskIdentifier) {
 	h.reconcileMu.Lock()
 	defer h.reconcileMu.Unlock()
 	delete(h.reconcileStreaks, id)
 }
 
+// reconcileStreakSuperseded reports whether another driver has spawned this task
+// since the floor's last re-drive, in which case the streak no longer describes a
+// floor-only loop and must be cleared.
+//
+// All three clauses are load-bearing. A non-empty current_job differing from the
+// floor's own Job means someone else spawned. But a spawn notification is written
+// ASYNCHRONOUSLY, so for a pass or two after the floor's own spawn the task still
+// shows the PREVIOUS Job — non-empty and different — and clearing on that alone
+// would reset the streak the floor just recorded. That is precisely the defect
+// this cap exists to fix: the floor's own spawn notification re-enters as a task
+// event and would clear the streak every pass. The liveness clause is what
+// separates the two — while the floor's own Job is still running, a differing
+// value is a lagging write, not a second spawner.
+//
+// IsJobActive is per task, not per Job, so a genuine second spawner is only
+// detected once ITS Job finishes. That defers the clear by a pass rather than
+// losing it, which is the safe direction: a late clear costs one extra re-drive,
+// a spurious clear costs the whole cap.
+func (h *taskEventHandler) reconcileStreakSuperseded(
+	ctx context.Context,
+	task lib.Task,
+	streak reconcileStreak,
+) bool {
+	current := task.Frontmatter.CurrentJob()
+	if current == "" || current == streak.jobName {
+		return false
+	}
+	active, err := h.jobSpawner.IsJobActive(ctx, task.TaskIdentifier)
+	if err != nil {
+		// Fail safe: an unreadable liveness signal must not clear the streak.
+		glog.Warningf(
+			"event=reconcile_streak_liveness_unknown task=%s err=%v",
+			task.TaskIdentifier, err,
+		)
+		return false
+	}
+	return !active
+}
+
 // cappedByReconcileRedrive reports whether the floor must skip this task because
-// it has re-driven it maxConsecutiveReconcileRedrives times in a row with
-// nothing else driving it, and records the skip signal when it must.
+// it has re-driven it maxConsecutiveReconcileRedrives times in a row with nothing
+// else driving it, and records the skip signal when it must.
 //
 // Skipping is the whole bound. The streak is deliberately NOT cleared here, so
-// the task stays capped until something else moves it — clearing on the cap
-// would let the next pass re-drive it and make the cap a no-op.
+// the task stays capped until something else moves it — clearing on the cap would
+// let the next pass re-drive it and make the cap a no-op.
+//
+// Logged at V(1), not V(0): a capped task repeats this line every pass for as long
+// as it stays capped, which is an expected steady state — the same reason
+// event=concurrency_cap is V(1). The metric carries the alerting signal.
 func (h *taskEventHandler) cappedByReconcileRedrive(
 	id lib.TaskIdentifier,
 	relPath string,
+	streak reconcileStreak,
 ) bool {
-	streak := h.reconcileRedriveStreak(id)
-	if streak < maxConsecutiveReconcileRedrives {
+	if streak.count < maxConsecutiveReconcileRedrives {
 		return false
 	}
 	metrics.ReconcileRedriveCappedTotal.Inc()
-	glog.Infof(
+	glog.V(1).Infof(
 		"event=reconcile_redrive_capped task=%s path=%s streak=%d cap=%d",
-		id, relPath, streak, maxConsecutiveReconcileRedrives,
+		id, relPath, streak.count, maxConsecutiveReconcileRedrives,
 	)
 	return true
 }
