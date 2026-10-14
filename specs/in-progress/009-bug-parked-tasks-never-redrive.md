@@ -1,7 +1,8 @@
 ---
-status: draft
-kind: bug
-created: 2026-10-14
+status: generating
+approved: "2026-10-14T21:33:38Z"
+generating: "2026-10-14T21:34:16Z"
+branch: dark-factory/bug-parked-tasks-never-redrive
 ---
 
 ## Summary
