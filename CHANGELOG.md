@@ -2,6 +2,10 @@
 
 All notable changes to this project will be documented in this file.
 
+## Unreleased
+
+- fix: cap the reconcile floor's consecutive re-drives of the same task, so a task that parks after a failed step stops producing a Job every 60 s forever. The floor's intended bound is the scoped trigger budget (spec 005), but that budget cannot bound this shape: a task carrying neither `ref` nor `max_triggers` keeps the cap disarmed by design — arming it re-creates the 2026-08-27 Daily Sentry Triage incident (spec 006) — and `triggerScope` scopes such a task on phase alone, so the observed `planning:` ↔ `execution:` flip handed out a fresh budget on every pass and `trigger_count` never rose above 1. Observed on dev 2026-10-13: four Jobs in ~35 min for one parked hypothesis task, each from `event=reconcile_redrive`, with `maxConcurrentJobs: 1` only serialising them. The streak is in-memory and is cleared by any spawn from a non-floor path (the Kafka event path, the deferred-respawn loop) and by the task leaving the eligibility filter — so a legitimate recurring task, driven by its own schedule, is never capped, and only a task the floor alone keeps re-driving is. Deliberately in-memory: a persisted counter would have to be written to the task file, and that write is itself a vault change that re-triggers the event path, so it would reset the loop it exists to bound; losing it on restart costs nothing, since the floor's purpose is recovering restart-orphaned tasks and after a restart every streak is empty. Adds `executor_reconcile_redrive_capped_total`, an `event=reconcile_redrive_capped` log line naming the task and streak, and `capped=` on the pass summary — an unobservable cap is indistinguishable from a quiet fleet, the failure shape `ReconcilePassesTotal` already exists to avoid.
+
 ## v0.18.7
 
 - fix: stamp the Config's declared priority class onto a service agent's StatefulSet pod template, so a `type: service` agent is admitted at its declared priority instead of 0 and is no longer the first workload a higher-priority Job evicts

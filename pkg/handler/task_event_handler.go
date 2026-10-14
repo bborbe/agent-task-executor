@@ -61,6 +61,32 @@ const concurrencyCapRetryDelay = 60 * time.Second
 // across a restart.
 const defaultReconcileInterval = 60 * time.Second
 
+// maxConsecutiveReconcileRedrives bounds how many times in a row the reconcile
+// floor may re-drive the same task with nothing else driving it.
+//
+// The floor's contract (spec 005) is that it re-drives an eligible task through
+// spawnIfNeeded, so the concurrency cap and the scoped trigger budget apply to
+// it identically to an event-driven spawn. This cap is the bound for the case
+// where neither of those engages: a task with no `ref` and no `max_triggers`
+// keeps the trigger budget disarmed by design (see applyTriggerBudget — arming
+// it would re-create the 2026-08-27 Daily Sentry Triage incident), and a task
+// whose scope flips between phases gets a fresh budget on every pass anyway,
+// because triggerScope scopes a no-ref task on phase alone.
+//
+// Observed on dev 2026-10-13: one parked hypothesis task produced four Jobs in
+// ~35 min, each from event=reconcile_redrive, while trigger_count never rose
+// above 1 and trigger_scope alternated planning: <-> execution:.
+//
+// The streak is in-memory and deliberately so. A persisted counter would have
+// to be written to the task file, and that write is itself a vault change that
+// re-triggers the event path — the counter would reset the loop it exists to
+// bound. It also costs nothing to lose: the floor's purpose is recovering
+// tasks a restart orphaned, and after a restart every streak is empty, which is
+// exactly the state in which re-driving is correct. The cost is that a task
+// stuck across a restart is re-driven up to N more times, not that it loops
+// forever.
+const maxConsecutiveReconcileRedrives = 3
+
 // reconcilePassTimeout bounds one reconcile pass so a slow or large vault
 // cannot hold a pass open indefinitely (spec 005 Failure Modes: "Pass bounded
 // by a per-pass timeout; logs evaluate count so cost is visible"). Half the
@@ -161,6 +187,7 @@ func NewTaskEventHandler(
 		spawnLocks:       make(map[string]*sync.Mutex),
 		gitRestClient:    gitRestClient,
 		taskGlob:         taskGlob,
+		reconcileStreaks: make(map[lib.TaskIdentifier]int),
 	}
 }
 
@@ -177,6 +204,8 @@ type taskEventHandler struct {
 	spawnLocks       map[string]*sync.Mutex
 	gitRestClient    gitrestclient.GitRestClient
 	taskGlob         string
+	reconcileMu      sync.Mutex
+	reconcileStreaks map[lib.TaskIdentifier]int
 }
 
 // lockAssigneeSpawn serializes the count-then-spawn sequence for one assignee and
@@ -263,6 +292,12 @@ func (h *taskEventHandler) ConsumeMessage(ctx context.Context, msg *sarama.Consu
 	if skip {
 		return nil
 	}
+	// The event path is a non-floor driver: a message arriving for this task
+	// means the vault changed and something other than the reconcile floor is
+	// moving it, so its consecutive floor-re-drive streak ends here. This is
+	// what keeps a legitimate recurring task uncapped — its schedule fires an
+	// event, which clears the streak, so the floor keeps re-driving it.
+	h.clearReconcileRedrive(task.TaskIdentifier)
 	_, err = h.spawnIfNeeded(ctx, task, config)
 	return err
 }
@@ -695,6 +730,10 @@ func (h *taskEventHandler) evalDeferredRespawns(ctx context.Context) error {
 		if !spawned {
 			continue
 		}
+		// The deferred-respawn loop is a non-floor driver too: it re-spawns a
+		// task the floor had deferred, so the floor is no longer the only thing
+		// moving it.
+		h.clearReconcileRedrive(entry.task.TaskIdentifier)
 		jobStartedAt, _ := entry.task.Frontmatter.JobStartedAt()
 		elapsed := now.Sub(jobStartedAt)
 		glog.V(1).Infof(
@@ -842,7 +881,7 @@ func (h *taskEventHandler) ReconcileOnce(ctx context.Context) error {
 		glog.Warningf("event=reconcile_list_failed glob=%q err=%v", h.taskGlob, err)
 		return nil
 	}
-	evaluated, redriven, deferred, skipped := 0, 0, 0, 0
+	evaluated, redriven, deferred, skipped, capped := 0, 0, 0, 0, 0
 	for _, relPath := range paths {
 		select {
 		case <-passCtx.Done():
@@ -857,49 +896,86 @@ func (h *taskEventHandler) ReconcileOnce(ctx context.Context) error {
 			return nil
 		default:
 		}
-		content, err := h.gitRestClient.Get(passCtx, relPath)
-		if err != nil {
-			glog.Warningf("event=reconcile_skip path=%s reason=get_failed err=%v", relPath, err)
+		switch outcome := h.reconcileOne(passCtx, relPath); outcome {
+		case reconcileOutcomeSkipped:
 			skipped++
-			continue
-		}
-		task, config, ok, err := h.reconcileTask(passCtx, content)
-		if err != nil {
-			glog.Warningf("event=reconcile_skip path=%s reason=resolve_error err=%v", relPath, err)
-			skipped++
-			continue
-		}
-		if !ok {
-			skipped++
-			continue
-		}
-		evaluated++
-		spawned, err := h.spawnIfNeeded(passCtx, task, config)
-		if err != nil {
-			glog.Warningf(
-				"event=reconcile_skip task=%s reason=spawn_error err=%v",
-				task.TaskIdentifier,
-				err,
-			)
-			skipped++
-			continue
-		}
-		if spawned {
+		case reconcileOutcomeRedriven:
+			evaluated++
 			redriven++
-			metrics.ReconcileRedrivenTotal.Inc()
-			glog.Infof("event=reconcile_redrive task=%s path=%s", task.TaskIdentifier, relPath)
-		} else {
+		case reconcileOutcomeDeferred:
+			evaluated++
 			deferred++
+		case reconcileOutcomeCapped:
+			evaluated++
+			capped++
 		}
 	}
 	// Counted on every pass that got past List, so rate(ok)==0 is a true
 	// "the backstop is not running" signal rather than an absence of errors.
 	metrics.ReconcilePassesTotal.WithLabelValues("ok").Inc()
 	glog.Infof(
-		"event=reconcile evaluated=%d re_driven=%d deferred=%d skipped=%d glob=%q",
-		evaluated, redriven, deferred, skipped, h.taskGlob,
+		"event=reconcile evaluated=%d re_driven=%d deferred=%d skipped=%d capped=%d glob=%q",
+		evaluated, redriven, deferred, skipped, capped, h.taskGlob,
 	)
 	return nil
+}
+
+// reconcileOutcome is what one vault file contributed to a pass's counters.
+// Skipped covers every path that reached no spawn decision: an unreadable file,
+// an ineligible task, or a spawn error. The other three each count as evaluated,
+// preserving the pre-extraction accounting exactly.
+type reconcileOutcome int
+
+const (
+	reconcileOutcomeSkipped reconcileOutcome = iota
+	reconcileOutcomeRedriven
+	reconcileOutcomeDeferred
+	reconcileOutcomeCapped
+)
+
+// reconcileOne evaluates one vault file and drives it when it is eligible. It
+// owns the whole per-file decision — read, eligibility filter, the
+// consecutive-re-drive cap, and the spawn — so ReconcileOnce stays a pass-level
+// loop over paths.
+func (h *taskEventHandler) reconcileOne(
+	ctx context.Context,
+	relPath string,
+) reconcileOutcome {
+	content, err := h.gitRestClient.Get(ctx, relPath)
+	if err != nil {
+		glog.Warningf("event=reconcile_skip path=%s reason=get_failed err=%v", relPath, err)
+		return reconcileOutcomeSkipped
+	}
+	task, config, ok, err := h.reconcileTask(ctx, content)
+	if err != nil {
+		glog.Warningf("event=reconcile_skip path=%s reason=resolve_error err=%v", relPath, err)
+		return reconcileOutcomeSkipped
+	}
+	if !ok {
+		// Left the eligibility filter — it advanced, or its assignee was
+		// cleared. Either way the floor is no longer its only driver.
+		h.clearReconcileRedrive(task.TaskIdentifier)
+		return reconcileOutcomeSkipped
+	}
+	if h.cappedByReconcileRedrive(task.TaskIdentifier, relPath) {
+		return reconcileOutcomeCapped
+	}
+	spawned, err := h.spawnIfNeeded(ctx, task, config)
+	if err != nil {
+		glog.Warningf(
+			"event=reconcile_skip task=%s reason=spawn_error err=%v",
+			task.TaskIdentifier,
+			err,
+		)
+		return reconcileOutcomeSkipped
+	}
+	if !spawned {
+		return reconcileOutcomeDeferred
+	}
+	h.recordReconcileRedrive(task.TaskIdentifier)
+	metrics.ReconcileRedrivenTotal.Inc()
+	glog.Infof("event=reconcile_redrive task=%s path=%s", task.TaskIdentifier, relPath)
+	return reconcileOutcomeRedriven
 }
 
 // reconcileTask parses a task file and applies the reconcile eligibility filter.
@@ -930,29 +1006,78 @@ func (h *taskEventHandler) reconcileTask(
 ) (lib.Task, *pkg.AgentConfiguration, bool, error) {
 	task, ok := parseTaskFile(ctx, content)
 	if !ok {
-		return lib.Task{}, nil, false, nil
+		return task, nil, false, nil
 	}
 	config, skip, err := h.resolveConfig(ctx, task)
 	if err != nil {
 		return lib.Task{}, nil, false, err
 	}
 	if skip {
-		return lib.Task{}, nil, false, nil
+		return task, nil, false, nil
 	}
 	if !effectiveTriggerStatuses(config).Contains(task.Frontmatter.Status()) {
-		return lib.Task{}, nil, false, nil
+		return task, nil, false, nil
 	}
 	phase := task.Frontmatter.Phase()
 	if phase == nil || !effectiveTriggerPhases(config).Contains(*phase) {
-		return lib.Task{}, nil, false, nil
+		return task, nil, false, nil
 	}
 	if task.Frontmatter.Stage() != string(h.branch) {
-		return lib.Task{}, nil, false, nil
+		return task, nil, false, nil
 	}
 	if task.Frontmatter.Assignee() == "" {
-		return lib.Task{}, nil, false, nil
+		return task, nil, false, nil
 	}
 	return task, config, true, nil
+}
+
+// reconcileRedriveStreak reports how many times in a row the floor has re-driven
+// this task with nothing else driving it. See maxConsecutiveReconcileRedrives.
+func (h *taskEventHandler) reconcileRedriveStreak(id lib.TaskIdentifier) int {
+	h.reconcileMu.Lock()
+	defer h.reconcileMu.Unlock()
+	return h.reconcileStreaks[id]
+}
+
+// recordReconcileRedrive extends this task's consecutive floor-re-drive streak.
+// Called by ReconcileOnce after a floor-driven spawn actually happened.
+func (h *taskEventHandler) recordReconcileRedrive(id lib.TaskIdentifier) {
+	h.reconcileMu.Lock()
+	defer h.reconcileMu.Unlock()
+	h.reconcileStreaks[id]++
+}
+
+// clearReconcileRedrive ends this task's streak: either something other than
+// the floor drove it, or it left the eligibility filter. Both mean the floor is
+// no longer the only thing keeping the task moving, which is the condition the
+// cap exists to detect.
+func (h *taskEventHandler) clearReconcileRedrive(id lib.TaskIdentifier) {
+	h.reconcileMu.Lock()
+	defer h.reconcileMu.Unlock()
+	delete(h.reconcileStreaks, id)
+}
+
+// cappedByReconcileRedrive reports whether the floor must skip this task because
+// it has re-driven it maxConsecutiveReconcileRedrives times in a row with
+// nothing else driving it, and records the skip signal when it must.
+//
+// Skipping is the whole bound. The streak is deliberately NOT cleared here, so
+// the task stays capped until something else moves it — clearing on the cap
+// would let the next pass re-drive it and make the cap a no-op.
+func (h *taskEventHandler) cappedByReconcileRedrive(
+	id lib.TaskIdentifier,
+	relPath string,
+) bool {
+	streak := h.reconcileRedriveStreak(id)
+	if streak < maxConsecutiveReconcileRedrives {
+		return false
+	}
+	metrics.ReconcileRedriveCappedTotal.Inc()
+	glog.Infof(
+		"event=reconcile_redrive_capped task=%s path=%s streak=%d cap=%d",
+		id, relPath, streak, maxConsecutiveReconcileRedrives,
+	)
+	return true
 }
 
 // RunReconcileLoop runs one reconcile pass immediately at startup, then every
