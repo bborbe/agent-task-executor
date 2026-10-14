@@ -185,14 +185,15 @@ var _ = Describe("TaskEventHandler reconcile loop", func() {
 	It(
 		"caps consecutive re-drives of a stuck task and stops spawning (regression: unbounded 60s re-drive)",
 		func() {
-			// Observed on dev 2026-10-13: a parked hypothesis task carrying neither
-			// `ref` nor `max_triggers` produced four Jobs in ~35 min, each from
-			// event=reconcile_redrive. The trigger budget cannot bound it — with
+			// Observed on dev 2026-10-13 and again 2026-10-14: a parked task
+			// carrying neither `ref` nor `max_triggers` produced a new Job every
+			// 15-30 min indefinitely. The trigger budget cannot bound it — with
 			// neither field set, applyTriggerBudget's cap branch is disarmed by
 			// design (arming it re-creates the 2026-08-27 Daily Sentry Triage
-			// incident) — and triggerScope scopes a no-ref task on phase alone, so
-			// the observed planning:/execution: flip handed out a fresh budget on
-			// every pass and trigger_count never rose above 1.
+			// incident) — and the agent pods rewrite the frontmatter from their
+			// run-start snapshot on every completion, so trigger_scope is clobbered
+			// back, scopeChanged is true on every spawn, and trigger_count is reset
+			// to 1 each time.
 			fakeGitRestClient.ListReturns([]string{"24 Tasks/tid-a.md"}, nil)
 			fakeGitRestClient.GetReturns(
 				[]byte(renderTaskFile(eligibleTask(domain.TaskPhaseExecution))),
@@ -201,7 +202,7 @@ var _ = Describe("TaskEventHandler reconcile loop", func() {
 			fakeSpawner.IsJobActiveReturns(false, nil)
 			fakeSpawner.SpawnJobReturns("job-1", nil)
 
-			before := testutil.ToFloat64(metrics.ReconcileRedriveCappedTotal)
+			before := testutil.ToFloat64(metrics.RedriveCappedTotal)
 
 			// Five passes is two past the cap: a pre-fix build spawns on all five.
 			for i := 0; i < 5; i++ {
@@ -209,38 +210,18 @@ var _ = Describe("TaskEventHandler reconcile loop", func() {
 			}
 
 			Expect(fakeSpawner.SpawnJobCallCount()).To(Equal(3))
-			Expect(testutil.ToFloat64(metrics.ReconcileRedriveCappedTotal)).To(Equal(before + 2))
-
-			// The production steady state: the vault now carries the Job the floor
-			// just spawned. That equality is the load-bearing clause — a floor
-			// spawn must not read as another driver — and a SpawnJobReturns stub is
-			// what makes it a non-empty comparison rather than "" == "".
-			own := eligibleTask(domain.TaskPhaseExecution)
-			own.Frontmatter["current_job"] = "job-1"
-			fakeGitRestClient.GetReturns([]byte(renderTaskFile(own)), nil)
-			Expect(h.ReconcileOnce(ctx)).To(Succeed())
-			Expect(fakeSpawner.SpawnJobCallCount()).To(Equal(3))
+			Expect(testutil.ToFloat64(metrics.RedriveCappedTotal)).To(Equal(before + 2))
 		},
 	)
 
-	It("clears the streak when the task leaves the eligibility filter", func() {
-		// The cap bounds a STREAK, not a task. A task that drops out of the
-		// trigger set and comes back is a new situation and earns a fresh
-		// allowance — otherwise the cap would strand a lane that legitimately
-		// re-enters the filter, which is the over-capping regression spec 006
-		// guards.
-		ineligible := lib.Task{
-			TaskIdentifier: "tid-a",
-			Frontmatter: lib.TaskFrontmatter{
-				"status":   "todo",
-				"phase":    string(domain.TaskPhaseExecution),
-				"assignee": "claude",
-				"stage":    "prod",
-			},
-		}
-
+	It("resets the streak when the task advances to a new phase", func() {
+		// The cap bounds a STREAK, not a task. A task that moved phase has
+		// advanced, and the executor must serve the new phase — otherwise the cap
+		// would strand a lane that legitimately progresses, which is the
+		// over-capping regression spec 006 guards.
 		fakeGitRestClient.ListReturns([]string{"24 Tasks/tid-a.md"}, nil)
 		fakeSpawner.IsJobActiveReturns(false, nil)
+		fakeSpawner.SpawnJobReturns("job-1", nil)
 
 		fakeGitRestClient.GetReturns(
 			[]byte(renderTaskFile(eligibleTask(domain.TaskPhaseExecution))),
@@ -251,14 +232,13 @@ var _ = Describe("TaskEventHandler reconcile loop", func() {
 		}
 		Expect(fakeSpawner.SpawnJobCallCount()).To(Equal(3))
 
-		// One ineligible pass clears the streak; the task is not re-driven.
-		fakeGitRestClient.GetReturns([]byte(renderTaskFile(ineligible)), nil)
+		// At the cap, and still at the same phase: the next spawn is skipped.
 		Expect(h.ReconcileOnce(ctx)).To(Succeed())
 		Expect(fakeSpawner.SpawnJobCallCount()).To(Equal(3))
 
-		// Eligible again: the floor re-drives it rather than staying capped.
+		// The task advances — the phase changed, so the streak starts over.
 		fakeGitRestClient.GetReturns(
-			[]byte(renderTaskFile(eligibleTask(domain.TaskPhaseExecution))),
+			[]byte(renderTaskFile(eligibleTask(domain.TaskPhaseAIReview))),
 			nil,
 		)
 		Expect(h.ReconcileOnce(ctx)).To(Succeed())
@@ -266,42 +246,45 @@ var _ = Describe("TaskEventHandler reconcile loop", func() {
 	})
 
 	It(
-		"clears the streak only when another driver's job is no longer running (SC5)",
+		"counts a Kafka-path spawn toward the same streak (SC1/SC2 regression)",
 		func() {
-			// SC5's guard, and the reason the cap does not re-create the v0.7.1
-			// regression spec 006 protects against. The clear is keyed on the JOB
-			// the floor created, not on the task event — the floor's own spawn
-			// notification is written asynchronously and re-enters as a task
-			// event, so an event-keyed clear would reset the streak the floor had
-			// just recorded and the cap would never engage.
+			// The regression this test exists for. v0.18.8 counted only the
+			// reconcile floor's OWN spawns, so a Kafka-path spawn landing between
+			// two floor spawns cleared the streak before it could reach the cap —
+			// measured on the dev fixture 2026-10-14 as four Jobs in 70 min with
+			// capped=0 on all 68 reconcile passes, and the floor responsible for
+			// only two of the four. Counting every spawn, at the one funnel all
+			// three paths share, is what makes the bound hold.
+			//
+			// NOTE: buildMsg elsewhere in this package is a Describe-scoped
+			// closure, so define a local equivalent rather than reaching for one.
+			buildMsg := func(t lib.Task) *sarama.ConsumerMessage {
+				value, err := json.Marshal(t)
+				Expect(err).To(BeNil())
+				return &sarama.ConsumerMessage{Value: value}
+			}
+
 			task := eligibleTask(domain.TaskPhaseExecution)
 			fakeGitRestClient.ListReturns([]string{"24 Tasks/tid-a.md"}, nil)
 			fakeGitRestClient.GetReturns([]byte(renderTaskFile(task)), nil)
 			fakeSpawner.IsJobActiveReturns(false, nil)
 			fakeSpawner.SpawnJobReturns("job-1", nil)
 
-			// Drive the floor to its cap.
-			for i := 0; i < 3; i++ {
+			// Two floor re-drives, then a Kafka-path spawn.
+			for i := 0; i < 2; i++ {
 				Expect(h.ReconcileOnce(ctx)).To(Succeed())
 			}
+			Expect(h.ConsumeMessage(ctx, buildMsg(task))).To(Succeed())
 			Expect(fakeSpawner.SpawnJobCallCount()).To(Equal(3))
+
+			// The streak now stands at 3 across BOTH paths, so the floor is capped.
 			Expect(h.ReconcileOnce(ctx)).To(Succeed())
 			Expect(fakeSpawner.SpawnJobCallCount()).To(Equal(3))
 
-			// Another driver's job now appears on the task. While it is still
-			// RUNNING the difference is indistinguishable from the floor's own
-			// lagging spawn notification, so the streak must survive.
-			other := eligibleTask(domain.TaskPhaseExecution)
-			other.Frontmatter["current_job"] = "another-drivers-job"
-			fakeGitRestClient.GetReturns([]byte(renderTaskFile(other)), nil)
-			fakeSpawner.IsJobActiveReturns(true, nil)
-			Expect(h.ReconcileOnce(ctx)).To(Succeed())
+			// And so is the Kafka path: the cap lives in spawnIfNeeded, not at
+			// either call site, so no path can bypass it.
+			Expect(h.ConsumeMessage(ctx, buildMsg(task))).To(Succeed())
 			Expect(fakeSpawner.SpawnJobCallCount()).To(Equal(3))
-
-			// Once that job is done the clear fires and the floor re-drives.
-			fakeSpawner.IsJobActiveReturns(false, nil)
-			Expect(h.ReconcileOnce(ctx)).To(Succeed())
-			Expect(fakeSpawner.SpawnJobCallCount()).To(Equal(4))
 		},
 	)
 
