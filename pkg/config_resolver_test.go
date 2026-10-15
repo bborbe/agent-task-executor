@@ -249,4 +249,142 @@ var _ = Describe("ConfigResolver", func() {
 		Expect(err).NotTo(BeNil())
 		Expect(errors.Is(err, pkg.ErrConfigNotFound)).To(BeTrue())
 	})
+
+	Describe("ResolveByTaskType", func() {
+		It("resolves via the singular Spec.TaskType", func() {
+			provider.items = []agentv1.Config{
+				{
+					Spec: agentv1.ConfigSpec{
+						Assignee: "update-go-agent-personal",
+						Image:    "foo/bar",
+						TaskType: "github-update-go",
+					},
+				},
+			}
+			config, err := resolver.ResolveByTaskType(ctx, "github-update-go")
+			Expect(err).To(BeNil())
+			Expect(config.Assignee).To(Equal("update-go-agent-personal"))
+			Expect(config.Image).To(Equal("foo/bar:dev"))
+		})
+
+		It("resolves via a Spec.TaskTypes list element", func() {
+			provider.items = []agentv1.Config{
+				{
+					Spec: agentv1.ConfigSpec{
+						Assignee:  "pr-reviewer-agent-personal",
+						Image:     "img",
+						TaskTypes: []string{"pr-review", "oauth-probe"},
+					},
+				},
+			}
+			for _, taskType := range []string{"pr-review", "oauth-probe"} {
+				config, err := resolver.ResolveByTaskType(ctx, taskType)
+				Expect(err).To(BeNil())
+				Expect(config.Assignee).To(Equal("pr-reviewer-agent-personal"))
+			}
+		})
+
+		It("resolves every member of the effective union", func() {
+			provider.items = []agentv1.Config{
+				{
+					Spec: agentv1.ConfigSpec{
+						Assignee:  "a-personal",
+						Image:     "img",
+						TaskType:  "github-update-go",
+						TaskTypes: []string{"go-vuln"},
+					},
+				},
+			}
+			for _, taskType := range []string{"github-update-go", "go-vuln"} {
+				config, err := resolver.ResolveByTaskType(ctx, taskType)
+				Expect(err).To(BeNil())
+				Expect(config.Assignee).To(Equal("a-personal"))
+			}
+		})
+
+		It("returns ErrConfigNotFound when no Config declares the type", func() {
+			provider.items = []agentv1.Config{
+				{
+					Spec: agentv1.ConfigSpec{
+						Assignee: "other-agent-personal",
+						Image:    "img",
+						TaskType: "some-other-type",
+					},
+				},
+			}
+			_, err := resolver.ResolveByTaskType(ctx, "github-update-go")
+			Expect(err).NotTo(BeNil())
+			Expect(errors.Is(err, pkg.ErrConfigNotFound)).To(BeTrue())
+			Expect(errors.Is(err, pkg.ErrConfigAmbiguous)).To(BeFalse())
+		})
+
+		It("returns ErrConfigNotFound when store is empty", func() {
+			provider.items = []agentv1.Config{}
+			_, err := resolver.ResolveByTaskType(ctx, "github-update-go")
+			Expect(err).NotTo(BeNil())
+			Expect(errors.Is(err, pkg.ErrConfigNotFound)).To(BeTrue())
+			Expect(errors.Is(err, pkg.ErrConfigAmbiguous)).To(BeFalse())
+		})
+
+		It("returns ErrConfigAmbiguous when two Configs declare the same type", func() {
+			provider.items = []agentv1.Config{
+				{
+					Spec: agentv1.ConfigSpec{
+						Assignee:  "a-personal",
+						Image:     "img",
+						TaskTypes: []string{"shared-type"},
+					},
+				},
+				{
+					Spec: agentv1.ConfigSpec{
+						Assignee:  "b-personal",
+						Image:     "img",
+						TaskTypes: []string{"shared-type"},
+					},
+				},
+			}
+			_, err := resolver.ResolveByTaskType(ctx, "shared-type")
+			Expect(err).NotTo(BeNil())
+			Expect(errors.Is(err, pkg.ErrConfigAmbiguous)).To(BeTrue())
+			Expect(errors.Is(err, pkg.ErrConfigNotFound)).To(BeFalse())
+			Expect(err.Error()).To(ContainSubstring("shared-type"))
+		})
+
+		It("never matches an empty taskType", func() {
+			provider.items = []agentv1.Config{
+				{
+					Spec: agentv1.ConfigSpec{
+						Assignee: "a-personal",
+						Image:    "img",
+						TaskType: "github-update-go",
+					},
+				},
+			}
+			_, err := resolver.ResolveByTaskType(ctx, "")
+			Expect(err).NotTo(BeNil())
+			Expect(errors.Is(err, pkg.ErrConfigNotFound)).To(BeTrue())
+		})
+
+		It("never selects a Config whose effective type set is empty", func() {
+			provider.items = []agentv1.Config{
+				{
+					Spec: agentv1.ConfigSpec{
+						Assignee: "service-agent-personal",
+						Image:    "img",
+					},
+				},
+			}
+			_, err := resolver.ResolveByTaskType(ctx, "anything")
+			Expect(err).NotTo(BeNil())
+			Expect(errors.Is(err, pkg.ErrConfigNotFound)).To(BeTrue())
+		})
+
+		It("returns a wrapped error when provider.Get fails", func() {
+			provider.err = errors.Errorf(ctx, "storage unavailable")
+			_, err := resolver.ResolveByTaskType(ctx, "github-update-go")
+			Expect(err).NotTo(BeNil())
+			Expect(errors.Is(err, pkg.ErrConfigNotFound)).To(BeFalse())
+			Expect(errors.Is(err, pkg.ErrConfigAmbiguous)).To(BeFalse())
+		})
+	})
 })

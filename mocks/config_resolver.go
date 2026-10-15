@@ -23,6 +23,20 @@ type FakeConfigResolver struct {
 		result1 pkg.AgentConfiguration
 		result2 error
 	}
+	ResolveByTaskTypeStub        func(context.Context, string) (pkg.AgentConfiguration, error)
+	resolveByTaskTypeMutex       sync.RWMutex
+	resolveByTaskTypeArgsForCall []struct {
+		arg1 context.Context
+		arg2 string
+	}
+	resolveByTaskTypeReturns struct {
+		result1 pkg.AgentConfiguration
+		result2 error
+	}
+	resolveByTaskTypeReturnsOnCall map[int]struct {
+		result1 pkg.AgentConfiguration
+		result2 error
+	}
 	invocations      map[string][][]interface{}
 	invocationsMutex sync.RWMutex
 }
@@ -87,6 +101,71 @@ func (fake *FakeConfigResolver) ResolveReturnsOnCall(i int, result1 pkg.AgentCon
 		})
 	}
 	fake.resolveReturnsOnCall[i] = struct {
+		result1 pkg.AgentConfiguration
+		result2 error
+	}{result1, result2}
+}
+
+func (fake *FakeConfigResolver) ResolveByTaskType(arg1 context.Context, arg2 string) (pkg.AgentConfiguration, error) {
+	fake.resolveByTaskTypeMutex.Lock()
+	ret, specificReturn := fake.resolveByTaskTypeReturnsOnCall[len(fake.resolveByTaskTypeArgsForCall)]
+	fake.resolveByTaskTypeArgsForCall = append(fake.resolveByTaskTypeArgsForCall, struct {
+		arg1 context.Context
+		arg2 string
+	}{arg1, arg2})
+	stub := fake.ResolveByTaskTypeStub
+	fakeReturns := fake.resolveByTaskTypeReturns
+	fake.recordInvocation("ResolveByTaskType", []interface{}{arg1, arg2})
+	fake.resolveByTaskTypeMutex.Unlock()
+	if stub != nil {
+		return stub(arg1, arg2)
+	}
+	if specificReturn {
+		return ret.result1, ret.result2
+	}
+	return fakeReturns.result1, fakeReturns.result2
+}
+
+func (fake *FakeConfigResolver) ResolveByTaskTypeCallCount() int {
+	fake.resolveByTaskTypeMutex.RLock()
+	defer fake.resolveByTaskTypeMutex.RUnlock()
+	return len(fake.resolveByTaskTypeArgsForCall)
+}
+
+func (fake *FakeConfigResolver) ResolveByTaskTypeCalls(stub func(context.Context, string) (pkg.AgentConfiguration, error)) {
+	fake.resolveByTaskTypeMutex.Lock()
+	defer fake.resolveByTaskTypeMutex.Unlock()
+	fake.ResolveByTaskTypeStub = stub
+}
+
+func (fake *FakeConfigResolver) ResolveByTaskTypeArgsForCall(i int) (context.Context, string) {
+	fake.resolveByTaskTypeMutex.RLock()
+	defer fake.resolveByTaskTypeMutex.RUnlock()
+	argsForCall := fake.resolveByTaskTypeArgsForCall[i]
+	return argsForCall.arg1, argsForCall.arg2
+}
+
+func (fake *FakeConfigResolver) ResolveByTaskTypeReturns(result1 pkg.AgentConfiguration, result2 error) {
+	fake.resolveByTaskTypeMutex.Lock()
+	defer fake.resolveByTaskTypeMutex.Unlock()
+	fake.ResolveByTaskTypeStub = nil
+	fake.resolveByTaskTypeReturns = struct {
+		result1 pkg.AgentConfiguration
+		result2 error
+	}{result1, result2}
+}
+
+func (fake *FakeConfigResolver) ResolveByTaskTypeReturnsOnCall(i int, result1 pkg.AgentConfiguration, result2 error) {
+	fake.resolveByTaskTypeMutex.Lock()
+	defer fake.resolveByTaskTypeMutex.Unlock()
+	fake.ResolveByTaskTypeStub = nil
+	if fake.resolveByTaskTypeReturnsOnCall == nil {
+		fake.resolveByTaskTypeReturnsOnCall = make(map[int]struct {
+			result1 pkg.AgentConfiguration
+			result2 error
+		})
+	}
+	fake.resolveByTaskTypeReturnsOnCall[i] = struct {
 		result1 pkg.AgentConfiguration
 		result2 error
 	}{result1, result2}
