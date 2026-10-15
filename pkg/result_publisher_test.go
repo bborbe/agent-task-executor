@@ -593,6 +593,85 @@ var _ = Describe("ResultPublisher", func() {
 		)
 	})
 
+	Describe("PublishRestoreAssignee", func() {
+		It(
+			"writes exactly one assignee key and no counter key via UpdateFrontmatterCommand",
+			func() {
+				// Spec 009 AC 7: the re-drive writes no counter key. The parked
+				// fixture carries the keys a parked task really has — an empty
+				// assignee, a previous_assignee left by the failure path, and a
+				// trigger_count — so a restore that echoed any of them would show
+				// up here rather than passing on a minimal fixture.
+				task := lib.Task{
+					TaskIdentifier: lib.TaskIdentifier("test-task-parked"),
+					Frontmatter: lib.TaskFrontmatter{
+						"status":            "in_progress",
+						"phase":             "planning",
+						"assignee":          "",
+						"previous_assignee": "stale-agent",
+						"task_type":         "github-update-go",
+						"target_vault":      "work",
+						"trigger_count":     0,
+						"trigger_scope":     "planning:",
+					},
+				}
+				err := publisher.PublishRestoreAssignee(ctx, task, "correct-agent")
+				Expect(err).NotTo(HaveOccurred())
+
+				Expect(producer.messages).To(HaveLen(1))
+				operation, cmd := decodeUpdateFrontmatterCommand(producer.messages[0])
+
+				Expect(
+					string(operation),
+				).To(Equal(string(taskcmd.UpdateFrontmatterCommandOperation)))
+				Expect(cmd.TaskIdentifier).To(Equal(lib.TaskIdentifier("test-task-parked")))
+				Expect(cmd.TargetVault).To(Equal("work"))
+
+				Expect(cmd.Updates).To(HaveLen(1))
+				Expect(cmd.Updates["assignee"]).To(Equal("correct-agent"))
+
+				for _, key := range []string{
+					"trigger_count",
+					"trigger_scope",
+					"current_job",
+					"status",
+					"phase",
+					"previous_assignee",
+				} {
+					_, hasKey := cmd.Updates[key]
+					Expect(hasKey).To(BeFalse(), key+" must not be in the restore update")
+				}
+				Expect(cmd.Body).To(BeNil())
+
+				// The emitted command must satisfy the lib slug contract the
+				// controller enforces, exactly as every other update here does.
+				Expect(cmd.Validate(ctx)).To(Succeed())
+			},
+		)
+
+		It("returns error when sender fails", func() {
+			failingProducer := &failingSyncProducer{
+				err: errors.New(context.Background(), "kafka: leader not available"),
+			}
+			failingPublisher := pkg.NewResultPublisher(
+				failingProducer,
+				base.TopicPrefix("develop"),
+				currentDateTime,
+			)
+
+			task := lib.Task{
+				TaskIdentifier: lib.TaskIdentifier("test-task-parked-fail"),
+				Frontmatter: lib.TaskFrontmatter{
+					"status":   "in_progress",
+					"assignee": "",
+				},
+			}
+			err := failingPublisher.PublishRestoreAssignee(ctx, task, "correct-agent")
+			Expect(err).To(HaveOccurred())
+			Expect(err.Error()).To(ContainSubstring("kafka: leader not available"))
+		})
+	})
+
 	Describe("PublishIncrementTriggerCount", func() {
 		It("sends IncrementFrontmatterCommand with trigger_count and delta 1", func() {
 			task := lib.Task{

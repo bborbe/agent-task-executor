@@ -81,6 +81,12 @@ type ResultPublisher interface {
 	// task surfaces in the operator inbox via assignee=="" filter. Does not bump
 	// trigger_count or retry_count.
 	PublishTypeMismatchFailure(ctx context.Context, task lib.Task, reason string) error
+	// PublishRestoreAssignee writes the resolved configuration's assignee back
+	// onto a task whose routing value was cleared, so the controller applies the
+	// write and the resulting hash change re-publishes TaskUpdated — the event
+	// the normal spawn path already consumes. Writes the "assignee" key and
+	// nothing else.
+	PublishRestoreAssignee(ctx context.Context, task lib.Task, assignee string) error
 	// PublishRaw publishes a raw payload for testing error paths.
 	PublishRaw(ctx context.Context, operation base.CommandOperation, payload interface{}) error
 }
@@ -355,6 +361,39 @@ func (p *resultPublisher) PublishTypeMismatchFailure(
 		)
 	}
 	return nil
+}
+
+// PublishRestoreAssignee writes a task's routing value back onto its frontmatter
+// after an agent cleared it and parked the task. The value is the resolved
+// configuration's assignee — never the task's recorded prior assignee, which is
+// a history of what the task carried before it was parked rather than a routing
+// decision.
+//
+// This is an UpdateFrontmatterCommand rather than a result publish for the same
+// reason PublishSetTriggerScope is: the write must land on the on-disk
+// frontmatter directly (buildUpdateModifyFn), not be merged through the result
+// writer's ownership guard. PublishTypeMismatchFailure is the precedent that the
+// controller's update path accepts an "assignee" key — it writes that key on the
+// failure path.
+//
+// Updates carries exactly one key, the routing value, and nothing else: this
+// restores routing and touches no counter, no scope, no current_job, no status
+// and no phase. The write is idempotent — every pass over a task the controller
+// has not yet updated re-publishes the same resolved value, and rewriting the
+// same assignee is a no-op on the file.
+func (p *resultPublisher) PublishRestoreAssignee(
+	ctx context.Context,
+	task lib.Task,
+	assignee string,
+) error {
+	cmd := taskcmd.UpdateFrontmatterCommand{
+		TaskIdentifier: task.TaskIdentifier,
+		TargetVault:    targetVaultFromTask(task),
+		Updates: lib.TaskFrontmatter{
+			"assignee": assignee,
+		},
+	}
+	return p.publishRaw(ctx, taskcmd.UpdateFrontmatterCommandOperation, cmd)
 }
 
 func (p *resultPublisher) publishRaw(
