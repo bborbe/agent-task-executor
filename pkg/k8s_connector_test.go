@@ -18,6 +18,7 @@ import (
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/client-go/rest"
 	k8stesting "k8s.io/client-go/testing"
 
@@ -36,6 +37,43 @@ func getCRDFromCreateAction(actions []k8stesting.Action) *apiextensionsv1.Custom
 	crd, ok := createAction.GetObject().(*apiextensionsv1.CustomResourceDefinition)
 	Expect(ok).To(BeTrue(), "expected object to be *CustomResourceDefinition")
 	return crd
+}
+
+func countVerb(actions []k8stesting.Action, verb string) int {
+	count := 0
+	for _, action := range actions {
+		if action.GetVerb() == verb {
+			count++
+		}
+	}
+	return count
+}
+
+// crdResource is the GroupResource a CRD write conflict is reported against.
+var crdResource = schema.GroupResource{
+	Group:    "apiextensions.k8s.io",
+	Resource: "customresourcedefinitions",
+}
+
+// differingCRD is a stored Config CRD whose spec deliberately differs from the one
+// the connector installs, so SetupCustomResourceDefinition takes the update path.
+func differingCRD() *apiextensionsv1.CustomResourceDefinition {
+	return &apiextensionsv1.CustomResourceDefinition{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: "configs.agent.benjamin-borbe.de",
+		},
+		Spec: apiextensionsv1.CustomResourceDefinitionSpec{
+			Group: "agent.benjamin-borbe.de",
+			Names: apiextensionsv1.CustomResourceDefinitionNames{
+				Kind:   "Config",
+				Plural: "configs",
+			},
+			Scope: apiextensionsv1.NamespaceScoped,
+			Versions: []apiextensionsv1.CustomResourceDefinitionVersion{
+				{Name: "v1", Served: true, Storage: true},
+			},
+		},
+	}
 }
 
 var _ = Describe("K8sConnector", func() {
@@ -65,23 +103,7 @@ var _ = Describe("K8sConnector", func() {
 		})
 
 		It("updates CRD when one already exists", func() {
-			existingCRD := &apiextensionsv1.CustomResourceDefinition{
-				ObjectMeta: metav1.ObjectMeta{
-					Name: "configs.agent.benjamin-borbe.de",
-				},
-				Spec: apiextensionsv1.CustomResourceDefinitionSpec{
-					Group: "agent.benjamin-borbe.de",
-					Names: apiextensionsv1.CustomResourceDefinitionNames{
-						Kind:   "Config",
-						Plural: "configs",
-					},
-					Scope: apiextensionsv1.NamespaceScoped,
-					Versions: []apiextensionsv1.CustomResourceDefinitionVersion{
-						{Name: "v1", Served: true, Storage: true},
-					},
-				},
-			}
-			cs := fake.NewSimpleClientset(existingCRD)
+			cs := fake.NewSimpleClientset(differingCRD())
 			connector := pkg.NewK8sConnector(&rest.Config{}, fakeBuilder(cs))
 
 			err := connector.SetupCustomResourceDefinition(ctx)
@@ -92,6 +114,52 @@ var _ = Describe("K8sConnector", func() {
 			Expect(actions).To(HaveLen(2))
 			Expect(actions[0].GetVerb()).To(Equal("get"))
 			Expect(actions[1].GetVerb()).To(Equal("update"))
+		})
+
+		It("retries the update when the CRD was modified concurrently", func() {
+			// The CRD is cluster-scoped and shared by every executor instance, so a
+			// simultaneous rollout leaves the losers writing against a resourceVersion
+			// the winner already bumped. That 409 used to be fatal at startup and the
+			// pod restarted; the loser must re-Get and write again instead.
+			cs := fake.NewSimpleClientset(differingCRD())
+
+			conflicts := 0
+			cs.PrependReactor(
+				"update",
+				"customresourcedefinitions",
+				func(_ k8stesting.Action) (bool, runtime.Object, error) {
+					if conflicts == 0 {
+						conflicts++
+						return true, nil, apierrors.NewConflict(
+							crdResource,
+							"configs.agent.benjamin-borbe.de",
+							stderrors.New("the object has been modified"),
+						)
+					}
+					return false, nil, nil // fall through to the tracker's own update
+				},
+			)
+
+			connector := pkg.NewK8sConnector(&rest.Config{}, fakeBuilder(cs))
+			err := connector.SetupCustomResourceDefinition(ctx)
+			Expect(err).To(BeNil())
+
+			Expect(conflicts).To(Equal(1))
+			Expect(countVerb(cs.Actions(), "update")).To(Equal(2))
+		})
+
+		It("does not update the CRD when the stored spec already matches", func() {
+			// A restart of an unchanged executor must issue no write at all. The write
+			// is what bumps resourceVersion and opens the conflict window for every
+			// other instance, so skipping it is what makes the conflict rare rather
+			// than merely survivable.
+			cs := fake.NewSimpleClientset()
+			connector := pkg.NewK8sConnector(&rest.Config{}, fakeBuilder(cs))
+
+			Expect(connector.SetupCustomResourceDefinition(ctx)).To(BeNil())
+			Expect(connector.SetupCustomResourceDefinition(ctx)).To(BeNil())
+
+			Expect(countVerb(cs.Actions(), "update")).To(Equal(0))
 		})
 
 		It("returns a wrapped error when Get fails with a non-NotFound error", func() {
