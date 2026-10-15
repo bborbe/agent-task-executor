@@ -1,7 +1,8 @@
 ---
-status: generating
+status: approved
 approved: "2026-10-14T21:33:38Z"
 generating: "2026-10-14T21:34:16Z"
+verifying: "2026-10-14T21:52:43Z"
 branch: dark-factory/bug-parked-tasks-never-redrive
 ---
 

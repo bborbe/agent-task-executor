@@ -63,6 +63,19 @@ type FakeResultPublisher struct {
 	publishRawReturnsOnCall map[int]struct {
 		result1 error
 	}
+	PublishRestoreAssigneeStub        func(context.Context, lib.Task, string) error
+	publishRestoreAssigneeMutex       sync.RWMutex
+	publishRestoreAssigneeArgsForCall []struct {
+		arg1 context.Context
+		arg2 lib.Task
+		arg3 string
+	}
+	publishRestoreAssigneeReturns struct {
+		result1 error
+	}
+	publishRestoreAssigneeReturnsOnCall map[int]struct {
+		result1 error
+	}
 	PublishSetTriggerScopeStub        func(context.Context, lib.Task, string, int) error
 	publishSetTriggerScopeMutex       sync.RWMutex
 	publishSetTriggerScopeArgsForCall []struct {
@@ -355,6 +368,69 @@ func (fake *FakeResultPublisher) PublishRawReturnsOnCall(i int, result1 error) {
 		})
 	}
 	fake.publishRawReturnsOnCall[i] = struct {
+		result1 error
+	}{result1}
+}
+
+func (fake *FakeResultPublisher) PublishRestoreAssignee(arg1 context.Context, arg2 lib.Task, arg3 string) error {
+	fake.publishRestoreAssigneeMutex.Lock()
+	ret, specificReturn := fake.publishRestoreAssigneeReturnsOnCall[len(fake.publishRestoreAssigneeArgsForCall)]
+	fake.publishRestoreAssigneeArgsForCall = append(fake.publishRestoreAssigneeArgsForCall, struct {
+		arg1 context.Context
+		arg2 lib.Task
+		arg3 string
+	}{arg1, arg2, arg3})
+	stub := fake.PublishRestoreAssigneeStub
+	fakeReturns := fake.publishRestoreAssigneeReturns
+	fake.recordInvocation("PublishRestoreAssignee", []interface{}{arg1, arg2, arg3})
+	fake.publishRestoreAssigneeMutex.Unlock()
+	if stub != nil {
+		return stub(arg1, arg2, arg3)
+	}
+	if specificReturn {
+		return ret.result1
+	}
+	return fakeReturns.result1
+}
+
+func (fake *FakeResultPublisher) PublishRestoreAssigneeCallCount() int {
+	fake.publishRestoreAssigneeMutex.RLock()
+	defer fake.publishRestoreAssigneeMutex.RUnlock()
+	return len(fake.publishRestoreAssigneeArgsForCall)
+}
+
+func (fake *FakeResultPublisher) PublishRestoreAssigneeCalls(stub func(context.Context, lib.Task, string) error) {
+	fake.publishRestoreAssigneeMutex.Lock()
+	defer fake.publishRestoreAssigneeMutex.Unlock()
+	fake.PublishRestoreAssigneeStub = stub
+}
+
+func (fake *FakeResultPublisher) PublishRestoreAssigneeArgsForCall(i int) (context.Context, lib.Task, string) {
+	fake.publishRestoreAssigneeMutex.RLock()
+	defer fake.publishRestoreAssigneeMutex.RUnlock()
+	argsForCall := fake.publishRestoreAssigneeArgsForCall[i]
+	return argsForCall.arg1, argsForCall.arg2, argsForCall.arg3
+}
+
+func (fake *FakeResultPublisher) PublishRestoreAssigneeReturns(result1 error) {
+	fake.publishRestoreAssigneeMutex.Lock()
+	defer fake.publishRestoreAssigneeMutex.Unlock()
+	fake.PublishRestoreAssigneeStub = nil
+	fake.publishRestoreAssigneeReturns = struct {
+		result1 error
+	}{result1}
+}
+
+func (fake *FakeResultPublisher) PublishRestoreAssigneeReturnsOnCall(i int, result1 error) {
+	fake.publishRestoreAssigneeMutex.Lock()
+	defer fake.publishRestoreAssigneeMutex.Unlock()
+	fake.PublishRestoreAssigneeStub = nil
+	if fake.publishRestoreAssigneeReturnsOnCall == nil {
+		fake.publishRestoreAssigneeReturnsOnCall = make(map[int]struct {
+			result1 error
+		})
+	}
+	fake.publishRestoreAssigneeReturnsOnCall[i] = struct {
 		result1 error
 	}{result1}
 }
