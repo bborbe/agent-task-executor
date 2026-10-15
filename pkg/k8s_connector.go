@@ -12,10 +12,13 @@ import (
 	libk8s "github.com/bborbe/k8s"
 	apiextensionsv1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
 	apiextensionsclient "k8s.io/apiextensions-apiserver/pkg/client/clientset/clientset"
+	apiextensionsv1client "k8s.io/apiextensions-apiserver/pkg/client/clientset/clientset/typed/apiextensions/v1"
+	"k8s.io/apimachinery/pkg/api/equality"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/cache"
+	"k8s.io/client-go/util/retry"
 
 	agentv1 "github.com/bborbe/agent-task-executor/k8s/apis/agent.benjamin-borbe.de/v1"
 	versioned "github.com/bborbe/agent-task-executor/k8s/client/clientset/versioned"
@@ -66,32 +69,85 @@ type k8sConnector struct {
 	crdBuilder CRDClientBuilder
 }
 
+// crdName is the cluster-scoped Config CRD. Every executor instance
+// (openclaw/personal/trading) installs this same object on start.
+const crdName = "configs.agent.benjamin-borbe.de"
+
 // SetupCustomResourceDefinition installs or updates the Config CRD on the cluster.
 func (c *k8sConnector) SetupCustomResourceDefinition(ctx context.Context) error {
 	clientset, err := c.crdBuilder(c.config)
 	if err != nil {
 		return errors.Wrapf(ctx, err, "build apiextensions clientset")
 	}
-	crds := clientset.ApiextensionsV1().CustomResourceDefinitions()
-	existing, err := crds.Get(ctx, "configs.agent.benjamin-borbe.de", metav1.GetOptions{})
-	if apierrors.IsNotFound(err) {
-		crd := &apiextensionsv1.CustomResourceDefinition{
-			ObjectMeta: metav1.ObjectMeta{Name: "configs.agent.benjamin-borbe.de"},
-			Spec:       desiredCRDSpec(),
+	return ensureCRD(ctx, clientset.ApiextensionsV1().CustomResourceDefinitions())
+}
+
+// ensureCRD creates the Config CRD when the cluster has none, and updates it when the
+// stored spec differs from the one this executor installs.
+//
+// The Get->Update runs inside RetryOnConflict because the CRD is cluster-scoped and
+// shared: every executor instance installs it on start, so a simultaneous rollout
+// leaves the losers writing against a resourceVersion the winner already bumped. That
+// was a fatal 409 "object has been modified" during startup, and the pod restarted.
+// Each attempt re-Gets, so the retry carries a fresh resourceVersion instead of
+// replaying the stale one.
+//
+// The Update is skipped when the specs already match: a restart of an otherwise
+// unchanged executor then issues no write at all, and fewer writes mean fewer
+// resourceVersion bumps — which makes the conflict rare rather than merely survivable.
+func ensureCRD(
+	ctx context.Context,
+	crds apiextensionsv1client.CustomResourceDefinitionInterface,
+) error {
+	return retry.RetryOnConflict(retry.DefaultRetry, func() error {
+		existing, err := crds.Get(ctx, crdName, metav1.GetOptions{})
+		if apierrors.IsNotFound(err) {
+			if _, err := crds.Create(ctx, desiredCRD(), metav1.CreateOptions{}); err != nil {
+				return errors.Wrapf(ctx, err, "create CRD")
+			}
+			return nil
 		}
-		if _, err := crds.Create(ctx, crd, metav1.CreateOptions{}); err != nil {
-			return errors.Wrapf(ctx, err, "create CRD")
+		if err != nil {
+			return errors.Wrapf(ctx, err, "get CRD")
+		}
+		desired := desiredCRD()
+		if crdSpecEqual(existing.Spec, desired.Spec) {
+			return nil
+		}
+		existing.Spec = desired.Spec
+		if _, err := crds.Update(ctx, existing, metav1.UpdateOptions{}); err != nil {
+			return errors.Wrapf(ctx, err, "update CRD")
 		}
 		return nil
+	})
+}
+
+// desiredCRD is the Config CRD as this executor installs it, with the API server's own
+// CRD defaults already applied.
+//
+// The defaulting is load-bearing for the no-op check in ensureCRD, not cosmetic: the
+// server stores `spec.conversion.strategy: None` on create, while desiredCRDSpec leaves
+// Conversion nil. Comparing a stored spec against an undefaulted desired one would
+// therefore never be equal, and the Update would be re-issued on every single executor
+// start — exactly the needless write the no-op check exists to prevent.
+func desiredCRD() *apiextensionsv1.CustomResourceDefinition {
+	crd := &apiextensionsv1.CustomResourceDefinition{
+		ObjectMeta: metav1.ObjectMeta{Name: crdName},
+		Spec:       desiredCRDSpec(),
 	}
-	if err != nil {
-		return errors.Wrapf(ctx, err, "get CRD")
-	}
-	existing.Spec = desiredCRDSpec()
-	if _, err := crds.Update(ctx, existing, metav1.UpdateOptions{}); err != nil {
-		return errors.Wrapf(ctx, err, "update CRD")
-	}
-	return nil
+	apiextensionsv1.SetDefaults_CustomResourceDefinitionSpec(&crd.Spec)
+	return crd
+}
+
+// crdSpecEqual reports whether the cluster's stored CRD spec already matches the one
+// this executor installs. Both sides are run through the API server's CRD defaults
+// first, so the comparison is between two copies of the form the server stores.
+func crdSpecEqual(existing, desired apiextensionsv1.CustomResourceDefinitionSpec) bool {
+	existingDefaults := existing.DeepCopy()
+	apiextensionsv1.SetDefaults_CustomResourceDefinitionSpec(existingDefaults)
+	desiredDefaults := desired.DeepCopy()
+	apiextensionsv1.SetDefaults_CustomResourceDefinitionSpec(desiredDefaults)
+	return equality.Semantic.DeepEqual(*existingDefaults, *desiredDefaults)
 }
 
 // defaultResync is the re-sync period for the shared informer factory.
@@ -158,7 +214,7 @@ func desiredCRDSpec() apiextensionsv1.CustomResourceDefinitionSpec {
 }
 
 // configSpecSchema is the authoritative schema for Config.spec — SetupCustomResourceDefinition
-// overwrites the cluster CRD with it on EVERY executor start.
+// writes it into the cluster CRD whenever the stored spec differs from it.
 //
 // Any field added to AgentConfiguration must be added here too, or the API server prunes it
 // from every Config within seconds of the next restart. The failure is silent and reads as
