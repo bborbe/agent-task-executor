@@ -391,6 +391,14 @@ func (f *fakeResultPublisher) PublishTypeMismatchFailure(
 	return nil
 }
 
+func (f *fakeResultPublisher) PublishRestoreAssignee(
+	ctx context.Context,
+	task lib.Task,
+	assignee string,
+) error {
+	return nil
+}
+
 func (f *fakeResultPublisher) PublishRaw(
 	ctx context.Context,
 	operation base.CommandOperation,

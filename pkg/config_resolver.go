@@ -19,12 +19,26 @@ import (
 // Config in the store has a matching Spec.Assignee.
 var ErrConfigNotFound = stderrors.New("config not found")
 
+// ErrConfigAmbiguous is returned by ConfigResolver.ResolveByTaskType when more
+// than one Config in the store declares the requested task_type. The executor
+// does not guess between them: the ambiguous task is left untouched and the
+// skip is logged, so an operator can narrow the Configs' taskTypes.
+var ErrConfigAmbiguous = stderrors.New("config ambiguous")
+
 //counterfeiter:generate -o ../mocks/config_resolver.go --fake-name FakeConfigResolver . ConfigResolver
 
-// ConfigResolver looks up the AgentConfiguration for an assignee by
-// iterating the in-memory Config store and converting the matching entry.
+// ConfigResolver looks up the AgentConfiguration for an assignee, and — on
+// the recovery path — for a task's task_type.
 type ConfigResolver interface {
 	Resolve(ctx context.Context, assignee string) (AgentConfiguration, error)
+	// ResolveByTaskType looks up the single AgentConfiguration whose effective
+	// task-type set ({Spec.TaskType} ∪ Spec.TaskTypes) contains taskType. It is
+	// the recovery path's routing lookup for a task whose assignee was cleared:
+	// the task's own task_type still identifies exactly one agent.
+	//
+	// Returns ErrConfigNotFound when no Config declares taskType, and
+	// ErrConfigAmbiguous when more than one does.
+	ResolveByTaskType(ctx context.Context, taskType string) (AgentConfiguration, error)
 }
 
 // NewConfigResolver returns a ConfigResolver backed by the given
@@ -98,6 +112,55 @@ func (r *configResolver) Resolve(
 		"find composed assignee %q",
 		composed,
 	)
+}
+
+// ResolveByTaskType returns the single AgentConfiguration whose effective
+// task-type set contains taskType. It is deliberately vault-agnostic: the
+// lookup scans every Config the executor's informer holds, keyed on the task
+// type rather than the assignee.
+func (r *configResolver) ResolveByTaskType(
+	ctx context.Context,
+	taskType string,
+) (AgentConfiguration, error) {
+	items, err := r.provider.Get(ctx)
+	if err != nil {
+		return AgentConfiguration{}, errors.Wrapf(ctx, err, "list agent configs")
+	}
+	var matches []agentv1.Config
+	for _, it := range items {
+		select {
+		case <-ctx.Done():
+			return AgentConfiguration{}, errors.Wrapf(
+				ctx,
+				ctx.Err(),
+				"resolve config by task_type %q cancelled",
+				taskType,
+			)
+		default:
+		}
+		if TaskTypeInSet(taskType, EffectiveTaskTypes(it.Spec.TaskType, it.Spec.TaskTypes)) {
+			matches = append(matches, it)
+		}
+	}
+	switch len(matches) {
+	case 0:
+		return AgentConfiguration{}, errors.Wrapf(
+			ctx,
+			ErrConfigNotFound,
+			"find config for task_type %q",
+			taskType,
+		)
+	case 1:
+		return convert(ctx, matches[0], r.branch.String())
+	default:
+		return AgentConfiguration{}, errors.Wrapf(
+			ctx,
+			ErrConfigAmbiguous,
+			"task_type %q matches %d configs",
+			taskType,
+			len(matches),
+		)
+	}
 }
 
 func convert(ctx context.Context, obj agentv1.Config, branch string) (AgentConfiguration, error) {

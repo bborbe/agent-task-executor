@@ -439,6 +439,52 @@ func (h *taskEventHandler) resolveConfig(
 	return &resolved, false, nil
 }
 
+// resolveConfigForReconcile resolves the agent Config for a task on the reconcile
+// floor's recovery path. It calls resolveConfig first (which resolves by assignee
+// only) and falls back to a lookup by the task's declared task_type when the
+// assignee is empty and the task_type is non-empty.
+//
+// It exists separately from resolveConfig because resolveConfig is also called by
+// parseAndFilter — the Kafka consumer path. That path must NOT gain this fallback:
+// an ambiguous declared type would return an error out of ConsumeMessage and tear
+// the consumer loop down with the offset unmarked, wedging on redelivery. Only
+// reconcileTask calls this function.
+//
+// Returns (nil, true, nil) when neither the assignee nor the declared task_type
+// resolves to a Config: the task carries no routing information this executor can
+// use. The skip is attributed to the existing skipped_unknown_assignee label on
+// TaskEventsTotal; SkippedUnknownAssigneeTotal is deliberately NOT incremented,
+// because that counter is keyed on a routing value and there is none.
+// ErrConfigAmbiguous and any other error are returned unchanged so the caller can
+// log them with the task in hand.
+func (h *taskEventHandler) resolveConfigForReconcile(
+	ctx context.Context,
+	task lib.Task,
+) (*pkg.AgentConfiguration, bool, error) {
+	config, skip, err := h.resolveConfig(ctx, task)
+	if err != nil || skip || config != nil {
+		return config, skip, err
+	}
+	taskType := task.Frontmatter.TaskType()
+	if taskType == "" {
+		return nil, false, nil
+	}
+	resolved, err := h.resolver.ResolveByTaskType(ctx, string(taskType))
+	if err != nil {
+		if stderrors.Is(err, pkg.ErrConfigNotFound) {
+			glog.V(2).Infof(
+				"skip task %s: task_type %s resolves to no config",
+				task.TaskIdentifier,
+				taskType,
+			)
+			metrics.TaskEventsTotal.WithLabelValues("skipped_unknown_assignee").Inc()
+			return nil, true, nil
+		}
+		return nil, false, err
+	}
+	return &resolved, false, nil
+}
+
 // taskTypeMismatchReason returns a non-empty reason string when the task's task_type is not in the
 // agent's effective type set. Returns "" when the filter passes (match or effective set is empty).
 func taskTypeMismatchReason(task lib.Task, cfg *pkg.AgentConfiguration) string {
@@ -871,8 +917,12 @@ func (h *taskEventHandler) RunDeferredRespawnLoop(ctx context.Context) error {
 }
 
 // ReconcileOnce runs a single reconcile pass: lists the task files under the
-// configured task glob via git-rest, parses each file's frontmatter, and
-// re-drives every eligible task through the existing spawnIfNeeded path.
+// configured task glob via git-rest, parses each file's frontmatter, and drives
+// every eligible task. There are two outcomes for an eligible task: a parked
+// task — one whose routing value was cleared but whose declared task_type
+// resolves to a Config — gets that Config's assignee written back onto it (no
+// Job is spawned; the write's TaskUpdated drives the normal spawn path), and
+// every other eligible task is re-driven through the existing spawnIfNeeded path.
 //
 // The reconcile loop is the source-of-truth floor (spec 005): it derives state
 // from the world — the vault via git-rest, live Jobs via the spawner — rather
@@ -995,15 +1045,33 @@ func (h *taskEventHandler) reconcileOne(
 		seen[task.TaskIdentifier] = struct{}{}
 	}
 	if err != nil {
-		glog.Warningf("event=reconcile_skip path=%s reason=resolve_error err=%v", relPath, err)
+		glog.Warningf(
+			"event=reconcile_skip path=%s reason=resolve_error task=%s task_type=%s err=%v",
+			relPath,
+			task.TaskIdentifier,
+			task.Frontmatter.TaskType(),
+			err,
+		)
 		return reconcileOutcomeSkipped
 	}
 	if !ok {
-		// Left the eligibility filter — it advanced, or its assignee was cleared.
-		// Nothing to clear here: the streak's phase key is what retires a task
-		// that genuinely moved on, and a task that left the filter is not spawned
-		// again either way.
+		// Left the eligibility filter — it advanced, or it carries no routing
+		// information at all (an empty assignee whose declared task_type resolves
+		// to no Config). Nothing to clear here: the streak's phase key is what
+		// retires a task that genuinely moved on, and a task that left the filter
+		// is not spawned again either way.
 		return reconcileOutcomeSkipped
+	}
+	// A parked task whose declared task_type resolved to a Config: restoring the
+	// routing value is the whole action. The restore consumes no spawn budget, so
+	// this branches BEFORE the streak cap — a task the floor already re-drove
+	// maxConsecutiveRedrives times at this phase must still get its routing value
+	// back, otherwise it returns capped and stays parked forever, which is exactly
+	// the re-drive-and-re-park class this recovery path exists for. No Job is
+	// spawned here: the restore changes the file, the controller publishes
+	// TaskUpdated for it, and that event drives the normal spawn path.
+	if task.Frontmatter.Assignee() == "" {
+		return h.restoreParkedAssignee(ctx, task, config, relPath)
 	}
 	// Checked here as well as in spawnIfNeeded so the pass summary can report the
 	// skip as `capped` rather than folding it into `deferred`. Only the capped
@@ -1028,11 +1096,44 @@ func (h *taskEventHandler) reconcileOne(
 	return reconcileOutcomeRedriven
 }
 
+// restoreParkedAssignee publishes the resolved configuration's assignee back onto
+// a parked task and reports the outcome. See reconcileOne for why it branches
+// before the consecutive-re-drive cap and why no Job is spawned here.
+//
+// A publish failure is a skip, not a pass failure: ReconcileOnce never returns a
+// vault-side error, and the next tick retries.
+func (h *taskEventHandler) restoreParkedAssignee(
+	ctx context.Context,
+	task lib.Task,
+	config *pkg.AgentConfiguration,
+	relPath string,
+) reconcileOutcome {
+	if err := h.resultPublisher.PublishRestoreAssignee(ctx, task, config.Assignee); err != nil {
+		glog.Warningf(
+			"event=reconcile_skip task=%s reason=restore_error err=%v",
+			task.TaskIdentifier,
+			err,
+		)
+		return reconcileOutcomeSkipped
+	}
+	metrics.ReconcileRedrivenTotal.Inc()
+	glog.Infof(
+		"event=reconcile_redrive task=%s path=%s reason=restore_assignee assignee=%s",
+		task.TaskIdentifier,
+		relPath,
+		config.Assignee,
+	)
+	return reconcileOutcomeRedriven
+}
+
 // reconcileTask parses a task file and applies the reconcile eligibility filter.
 // Returns (task, config, ok, err): ok=false when the file is not an eligible
 // task (unparseable frontmatter, missing task_identifier, status not in the
-// Config's trigger set, phase not in the Config's trigger set, stage mismatch,
-// empty assignee, or unresolvable Config) — mirroring parseAndFilter's gates.
+// Config's trigger set, phase not in the Config's trigger set, stage mismatch, or
+// no routing information — an empty assignee whose declared task_type resolves to
+// no Config) — mirroring parseAndFilter's gates, except that a parked task whose
+// declared task_type resolves IS eligible here and is not eligible on the Kafka
+// path.
 //
 // The trigger sets come from the resolved Config via effectiveTriggerPhases /
 // effectiveTriggerStatuses, NOT from the hardcoded defaults. Those helpers still
@@ -1058,9 +1159,9 @@ func (h *taskEventHandler) reconcileTask(
 	if !ok {
 		return task, nil, false, nil
 	}
-	config, skip, err := h.resolveConfig(ctx, task)
+	config, skip, err := h.resolveConfigForReconcile(ctx, task)
 	if err != nil {
-		return lib.Task{}, nil, false, err
+		return task, nil, false, err
 	}
 	if skip {
 		return task, nil, false, nil
@@ -1075,7 +1176,11 @@ func (h *taskEventHandler) reconcileTask(
 	if task.Frontmatter.Stage() != string(h.branch) {
 		return task, nil, false, nil
 	}
-	if task.Frontmatter.Assignee() == "" {
+	// A parked task (empty routing value) is eligible when its declared
+	// task_type resolved to a Config on this floor-only path. resolveConfig
+	// returns no Config for an empty assignee, so a non-nil config here means
+	// the declared type resolved. A task with neither is still ineligible.
+	if task.Frontmatter.Assignee() == "" && config == nil {
 		return task, nil, false, nil
 	}
 	return task, config, true, nil

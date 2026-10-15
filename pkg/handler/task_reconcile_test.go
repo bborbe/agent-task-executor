@@ -770,4 +770,234 @@ var _ = Describe("TaskEventHandler reconcile loop", func() {
 			Expect(fakeSpawner.SpawnJobCallCount()).To(Equal(1))
 		},
 	)
+
+	// Spec 009: the parked-task recovery path. A task an agent parked — its own
+	// assignee cleared, status still in_progress, at a trigger phase, no
+	// current_job — is invisible to every spawn gate because they all read
+	// assignee. Its declared task_type still identifies exactly one Config, so the
+	// floor resolves that Config and writes its assignee back. It does NOT spawn:
+	// the write changes the file, the controller publishes TaskUpdated for it, and
+	// that event drives the normal spawn path with every existing guard in place.
+
+	// parkedTask builds the vault shape of a parked task. taskType is what still
+	// routes it.
+	parkedTask := func(phase domain.TaskPhase, taskType string) lib.Task {
+		return lib.Task{
+			TaskIdentifier: lib.TaskIdentifier("tid-parked"),
+			Frontmatter: lib.TaskFrontmatter{
+				"status":    "in_progress",
+				"phase":     string(phase),
+				"assignee":  "",
+				"stage":     "prod",
+				"task_type": taskType,
+			},
+		}
+	}
+
+	// restoreConfig is the Config a parked task's declared type resolves to. Its
+	// assignee is deliberately distinct from the fake's Resolve default ("claude")
+	// so a spec cannot pass by reading the wrong resolution.
+	restoreConfig := pkg.AgentConfiguration{
+		Assignee: "correct-agent",
+		Image:    "my-image:latest",
+	}
+
+	It("restores a parked task's routing value with no operator write (AC 1)", func() {
+		fakeResolver.ResolveByTaskTypeReturns(restoreConfig, nil)
+		fakeGitRestClient.ListReturns([]string{"24 Tasks/tid-parked.md"}, nil)
+		fakeGitRestClient.GetReturns(
+			[]byte(renderTaskFile(parkedTask(domain.TaskPhasePlanning, "github-update-go"))),
+			nil,
+		)
+
+		before := testutil.ToFloat64(metrics.ReconcileRedrivenTotal)
+		Expect(h.ReconcileOnce(ctx)).To(Succeed())
+
+		// Exactly one frontmatter update, naming that task.
+		Expect(fakeResultPublisher.PublishRestoreAssigneeCallCount()).To(Equal(1))
+		_, publishedTask, assignee := fakeResultPublisher.PublishRestoreAssigneeArgsForCall(0)
+		Expect(publishedTask.TaskIdentifier).To(Equal(lib.TaskIdentifier("tid-parked")))
+		Expect(assignee).To(Equal("correct-agent"))
+
+		// The declared task_type is what resolved it — not the assignee, which is
+		// empty, and not previous_assignee, which this fixture does not carry.
+		Expect(fakeResolver.ResolveByTaskTypeCallCount()).To(Equal(1))
+		_, resolvedType := fakeResolver.ResolveByTaskTypeArgsForCall(0)
+		Expect(resolvedType).To(Equal("github-update-go"))
+
+		// The restore is the whole action: no Job, and the pass counts it redriven.
+		Expect(fakeSpawner.SpawnJobCallCount()).To(Equal(0))
+		Expect(testutil.ToFloat64(metrics.ReconcileRedrivenTotal)).To(Equal(before + 1))
+	})
+
+	It("writes the resolved Config's assignee, never previous_assignee (AC 2)", func() {
+		fakeResolver.ResolveByTaskTypeReturns(restoreConfig, nil)
+		task := parkedTask(domain.TaskPhasePlanning, "github-update-go")
+		task.Frontmatter["previous_assignee"] = "stale-agent"
+		fakeGitRestClient.ListReturns([]string{"24 Tasks/tid-parked.md"}, nil)
+		fakeGitRestClient.GetReturns([]byte(renderTaskFile(task)), nil)
+
+		Expect(h.ReconcileOnce(ctx)).To(Succeed())
+
+		Expect(fakeResultPublisher.PublishRestoreAssigneeCallCount()).To(Equal(1))
+		_, _, assignee := fakeResultPublisher.PublishRestoreAssigneeArgsForCall(0)
+		Expect(assignee).To(Equal("correct-agent"))
+
+		// stale-agent appears in no published command at all. Reading
+		// previous_assignee as a routing source is the substitution the operator
+		// runbook records a full night lost to (2026-09-13).
+		for i := 0; i < fakeResultPublisher.PublishRestoreAssigneeCallCount(); i++ {
+			_, _, published := fakeResultPublisher.PublishRestoreAssigneeArgsForCall(i)
+			Expect(published).NotTo(Equal("stale-agent"))
+		}
+		Expect(fakeSpawner.SpawnJobCallCount()).To(Equal(0))
+	})
+
+	It("publishes nothing when the declared task_type matches no Config (AC 3)", func() {
+		fakeResolver.ResolveByTaskTypeReturns(pkg.AgentConfiguration{}, pkg.ErrConfigNotFound)
+		fakeGitRestClient.ListReturns([]string{"24 Tasks/tid-parked.md"}, nil)
+		fakeGitRestClient.GetReturns(
+			[]byte(renderTaskFile(parkedTask(domain.TaskPhasePlanning, "no-such-type"))),
+			nil,
+		)
+
+		before := testutil.ToFloat64(
+			metrics.TaskEventsTotal.WithLabelValues("skipped_unknown_assignee"),
+		)
+		Expect(h.ReconcileOnce(ctx)).To(Succeed())
+
+		Expect(fakeResultPublisher.PublishRestoreAssigneeCallCount()).To(Equal(0))
+		Expect(fakeSpawner.SpawnJobCallCount()).To(Equal(0))
+		// The skip reuses the existing unknown-assignee label rather than adding a
+		// metric: the task carries no routing information this executor can use.
+		Expect(
+			testutil.ToFloat64(
+				metrics.TaskEventsTotal.WithLabelValues("skipped_unknown_assignee"),
+			),
+		).To(Equal(before + 1))
+	})
+
+	It("does not rewrite a task that already carries an assignee (AC 4)", func() {
+		fakeGitRestClient.ListReturns([]string{"24 Tasks/tid-a.md"}, nil)
+		fakeGitRestClient.GetReturns(
+			[]byte(renderTaskFile(eligibleTask(domain.TaskPhaseExecution))),
+			nil,
+		)
+		fakeSpawner.IsJobActiveReturns(false, nil)
+
+		Expect(h.ReconcileOnce(ctx)).To(Succeed())
+
+		Expect(fakeResultPublisher.PublishRestoreAssigneeCallCount()).To(Equal(0))
+		// The by-type fallback is not consulted at all for a routable task.
+		Expect(fakeResolver.ResolveByTaskTypeCallCount()).To(Equal(0))
+		Expect(fakeSpawner.SpawnJobCallCount()).To(Equal(1))
+	})
+
+	DescribeTable("does not re-drive a terminal task (AC 5)",
+		func(status string) {
+			task := parkedTask(domain.TaskPhaseExecution, "github-update-go")
+			task.Frontmatter["status"] = status
+			fakeResolver.ResolveByTaskTypeReturns(restoreConfig, nil)
+			fakeGitRestClient.ListReturns([]string{"24 Tasks/tid-parked.md"}, nil)
+			fakeGitRestClient.GetReturns([]byte(renderTaskFile(task)), nil)
+
+			Expect(h.ReconcileOnce(ctx)).To(Succeed())
+			Expect(fakeResultPublisher.PublishRestoreAssigneeCallCount()).To(Equal(0))
+			Expect(fakeSpawner.SpawnJobCallCount()).To(Equal(0))
+		},
+		Entry("status completed", "completed"),
+		Entry("status aborted", "aborted"),
+	)
+
+	It("does not re-drive a parked task outside its Config's trigger set (AC 6)", func() {
+		fakeResolver.ResolveByTaskTypeReturns(
+			pkg.AgentConfiguration{
+				Assignee: "correct-agent",
+				Image:    "my-image:latest",
+				Trigger: &agentv1.Trigger{
+					Phases:   domain.TaskPhases{domain.TaskPhaseExecution},
+					Statuses: domain.TaskStatuses{domain.TaskStatusInProgress},
+				},
+			},
+			nil,
+		)
+		fakeGitRestClient.ListReturns([]string{"24 Tasks/tid-parked.md"}, nil)
+		fakeGitRestClient.GetReturns(
+			[]byte(renderTaskFile(parkedTask(domain.TaskPhaseHumanReview, "github-update-go"))),
+			nil,
+		)
+
+		Expect(h.ReconcileOnce(ctx)).To(Succeed())
+		Expect(fakeResultPublisher.PublishRestoreAssigneeCallCount()).To(Equal(0))
+		Expect(fakeSpawner.SpawnJobCallCount()).To(Equal(0))
+	})
+
+	It("writes no counter key on the restore path (AC 7)", func() {
+		fakeResolver.ResolveByTaskTypeReturns(restoreConfig, nil)
+		fakeGitRestClient.ListReturns([]string{"24 Tasks/tid-parked.md"}, nil)
+		fakeGitRestClient.GetReturns(
+			[]byte(renderTaskFile(parkedTask(domain.TaskPhaseExecution, "github-update-go"))),
+			nil,
+		)
+
+		Expect(h.ReconcileOnce(ctx)).To(Succeed())
+
+		// The restore is the only command emitted. Neither counter-writing command
+		// is sent, and nothing else touches the task. The Updates map itself — a
+		// single assignee key — is pinned in result_publisher_test.go, which can
+		// decode the emitted command; the fake here records only call arguments.
+		Expect(fakeResultPublisher.PublishRestoreAssigneeCallCount()).To(Equal(1))
+		Expect(fakeResultPublisher.PublishIncrementTriggerCountCallCount()).To(Equal(0))
+		Expect(fakeResultPublisher.PublishSetTriggerScopeCallCount()).To(Equal(0))
+		Expect(fakeResultPublisher.PublishSpawnNotificationCallCount()).To(Equal(0))
+		Expect(fakeResultPublisher.PublishClearCurrentJobCallCount()).To(Equal(0))
+	})
+
+	It(
+		"leaves a parked task untouched when its declared type is ambiguous (failure mode 2)",
+		func() {
+			// Two Configs declaring the same task_type: the executor does not guess.
+			// resolveConfigForReconcile returns the error unchanged and reconcileOne's
+			// resolve_error branch — which names the task and its task_type — turns it
+			// into a skip, so the ambiguity is diagnosable and the pass still completes.
+			fakeResolver.ResolveByTaskTypeReturns(pkg.AgentConfiguration{}, pkg.ErrConfigAmbiguous)
+			fakeGitRestClient.ListReturns([]string{"24 Tasks/tid-parked.md"}, nil)
+			fakeGitRestClient.GetReturns(
+				[]byte(renderTaskFile(parkedTask(domain.TaskPhaseExecution, "shared-type"))),
+				nil,
+			)
+
+			Expect(h.ReconcileOnce(ctx)).To(Succeed())
+			Expect(fakeResolver.ResolveByTaskTypeCallCount()).To(Equal(1))
+			Expect(fakeResultPublisher.PublishRestoreAssigneeCallCount()).To(Equal(0))
+			Expect(fakeSpawner.SpawnJobCallCount()).To(Equal(0))
+		},
+	)
+
+	It("leaves a parked task with no declared type untouched (no routing information)", func() {
+		task := parkedTask(domain.TaskPhaseExecution, "")
+		delete(task.Frontmatter, "task_type")
+		fakeGitRestClient.ListReturns([]string{"24 Tasks/tid-parked.md"}, nil)
+		fakeGitRestClient.GetReturns([]byte(renderTaskFile(task)), nil)
+
+		Expect(h.ReconcileOnce(ctx)).To(Succeed())
+		Expect(fakeResultPublisher.PublishRestoreAssigneeCallCount()).To(Equal(0))
+		Expect(fakeSpawner.SpawnJobCallCount()).To(Equal(0))
+		// No lookup is attempted without a type to look up.
+		Expect(fakeResolver.ResolveByTaskTypeCallCount()).To(Equal(0))
+	})
+
+	It("skips the file when the restore publish fails and does not fail the pass", func() {
+		fakeResolver.ResolveByTaskTypeReturns(restoreConfig, nil)
+		fakeResultPublisher.PublishRestoreAssigneeReturns(errors.Errorf(ctx, "kafka: boom"))
+		fakeGitRestClient.ListReturns([]string{"24 Tasks/tid-parked.md"}, nil)
+		fakeGitRestClient.GetReturns(
+			[]byte(renderTaskFile(parkedTask(domain.TaskPhaseExecution, "github-update-go"))),
+			nil,
+		)
+
+		// A publish failure is a skip, not a pass failure: the next tick retries.
+		Expect(h.ReconcileOnce(ctx)).To(Succeed())
+		Expect(fakeSpawner.SpawnJobCallCount()).To(Equal(0))
+	})
 })
