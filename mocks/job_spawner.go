@@ -39,6 +39,20 @@ type FakeJobSpawner struct {
 		result1 bool
 		result2 error
 	}
+	ListActiveJobsStub        func(context.Context, string) (map[lib.TaskIdentifier]bool, error)
+	listActiveJobsMutex       sync.RWMutex
+	listActiveJobsArgsForCall []struct {
+		arg1 context.Context
+		arg2 string
+	}
+	listActiveJobsReturns struct {
+		result1 map[lib.TaskIdentifier]bool
+		result2 error
+	}
+	listActiveJobsReturnsOnCall map[int]struct {
+		result1 map[lib.TaskIdentifier]bool
+		result2 error
+	}
 	SpawnJobStub        func(context.Context, lib.Task, pkg.AgentConfiguration) (string, error)
 	spawnJobMutex       sync.RWMutex
 	spawnJobArgsForCall []struct {
@@ -184,6 +198,71 @@ func (fake *FakeJobSpawner) IsJobActiveReturnsOnCall(i int, result1 bool, result
 	}
 	fake.isJobActiveReturnsOnCall[i] = struct {
 		result1 bool
+		result2 error
+	}{result1, result2}
+}
+
+func (fake *FakeJobSpawner) ListActiveJobs(arg1 context.Context, arg2 string) (map[lib.TaskIdentifier]bool, error) {
+	fake.listActiveJobsMutex.Lock()
+	ret, specificReturn := fake.listActiveJobsReturnsOnCall[len(fake.listActiveJobsArgsForCall)]
+	fake.listActiveJobsArgsForCall = append(fake.listActiveJobsArgsForCall, struct {
+		arg1 context.Context
+		arg2 string
+	}{arg1, arg2})
+	stub := fake.ListActiveJobsStub
+	fakeReturns := fake.listActiveJobsReturns
+	fake.recordInvocation("ListActiveJobs", []interface{}{arg1, arg2})
+	fake.listActiveJobsMutex.Unlock()
+	if stub != nil {
+		return stub(arg1, arg2)
+	}
+	if specificReturn {
+		return ret.result1, ret.result2
+	}
+	return fakeReturns.result1, fakeReturns.result2
+}
+
+func (fake *FakeJobSpawner) ListActiveJobsCallCount() int {
+	fake.listActiveJobsMutex.RLock()
+	defer fake.listActiveJobsMutex.RUnlock()
+	return len(fake.listActiveJobsArgsForCall)
+}
+
+func (fake *FakeJobSpawner) ListActiveJobsCalls(stub func(context.Context, string) (map[lib.TaskIdentifier]bool, error)) {
+	fake.listActiveJobsMutex.Lock()
+	defer fake.listActiveJobsMutex.Unlock()
+	fake.ListActiveJobsStub = stub
+}
+
+func (fake *FakeJobSpawner) ListActiveJobsArgsForCall(i int) (context.Context, string) {
+	fake.listActiveJobsMutex.RLock()
+	defer fake.listActiveJobsMutex.RUnlock()
+	argsForCall := fake.listActiveJobsArgsForCall[i]
+	return argsForCall.arg1, argsForCall.arg2
+}
+
+func (fake *FakeJobSpawner) ListActiveJobsReturns(result1 map[lib.TaskIdentifier]bool, result2 error) {
+	fake.listActiveJobsMutex.Lock()
+	defer fake.listActiveJobsMutex.Unlock()
+	fake.ListActiveJobsStub = nil
+	fake.listActiveJobsReturns = struct {
+		result1 map[lib.TaskIdentifier]bool
+		result2 error
+	}{result1, result2}
+}
+
+func (fake *FakeJobSpawner) ListActiveJobsReturnsOnCall(i int, result1 map[lib.TaskIdentifier]bool, result2 error) {
+	fake.listActiveJobsMutex.Lock()
+	defer fake.listActiveJobsMutex.Unlock()
+	fake.ListActiveJobsStub = nil
+	if fake.listActiveJobsReturnsOnCall == nil {
+		fake.listActiveJobsReturnsOnCall = make(map[int]struct {
+			result1 map[lib.TaskIdentifier]bool
+			result2 error
+		})
+	}
+	fake.listActiveJobsReturnsOnCall[i] = struct {
+		result1 map[lib.TaskIdentifier]bool
 		result2 error
 	}{result1, result2}
 }
