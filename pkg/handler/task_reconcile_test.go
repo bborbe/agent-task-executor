@@ -354,7 +354,7 @@ var _ = Describe("TaskEventHandler reconcile loop", func() {
 				"stage":    "prod",
 			},
 		}, func() {
-			fakeSpawner.IsJobActiveReturns(true, nil)
+			fakeSpawner.ListActiveJobsReturns(map[lib.TaskIdentifier]bool{"tid-a": true}, nil)
 		}),
 		Entry("stage mismatch (stage dev, executor branch prod)", lib.Task{
 			TaskIdentifier: "tid-a",
@@ -376,8 +376,7 @@ var _ = Describe("TaskEventHandler reconcile loop", func() {
 			},
 			nil,
 		)
-		fakeSpawner.CountActiveJobsReturns(1, nil) // at cap
-		fakeSpawner.IsJobActiveReturns(false, nil)
+		fakeSpawner.ListActiveJobsReturns(activeJobs(1), nil) // at cap
 		fakeGitRestClient.ListReturns([]string{"24 Tasks/tid-a.md"}, nil)
 		fakeGitRestClient.GetReturns(
 			[]byte(renderTaskFile(eligibleTask(domain.TaskPhaseExecution))),
@@ -575,7 +574,6 @@ var _ = Describe("TaskEventHandler reconcile loop", func() {
 				nil,
 			)
 			var spawned atomic.Int64
-			fakeSpawner.CountActiveJobsReturns(0, nil)
 			fakeSpawner.SpawnJobStub = func(
 				_ context.Context,
 				_ lib.Task,
@@ -584,12 +582,15 @@ var _ = Describe("TaskEventHandler reconcile loop", func() {
 				spawned.Add(1)
 				return "job-name", nil
 			}
-			fakeSpawner.IsJobActiveStub = func(
+			fakeSpawner.ListActiveJobsStub = func(
 				_ context.Context,
-				_ lib.TaskIdentifier,
-			) (bool, error) {
+				_ string,
+			) (map[lib.TaskIdentifier]bool, error) {
 				time.Sleep(20 * time.Millisecond)
-				return spawned.Load() > 0, nil
+				if spawned.Load() > 0 {
+					return map[lib.TaskIdentifier]bool{"tid-double-spawn": true}, nil
+				}
+				return map[lib.TaskIdentifier]bool{}, nil
 			}
 			fakeGitRestClient.IsReadyReturns(true, nil)
 
@@ -661,8 +662,7 @@ var _ = Describe("TaskEventHandler reconcile loop", func() {
 				},
 				nil,
 			)
-			fakeSpawner.CountActiveJobsReturns(1, nil) // at cap
-			fakeSpawner.IsJobActiveReturns(false, nil) // prior job is gone
+			fakeSpawner.ListActiveJobsReturns(activeJobs(1), nil) // at cap
 
 			loopCtx, cancel := context.WithCancel(context.Background())
 			done := make(chan error, 1)

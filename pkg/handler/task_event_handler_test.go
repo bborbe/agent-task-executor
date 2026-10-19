@@ -37,6 +37,17 @@ func TestHandler(t *testing.T) {
 	RunSpecs(t, "Handler Suite")
 }
 
+// activeJobs builds a ListActiveJobs result carrying n synthetic task IDs. Tests
+// that only care about the concurrency count use it; tests that care which task
+// is active build the map with the real identifier.
+func activeJobs(n int) map[lib.TaskIdentifier]bool {
+	active := make(map[lib.TaskIdentifier]bool, n)
+	for i := 0; i < n; i++ {
+		active[lib.TaskIdentifier(fmt.Sprintf("active-%d", i))] = true
+	}
+	return active
+}
+
 var _ = Describe("TaskEventHandler", func() {
 	var (
 		ctx                 context.Context
@@ -211,7 +222,7 @@ var _ = Describe("TaskEventHandler", func() {
 		})
 
 		It("skips task when active job exists", func() {
-			fakeSpawner.IsJobActiveReturns(true, nil)
+			fakeSpawner.ListActiveJobsReturns(map[lib.TaskIdentifier]bool{"tid-7": true}, nil)
 			task := lib.Task{
 				TaskIdentifier: "tid-7",
 				Frontmatter: lib.TaskFrontmatter{
@@ -244,8 +255,8 @@ var _ = Describe("TaskEventHandler", func() {
 			Expect(config.Image).To(Equal("my-image:latest"))
 		})
 
-		It("returns error when IsJobActive fails", func() {
-			fakeSpawner.IsJobActiveReturns(false, errors.Errorf(ctx, "k8s unavailable"))
+		It("returns error when the active-Job lookup fails", func() {
+			fakeSpawner.ListActiveJobsReturns(nil, errors.Errorf(ctx, "k8s unavailable"))
 			task := lib.Task{
 				TaskIdentifier: lib.TaskIdentifier("tid-9"),
 				Frontmatter: lib.TaskFrontmatter{
@@ -268,8 +279,7 @@ var _ = Describe("TaskEventHandler", func() {
 				},
 				nil,
 			)
-			fakeSpawner.IsJobActiveReturns(false, nil)
-			fakeSpawner.CountActiveJobsReturns(4, nil)
+			fakeSpawner.ListActiveJobsReturns(activeJobs(4), nil)
 			task := lib.Task{
 				TaskIdentifier: lib.TaskIdentifier("tid-cap-at-limit"),
 				Frontmatter: lib.TaskFrontmatter{
@@ -302,8 +312,7 @@ var _ = Describe("TaskEventHandler", func() {
 				},
 				nil,
 			)
-			fakeSpawner.IsJobActiveReturns(false, nil)
-			fakeSpawner.CountActiveJobsReturns(3, nil)
+			fakeSpawner.ListActiveJobsReturns(activeJobs(3), nil)
 			task := lib.Task{
 				TaskIdentifier: lib.TaskIdentifier("tid-cap-below"),
 				Frontmatter: lib.TaskFrontmatter{
@@ -337,8 +346,10 @@ var _ = Describe("TaskEventHandler", func() {
 				},
 				nil,
 			)
-			fakeSpawner.IsJobActiveReturns(false, nil)
-			fakeSpawner.CountActiveJobsStub = func(_ context.Context, _ string) (int, error) {
+			fakeSpawner.ListActiveJobsStub = func(
+				_ context.Context,
+				_ string,
+			) (map[lib.TaskIdentifier]bool, error) {
 				// Widen the count→spawn window deliberately. The real race is a
 				// sub-millisecond gap between a live API List and the Job CREATE;
 				// without this delay the unlocked code wins the race often enough
@@ -346,7 +357,7 @@ var _ = Describe("TaskEventHandler", func() {
 				// serialize (10 * 20ms) instead of overlapping, so the delay
 				// cannot mask a regression — it only makes one visible.
 				time.Sleep(20 * time.Millisecond)
-				return int(spawned.Load()), nil
+				return activeJobs(int(spawned.Load())), nil
 			}
 			fakeSpawner.SpawnJobStub = func(
 				_ context.Context,
@@ -381,8 +392,7 @@ var _ = Describe("TaskEventHandler", func() {
 			Expect(fakeSpawner.SpawnJobCallCount()).To(Equal(1))
 		})
 
-		It("does not count active jobs when MaxConcurrentJobs is unset", func() {
-			fakeSpawner.IsJobActiveReturns(false, nil)
+		It("spawns without applying a cap when MaxConcurrentJobs is unset", func() {
 			task := lib.Task{
 				TaskIdentifier: lib.TaskIdentifier("tid-cap-unset"),
 				Frontmatter: lib.TaskFrontmatter{
@@ -394,7 +404,10 @@ var _ = Describe("TaskEventHandler", func() {
 
 			err := h.ConsumeMessage(ctx, buildMsg(task))
 			Expect(err).To(BeNil())
-			Expect(fakeSpawner.CountActiveJobsCallCount()).To(Equal(0))
+			// One list serves both the active-Job check and the cap count. With no
+			// cap configured the cap branch returns early, so exactly one call
+			// happens — for the active check — and the spawn proceeds.
+			Expect(fakeSpawner.ListActiveJobsCallCount()).To(Equal(1))
 			Expect(fakeSpawner.SpawnJobCallCount()).To(Equal(1))
 		})
 
@@ -534,8 +547,7 @@ var _ = Describe("TaskEventHandler", func() {
 			},
 		)
 
-		It("does not spawn job when PublishIncrementTriggerCount fails", func() {
-			fakeSpawner.IsJobActiveReturns(false, nil)
+		It("spawns the job then reports the counter-write failure", func() {
 			fakeResultPublisher.PublishIncrementTriggerCountReturns(
 				errors.New(ctx, "kafka unavailable"),
 			)
@@ -553,7 +565,10 @@ var _ = Describe("TaskEventHandler", func() {
 			}
 			err := h.ConsumeMessage(ctx, buildMsg(task))
 			Expect(err).To(HaveOccurred())
-			Expect(fakeSpawner.SpawnJobCallCount()).To(Equal(0))
+			// The spawn is no longer blocked by a counter-write failure: the write
+			// happens after SpawnJob so an infrastructure failure cannot burn an
+			// attempt without the agent ever running.
+			Expect(fakeSpawner.SpawnJobCallCount()).To(Equal(1))
 		})
 
 		It("skips spawn when trigger_count >= max_triggers (cap reached)", func() {
@@ -847,9 +862,8 @@ var _ = Describe("TaskEventHandler", func() {
 		})
 
 		It(
-			"blocks spawn when PublishIncrementTriggerCount fails (publish-failure scenario)",
+			"spawns before charging the budget, so a counter-write failure does not block it",
 			func() {
-				fakeSpawner.IsJobActiveReturns(false, nil)
 				fakeResultPublisher.PublishIncrementTriggerCountReturns(
 					errors.New(ctx, "kafka down"),
 				)
@@ -867,7 +881,7 @@ var _ = Describe("TaskEventHandler", func() {
 				}
 				err := h.ConsumeMessage(ctx, buildMsg(task))
 				Expect(err).To(HaveOccurred())
-				Expect(fakeSpawner.SpawnJobCallCount()).To(Equal(0))
+				Expect(fakeSpawner.SpawnJobCallCount()).To(Equal(1))
 			},
 		)
 
@@ -891,8 +905,7 @@ var _ = Describe("TaskEventHandler", func() {
 			Expect(fakeSpawner.SpawnJobCallCount()).To(Equal(0))
 		})
 
-		It("publishes increment once even when SpawnJob fails (over-count documented)", func() {
-			fakeSpawner.IsJobActiveReturns(false, nil)
+		It("does not charge the trigger budget when SpawnJob fails", func() {
 			fakeSpawner.SpawnJobReturns("", errors.New(ctx, "k8s create failed"))
 			task := lib.Task{
 				TaskIdentifier: lib.TaskIdentifier("test-task-cap-5"),
@@ -908,12 +921,16 @@ var _ = Describe("TaskEventHandler", func() {
 			}
 			err := h.ConsumeMessage(ctx, buildMsg(task))
 			Expect(err).To(HaveOccurred())
-			Expect(fakeResultPublisher.PublishIncrementTriggerCountCallCount()).To(Equal(1))
+			// The counter write now follows a successful spawn, so an infrastructure
+			// failure no longer consumes one of the task's attempts.
+			Expect(fakeResultPublisher.PublishIncrementTriggerCountCallCount()).To(Equal(0))
 			Expect(fakeSpawner.SpawnJobCallCount()).To(Equal(1))
 		})
 
 		It("skips spawn when current_job in frontmatter and K8s job is active", func() {
-			fakeSpawner.IsJobActiveReturns(true, nil)
+			fakeSpawner.ListActiveJobsReturns(
+				map[lib.TaskIdentifier]bool{"test-task-uuid-1234": true}, nil,
+			)
 			task := lib.Task{
 				TaskIdentifier: lib.TaskIdentifier("test-task-uuid-1234"),
 				Frontmatter: lib.TaskFrontmatter{

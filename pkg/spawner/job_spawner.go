@@ -55,6 +55,14 @@ type JobSpawner interface {
 	// label set by SpawnJob. Jobs spawned before that label existed are not
 	// counted, so the cap under-counts during the rollout and never over-counts.
 	CountActiveJobs(ctx context.Context, assignee string) (int, error)
+	// ListActiveJobs returns the set of task identifiers that currently have an
+	// active (not completed/failed) Job for the assignee, from ONE list call.
+	// IsJobActive and CountActiveJobs are both answered from it, so a reconcile
+	// pass that evaluates N tasks costs one call per assignee instead of 2N.
+	// Added 2026-10-19: the per-task path issued two list calls each, and a pass
+	// over ~70 eligible tasks consumed its whole budget in client-go's default
+	// 5 QPS rate limiter before reaching the spawn.
+	ListActiveJobs(ctx context.Context, assignee string) (map[lib.TaskIdentifier]bool, error)
 }
 
 // NewJobSpawner creates a new JobSpawner backed by the K8s batch/v1 API.
@@ -251,6 +259,53 @@ func (s *jobSpawner) CountActiveJobs(ctx context.Context, assignee string) (int,
 		count++
 	}
 	return count, nil
+}
+
+// ListActiveJobs returns the task identifiers with an active Job for the
+// assignee, from a single list call. One list answers both the concurrency-cap
+// count and the per-task active check; the two dedicated methods each issue
+// their own list, which is what made a large reconcile pass exceed its budget.
+//
+// Terminal detection matches IsJobActive and CountActiveJobs exactly —
+// conditions first, counters as a fallback — so the three cannot disagree about
+// whether a Job has finished.
+func (s *jobSpawner) ListActiveJobs(
+	ctx context.Context,
+	assignee string,
+) (map[lib.TaskIdentifier]bool, error) {
+	active := make(map[lib.TaskIdentifier]bool)
+	if assignee == "" {
+		// Not an error: an unlabelled agent simply has nothing to count. Warn
+		// loudly though, because reaching here with a cap configured means the
+		// cap silently never fires.
+		glog.Warningf("ListActiveJobs called with empty assignee; concurrency cap cannot apply")
+		return active, nil
+	}
+	labelSelector := assigneeLabelKey + "=" + assignee
+	jobs, err := s.kubeClient.BatchV1().Jobs(s.namespace.String()).List(ctx, metav1.ListOptions{
+		LabelSelector: labelSelector,
+	})
+	if err != nil {
+		return nil, errors.Wrapf(ctx, err, "list jobs for assignee %s", assignee)
+	}
+	for i := range jobs.Items {
+		job := &jobs.Items[i]
+		if pkg.IsJobFailed(job) || pkg.IsJobSucceeded(job) {
+			continue
+		}
+		if job.Status.Succeeded > 0 {
+			continue
+		}
+		if job.Status.Failed > 0 && job.Status.Active == 0 {
+			continue
+		}
+		taskID := lib.TaskIdentifier(job.Labels[taskIDLabelKey])
+		if taskID == "" {
+			continue
+		}
+		active[taskID] = true
+	}
+	return active, nil
 }
 
 // applyVolumeMounts configures the optional PVC and ConfigMap mounts on the

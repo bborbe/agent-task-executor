@@ -102,10 +102,15 @@ const maxConsecutiveRedrives = 3
 
 // reconcilePassTimeout bounds one reconcile pass so a slow or large vault
 // cannot hold a pass open indefinitely (spec 005 Failure Modes: "Pass bounded
-// by a per-pass timeout; logs evaluate count so cost is visible"). Half the
-// interval: a pass completes within a tick and leaves headroom for the next
-// tick. Package constant — not configurable in this change.
-const reconcilePassTimeout = 30 * time.Second
+// by a per-pass timeout; logs evaluate count so cost is visible"). Three
+// quarters of the interval: a pass completes within a tick and leaves headroom
+// for the next one. Raised from 30s on 2026-10-19 — a pass over the openclaw
+// vault aborted on `context_cancelled` every minute after evaluating only 8-73
+// of ~200 non-terminal tasks, so the tasks ordered after the cut were never
+// reached. The per-assignee active-Job cache added in the same change removes
+// most of the cost; this is the headroom that keeps a slow pass from re-opening
+// the same window. Package constant — not configurable in this change.
+const reconcilePassTimeout = 45 * time.Second
 
 // deferredEntry tracks a task whose respawn was suppressed by the grace window.
 // The executor re-evaluates it once retryAfter is reached.
@@ -223,6 +228,9 @@ type taskEventHandler struct {
 	vaultMu          sync.RWMutex
 	vaultTasks       map[lib.TaskIdentifier]struct{}
 	vaultScanned     bool
+	jobCacheMu       sync.Mutex
+	jobCache         map[string]map[lib.TaskIdentifier]bool
+	jobCacheArmed    bool
 }
 
 // lockAssigneeSpawn serializes the count-then-spawn sequence for one assignee and
@@ -260,6 +268,100 @@ func (h *taskEventHandler) lockAssigneeSpawn(assignee string) func() {
 
 	mu.Lock()
 	return mu.Unlock
+}
+
+// beginJobCache arms the per-reconcile-pass active-Job cache and returns the
+// function that disarms it. Inside a pass every lookup is answered from one
+// `list jobs` per assignee; outside a pass lookups go straight to the API, so
+// the Kafka consumer path is never served a snapshot a reconcile pass froze.
+//
+// Added 2026-10-19: spawnIfNeeded made two list calls per eligible task
+// (IsJobActive and CountActiveJobs). A pass over ~70 eligible tasks therefore
+// issued ~140 calls, and client-go's default 5 QPS limiter consumed the whole
+// 30 s pass budget before the first spawn — the `spawn_error ... context
+// deadline exceeded` that kept github-update-go at zero dispatch.
+func (h *taskEventHandler) beginJobCache() func() {
+	h.jobCacheMu.Lock()
+	h.jobCache = make(map[string]map[lib.TaskIdentifier]bool)
+	h.jobCacheArmed = true
+	h.jobCacheMu.Unlock()
+	return func() {
+		h.jobCacheMu.Lock()
+		h.jobCache = nil
+		h.jobCacheArmed = false
+		h.jobCacheMu.Unlock()
+	}
+}
+
+// invalidateJobCache drops the per-pass cache after a Job is created, so a later
+// lookup in the same pass cannot miss a Job this executor just made. The cache is
+// reset to an empty map rather than nil so it keeps repopulating for the rest of
+// the pass; nil is reserved for "no pass is armed".
+func (h *taskEventHandler) invalidateJobCache() {
+	h.jobCacheMu.Lock()
+	if h.jobCacheArmed {
+		h.jobCache = make(map[string]map[lib.TaskIdentifier]bool)
+	}
+	h.jobCacheMu.Unlock()
+}
+
+// activeJobsFor returns the set of task identifiers with an active Job for the
+// assignee. Inside an armed reconcile pass the answer is memoized per assignee;
+// outside one it is read live. Callers treat the returned map as read-only.
+func (h *taskEventHandler) activeJobsFor(
+	ctx context.Context,
+	assignee string,
+) (map[lib.TaskIdentifier]bool, error) {
+	h.jobCacheMu.Lock()
+	armed := h.jobCacheArmed
+	if armed {
+		if cached, ok := h.jobCache[assignee]; ok {
+			h.jobCacheMu.Unlock()
+			return cached, nil
+		}
+	}
+	h.jobCacheMu.Unlock()
+
+	active, err := h.jobSpawner.ListActiveJobs(ctx, assignee)
+	if err != nil {
+		return nil, err
+	}
+	if armed {
+		h.jobCacheMu.Lock()
+		if h.jobCache != nil {
+			h.jobCache[assignee] = active
+		}
+		h.jobCacheMu.Unlock()
+	}
+	return active, nil
+}
+
+// isJobActive reports whether an active Job exists for the task. Answered from
+// the per-assignee active set when the assignee is known, so a reconcile pass
+// costs one list per assignee rather than one per task. An empty assignee cannot
+// key that set, so it falls back to the direct lookup.
+func (h *taskEventHandler) isJobActive(
+	ctx context.Context,
+	task lib.Task,
+	config *pkg.AgentConfiguration,
+) (bool, error) {
+	if config == nil || config.Assignee == "" {
+		active, err := h.jobSpawner.IsJobActive(ctx, task.TaskIdentifier)
+		if err != nil {
+			return false, errors.Wrapf(
+				ctx,
+				err,
+				"check active job for task %s",
+				task.TaskIdentifier,
+			)
+		}
+		return active, nil
+	}
+	activeSet, err := h.activeJobsFor(ctx, config.Assignee)
+	if err != nil {
+		return false, errors.Wrapf(ctx, err, "check active job for task %s", task.TaskIdentifier)
+	}
+	return activeSet[task.TaskIdentifier], nil
 }
 
 // cleanupTerminalTask clears in-flight state when a task has reached a terminal
@@ -633,10 +735,10 @@ func (h *taskEventHandler) spawnIfNeeded(
 		defer h.lockAssigneeSpawn(config.Assignee)()
 	}
 
-	active, err := h.jobSpawner.IsJobActive(ctx, task.TaskIdentifier)
+	active, err := h.isJobActive(ctx, task, config)
 	if err != nil {
 		metrics.TaskEventsTotal.WithLabelValues("error").Inc()
-		return false, errors.Wrapf(ctx, err, "check active job for task %s", task.TaskIdentifier)
+		return false, err
 	}
 	if active {
 		glog.V(3).Infof("skip task %s: active job exists", task.TaskIdentifier)
@@ -661,14 +763,10 @@ func (h *taskEventHandler) spawnIfNeeded(
 		return false, nil
 	}
 
-	// Scoped trigger budget: evaluates the spawn-trigger cap (default-engages on
-	// phase+ref scope and publishes the counter write for the spawn about to
-	// happen. Extracted so spawnIfNeeded stays legible; it owns one decision.
-	capped, err = h.applyTriggerBudget(ctx, task)
-	if err != nil {
-		return false, err
-	}
-	if capped {
+	// Scoped trigger budget: check only. The counter write is published by
+	// recordTriggerSpawn after SpawnJob succeeds, so an infrastructure failure
+	// cannot burn one of the task's attempts.
+	if h.checkTriggerBudget(task) {
 		return false, nil
 	}
 
@@ -678,7 +776,21 @@ func (h *taskEventHandler) spawnIfNeeded(
 		return false, errors.Wrapf(ctx, err, "spawn job for task %s failed", task.TaskIdentifier)
 	}
 
+	// A Job now exists: charge the attempt. The error still propagates — a
+	// counter write that cannot be recorded is a real fault, and the existing
+	// callers treat it as one. It no longer prevents the spawn, which is the
+	// point of moving the write here: a spawn that fails for infrastructure
+	// reasons leaves the budget untouched, and a Job that did start is charged.
+	// Record the Job before the counter write: if the write fails and this
+	// returns an error, the in-memory store must still know the Job exists.
+	h.invalidateJobCache()
 	h.storeSpawnedJob(task, jobName)
+
+	if err := h.recordTriggerSpawn(ctx, task); err != nil {
+		metrics.TaskEventsTotal.WithLabelValues("error").Inc()
+		return false, err
+	}
+
 	if err := h.resultPublisher.PublishSpawnNotification(ctx, task, jobName); err != nil {
 		// Log but don't fail — job is already spawned, spawn notification is best-effort
 		glog.Warningf("publish spawn notification for task %s failed (job %s still running): %v",
@@ -733,11 +845,12 @@ func (h *taskEventHandler) deferIfAtConcurrencyCap(
 	if config == nil || config.MaxConcurrentJobs <= 0 {
 		return false, nil
 	}
-	running, err := h.jobSpawner.CountActiveJobs(ctx, config.Assignee)
+	activeSet, err := h.activeJobsFor(ctx, config.Assignee)
 	if err != nil {
 		metrics.TaskEventsTotal.WithLabelValues("error").Inc()
 		return false, errors.Wrapf(ctx, err, "count active jobs for assignee %s", config.Assignee)
 	}
+	running := len(activeSet)
 	if running < config.MaxConcurrentJobs {
 		// Log the ADMIT decision, not just the deferral. Without this, an
 		// over-cap spawn leaves no trace and overshoot can only be found by
@@ -942,6 +1055,11 @@ func (h *taskEventHandler) ReconcileOnce(ctx context.Context) error {
 	// log and skip; the next tick retries.
 	passCtx, cancel := context.WithTimeout(ctx, reconcilePassTimeout)
 	defer cancel()
+
+	// One `list jobs` per assignee for the whole pass, instead of two per task.
+	// Disarmed on return so the event path never reads a frozen snapshot.
+	disarmJobCache := h.beginJobCache()
+	defer disarmJobCache()
 
 	ready, err := h.gitRestClient.IsReady(passCtx)
 	if err != nil {
@@ -1401,10 +1519,17 @@ func triggerScope(fm lib.TaskFrontmatter) string {
 // Scoping also fixes the opt-in cap's correctness: a task that opts in no
 // longer burns its budget across unrelated attempts, so an operator can set a
 // tight max_triggers without it leaking into the next phase or the next commit.
-func (h *taskEventHandler) applyTriggerBudget(
-	ctx context.Context,
-	task lib.Task,
-) (bool, error) {
+// checkTriggerBudget reports whether the task's scoped trigger budget is
+// exhausted. It writes nothing.
+//
+// The counter write is deliberately split out into recordTriggerSpawn and
+// published only AFTER a Job was actually created. Until 2026-10-19 the
+// increment was published here, before SpawnJob, so every infrastructure
+// failure — the `spawn_error ... context deadline exceeded` this change also
+// fixes — consumed one of the task's attempts without the agent ever running.
+// That is how github-update-go tasks reached trigger_count 5-7 while producing
+// no work, and why a trigger_count reset alone could not hold.
+func (h *taskEventHandler) checkTriggerBudget(task lib.Task) bool {
 	currentScope := triggerScope(task.Frontmatter)
 	storedScope, hasScope := task.Frontmatter.String("trigger_scope")
 
@@ -1426,33 +1551,41 @@ func (h *taskEventHandler) applyTriggerBudget(
 			currentScope,
 		)
 		metrics.TaskEventsTotal.WithLabelValues("skipped_trigger_cap").Inc()
-		return true, nil
+		return true
 	}
+	return false
+}
 
-	// Exactly one publish per spawn in every branch. Splitting "write the scope"
-	// and "count the spawn" into two commands would emit two writes for one spawn
-	// and let them interleave with a concurrent write.
+// recordTriggerSpawn publishes the counter write that charges one spawn against
+// the task's scoped budget. Called only after SpawnJob succeeded.
+//
+// Exactly one publish per spawn in every branch. Splitting "write the scope"
+// and "count the spawn" into two commands would emit two writes for one spawn
+// and let them interleave with a concurrent write.
+func (h *taskEventHandler) recordTriggerSpawn(ctx context.Context, task lib.Task) error {
+	currentScope := triggerScope(task.Frontmatter)
+	storedScope, hasScope := task.Frontmatter.String("trigger_scope")
+	scopeChanged := hasScope && storedScope != currentScope
+
 	count, useScopeWrite := triggerBudgetWrite(task.Frontmatter, scopeChanged, hasScope)
 	if !useScopeWrite {
 		if err := h.resultPublisher.PublishIncrementTriggerCount(ctx, task); err != nil {
-			metrics.TaskEventsTotal.WithLabelValues("error").Inc()
-			return false, errors.Wrapf(
+			return errors.Wrapf(
 				ctx, err, "publish increment trigger_count for task %s", task.TaskIdentifier,
 			)
 		}
-		return false, nil
+		return nil
 	}
 
 	glog.V(2).Infof("task %s: trigger scope %q -> %q, trigger_count -> %d",
 		task.TaskIdentifier, storedScope, currentScope, count,
 	)
 	if err := h.resultPublisher.PublishSetTriggerScope(ctx, task, currentScope, count); err != nil {
-		metrics.TaskEventsTotal.WithLabelValues("error").Inc()
-		return false, errors.Wrapf(
+		return errors.Wrapf(
 			ctx, err, "publish set trigger scope for task %s", task.TaskIdentifier,
 		)
 	}
-	return false, nil
+	return nil
 }
 
 // triggerBudgetWrite decides which counter write a spawn needs. useScopeWrite
