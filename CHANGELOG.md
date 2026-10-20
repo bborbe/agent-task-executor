@@ -4,6 +4,8 @@ All notable changes to this project will be documented in this file.
 
 ## v0.19.0
 
+- feat: **an agent task can name the cluster that runs it.** A task carrying `cluster: <name>` frontmatter now runs only on the executor whose new optional `CLUSTER` env var matches. Every other executor logs `skip task <id>: foreign cluster <name>` and counts `agent_executor_task_events_total{result="skipped_foreign_cluster"}`. The check runs before Config resolution on both the Kafka path and the reconcile path, so a foreign task is not miscounted as an unknown assignee. A task without `cluster:` is unchanged. The Kafka consumer group is now set by `CONSUMER_GROUP` (default `agent-task-executor`, the previous hard-coded value). Each cluster needs its own group so every cluster sees every event; a shared group splits the partitions, and a message delivered to the wrong cluster is lost.
+
 - feat: **a task deferred behind the concurrency cap now records a durable `queued_at` frontmatter field.** The executor stamps an RFC3339 UTC timestamp once, at the moment the first wait begins, through a new `PublishQueueEntry` on `ResultPublisher` (an `UpdateFrontmatterCommand` carrying exactly `{"queued_at": …}`), so a consumer reading the task file can compute a queue age for the agent-execution stage. A re-deferral never moves the timestamp: `stampQueueEntry` reads the field from the in-memory entry first, then from the vault through git-rest (a duplicate event can arrive after the publish but before the controller applies it), and publishes only when neither carries it. A failed publish is not retried — the in-memory copy suppresses the next attempt rather than publishing a later, wrong time. A spawn that is not deferred never writes the field.
 
 ## v0.18.14

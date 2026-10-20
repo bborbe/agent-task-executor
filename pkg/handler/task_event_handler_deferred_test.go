@@ -56,6 +56,7 @@ var _ = Describe("TaskEventHandler", func() {
 		h = handler.NewTaskEventHandler(
 			fakeSpawner,
 			base.Branch("prod"),
+			"",
 			fakeResolver,
 			fakeResultPublisher,
 			taskStore,
@@ -429,6 +430,7 @@ var _ = Describe("TaskEventHandler", func() {
 					freshHandler := handler.NewTaskEventHandler(
 						fakeSpawner,
 						base.Branch("prod"),
+						"",
 						fakeResolver,
 						fakeResultPublisher,
 						restartStore,
@@ -477,6 +479,7 @@ var _ = Describe("TaskEventHandler", func() {
 					freshHandler := handler.NewTaskEventHandler(
 						fakeSpawner,
 						base.Branch("prod"),
+						"",
 						fakeResolver,
 						fakeResultPublisher,
 						restartStore,
