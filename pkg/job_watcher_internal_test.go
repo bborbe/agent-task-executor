@@ -399,6 +399,14 @@ func (f *fakeResultPublisher) PublishRestoreAssignee(
 	return nil
 }
 
+func (f *fakeResultPublisher) PublishQueueEntry(
+	ctx context.Context,
+	task lib.Task,
+	queuedAt string,
+) error {
+	return nil
+}
+
 func (f *fakeResultPublisher) PublishRaw(
 	ctx context.Context,
 	operation base.CommandOperation,

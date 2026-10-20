@@ -87,6 +87,9 @@ type ResultPublisher interface {
 	// the normal spawn path already consumes. Writes the "assignee" key and
 	// nothing else.
 	PublishRestoreAssignee(ctx context.Context, task lib.Task, assignee string) error
+	// PublishQueueEntry records when a task first started waiting behind the
+	// concurrency cap. It publishes queued_at and touches no other key.
+	PublishQueueEntry(ctx context.Context, task lib.Task, queuedAt string) error
 	// PublishRaw publishes a raw payload for testing error paths.
 	PublishRaw(ctx context.Context, operation base.CommandOperation, payload interface{}) error
 }
@@ -391,6 +394,25 @@ func (p *resultPublisher) PublishRestoreAssignee(
 		TargetVault:    targetVaultFromTask(task),
 		Updates: lib.TaskFrontmatter{
 			"assignee": assignee,
+		},
+	}
+	return p.publishRaw(ctx, taskcmd.UpdateFrontmatterCommandOperation, cmd)
+}
+
+// PublishQueueEntry writes only the queued_at key: the moment the task first
+// began waiting behind the concurrency cap. Every other frontmatter key is left
+// untouched, so a consumer reading the task file can compute a queue age for the
+// agent-execution stage without this write disturbing the spawn state.
+func (p *resultPublisher) PublishQueueEntry(
+	ctx context.Context,
+	task lib.Task,
+	queuedAt string,
+) error {
+	cmd := taskcmd.UpdateFrontmatterCommand{
+		TaskIdentifier: task.TaskIdentifier,
+		TargetVault:    targetVaultFromTask(task),
+		Updates: lib.TaskFrontmatter{
+			"queued_at": queuedAt,
 		},
 	}
 	return p.publishRaw(ctx, taskcmd.UpdateFrontmatterCommandOperation, cmd)

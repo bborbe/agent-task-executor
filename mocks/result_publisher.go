@@ -50,6 +50,19 @@ type FakeResultPublisher struct {
 	publishIncrementTriggerCountReturnsOnCall map[int]struct {
 		result1 error
 	}
+	PublishQueueEntryStub        func(context.Context, lib.Task, string) error
+	publishQueueEntryMutex       sync.RWMutex
+	publishQueueEntryArgsForCall []struct {
+		arg1 context.Context
+		arg2 lib.Task
+		arg3 string
+	}
+	publishQueueEntryReturns struct {
+		result1 error
+	}
+	publishQueueEntryReturnsOnCall map[int]struct {
+		result1 error
+	}
 	PublishRawStub        func(context.Context, base.CommandOperation, interface{}) error
 	publishRawMutex       sync.RWMutex
 	publishRawArgsForCall []struct {
@@ -305,6 +318,69 @@ func (fake *FakeResultPublisher) PublishIncrementTriggerCountReturnsOnCall(i int
 		})
 	}
 	fake.publishIncrementTriggerCountReturnsOnCall[i] = struct {
+		result1 error
+	}{result1}
+}
+
+func (fake *FakeResultPublisher) PublishQueueEntry(arg1 context.Context, arg2 lib.Task, arg3 string) error {
+	fake.publishQueueEntryMutex.Lock()
+	ret, specificReturn := fake.publishQueueEntryReturnsOnCall[len(fake.publishQueueEntryArgsForCall)]
+	fake.publishQueueEntryArgsForCall = append(fake.publishQueueEntryArgsForCall, struct {
+		arg1 context.Context
+		arg2 lib.Task
+		arg3 string
+	}{arg1, arg2, arg3})
+	stub := fake.PublishQueueEntryStub
+	fakeReturns := fake.publishQueueEntryReturns
+	fake.recordInvocation("PublishQueueEntry", []interface{}{arg1, arg2, arg3})
+	fake.publishQueueEntryMutex.Unlock()
+	if stub != nil {
+		return stub(arg1, arg2, arg3)
+	}
+	if specificReturn {
+		return ret.result1
+	}
+	return fakeReturns.result1
+}
+
+func (fake *FakeResultPublisher) PublishQueueEntryCallCount() int {
+	fake.publishQueueEntryMutex.RLock()
+	defer fake.publishQueueEntryMutex.RUnlock()
+	return len(fake.publishQueueEntryArgsForCall)
+}
+
+func (fake *FakeResultPublisher) PublishQueueEntryCalls(stub func(context.Context, lib.Task, string) error) {
+	fake.publishQueueEntryMutex.Lock()
+	defer fake.publishQueueEntryMutex.Unlock()
+	fake.PublishQueueEntryStub = stub
+}
+
+func (fake *FakeResultPublisher) PublishQueueEntryArgsForCall(i int) (context.Context, lib.Task, string) {
+	fake.publishQueueEntryMutex.RLock()
+	defer fake.publishQueueEntryMutex.RUnlock()
+	argsForCall := fake.publishQueueEntryArgsForCall[i]
+	return argsForCall.arg1, argsForCall.arg2, argsForCall.arg3
+}
+
+func (fake *FakeResultPublisher) PublishQueueEntryReturns(result1 error) {
+	fake.publishQueueEntryMutex.Lock()
+	defer fake.publishQueueEntryMutex.Unlock()
+	fake.PublishQueueEntryStub = nil
+	fake.publishQueueEntryReturns = struct {
+		result1 error
+	}{result1}
+}
+
+func (fake *FakeResultPublisher) PublishQueueEntryReturnsOnCall(i int, result1 error) {
+	fake.publishQueueEntryMutex.Lock()
+	defer fake.publishQueueEntryMutex.Unlock()
+	fake.PublishQueueEntryStub = nil
+	if fake.publishQueueEntryReturnsOnCall == nil {
+		fake.publishQueueEntryReturnsOnCall = make(map[int]struct {
+			result1 error
+		})
+	}
+	fake.publishQueueEntryReturnsOnCall[i] = struct {
 		result1 error
 	}{result1}
 }

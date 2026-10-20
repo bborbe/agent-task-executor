@@ -201,6 +201,30 @@ var _ = Describe("ResultPublisher", func() {
 		})
 	})
 
+	Describe("PublishQueueEntry", func() {
+		It("sends exactly one queued_at key via UpdateFrontmatterCommand", func() {
+			task := lib.Task{
+				TaskIdentifier: lib.TaskIdentifier("test-task-queued"),
+				Frontmatter: lib.TaskFrontmatter{
+					"status":   "in_progress",
+					"phase":    "execution",
+					"assignee": "claude",
+				},
+			}
+			err := publisher.PublishQueueEntry(ctx, task, "2026-05-17T09:34:00Z")
+			Expect(err).NotTo(HaveOccurred())
+
+			Expect(producer.messages).To(HaveLen(1))
+			operation, cmd := decodeUpdateFrontmatterCommand(producer.messages[0])
+
+			Expect(string(operation)).To(
+				Equal(string(taskcmd.UpdateFrontmatterCommandOperation)),
+			)
+			Expect(cmd.Updates).To(HaveLen(1))
+			Expect(cmd.Updates["queued_at"]).To(Equal("2026-05-17T09:34:00Z"))
+		})
+	})
+
 	Describe("PublishFailure", func() {
 		It(
 			"publishes two commands: UpdateFrontmatterCommand clearing current_job with ## Failure body, then IncrementFrontmatterCommand bumping trigger_count",

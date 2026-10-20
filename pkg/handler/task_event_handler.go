@@ -886,6 +886,7 @@ func (h *taskEventHandler) deferIfAtConcurrencyCap(
 	// The bare counter above is kept for continuity; this one carries the
 	// assignee so an alert can exclude an agent that is capped on purpose.
 	metrics.DeferredConcurrencyCapTotal.WithLabelValues(config.Assignee).Inc()
+	task = h.stampQueueEntry(ctx, task)
 	h.deferredMu.Lock()
 	h.deferredRespawns[task.TaskIdentifier] = deferredEntry{
 		task:       task,
@@ -894,6 +895,107 @@ func (h *taskEventHandler) deferIfAtConcurrencyCap(
 	}
 	h.deferredMu.Unlock()
 	return true, nil
+}
+
+// stampQueueEntry returns the task carrying a queued_at value, writing that
+// value to the vault the first time the task is deferred behind the concurrency
+// cap. queued_at is the moment the FIRST wait began: it is written once and never
+// moved by a later re-deferral, so the field can be read as a queue-entry time.
+//
+// Three cases, in order:
+//
+//   - the task already carries queued_at (a re-deferred in-memory entry) — return
+//     it unchanged and publish nothing.
+//   - the vault file already carries queued_at — return a copy carrying it. The
+//     vault is the authority here because a duplicate Kafka event can arrive after
+//     the publish but before the controller has written the field; re-stamping
+//     would move the timestamp forward.
+//   - neither — stamp the injected clock's current UTC time, publish it, and
+//     return a copy carrying it so a later re-deferral takes the first branch.
+//
+// A failed publish is deliberately not retried. The returned copy still carries
+// the value, so the next re-deferral sees it and publishes nothing: that wait
+// reports no queue age rather than publishing a later, wrong one.
+func (h *taskEventHandler) stampQueueEntry(ctx context.Context, task lib.Task) lib.Task {
+	if v, ok := task.Frontmatter.String("queued_at"); ok && v != "" {
+		return task
+	}
+	if v := h.queuedAtFromVault(ctx, task.TaskIdentifier); v != "" {
+		return taskWithFrontmatterValue(task, "queued_at", v)
+	}
+	queuedAt := h.currentDateTime.Now().UTC().Format("2006-01-02T15:04:05Z07:00")
+	if err := h.resultPublisher.PublishQueueEntry(ctx, task, queuedAt); err != nil {
+		glog.Warningf(
+			"event=queued_at_publish_failed task=%s queued_at=%s err=%v",
+			task.TaskIdentifier, queuedAt, err,
+		)
+	} else {
+		glog.V(1).Infof(
+			"event=queued_at_written task=%s queued_at=%s",
+			task.TaskIdentifier, queuedAt,
+		)
+	}
+	return taskWithFrontmatterValue(task, "queued_at", queuedAt)
+}
+
+// queuedAtFromVault reads the task file through git-rest and returns its
+// queued_at frontmatter value, or "" when the path is unknown, the read fails,
+// the file is unparseable, or the field is absent/empty.
+//
+// It exists for a duplicate event that arrives after PublishQueueEntry but
+// before the controller has applied the write: without this read that event
+// would stamp a second, later timestamp. The read is a single bounded call on
+// the deferral path, which holds the per-assignee spawn lock — git-rest owns its
+// own timeouts and retries, so this adds no retry loop of its own. A failed read
+// only logs: the deferral itself must never fail because of this best-effort
+// write.
+func (h *taskEventHandler) queuedAtFromVault(
+	ctx context.Context,
+	id lib.TaskIdentifier,
+) string {
+	h.vaultMu.RLock()
+	var relPath string
+	for path, cachedID := range h.pathIDs {
+		if cachedID == id {
+			relPath = path
+			break
+		}
+	}
+	h.vaultMu.RUnlock()
+	if relPath == "" {
+		return ""
+	}
+	content, err := h.gitRestClient.Get(ctx, relPath)
+	if err != nil {
+		glog.Warningf(
+			"event=queued_at_vault_read_failed task=%s path=%s err=%v",
+			id, relPath, err,
+		)
+		return ""
+	}
+	task, ok := parseTaskFile(ctx, content)
+	if !ok {
+		return ""
+	}
+	v, ok := task.Frontmatter.String("queued_at")
+	if !ok || v == "" {
+		return ""
+	}
+	return v
+}
+
+// taskWithFrontmatterValue returns a copy of the task whose frontmatter carries
+// one extra key. The frontmatter map is copied rather than mutated in place: the
+// caller's map is shared with the event and may still be held by a deferred
+// entry, so an in-place write would corrupt that entry.
+func taskWithFrontmatterValue(task lib.Task, key string, value interface{}) lib.Task {
+	copied := task
+	copied.Frontmatter = make(lib.TaskFrontmatter, len(task.Frontmatter)+1)
+	for k, v := range task.Frontmatter {
+		copied.Frontmatter[k] = v
+	}
+	copied.Frontmatter[key] = value
+	return copied
 }
 
 // evalDeferredRespawns checks all pending deferred-respawn entries and spawns a job
