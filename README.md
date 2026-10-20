@@ -19,6 +19,8 @@ A task can name the cluster that runs it with the optional `cluster:` frontmatte
 - `CLUSTER`: the cluster this executor runs in. A task whose `cluster` names a different cluster is skipped, logged as `skip task <id>: foreign cluster <name>`, and counted as `agent_executor_task_events_total{result="skipped_foreign_cluster"}`. A task without `cluster:` runs as before.
 - `CONSUMER_GROUP`: the Kafka consumer group (default `agent-task-executor`). Each cluster must use its own group, e.g. `agent-task-executor-sun`, so that every cluster receives every task event. Keep an existing cluster on its current group, because a new group starts from the oldest retained offset and re-reads the topic.
 
+- `STAGE_FILTER` (default `true`): skip tasks whose `stage` frontmatter (default `prod`) differs from `BRANCH`. Set it to `false` on a cluster whose controller already scopes tasks by cluster (sun), so tasks there need no `stage` field.
+
 ## Reconcile loop configuration
 
 The reconcile loop re-derives running tasks from the vault (via git-rest) and

@@ -188,6 +188,7 @@ func NewTaskEventHandler(
 	jobSpawner spawner.JobSpawner,
 	branch base.Branch,
 	cluster string,
+	stageFilter bool,
 	resolver pkg.ConfigResolver,
 	resultPublisher pkg.ResultPublisher,
 	taskStore *pkg.TaskStore,
@@ -199,6 +200,7 @@ func NewTaskEventHandler(
 		jobSpawner:       jobSpawner,
 		branch:           branch,
 		cluster:          cluster,
+		stageFilter:      stageFilter,
 		resolver:         resolver,
 		resultPublisher:  resultPublisher,
 		taskStore:        taskStore,
@@ -217,6 +219,7 @@ type taskEventHandler struct {
 	jobSpawner       spawner.JobSpawner
 	branch           base.Branch
 	cluster          string
+	stageFilter      bool
 	resolver         pkg.ConfigResolver
 	resultPublisher  pkg.ResultPublisher
 	taskStore        *pkg.TaskStore
@@ -496,7 +499,7 @@ func (h *taskEventHandler) parseAndFilter(
 	}
 
 	stage := task.Frontmatter.Stage()
-	if stage != string(h.branch) {
+	if h.stageFilter && stage != string(h.branch) {
 		glog.V(3).Infof(
 			"skip task %s with stage %s (executor branch %s)",
 			task.TaskIdentifier, stage, h.branch,
@@ -1407,7 +1410,7 @@ func (h *taskEventHandler) reconcileTask(
 	if phase == nil || !effectiveTriggerPhases(config).Contains(*phase) {
 		return task, nil, false, nil
 	}
-	if task.Frontmatter.Stage() != string(h.branch) {
+	if h.stageFilter && task.Frontmatter.Stage() != string(h.branch) {
 		return task, nil, false, nil
 	}
 	// A parked task (empty routing value) is eligible when its declared
