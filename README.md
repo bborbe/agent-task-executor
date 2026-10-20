@@ -12,6 +12,13 @@ pin, e.g. `…/agent-claude:v0.1.1`) is used as-is; an **untagged** image gets t
 running branch appended (`…/agent-backtest` → `…/agent-backtest:dev`). Deployed
 via the `agent` Helm chart; published image `docker.io/bborbe/agent-task-executor`.
 
+## Cluster routing
+
+A task can name the cluster that runs it with the optional `cluster:` frontmatter field. The canonical values are `nukedev`, `nukeprod` and `sun`.
+
+- `CLUSTER`: the cluster this executor runs in. A task whose `cluster` names a different cluster is skipped, logged as `skip task <id>: foreign cluster <name>`, and counted as `agent_executor_task_events_total{result="skipped_foreign_cluster"}`. A task without `cluster:` runs as before.
+- `CONSUMER_GROUP`: the Kafka consumer group (default `agent-task-executor`). Each cluster must use its own group, e.g. `agent-task-executor-sun`, so that every cluster receives every task event. Keep an existing cluster on its current group, because a new group starts from the oldest retained offset and re-reads the topic.
+
 ## Reconcile loop configuration
 
 The reconcile loop re-derives running tasks from the vault (via git-rest) and

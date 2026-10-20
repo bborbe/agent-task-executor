@@ -76,6 +76,7 @@ var _ = Describe("TaskEventHandler", func() {
 		h = handler.NewTaskEventHandler(
 			fakeSpawner,
 			base.Branch("prod"),
+			"",
 			fakeResolver,
 			fakeResultPublisher,
 			taskStore,
@@ -976,6 +977,65 @@ var _ = Describe("TaskEventHandler", func() {
 			Expect(fakeSpawner.SpawnJobCallCount()).To(Equal(0))
 		})
 
+		Context("cluster routing", func() {
+			var (
+				clusterSpawner  *mocks.FakeJobSpawner
+				clusterResolver *mocks.FakeConfigResolver
+				clusterHandler  handler.TaskEventHandler
+			)
+			BeforeEach(func() {
+				clusterSpawner = new(mocks.FakeJobSpawner)
+				clusterSpawner.IsJobActiveReturns(false, nil)
+				clusterResolver = &mocks.FakeConfigResolver{}
+				clusterResolver.ResolveReturns(
+					pkg.AgentConfiguration{Assignee: "claude", Image: "my-image:latest"},
+					nil,
+				)
+				clusterHandler = handler.NewTaskEventHandler(
+					clusterSpawner,
+					base.Branch("prod"),
+					"nukedev",
+					clusterResolver,
+					&mocks.FakeResultPublisher{},
+					pkg.NewTaskStore(),
+					libtime.NewCurrentDateTime(),
+					fakeGitRestClient,
+					"24 Tasks/*.md",
+				)
+			})
+			buildClusterTask := func(cluster string) lib.Task {
+				frontmatter := lib.TaskFrontmatter{
+					"status":   "in_progress",
+					"phase":    string(domain.TaskPhaseExecution),
+					"assignee": "claude",
+					"stage":    "prod",
+				}
+				if cluster != "" {
+					frontmatter["cluster"] = cluster
+				}
+				return lib.Task{
+					TaskIdentifier: lib.TaskIdentifier("tid-cluster-" + cluster),
+					Frontmatter:    frontmatter,
+				}
+			}
+			It("spawns a task naming this executor's cluster", func() {
+				err := clusterHandler.ConsumeMessage(ctx, buildMsg(buildClusterTask("nukedev")))
+				Expect(err).To(BeNil())
+				Expect(clusterSpawner.SpawnJobCallCount()).To(Equal(1))
+			})
+			It("spawns a task without a cluster field", func() {
+				err := clusterHandler.ConsumeMessage(ctx, buildMsg(buildClusterTask("")))
+				Expect(err).To(BeNil())
+				Expect(clusterSpawner.SpawnJobCallCount()).To(Equal(1))
+			})
+			It("skips a task naming another cluster without resolving its Config", func() {
+				err := clusterHandler.ConsumeMessage(ctx, buildMsg(buildClusterTask("sun")))
+				Expect(err).To(BeNil())
+				Expect(clusterSpawner.SpawnJobCallCount()).To(Equal(0))
+				Expect(clusterResolver.ResolveCallCount()).To(Equal(0))
+			})
+		})
+
 		It("spawns job with stage=dev when executor branch is dev", func() {
 			localSpawner := new(mocks.FakeJobSpawner)
 			localSpawner.IsJobActiveReturns(false, nil)
@@ -987,6 +1047,7 @@ var _ = Describe("TaskEventHandler", func() {
 			localHandler := handler.NewTaskEventHandler(
 				localSpawner,
 				base.Branch("dev"),
+				"",
 				localResolver,
 				&mocks.FakeResultPublisher{},
 				pkg.NewTaskStore(),
@@ -1035,6 +1096,7 @@ var _ = Describe("TaskEventHandler", func() {
 			localHandler := handler.NewTaskEventHandler(
 				localSpawner,
 				base.Branch("dev"),
+				"",
 				localResolver,
 				&mocks.FakeResultPublisher{},
 				pkg.NewTaskStore(),

@@ -46,6 +46,8 @@ type application struct {
 	Listen                     string            `required:"true"  arg:"listen"                         env:"LISTEN"                         usage:"address to listen to"`
 	KafkaBrokers               string            `required:"true"  arg:"kafka-brokers"                  env:"KAFKA_BROKERS"                  usage:"comma-separated Kafka broker addresses"`
 	Branch                     base.Branch       `required:"true"  arg:"branch"                         env:"BRANCH"                         usage:"Kafka topic prefix branch (develop/live)"`
+	Cluster                    string            `required:"false" arg:"cluster"                        env:"CLUSTER"                        usage:"Name of the cluster this executor runs in (e.g. nukedev, nukeprod, sun); tasks whose cluster frontmatter names another cluster are skipped. Empty runs only tasks without a cluster field"`
+	ConsumerGroup              string            `required:"false" arg:"consumer-group"                 env:"CONSUMER_GROUP"                 usage:"Kafka consumer group for the task event topic; give each cluster its own group so every cluster sees every event"                                                                                                                                                                   default:"agent-task-executor"`
 	TopicPrefix                base.TopicPrefix  `required:"false" arg:"topic-prefix"                   env:"TOPIC_PREFIX"                   usage:"Explicit Kafka topic prefix; empty means unprefixed topics"`
 	Namespace                  libk8s.Namespace  `required:"true"  arg:"namespace"                      env:"NAMESPACE"                      usage:"K8s namespace to spawn Jobs in"`
 	VaultName                  string            `required:"true"  arg:"vault-name"                     env:"VAULT_NAME"                     usage:"Obsidian vault name this executor instance serves; Config CRs are resolved by the composed {assignee}-{vaultName} assignee"`
@@ -217,6 +219,8 @@ func (a *application) Run(ctx context.Context, sentryClient libsentry.Client) er
 	consumer, taskEventHandler := factory.CreateConsumer(
 		saramaClient,
 		a.Branch,
+		a.Cluster,
+		a.ConsumerGroup,
 		a.TopicPrefix,
 		kubeClient,
 		a.Namespace,

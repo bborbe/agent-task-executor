@@ -2,6 +2,10 @@
 
 All notable changes to this project will be documented in this file.
 
+## Unreleased
+
+- feat: **an agent task can name the cluster that runs it.** A task carrying `cluster: <name>` frontmatter now runs only on the executor whose new optional `CLUSTER` env var matches. Every other executor logs `skip task <id>: foreign cluster <name>` and counts `agent_executor_task_events_total{result="skipped_foreign_cluster"}`. The check runs before Config resolution on both the Kafka path and the reconcile path, so a foreign task is not miscounted as an unknown assignee. A task without `cluster:` is unchanged. The Kafka consumer group is now set by `CONSUMER_GROUP` (default `agent-task-executor`, the previous hard-coded value). Each cluster needs its own group so every cluster sees every event; a shared group splits the partitions, and a message delivered to the wrong cluster is lost.
+
 ## v0.18.14
 
 - fix: **a task filed after the last completed reconcile pass is no longer skipped as foreign when later passes abort.** Measured on nuke-prod 2026-10-20: the OpenClaw vault reached ~14.9k files, every pass after 13:14Z ended `event=reconcile_aborted reason=context_cancelled`, and because an aborted pass publishes nothing the ownership set froze at 13:14Z — each pr-review task filed afterwards (bborbe/claude-supervisor#458, bborbe/agent#110) logged `skip task <id>: not in this executor's vault` and never spawned. The executor now keeps a path→identifier cache across passes: `prioritizeUncachedPaths` prunes it to the listed paths, rebuilds ownership from it, and visits never-parsed paths first; `recordPathID` owns each parsed identifier immediately instead of at pass completion. A new task is therefore owned within one pass, completed or not.

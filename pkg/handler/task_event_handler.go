@@ -187,6 +187,7 @@ type TaskEventHandler interface {
 func NewTaskEventHandler(
 	jobSpawner spawner.JobSpawner,
 	branch base.Branch,
+	cluster string,
 	resolver pkg.ConfigResolver,
 	resultPublisher pkg.ResultPublisher,
 	taskStore *pkg.TaskStore,
@@ -197,6 +198,7 @@ func NewTaskEventHandler(
 	return &taskEventHandler{
 		jobSpawner:       jobSpawner,
 		branch:           branch,
+		cluster:          cluster,
 		resolver:         resolver,
 		resultPublisher:  resultPublisher,
 		taskStore:        taskStore,
@@ -214,6 +216,7 @@ func NewTaskEventHandler(
 type taskEventHandler struct {
 	jobSpawner       spawner.JobSpawner
 	branch           base.Branch
+	cluster          string
 	resolver         pkg.ConfigResolver
 	resultPublisher  pkg.ResultPublisher
 	taskStore        *pkg.TaskStore
@@ -443,6 +446,10 @@ func (h *taskEventHandler) parseAndFilter(
 	}
 
 	h.cleanupTerminalTask(task)
+
+	if h.skipForeignCluster(task) { // before Config resolution: not an unknown assignee
+		return lib.Task{}, nil, true, nil
+	}
 
 	// Resolve the per-agent Config before the status/phase checks so both filters
 	// can use the per-Config trigger. Skip lookup when assignee is empty.
@@ -1281,6 +1288,9 @@ func (h *taskEventHandler) reconcileTask(
 	if !ok {
 		return task, nil, false, nil
 	}
+	if h.isForeignCluster(task) {
+		return task, nil, false, nil
+	}
 	config, skip, err := h.resolveConfigForReconcile(ctx, task)
 	if err != nil {
 		return task, nil, false, err
@@ -1661,4 +1671,33 @@ func triggerBudgetWrite(
 	default:
 		return 0, false
 	}
+}
+
+// taskCluster returns the task's optional "cluster" frontmatter value, or ""
+// when the task names no cluster.
+func taskCluster(task lib.Task) string {
+	v, _ := task.Frontmatter["cluster"].(string)
+	return v
+}
+
+// isForeignCluster reports whether the task names a cluster other than the one
+// this executor runs in. A task without a cluster is never foreign, so tasks
+// filed before the field existed keep their previous routing.
+func (h *taskEventHandler) isForeignCluster(task lib.Task) bool {
+	c := taskCluster(task)
+	return c != "" && c != h.cluster
+}
+
+// skipForeignCluster logs and counts a task routed to another cluster and
+// reports whether the Kafka path must skip it.
+func (h *taskEventHandler) skipForeignCluster(task lib.Task) bool {
+	if !h.isForeignCluster(task) {
+		return false
+	}
+	glog.V(2).Infof(
+		"skip task %s: foreign cluster %s (executor cluster %s)",
+		task.TaskIdentifier, taskCluster(task), h.cluster,
+	)
+	metrics.TaskEventsTotal.WithLabelValues("skipped_foreign_cluster").Inc()
+	return true
 }

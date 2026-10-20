@@ -118,6 +118,7 @@ func init() {
 	TaskEventsTotal.WithLabelValues("skipped_unknown_assignee").Add(0)
 	TaskEventsTotal.WithLabelValues("skipped_active_job").Add(0)
 	TaskEventsTotal.WithLabelValues("skipped_stage").Add(0)
+	TaskEventsTotal.WithLabelValues("skipped_foreign_cluster").Add(0)
 	TaskEventsTotal.WithLabelValues("skipped_trigger_cap").Add(0)
 	TaskEventsTotal.WithLabelValues("error").Add(0)
 	TaskEventsTotal.WithLabelValues("type_mismatch").Add(0)

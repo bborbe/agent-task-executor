@@ -133,6 +133,8 @@ func CreateGitRestClient(baseURL, gatewaySecret string) gitrestclient.GitRestCli
 func CreateConsumer(
 	saramaClient sarama.Client,
 	branch base.Branch,
+	cluster string,
+	consumerGroup string,
 	topicPrefix base.TopicPrefix,
 	kubeClient kubernetes.Interface,
 	namespace libk8s.Namespace,
@@ -164,6 +166,7 @@ func CreateConsumer(
 	taskEventHandler := handler.NewTaskEventHandler(
 		jobSpawner,
 		branch,
+		cluster,
 		resolver,
 		resultPublisher,
 		taskStore,
@@ -174,7 +177,7 @@ func CreateConsumer(
 	topic := lib.TaskV1SchemaID.EventTopic(topicPrefix)
 	offsetManager := libkafka.NewSaramaOffsetManager(
 		saramaClient,
-		libkafka.Group("agent-task-executor"),
+		libkafka.Group(consumerGroup),
 		libkafka.OffsetOldest,
 		libkafka.OffsetOldest,
 	)
