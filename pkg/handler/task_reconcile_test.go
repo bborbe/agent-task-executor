@@ -7,6 +7,7 @@ package handler_test
 import (
 	"context"
 	"encoding/json"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -725,6 +726,69 @@ var _ = Describe("TaskEventHandler reconcile loop", func() {
 
 			Expect(h.ConsumeMessage(ctx, buildMsg(ownedTask("tid-foreign")))).To(Succeed())
 			Expect(fakeSpawner.SpawnJobCallCount()).To(Equal(1))
+		},
+	)
+
+	It(
+		"owns a task filed after the last completed pass even when later passes abort",
+		func() {
+			// Measured on prod 2026-10-20: the OpenClaw vault outgrew one pass's
+			// budget (~14.9k files), every pass after 13:14Z aborted, ownership froze
+			// at that pass, and each pr-review task filed afterwards was skipped as
+			// foreign. New paths are visited first and owned without waiting for the
+			// pass to complete.
+			buildMsg := func(t lib.Task) *sarama.ConsumerMessage {
+				value, err := json.Marshal(t)
+				Expect(err).To(BeNil())
+				return &sarama.ConsumerMessage{Value: value}
+			}
+			fakeGitRestClient.ListReturns([]string{"tasks/old-a.md", "tasks/old-b.md"}, nil)
+			fakeGitRestClient.GetStub = func(_ context.Context, relPath string) ([]byte, error) {
+				return []byte(
+					renderTaskFile(
+						ownedTask(
+							"tid-" + strings.TrimSuffix(
+								strings.TrimPrefix(relPath, "tasks/"),
+								".md",
+							),
+						),
+					),
+				), nil
+			}
+			fakeSpawner.IsJobActiveReturns(true, nil)
+			Expect(h.ReconcileOnce(ctx)).To(BeNil())
+
+			passCtx, cancelPass := context.WithCancel(ctx)
+			defer cancelPass()
+			fakeGitRestClient.ListReturns(
+				[]string{"tasks/old-a.md", "tasks/old-b.md", "tasks/new.md"},
+				nil,
+			)
+			var visited []string
+			fakeGitRestClient.GetStub = func(_ context.Context, relPath string) ([]byte, error) {
+				visited = append(visited, relPath)
+				if relPath == "tasks/old-a.md" {
+					cancelPass() // budget runs out mid-pass
+				}
+				return []byte(
+					renderTaskFile(
+						ownedTask(
+							"tid-" + strings.TrimSuffix(
+								strings.TrimPrefix(relPath, "tasks/"),
+								".md",
+							),
+						),
+					),
+				), nil
+			}
+			Expect(h.ReconcileOnce(passCtx)).To(BeNil())
+			Expect(visited).To(HaveLen(2))
+			Expect(visited[0]).To(Equal("tasks/new.md"))
+
+			fakeSpawner.IsJobActiveReturns(false, nil)
+			before := fakeSpawner.SpawnJobCallCount()
+			Expect(h.ConsumeMessage(ctx, buildMsg(ownedTask("tid-new")))).To(Succeed())
+			Expect(fakeSpawner.SpawnJobCallCount()).To(Equal(before + 1))
 		},
 	)
 

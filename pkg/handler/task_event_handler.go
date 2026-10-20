@@ -207,6 +207,7 @@ func NewTaskEventHandler(
 		taskGlob:         taskGlob,
 		redriveStreaks:   make(map[lib.TaskIdentifier]redriveStreak),
 		vaultTasks:       make(map[lib.TaskIdentifier]struct{}),
+		pathIDs:          make(map[string]lib.TaskIdentifier),
 	}
 }
 
@@ -228,6 +229,7 @@ type taskEventHandler struct {
 	vaultMu          sync.RWMutex
 	vaultTasks       map[lib.TaskIdentifier]struct{}
 	vaultScanned     bool
+	pathIDs          map[string]lib.TaskIdentifier
 	jobCacheMu       sync.Mutex
 	jobCache         map[string]map[lib.TaskIdentifier]bool
 	jobCacheArmed    bool
@@ -1078,6 +1080,7 @@ func (h *taskEventHandler) ReconcileOnce(ctx context.Context) error {
 		glog.Warningf("event=reconcile_list_failed glob=%q err=%v", h.taskGlob, err)
 		return nil
 	}
+	paths = h.prioritizeUncachedPaths(paths)
 	evaluated, redriven, deferred, skipped, capped := 0, 0, 0, 0, 0
 	// Collected across the whole pass and published only once it completes: an
 	// aborted pass would otherwise disown every task it had not reached yet, and
@@ -1161,6 +1164,7 @@ func (h *taskEventHandler) reconcileOne(
 	task, config, ok, err := h.reconcileTask(ctx, content)
 	if task.TaskIdentifier != "" {
 		seen[task.TaskIdentifier] = struct{}{}
+		h.recordPathID(relPath, task.TaskIdentifier)
 	}
 	if err != nil {
 		glog.Warningf(
@@ -1416,6 +1420,55 @@ func (h *taskEventHandler) vaultTasksOwned(id lib.TaskIdentifier) bool {
 	}
 	_, ok := h.vaultTasks[id]
 	return ok
+}
+
+// prioritizeUncachedPaths prunes the path→identifier cache to the paths the
+// vault still lists, folds the surviving identifiers into the ownership set, and
+// returns paths with the never-parsed ones first.
+//
+// A pass over a large vault can hit reconcilePassTimeout before it completes, and
+// an aborted pass publishes nothing — so without the cache a vault that grows past
+// one pass's budget freezes ownership at its last completed pass and every task
+// filed afterwards is skipped as foreign. Visiting new paths first means a new
+// task is owned within one pass, completed or not.
+func (h *taskEventHandler) prioritizeUncachedPaths(paths []string) []string {
+	h.vaultMu.Lock()
+	defer h.vaultMu.Unlock()
+	listed := make(map[string]struct{}, len(paths))
+	uncached := make([]string, 0)
+	cached := make([]string, 0, len(paths))
+	for _, relPath := range paths {
+		listed[relPath] = struct{}{}
+		if _, ok := h.pathIDs[relPath]; ok {
+			cached = append(cached, relPath)
+			continue
+		}
+		uncached = append(uncached, relPath)
+	}
+	for relPath := range h.pathIDs {
+		if _, ok := listed[relPath]; !ok {
+			delete(h.pathIDs, relPath)
+		}
+	}
+	if h.vaultScanned {
+		owned := make(map[lib.TaskIdentifier]struct{}, len(h.pathIDs))
+		for _, id := range h.pathIDs {
+			owned[id] = struct{}{}
+		}
+		h.vaultTasks = owned
+	}
+	return append(uncached, cached...)
+}
+
+// recordPathID caches the identifier parsed from relPath and owns it at once,
+// rather than waiting for the pass to complete.
+func (h *taskEventHandler) recordPathID(relPath string, id lib.TaskIdentifier) {
+	h.vaultMu.Lock()
+	defer h.vaultMu.Unlock()
+	h.pathIDs[relPath] = id
+	if h.vaultScanned {
+		h.vaultTasks[id] = struct{}{}
+	}
 }
 
 // publishVaultTasks replaces this instance's view of which tasks live in its
