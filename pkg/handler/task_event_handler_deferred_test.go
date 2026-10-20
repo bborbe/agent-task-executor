@@ -600,6 +600,151 @@ var _ = Describe("TaskEventHandler", func() {
 			})
 		})
 
+		Describe("queued_at on cap deferral", func() {
+			const (
+				queuedAtValue = "2026-05-17T09:34:00Z"
+				// concurrencyCapRetryDelay is unexported and this test lives in
+				// package handler_test, so the post-retry instant is hardcoded.
+				afterRetryDelay = "2026-05-17T09:35:01Z"
+			)
+
+			// A full frontmatter-delimited document is required: parseTaskFile
+			// rejects a bare YAML fragment, and without a parsed identifier
+			// recordPathID never runs.
+			queuedTaskFile := "---\n" +
+				"task_identifier: tid-queued\n" +
+				"status: in_progress\n" +
+				"phase: execution\n" +
+				"assignee: claude\n" +
+				"stage: prod\n" +
+				"queued_at: \"2026-05-17T09:34:00Z\"\n" +
+				"---\nbody\n"
+			// Ineligible on the reconcile floor (status/phase outside the trigger
+			// set) so the pass records the path but drives nothing — the only
+			// queued_at publish in these rows must come from ConsumeMessage.
+			ineligibleTaskFile := "---\n" +
+				"task_identifier: tid-queued\n" +
+				"status: done\n" +
+				"phase: done\n" +
+				"assignee: claude\n" +
+				"stage: prod\n" +
+				"---\nbody\n"
+
+			var payload lib.Task
+
+			BeforeEach(func() {
+				fakeResolver.ResolveReturns(
+					pkg.AgentConfiguration{
+						Assignee:          "claude",
+						Image:             "my-image:latest",
+						MaxConcurrentJobs: 1,
+					},
+					nil,
+				)
+				currentDateTime.SetNow(libtimetest.ParseDateTime(queuedAtValue))
+				// The cap is counted through ListActiveJobs (activeJobsFor). The
+				// map must carry a DIFFERENT identifier: isJobActive returns early
+				// when the task's own id is active.
+				fakeSpawner.ListActiveJobsReturns(
+					map[lib.TaskIdentifier]bool{"other-task": true},
+					nil,
+				)
+				fakeSpawner.IsJobActiveReturns(false, nil)
+				payload = lib.Task{
+					TaskIdentifier: lib.TaskIdentifier("tid-queued"),
+					Frontmatter: lib.TaskFrontmatter{
+						"status":   "in_progress",
+						"phase":    string(domain.TaskPhaseExecution),
+						"assignee": "claude",
+						"stage":    "prod",
+					},
+				}
+			})
+
+			It("publishes the fixed clock value when neither event nor vault carries it", func() {
+				Expect(h.ConsumeMessage(ctx, buildMsg(payload))).To(Succeed())
+
+				Expect(fakeResultPublisher.PublishQueueEntryCallCount()).To(Equal(1))
+				_, _, queuedAt := fakeResultPublisher.PublishQueueEntryArgsForCall(0)
+				Expect(queuedAt).To(Equal("2026-05-17T09:34:00Z"))
+			})
+
+			It("does not publish when the vault already carries queued_at", func() {
+				fakeGitRestClient.ListReturns([]string{"24 Tasks/tid-queued.md"}, nil)
+				fakeGitRestClient.GetReturns([]byte(queuedTaskFile), nil)
+				Expect(h.ReconcileOnce(ctx)).To(Succeed())
+
+				before := testutil.ToFloat64(
+					metrics.DeferredConcurrencyCapTotal.WithLabelValues("claude"),
+				)
+				Expect(h.ConsumeMessage(ctx, buildMsg(payload))).To(Succeed())
+				after := testutil.ToFloat64(
+					metrics.DeferredConcurrencyCapTotal.WithLabelValues("claude"),
+				)
+				// Proves the deferral actually happened rather than the payload
+				// being dropped as foreign before reaching queuedAtFromVault.
+				Expect(after - before).To(Equal(float64(1)))
+				Expect(fakeResultPublisher.PublishQueueEntryCallCount()).To(Equal(0))
+			})
+
+			It("does not re-publish on a second deferral of the same task", func() {
+				Expect(h.ConsumeMessage(ctx, buildMsg(payload))).To(Succeed())
+				Expect(fakeResultPublisher.PublishQueueEntryCallCount()).To(Equal(1))
+
+				// Drive the in-memory deferred entry, not a second ConsumeMessage:
+				// a repeat payload carries no queued_at and would re-stamp.
+				currentDateTime.SetNow(libtimetest.ParseDateTime(afterRetryDelay))
+				Expect(h.EvalDeferredRespawns(ctx)).To(Succeed())
+				Expect(fakeResultPublisher.PublishQueueEntryCallCount()).To(Equal(1))
+			})
+
+			DescribeTable("queuedAtFromVault failure branches still publish once",
+				func(setup func(), id lib.TaskIdentifier) {
+					setup()
+					task := payload
+					task.TaskIdentifier = id
+					Expect(h.ConsumeMessage(ctx, buildMsg(task))).To(Succeed())
+					Expect(fakeResultPublisher.PublishQueueEntryCallCount()).To(Equal(1))
+				},
+				Entry(
+					"unknown id with empty pathIDs",
+					func() {},
+					lib.TaskIdentifier("tid-unknown"),
+				),
+				Entry(
+					"vault read fails after the path was recorded",
+					func() {
+						fakeGitRestClient.ListReturns([]string{"24 Tasks/tid-queued.md"}, nil)
+						fakeGitRestClient.GetReturnsOnCall(0, []byte(ineligibleTaskFile), nil)
+						fakeGitRestClient.GetReturns(nil, errors.Errorf(ctx, "read failed"))
+						Expect(h.ReconcileOnce(ctx)).To(Succeed())
+					},
+					lib.TaskIdentifier("tid-queued"),
+				),
+				Entry(
+					"reconciled file has no queued_at",
+					func() {
+						fakeGitRestClient.ListReturns([]string{"24 Tasks/tid-queued.md"}, nil)
+						fakeGitRestClient.GetReturns([]byte(ineligibleTaskFile), nil)
+						Expect(h.ReconcileOnce(ctx)).To(Succeed())
+					},
+					lib.TaskIdentifier("tid-queued"),
+				),
+			)
+
+			It("returns nil on publish failure and does not retry the next deferral", func() {
+				fakeResultPublisher.PublishQueueEntryReturns(
+					errors.Errorf(ctx, "publish failed"),
+				)
+				Expect(h.ConsumeMessage(ctx, buildMsg(payload))).To(Succeed())
+				Expect(fakeResultPublisher.PublishQueueEntryCallCount()).To(Equal(1))
+
+				currentDateTime.SetNow(libtimetest.ParseDateTime(afterRetryDelay))
+				Expect(h.EvalDeferredRespawns(ctx)).To(Succeed())
+				Expect(fakeResultPublisher.PublishQueueEntryCallCount()).To(Equal(1))
+			})
+		})
+
 		Describe("grace window (spec 036)", func() {
 			BeforeEach(func() {
 				fakeSpawner.IsJobActiveReturns(false, nil)
