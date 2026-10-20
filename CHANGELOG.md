@@ -2,6 +2,10 @@
 
 All notable changes to this project will be documented in this file.
 
+## Unreleased
+
+- feat: **a task deferred behind the concurrency cap now records a durable `queued_at` frontmatter field.** The executor stamps an RFC3339 UTC timestamp once, at the moment the first wait begins, through a new `PublishQueueEntry` on `ResultPublisher` (an `UpdateFrontmatterCommand` carrying exactly `{"queued_at": …}`), so a consumer reading the task file can compute a queue age for the agent-execution stage. A re-deferral never moves the timestamp: `stampQueueEntry` reads the field from the in-memory entry first, then from the vault through git-rest (a duplicate event can arrive after the publish but before the controller applies it), and publishes only when neither carries it. A failed publish is not retried — the in-memory copy suppresses the next attempt rather than publishing a later, wrong time. A spawn that is not deferred never writes the field.
+
 ## v0.18.14
 
 - fix: **a task filed after the last completed reconcile pass is no longer skipped as foreign when later passes abort.** Measured on nuke-prod 2026-10-20: the OpenClaw vault reached ~14.9k files, every pass after 13:14Z ended `event=reconcile_aborted reason=context_cancelled`, and because an aborted pass publishes nothing the ownership set froze at 13:14Z — each pr-review task filed afterwards (bborbe/claude-supervisor#458, bborbe/agent#110) logged `skip task <id>: not in this executor's vault` and never spawned. The executor now keeps a path→identifier cache across passes: `prioritizeUncachedPaths` prunes it to the listed paths, rebuilds ownership from it, and visits never-parsed paths first; `recordPathID` owns each parsed identifier immediately instead of at pass completion. A new task is therefore owned within one pass, completed or not.
