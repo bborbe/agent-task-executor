@@ -16,7 +16,7 @@ via the `agent` Helm chart; published image `docker.io/bborbe/agent-task-executo
 
 A task can name the cluster that runs it with the optional `cluster:` frontmatter field. The canonical values are `nukedev`, `nukeprod` and `sun`.
 
-- `CLUSTER`: the cluster this executor runs in. A task whose `cluster` names a different cluster is skipped, logged as `skip task <id>: foreign cluster <name>`, and counted as `agent_executor_task_events_total{result="skipped_foreign_cluster"}`. A task without `cluster:` runs as before. Such an event also drops any respawn still pending for that task from an earlier deferral.
+- `CLUSTER`: the cluster this executor runs in. A task whose `cluster` names a different cluster is skipped, logged as `skip task <id>: foreign cluster <name>`, and counted as `agent_executor_task_events_total{result="skipped_foreign_cluster"}`. A task without `cluster:` runs as before. Every filter skip — including a foreign-cluster event — drops any respawn still pending for that task from an earlier deferral.
 - `CONSUMER_GROUP`: the Kafka consumer group (default `agent-task-executor`). Each cluster must use its own group, e.g. `agent-task-executor-sun`, so that every cluster receives every task event. Keep an existing cluster on its current group, because a new group starts from the oldest retained offset and re-reads the topic.
 
 - `STAGE_FILTER` (default `true`): skip tasks whose `stage` frontmatter (default `prod`) differs from `BRANCH`. Set it to `false` on a cluster whose controller already scopes tasks by cluster (sun), so tasks there need no `stage` field.

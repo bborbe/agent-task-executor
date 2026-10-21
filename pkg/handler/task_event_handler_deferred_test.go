@@ -587,6 +587,415 @@ var _ = Describe("TaskEventHandler", func() {
 				},
 			)
 
+			// capConfig is the single-slot configuration every claim spec parks a
+			// task behind.
+			capConfig := pkg.AgentConfiguration{
+				Assignee:          "claude",
+				Image:             "my-image:latest",
+				MaxConcurrentJobs: 1,
+			}
+
+			// claimInvalidatedCount reads the claim-invalidation counter.
+			claimInvalidatedCount := func() float64 {
+				return testutil.ToFloat64(
+					metrics.TaskEventsTotal.WithLabelValues("deferred_claim_invalidated"),
+				)
+			}
+
+			// installCapSpawner makes the spawner report `running` active jobs for
+			// claude. The returned setter frees or fills the slot.
+			installCapSpawner := func(running *int) {
+				fakeSpawner.ListActiveJobsStub = func(
+					context.Context, string,
+				) (map[lib.TaskIdentifier]bool, error) {
+					return activeJobs(*running), nil
+				}
+				fakeSpawner.SpawnJobStub = func(
+					context.Context, lib.Task, pkg.AgentConfiguration,
+				) (string, error) {
+					*running = 1
+					return "job-claim", nil
+				}
+			}
+
+			It("does not spawn or re-defer a replay whose entry was evicted mid-replay", func() {
+				// This spec fails on the pre-fix code. There, evalDeferredRespawns
+				// deleted the entry and released deferredMu, then spawned the stale
+				// snapshot: the retag eviction below found nothing to remove and the
+				// pre-retag task ran on nukeprod. The eviction is forced into that
+				// exact gap by the ListActiveJobs stub, which runs inside
+				// spawnIfNeeded after the collection and before the claim re-check.
+				fakeResolver.ResolveReturns(capConfig, nil)
+				routingHandler := newRoutingHandler("nukeprod", true)
+
+				running := 1
+				armed := false
+				evicted := false
+				installCapSpawner(&running)
+				// Not IsJobActiveStub: buildQueueTask carries no current_job, so the
+				// replay reaches isJobActive -> ListActiveJobs.
+				listStub := fakeSpawner.ListActiveJobsStub
+				fakeSpawner.ListActiveJobsStub = func(
+					ctx context.Context, assignee string,
+				) (map[lib.TaskIdentifier]bool, error) {
+					if armed && !evicted {
+						evicted = true
+						Expect(
+							routingHandler.ConsumeMessage(
+								ctx,
+								buildMsg(buildRoutingTask("tid-replay", "sun")),
+							),
+						).To(Succeed())
+					}
+					return listStub(ctx, assignee)
+				}
+
+				currentDateTime.SetNow(libtimetest.ParseDateTime("2026-10-21T08:00:00Z"))
+				Expect(
+					routingHandler.ConsumeMessage(
+						ctx,
+						buildMsg(buildRoutingTask("tid-replay", "")),
+					),
+				).To(Succeed())
+				Expect(fakeSpawner.SpawnJobCallCount()).To(Equal(0))
+
+				running = 0
+				armed = true
+				before := claimInvalidatedCount()
+				currentDateTime.SetNow(libtimetest.ParseDateTime("2026-10-21T08:01:30Z"))
+				Expect(routingHandler.EvalDeferredRespawns(ctx)).To(Succeed())
+
+				Expect(evicted).To(BeTrue())
+				Expect(fakeSpawner.SpawnJobCallCount()).To(Equal(0))
+				Expect(claimInvalidatedCount() - before).To(Equal(float64(1)))
+
+				// No re-deferral: a second tick past the retry delay spawns nothing.
+				currentDateTime.SetNow(libtimetest.ParseDateTime("2026-10-21T08:02:30Z"))
+				Expect(routingHandler.EvalDeferredRespawns(ctx)).To(Succeed())
+				Expect(fakeSpawner.SpawnJobCallCount()).To(Equal(0))
+			})
+
+			It(
+				"does not re-defer a replay whose entry was evicted while the agent stays at cap",
+				func() {
+					// This spec fails on the pre-fix code: the replay reached the cap
+					// branch and re-parked the stale snapshot, then spawned it once the
+					// slot freed. Keeping the agent at the cap during the replay tick is
+					// what forces that store; without it the spec also passes on the old
+					// code.
+					fakeResolver.ResolveReturns(capConfig, nil)
+					routingHandler := newRoutingHandler("nukeprod", true)
+
+					running := 1
+					armed := false
+					evicted := false
+					installCapSpawner(&running)
+					listStub := fakeSpawner.ListActiveJobsStub
+					fakeSpawner.ListActiveJobsStub = func(
+						ctx context.Context, assignee string,
+					) (map[lib.TaskIdentifier]bool, error) {
+						if armed && !evicted {
+							evicted = true
+							Expect(
+								routingHandler.ConsumeMessage(
+									ctx,
+									buildMsg(buildRoutingTask("tid-replay-cap", "sun")),
+								),
+							).To(Succeed())
+						}
+						return listStub(ctx, assignee)
+					}
+
+					currentDateTime.SetNow(libtimetest.ParseDateTime("2026-10-21T08:00:00Z"))
+					Expect(
+						routingHandler.ConsumeMessage(
+							ctx,
+							buildMsg(buildRoutingTask("tid-replay-cap", "")),
+						),
+					).To(Succeed())
+					Expect(fakeSpawner.SpawnJobCallCount()).To(Equal(0))
+
+					armed = true
+					before := claimInvalidatedCount()
+					currentDateTime.SetNow(libtimetest.ParseDateTime("2026-10-21T08:01:30Z"))
+					Expect(routingHandler.EvalDeferredRespawns(ctx)).To(Succeed())
+
+					Expect(evicted).To(BeTrue())
+					Expect(fakeSpawner.SpawnJobCallCount()).To(Equal(0))
+					Expect(claimInvalidatedCount() - before).To(Equal(float64(1)))
+
+					// Free the slot and tick twice past the retry delay: the evicted
+					// snapshot must not have been re-parked.
+					running = 0
+					currentDateTime.SetNow(libtimetest.ParseDateTime("2026-10-21T08:02:30Z"))
+					Expect(routingHandler.EvalDeferredRespawns(ctx)).To(Succeed())
+					currentDateTime.SetNow(libtimetest.ParseDateTime("2026-10-21T08:03:30Z"))
+					Expect(routingHandler.EvalDeferredRespawns(ctx)).To(Succeed())
+					Expect(fakeSpawner.SpawnJobCallCount()).To(Equal(0))
+				},
+			)
+
+			It("spawns an un-evicted replay exactly once", func() {
+				// Positive control: the eviction in the two specs above targets a
+				// different task id, so the replay's claim stays valid and it spawns
+				// exactly once. Proves those specs are not passing because the replay
+				// path was never exercised.
+				fakeResolver.ResolveReturns(capConfig, nil)
+				routingHandler := newRoutingHandler("nukeprod", true)
+
+				running := 1
+				armed := false
+				evictedOther := false
+				installCapSpawner(&running)
+				listStub := fakeSpawner.ListActiveJobsStub
+				fakeSpawner.ListActiveJobsStub = func(
+					ctx context.Context, assignee string,
+				) (map[lib.TaskIdentifier]bool, error) {
+					if armed && !evictedOther {
+						evictedOther = true
+						Expect(
+							routingHandler.ConsumeMessage(
+								ctx,
+								buildMsg(buildRoutingTask("tid-other", "sun")),
+							),
+						).To(Succeed())
+					}
+					return listStub(ctx, assignee)
+				}
+
+				currentDateTime.SetNow(libtimetest.ParseDateTime("2026-10-21T08:00:00Z"))
+				Expect(
+					routingHandler.ConsumeMessage(
+						ctx,
+						buildMsg(buildRoutingTask("tid-replay-control", "")),
+					),
+				).To(Succeed())
+				Expect(fakeSpawner.SpawnJobCallCount()).To(Equal(0))
+
+				running = 0
+				armed = true
+				currentDateTime.SetNow(libtimetest.ParseDateTime("2026-10-21T08:01:30Z"))
+				Expect(routingHandler.EvalDeferredRespawns(ctx)).To(Succeed())
+
+				Expect(evictedOther).To(BeTrue())
+				Expect(fakeSpawner.SpawnJobCallCount()).To(Equal(1))
+				_, spawnedTask, _ := fakeSpawner.SpawnJobArgsForCall(0)
+				Expect(spawnedTask.TaskIdentifier).
+					To(Equal(lib.TaskIdentifier("tid-replay-control")))
+			})
+
+			DescribeTable("every filter skip drops a parked deferred entry",
+				func(first, second lib.Task, configure func()) {
+					fakeResolver.ResolveReturns(capConfig, nil)
+					if configure != nil {
+						configure()
+					}
+					routingHandler := newRoutingHandler("nukeprod", true)
+					running := 1
+					installCapSpawner(&running)
+
+					currentDateTime.SetNow(libtimetest.ParseDateTime("2026-10-21T08:00:00Z"))
+					beforeCap := testutil.ToFloat64(
+						metrics.TaskEventsTotal.WithLabelValues("deferred_concurrency_cap"),
+					)
+					Expect(routingHandler.ConsumeMessage(ctx, buildMsg(first))).To(Succeed())
+					// The first event must actually have parked the task, otherwise
+					// the second event's eviction would be vacuous.
+					Expect(fakeSpawner.SpawnJobCallCount()).To(Equal(0))
+					Expect(
+						testutil.ToFloat64(
+							metrics.TaskEventsTotal.WithLabelValues("deferred_concurrency_cap"),
+						) - beforeCap,
+					).To(Equal(float64(1)))
+
+					Expect(routingHandler.ConsumeMessage(ctx, buildMsg(second))).To(Succeed())
+
+					running = 0
+					currentDateTime.SetNow(libtimetest.ParseDateTime("2026-10-21T08:01:30Z"))
+					Expect(routingHandler.EvalDeferredRespawns(ctx)).To(Succeed())
+					Expect(fakeSpawner.SpawnJobCallCount()).To(Equal(0))
+				},
+				Entry("type mismatch",
+					func() lib.Task {
+						t := buildQueueTask("tid-skip-type", "")
+						t.Frontmatter["task_type"] = "x"
+						return t
+					}(),
+					func() lib.Task {
+						t := buildQueueTask("tid-skip-type", "")
+						t.Frontmatter["task_type"] = "y"
+						return t
+					}(),
+					func() {
+						cfg := capConfig
+						cfg.TaskType = "x"
+						fakeResolver.ResolveReturns(cfg, nil)
+					},
+				),
+				Entry("status",
+					buildQueueTask("tid-skip-status", ""),
+					func() lib.Task {
+						t := buildQueueTask("tid-skip-status", "")
+						t.Frontmatter["status"] = "hold"
+						return t
+					}(),
+					nil,
+				),
+				Entry("non-trigger phase",
+					buildQueueTask("tid-skip-phase", ""),
+					func() lib.Task {
+						t := buildQueueTask("tid-skip-phase", "")
+						t.Frontmatter["phase"] = string(domain.TaskPhaseTodo)
+						return t
+					}(),
+					nil,
+				),
+				Entry("stage",
+					buildQueueTask("tid-skip-stage", ""),
+					func() lib.Task {
+						t := buildQueueTask("tid-skip-stage", "")
+						t.Frontmatter["stage"] = "dev"
+						return t
+					}(),
+					nil,
+				),
+				Entry("empty assignee",
+					buildQueueTask("tid-skip-assignee", ""),
+					func() lib.Task {
+						t := buildQueueTask("tid-skip-assignee", "")
+						t.Frontmatter["assignee"] = ""
+						return t
+					}(),
+					nil,
+				),
+				Entry("resolveConfig skip",
+					buildQueueTask("tid-skip-unknown", ""),
+					func() lib.Task {
+						t := buildQueueTask("tid-skip-unknown", "")
+						t.Frontmatter["assignee"] = "unknown-agent-skip"
+						return t
+					}(),
+					func() {
+						fakeResolver.ResolveStub = func(
+							_ context.Context, assignee string,
+						) (pkg.AgentConfiguration, error) {
+							if assignee == "unknown-agent-skip" {
+								return pkg.AgentConfiguration{}, pkg.ErrConfigNotFound
+							}
+							return capConfig, nil
+						}
+					},
+				),
+				Entry("foreign cluster",
+					buildQueueTask("tid-skip-cluster", ""),
+					buildRoutingTask("tid-skip-cluster", "sun"),
+					nil,
+				),
+				Entry("terminal phase",
+					buildQueueTask("tid-skip-terminal", ""),
+					func() lib.Task {
+						t := buildQueueTask("tid-skip-terminal", "")
+						t.Frontmatter["phase"] = string(domain.TaskPhaseHumanReview)
+						return t
+					}(),
+					nil,
+				),
+			)
+
+			// untaggedReconcileTaskFile is the vault view of a task the reconcile
+			// pass reads before a retag event moves it to cluster sun.
+			untaggedReconcileTaskFile := "---\n" +
+				"task_identifier: tid-reconcile\n" +
+				"status: in_progress\n" +
+				"phase: planning\n" +
+				"assignee: claude\n" +
+				"stage: prod\n" +
+				"---\nbody\n"
+
+			It("does not spawn a reconcile drive whose entry was evicted mid-drive", func() {
+				// Fails on the pre-fix code: gather captures the candidate, the retag
+				// eviction between gather and drive found nothing to remove, and the
+				// drive spawned the stale snapshot. The first ListActiveJobs call in
+				// a pass is the drive's isJobActive (gather makes none), so the stub
+				// lands the eviction exactly in that gap.
+				fakeResolver.ResolveReturns(capConfig, nil)
+				routingHandler := newRoutingHandler("nukeprod", true)
+				running := 0
+				evicted := false
+				fakeSpawner.ListActiveJobsStub = func(
+					ctx context.Context, _ string,
+				) (map[lib.TaskIdentifier]bool, error) {
+					if !evicted {
+						evicted = true
+						Expect(
+							routingHandler.ConsumeMessage(
+								ctx,
+								buildMsg(buildRoutingTask("tid-reconcile", "sun")),
+							),
+						).To(Succeed())
+					}
+					return activeJobs(running), nil
+				}
+				fakeSpawner.SpawnJobStub = func(
+					context.Context, lib.Task, pkg.AgentConfiguration,
+				) (string, error) {
+					return "job-reconcile", nil
+				}
+				fakeGitRestClient.ListReturns([]string{"24 Tasks/tid-reconcile.md"}, nil)
+				fakeGitRestClient.GetReturns([]byte(untaggedReconcileTaskFile), nil)
+
+				before := claimInvalidatedCount()
+				currentDateTime.SetNow(libtimetest.ParseDateTime("2026-10-21T08:00:00Z"))
+				Expect(routingHandler.ReconcileOnce(ctx)).To(Succeed())
+
+				Expect(evicted).To(BeTrue())
+				Expect(fakeSpawner.SpawnJobCallCount()).To(Equal(0))
+				Expect(claimInvalidatedCount() - before).To(Equal(float64(1)))
+			})
+
+			It("does not re-defer a reconcile drive evicted while the agent stays at cap", func() {
+				// Fails on the pre-fix code: the drive re-parked the reconcile snapshot
+				// at the cap, then spawned it after the slot freed. Keeping the agent at
+				// the cap forces the store.
+				fakeResolver.ResolveReturns(capConfig, nil)
+				routingHandler := newRoutingHandler("nukeprod", true)
+				running := 1
+				evicted := false
+				fakeSpawner.ListActiveJobsStub = func(
+					ctx context.Context, _ string,
+				) (map[lib.TaskIdentifier]bool, error) {
+					if !evicted {
+						evicted = true
+						Expect(
+							routingHandler.ConsumeMessage(
+								ctx,
+								buildMsg(buildRoutingTask("tid-reconcile", "sun")),
+							),
+						).To(Succeed())
+					}
+					return activeJobs(running), nil
+				}
+				fakeSpawner.SpawnJobStub = func(
+					context.Context, lib.Task, pkg.AgentConfiguration,
+				) (string, error) {
+					return "job-reconcile", nil
+				}
+				fakeGitRestClient.ListReturns([]string{"24 Tasks/tid-reconcile.md"}, nil)
+				fakeGitRestClient.GetReturns([]byte(untaggedReconcileTaskFile), nil)
+
+				before := claimInvalidatedCount()
+				currentDateTime.SetNow(libtimetest.ParseDateTime("2026-10-21T08:00:00Z"))
+				Expect(routingHandler.ReconcileOnce(ctx)).To(Succeed())
+				Expect(evicted).To(BeTrue())
+				Expect(fakeSpawner.SpawnJobCallCount()).To(Equal(0))
+				Expect(claimInvalidatedCount() - before).To(Equal(float64(1)))
+
+				running = 0
+				currentDateTime.SetNow(libtimetest.ParseDateTime("2026-10-21T08:01:30Z"))
+				Expect(routingHandler.EvalDeferredRespawns(ctx)).To(Succeed())
+				Expect(fakeSpawner.SpawnJobCallCount()).To(Equal(0))
+			})
+
 			It("orders already-attempted tasks by queue-entry time, not last attempt", func() {
 				// queued_at is when the FIRST wait began, so it is the fair key among
 				// tasks that have all had a turn. job_started_at is deliberately
