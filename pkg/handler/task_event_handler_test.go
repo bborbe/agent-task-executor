@@ -85,6 +85,8 @@ var _ = Describe("TaskEventHandler", func() {
 			currentDateTime,
 			fakeGitRestClient,
 			"24 Tasks/*.md",
+			handler.DefaultReconcilePassTimeout,
+			handler.DefaultReconcileInterval,
 		)
 	})
 
@@ -1005,6 +1007,8 @@ var _ = Describe("TaskEventHandler", func() {
 					libtime.NewCurrentDateTime(),
 					fakeGitRestClient,
 					"24 Tasks/*.md",
+					handler.DefaultReconcilePassTimeout,
+					handler.DefaultReconcileInterval,
 				)
 			})
 			buildClusterTask := func(cluster string) lib.Task {
@@ -1056,6 +1060,8 @@ var _ = Describe("TaskEventHandler", func() {
 					libtime.NewCurrentDateTime(),
 					fakeGitRestClient,
 					"24 Tasks/*.md",
+					handler.DefaultReconcilePassTimeout,
+					handler.DefaultReconcileInterval,
 				)
 			}
 			buildTask := func(cluster string) lib.Task {
@@ -1126,6 +1132,8 @@ var _ = Describe("TaskEventHandler", func() {
 					libtime.NewCurrentDateTime(),
 					fakeGitRestClient,
 					"24 Tasks/*.md",
+					handler.DefaultReconcilePassTimeout,
+					handler.DefaultReconcileInterval,
 				)
 			})
 			It("spawns a cluster task without a stage field on a dev-branch executor", func() {
@@ -1164,6 +1172,8 @@ var _ = Describe("TaskEventHandler", func() {
 				libtime.NewCurrentDateTime(),
 				fakeGitRestClient,
 				"24 Tasks/*.md",
+				handler.DefaultReconcilePassTimeout,
+				handler.DefaultReconcileInterval,
 			)
 			task := lib.Task{
 				TaskIdentifier: lib.TaskIdentifier("tid-stage-3"),
@@ -1215,6 +1225,8 @@ var _ = Describe("TaskEventHandler", func() {
 				libtime.NewCurrentDateTime(),
 				fakeGitRestClient,
 				"24 Tasks/*.md",
+				handler.DefaultReconcilePassTimeout,
+				handler.DefaultReconcileInterval,
 			)
 			task := lib.Task{
 				TaskIdentifier: lib.TaskIdentifier("tid-stage-4"),

@@ -7,6 +7,7 @@ package main
 import (
 	"context"
 	"reflect"
+	"time"
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
@@ -84,6 +85,46 @@ var _ = Describe("application.Run startup validation", func() {
 			Expect(f.Tag.Get("env")).To(Equal("TASK_GLOB"))
 			Expect(f.Tag.Get("arg")).To(Equal("task-glob"))
 			Expect(f.Tag.Get("default")).To(BeEmpty())
+		})
+	})
+
+	Describe("reconcile timing", func() {
+		It("declares env, arg, and the 45s/60s defaults", func() {
+			typ := reflect.TypeOf(application{})
+			f, ok := typ.FieldByName("ReconcilePassTimeout")
+			Expect(ok).To(BeTrue())
+			Expect(f.Type).To(Equal(reflect.TypeOf(time.Duration(0))))
+			Expect(f.Tag.Get("env")).To(Equal("RECONCILE_PASS_TIMEOUT"))
+			Expect(f.Tag.Get("arg")).To(Equal("reconcile-pass-timeout"))
+			Expect(f.Tag.Get("default")).To(Equal("45s"))
+			f, ok = typ.FieldByName("ReconcileInterval")
+			Expect(ok).To(BeTrue())
+			Expect(f.Type).To(Equal(reflect.TypeOf(time.Duration(0))))
+			Expect(f.Tag.Get("env")).To(Equal("RECONCILE_INTERVAL"))
+			Expect(f.Tag.Get("arg")).To(Equal("reconcile-interval"))
+			Expect(f.Tag.Get("default")).To(Equal("60s"))
+		})
+
+		It("rejects a non-positive pass timeout before the k8s client", func() {
+			a := &application{
+				VaultName:         "personal",
+				TaskGlob:          "t/*.md",
+				ReconcileInterval: time.Minute,
+			}
+			err := a.Run(context.Background(), nil)
+			Expect(err).To(HaveOccurred())
+			Expect(err.Error()).To(ContainSubstring("reconcile-pass-timeout"))
+		})
+
+		It("rejects a non-positive interval before the k8s client", func() {
+			a := &application{
+				VaultName:            "personal",
+				TaskGlob:             "t/*.md",
+				ReconcilePassTimeout: time.Minute,
+			}
+			err := a.Run(context.Background(), nil)
+			Expect(err).To(HaveOccurred())
+			Expect(err.Error()).To(ContainSubstring("reconcile-interval"))
 		})
 	})
 })

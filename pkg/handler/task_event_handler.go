@@ -54,12 +54,11 @@ const deferredRespawnInterval = 30 * time.Second
 // freed slot is picked up promptly without busy-polling the API server.
 const concurrencyCapRetryDelay = 60 * time.Second
 
-// defaultReconcileInterval is the interval between reconcile-loop passes
-// (spec 005). Mirrors the DefaultZombieSweeperIntervalSeconds CRD knob: a
-// package constant, not a CRD field and not env-configurable in this change.
-// 60s is a reasonable recovery latency for a task whose deferral was lost
-// across a restart.
-const defaultReconcileInterval = 60 * time.Second
+// DefaultReconcileInterval is the default interval between reconcile-loop
+// passes (spec 005), overridable per deployment via RECONCILE_INTERVAL. 60s is
+// a reasonable recovery latency for a task whose deferral was lost across a
+// restart.
+const DefaultReconcileInterval = 60 * time.Second
 
 // maxConsecutiveRedrives bounds how many times in a row the executor may spawn
 // the same task at the same phase with nothing advancing it.
@@ -100,7 +99,7 @@ const defaultReconcileInterval = 60 * time.Second
 // times, not that it loops forever.
 const maxConsecutiveRedrives = 3
 
-// reconcilePassTimeout bounds one reconcile pass so a slow or large vault
+// DefaultReconcilePassTimeout bounds one reconcile pass so a slow or large vault
 // cannot hold a pass open indefinitely (spec 005 Failure Modes: "Pass bounded
 // by a per-pass timeout; logs evaluate count so cost is visible"). Three
 // quarters of the interval: a pass completes within a tick and leaves headroom
@@ -109,8 +108,10 @@ const maxConsecutiveRedrives = 3
 // of ~200 non-terminal tasks, so the tasks ordered after the cut were never
 // reached. The per-assignee active-Job cache added in the same change removes
 // most of the cost; this is the headroom that keeps a slow pass from re-opening
-// the same window. Package constant — not configurable in this change.
-const reconcilePassTimeout = 45 * time.Second
+// the same window. Overridable per deployment via RECONCILE_PASS_TIMEOUT: on
+// 2026-10-21 a sun executor reading the 15k-file openclaw vault over the
+// git-rest ingress (~7 ms per GET) aborted every pass at 45s with evaluated=0.
+const DefaultReconcilePassTimeout = 45 * time.Second
 
 // deferredEntry tracks a task whose respawn was suppressed by the grace window.
 // The executor re-evaluates it once retryAfter is reached.
@@ -178,7 +179,7 @@ type TaskEventHandler interface {
 	// RunReconcileLoop on each tick; also callable directly in tests.
 	ReconcileOnce(ctx context.Context) error
 	// RunReconcileLoop runs one pass immediately at startup, then every
-	// defaultReconcileInterval until ctx is cancelled. Must be run
+	// reconcile interval until ctx is cancelled. Must be run
 	// alongside the Kafka consumer.
 	RunReconcileLoop(ctx context.Context) error
 }
@@ -196,52 +197,58 @@ func NewTaskEventHandler(
 	currentDateTime libtime.CurrentDateTimeGetter,
 	gitRestClient gitrestclient.GitRestClient,
 	taskGlob string,
+	reconcilePassTimeout time.Duration,
+	reconcileInterval time.Duration,
 ) TaskEventHandler {
 	return &taskEventHandler{
-		jobSpawner:       jobSpawner,
-		branch:           branch,
-		cluster:          cluster,
-		stageFilter:      stageFilter,
-		runUntagged:      runUntagged,
-		resolver:         resolver,
-		resultPublisher:  resultPublisher,
-		taskStore:        taskStore,
-		currentDateTime:  currentDateTime,
-		deferredRespawns: make(map[lib.TaskIdentifier]deferredEntry),
-		spawnLocks:       make(map[string]*sync.Mutex),
-		gitRestClient:    gitRestClient,
-		taskGlob:         taskGlob,
-		redriveStreaks:   make(map[lib.TaskIdentifier]redriveStreak),
-		vaultTasks:       make(map[lib.TaskIdentifier]struct{}),
-		pathIDs:          make(map[string]lib.TaskIdentifier),
+		jobSpawner:           jobSpawner,
+		branch:               branch,
+		cluster:              cluster,
+		stageFilter:          stageFilter,
+		runUntagged:          runUntagged,
+		resolver:             resolver,
+		resultPublisher:      resultPublisher,
+		taskStore:            taskStore,
+		currentDateTime:      currentDateTime,
+		deferredRespawns:     make(map[lib.TaskIdentifier]deferredEntry),
+		spawnLocks:           make(map[string]*sync.Mutex),
+		gitRestClient:        gitRestClient,
+		taskGlob:             taskGlob,
+		reconcilePassTimeout: reconcilePassTimeout,
+		reconcileInterval:    reconcileInterval,
+		redriveStreaks:       make(map[lib.TaskIdentifier]redriveStreak),
+		vaultTasks:           make(map[lib.TaskIdentifier]struct{}),
+		pathIDs:              make(map[string]lib.TaskIdentifier),
 	}
 }
 
 type taskEventHandler struct {
-	jobSpawner       spawner.JobSpawner
-	branch           base.Branch
-	cluster          string
-	stageFilter      bool
-	runUntagged      bool
-	resolver         pkg.ConfigResolver
-	resultPublisher  pkg.ResultPublisher
-	taskStore        *pkg.TaskStore
-	currentDateTime  libtime.CurrentDateTimeGetter
-	deferredMu       sync.Mutex
-	deferredRespawns map[lib.TaskIdentifier]deferredEntry
-	spawnLocksMu     sync.Mutex
-	spawnLocks       map[string]*sync.Mutex
-	gitRestClient    gitrestclient.GitRestClient
-	taskGlob         string
-	redriveMu        sync.Mutex
-	redriveStreaks   map[lib.TaskIdentifier]redriveStreak
-	vaultMu          sync.RWMutex
-	vaultTasks       map[lib.TaskIdentifier]struct{}
-	vaultScanned     bool
-	pathIDs          map[string]lib.TaskIdentifier
-	jobCacheMu       sync.Mutex
-	jobCache         map[string]map[lib.TaskIdentifier]bool
-	jobCacheArmed    bool
+	jobSpawner           spawner.JobSpawner
+	branch               base.Branch
+	cluster              string
+	stageFilter          bool
+	runUntagged          bool
+	resolver             pkg.ConfigResolver
+	resultPublisher      pkg.ResultPublisher
+	taskStore            *pkg.TaskStore
+	currentDateTime      libtime.CurrentDateTimeGetter
+	deferredMu           sync.Mutex
+	deferredRespawns     map[lib.TaskIdentifier]deferredEntry
+	spawnLocksMu         sync.Mutex
+	spawnLocks           map[string]*sync.Mutex
+	gitRestClient        gitrestclient.GitRestClient
+	taskGlob             string
+	reconcilePassTimeout time.Duration
+	reconcileInterval    time.Duration
+	redriveMu            sync.Mutex
+	redriveStreaks       map[lib.TaskIdentifier]redriveStreak
+	vaultMu              sync.RWMutex
+	vaultTasks           map[lib.TaskIdentifier]struct{}
+	vaultScanned         bool
+	pathIDs              map[string]lib.TaskIdentifier
+	jobCacheMu           sync.Mutex
+	jobCache             map[string]map[lib.TaskIdentifier]bool
+	jobCacheArmed        bool
 }
 
 // lockAssigneeSpawn serializes the count-then-spawn sequence for one assignee and
@@ -1219,7 +1226,7 @@ func (h *taskEventHandler) ReconcileOnce(ctx context.Context) error {
 	// timeout; logs evaluate count so cost is visible"). On timeout the
 	// in-flight git-rest call returns a deadline error, which the gates below
 	// log and skip; the next tick retries.
-	passCtx, cancel := context.WithTimeout(ctx, reconcilePassTimeout)
+	passCtx, cancel := context.WithTimeout(ctx, h.reconcilePassTimeout)
 	defer cancel()
 
 	// One `list jobs` per assignee for the whole pass, instead of two per task.
@@ -1598,7 +1605,7 @@ func (h *taskEventHandler) vaultTasksOwned(id lib.TaskIdentifier) bool {
 // vault still lists, folds the surviving identifiers into the ownership set, and
 // returns paths with the never-parsed ones first.
 //
-// A pass over a large vault can hit reconcilePassTimeout before it completes, and
+// A pass over a large vault can hit the reconcile pass timeout before it completes, and
 // an aborted pass publishes nothing — so without the cache a vault that grows past
 // one pass's budget freezes ownership at its last completed pass and every task
 // filed afterwards is skipped as foreign. Visiting new paths first means a new
@@ -1670,14 +1677,14 @@ func (h *taskEventHandler) skipForeignVaultTask(task lib.Task) bool {
 }
 
 // RunReconcileLoop runs one reconcile pass immediately at startup, then every
-// defaultReconcileInterval until ctx is cancelled. ReconcileOnce returns
+// reconcile interval until ctx is cancelled. ReconcileOnce returns
 // nil for all vault-side failures, so this loop cannot crash the executor when
 // git-rest is unreachable — the next tick just retries (spec 005 Failure Modes).
 func (h *taskEventHandler) RunReconcileLoop(ctx context.Context) error {
 	if err := h.ReconcileOnce(ctx); err != nil {
 		glog.Errorf("event=reconcile initial pass failed: %v", err)
 	}
-	ticker := time.NewTicker(defaultReconcileInterval)
+	ticker := time.NewTicker(h.reconcileInterval)
 	defer ticker.Stop()
 	for {
 		select {
