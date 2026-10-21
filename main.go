@@ -92,6 +92,11 @@ type application struct {
 	// default: the glob names a vault directory the binary cannot know, so an
 	// empty value is rejected at startup with ErrTaskGlobEmpty.
 	TaskGlob string `required:"false" arg:"task-glob"                      env:"TASK_GLOB"                      usage:"git-rest glob selecting vault task files to reconcile"`
+	// ReconcilePassTimeout and ReconcileInterval bound and pace the reconcile
+	// loop. A large vault read over a slow git-rest path needs a longer pass
+	// than the default; a non-positive value is rejected at startup.
+	ReconcilePassTimeout time.Duration `required:"false" arg:"reconcile-pass-timeout"         env:"RECONCILE_PASS_TIMEOUT"         usage:"Deadline for one reconcile pass over the vault task files"                                                                                                                                                                                                                          default:"45s"`
+	ReconcileInterval    time.Duration `required:"false" arg:"reconcile-interval"             env:"RECONCILE_INTERVAL"             usage:"Interval between reconcile passes"                                                                                                                                                                                                                                                  default:"60s"`
 }
 
 // vaultSlugRegexp mirrors the controller's VAULT_NAME validation (pkg/routing):
@@ -132,6 +137,21 @@ func (a *application) Run(ctx context.Context, sentryClient libsentry.Client) er
 			ctx,
 			ErrTaskGlobEmpty,
 			"task-glob (TASK_GLOB) must be set: it selects the vault task files the reconcile loop evaluates, and an empty glob makes git-rest match every file in the vault",
+		)
+	}
+
+	if a.ReconcilePassTimeout <= 0 {
+		return errors.Errorf(
+			ctx,
+			"reconcile-pass-timeout (RECONCILE_PASS_TIMEOUT) must be > 0, got %s",
+			a.ReconcilePassTimeout,
+		)
+	}
+	if a.ReconcileInterval <= 0 {
+		return errors.Errorf(
+			ctx,
+			"reconcile-interval (RECONCILE_INTERVAL) must be > 0, got %s",
+			a.ReconcileInterval,
 		)
 	}
 
@@ -240,6 +260,8 @@ func (a *application) Run(ctx context.Context, sentryClient libsentry.Client) er
 		a.JobFsGroup,
 		gitRestClient,
 		a.TaskGlob,
+		a.ReconcilePassTimeout,
+		a.ReconcileInterval,
 	)
 
 	return service.Run(

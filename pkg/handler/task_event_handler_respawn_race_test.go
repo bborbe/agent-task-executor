@@ -64,6 +64,8 @@ var _ = Describe("respawned-second-success race", func() {
 			libtime.NewCurrentDateTime(),
 			fakeGitRestClient,
 			"24 Tasks/*.md",
+			handler.DefaultReconcilePassTimeout,
+			handler.DefaultReconcileInterval,
 		)
 		watcher = pkg.NewJobWatcher(fake.NewClientset(), "test-ns", taskStore, fakeResultPublisher)
 	})

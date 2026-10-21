@@ -81,6 +81,8 @@ var _ = Describe("TaskEventHandler", func() {
 			currentDateTime,
 			fakeGitRestClient,
 			"24 Tasks/*.md",
+			handler.DefaultReconcilePassTimeout,
+			handler.DefaultReconcileInterval,
 		)
 	})
 
@@ -544,6 +546,8 @@ var _ = Describe("TaskEventHandler", func() {
 						currentDateTime,
 						fakeGitRestClient,
 						"24 Tasks/*.md",
+						handler.DefaultReconcilePassTimeout,
+						handler.DefaultReconcileInterval,
 					)
 
 					// Clock is past grace expiry — simulating the executor coming back up
@@ -595,6 +599,8 @@ var _ = Describe("TaskEventHandler", func() {
 						currentDateTime,
 						fakeGitRestClient,
 						"24 Tasks/*.md",
+						handler.DefaultReconcilePassTimeout,
+						handler.DefaultReconcileInterval,
 					)
 
 					currentDateTime.SetNow(libtimetest.ParseDateTime(graceExpiredR))
