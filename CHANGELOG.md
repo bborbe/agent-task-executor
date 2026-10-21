@@ -8,6 +8,10 @@ All notable changes to this project will be documented in this file.
 - feat: **the executor builds an in-memory task view from the compacted task event topic at startup.** The new `TaskView` replays `{TOPIC_PREFIX}-agent-task-v1-event` from the oldest offset on every partition, keeps the latest version of each task, honours tombstones, and reports readiness once every partition has caught up to the high-water mark captured at start. It reads through a non-group simple consumer, so it never joins `CONSUMER_GROUP` and never moves the live consumer's offsets; a decode failure drops the stale entry and increments `executor_task_view_skipped_total` without blocking readiness. The view is wired into `service.Run`, and a reader failure exits the process so a pod restart rebuilds it. The live consumer and the reconcile loop do not use the view yet.
 - chore: bump `github.com/bborbe/agent` to v0.113.0 (task events now carry the vault name), with the transitive bumps `go mod tidy` resolved.
 
+## v0.23.5
+
+- fix: **Evicted deferred respawns stay evicted.** A replay or reconcile drive whose entry was evicted mid-flight no longer spawns or re-parks the stale snapshot, and every event filter skip now evicts the task's deferred entry.
+
 ## v0.23.4
 
 - fix: **a task retagged to another cluster while parked behind the concurrency cap no longer runs on the cluster it was parked on.** The deferred-respawn entry held the pre-retag snapshot and was spawned locally once a slot freed (prod 2026-10-21, nukeprod ran a `cluster: sun` task). A foreign-cluster event or reconcile read now evicts the pending entry.

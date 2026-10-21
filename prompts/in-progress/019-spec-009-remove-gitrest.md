@@ -1,9 +1,11 @@
 ---
-status: approved
+status: failed
 spec: [009-kafka-task-view-replaces-gitrest-reconcile]
 created: "2026-10-21T18:40:07Z"
 queued: "2026-10-21T19:39:58Z"
+completed: "2026-10-21T20:24:18Z"
 branch: dark-factory/kafka-task-view-replaces-gitrest-reconcile
+lastFailReason: 'setup workflow: git merge origin default branch: merge origin/master: : git merge origin/master failed: exit status 1'
 ---
 
 # Remove the git-rest reader, its configuration, and its documentation
