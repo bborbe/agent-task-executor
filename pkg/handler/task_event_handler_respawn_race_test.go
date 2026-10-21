@@ -57,6 +57,7 @@ var _ = Describe("respawned-second-success race", func() {
 			base.Branch("prod"),
 			"",
 			true,
+			true,
 			fakeResolver,
 			fakeResultPublisher,
 			taskStore,

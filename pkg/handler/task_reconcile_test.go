@@ -73,6 +73,7 @@ var _ = Describe("TaskEventHandler reconcile loop", func() {
 			base.Branch("prod"),
 			"",
 			true,
+			true,
 			fakeResolver,
 			fakeResultPublisher,
 			taskStore,
@@ -111,6 +112,34 @@ var _ = Describe("TaskEventHandler reconcile loop", func() {
 			},
 		}
 	}
+
+	It("skips an untagged task without resolving Config when RUN_UNTAGGED is off", func() {
+		untaggedResolver := &mocks.FakeConfigResolver{}
+		untaggedHandler := handler.NewTaskEventHandler(
+			fakeSpawner,
+			base.Branch("prod"),
+			"sun",
+			true,
+			false,
+			untaggedResolver,
+			fakeResultPublisher,
+			taskStore,
+			currentDateTime,
+			fakeGitRestClient,
+			"24 Tasks/*.md",
+		)
+		fakeGitRestClient.ListReturns([]string{"24 Tasks/tid-a.md"}, nil)
+		fakeGitRestClient.GetReturns(
+			[]byte(renderTaskFile(eligibleTask(domain.TaskPhasePlanning))),
+			nil,
+		)
+		fakeSpawner.IsJobActiveReturns(false, nil)
+
+		err := untaggedHandler.ReconcileOnce(ctx)
+		Expect(err).To(BeNil())
+		Expect(fakeSpawner.SpawnJobCallCount()).To(Equal(0))
+		Expect(untaggedResolver.ResolveCallCount()).To(Equal(0))
+	})
 
 	It("re-drives an eligible task from the vault (AC 1)", func() {
 		fakeGitRestClient.ListReturns([]string{"24 Tasks/tid-a.md"}, nil)
