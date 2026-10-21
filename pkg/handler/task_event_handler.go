@@ -462,6 +462,8 @@ func (h *taskEventHandler) parseAndFilter(
 	h.cleanupTerminalTask(task)
 
 	if h.skipForeignCluster(task) { // before Config resolution: not an unknown assignee
+		// A pending deferred entry holds a pre-retag snapshot; it must not outlive this.
+		h.removeDeferredEntry(task.TaskIdentifier)
 		return lib.Task{}, nil, true, nil
 	}
 
@@ -490,9 +492,8 @@ func (h *taskEventHandler) parseAndFilter(
 	}
 
 	if !effectiveTriggerStatuses(config).Contains(task.Frontmatter.Status()) {
-		glog.V(3).Infof(
-			"skip task %s with status %s", task.TaskIdentifier, task.Frontmatter.Status(),
-		)
+		glog.V(3).
+			Infof("skip task %s with status %s", task.TaskIdentifier, task.Frontmatter.Status())
 		metrics.TaskEventsTotal.WithLabelValues("skipped_status").Inc()
 		return lib.Task{}, nil, true, nil
 	}
@@ -1108,7 +1109,9 @@ func (h *taskEventHandler) evalDeferredRespawns(ctx context.Context) error {
 }
 
 // removeDeferredEntry removes any pending deferred-respawn entry for the given task.
-// Called from parseAndFilter when a terminal-phase event arrives so no stale spawn fires.
+// Called from parseAndFilter when a terminal-phase event arrives or when a foreign-cluster
+// event skips the task, and from reconcileTask when the vault reads the task as foreign,
+// so no stale spawn fires.
 func (h *taskEventHandler) removeDeferredEntry(id lib.TaskIdentifier) {
 	h.deferredMu.Lock()
 	delete(h.deferredRespawns, id)
@@ -1561,6 +1564,9 @@ func (h *taskEventHandler) reconcileTask(
 		return task, nil, false, nil
 	}
 	if h.isForeignCluster(task) {
+		// Backstop for a reconcile-driven cap deferral that stored the pre-retag
+		// snapshot after the Kafka retag event was already consumed.
+		h.removeDeferredEntry(task.TaskIdentifier)
 		return task, nil, false, nil
 	}
 	config, skip, err := h.resolveConfigForReconcile(ctx, task)
