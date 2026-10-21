@@ -2,7 +2,7 @@
 
 All notable changes to this project will be documented in this file.
 
-## Unreleased
+## v0.23.0
 
 - feat: **the reconcile pass timeout and interval are configurable.** New envs `RECONCILE_PASS_TIMEOUT` (default `45s`) and `RECONCILE_INTERVAL` (default `60s`) replace the package constants; a non-positive value is rejected at startup. On sun the openclaw executor reads ~15k task files over the git-rest ingress (~7 ms each), so every 45s pass aborted with `evaluated=0` and redrive/backfill never ran there. Nuke dev and nuke prod keep the defaults.
 
