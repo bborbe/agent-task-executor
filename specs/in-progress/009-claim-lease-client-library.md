@@ -1,8 +1,9 @@
 ---
-status: prompted
+status: verifying
 approved: "2026-10-21T18:47:55Z"
 generating: "2026-10-21T18:47:55Z"
 prompted: "2026-10-21T19:08:11Z"
+verifying: "2026-10-21T20:06:26Z"
 branch: dark-factory/claim-lease-client-library
 ---
 

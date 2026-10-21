@@ -1,8 +1,13 @@
 ---
-status: approved
+status: completed
 spec: [010-config-rerun-on-lost-claim]
+summary: Added spec.rerunOnLostClaim to ConfigSpec with CRD schema, equality, deep-copy, decision rule, tests, docs and changelog
+execution_id: agent-task-executor-claim-client-exec-020-spec-010-rerun-on-lost-claim
+dark-factory-version: v0.198.7
 created: "2026-10-21T19:20:00Z"
 queued: "2026-10-21T19:14:22Z"
+started: "2026-10-21T20:07:27Z"
+completed: "2026-10-21T20:16:50Z"
 ---
 
 <summary>
