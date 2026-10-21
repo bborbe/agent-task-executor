@@ -5,6 +5,7 @@ All notable changes to this project will be documented in this file.
 ## Unreleased
 
 - feat: add a claim lease client library for git-rest `refs/claims` endpoints, with a compare-and-swap lease manager, fake-clock unit tests and `docs/claim-lease-protocol.md`.
+- fix: **Evicted deferred respawns stay evicted.** A replay or reconcile drive whose entry was evicted mid-flight no longer spawns or re-parks the stale snapshot, and every event filter skip now evicts the task's deferred entry.
 
 ## v0.23.4
 
