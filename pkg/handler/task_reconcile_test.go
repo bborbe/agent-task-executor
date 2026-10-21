@@ -1225,9 +1225,9 @@ var _ = Describe("TaskEventHandler reconcile loop", func() {
 				// Hold the pass open after it has cached claude's count.
 				close(codexListed)
 				<-releaseCodex
-				return activeJobsFor("codex", 0), nil
+				return activeJobs(0), nil
 			}
-			return activeJobsFor("claude", int(liveClaude.Load())), nil
+			return activeJobs(int(liveClaude.Load())), nil
 		}
 		fakeSpawner.SpawnJobReturns("job-name", nil)
 
@@ -1276,11 +1276,3 @@ var _ = Describe("TaskEventHandler reconcile loop", func() {
 	})
 })
 
-// activeJobsFor builds an active-Job set of n distinct task identifiers.
-func activeJobsFor(prefix string, n int) map[lib.TaskIdentifier]bool {
-	m := make(map[lib.TaskIdentifier]bool, n)
-	for i := 0; i < n; i++ {
-		m[lib.TaskIdentifier(prefix+"-job-"+string(rune('a'+i)))] = true
-	}
-	return m
-}
