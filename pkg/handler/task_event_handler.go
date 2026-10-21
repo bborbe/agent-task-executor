@@ -9,6 +9,7 @@ import (
 	"encoding/json"
 	stderrors "errors"
 	"fmt"
+	"sort"
 	"sync"
 	"time"
 
@@ -1060,6 +1061,49 @@ func taskWithFrontmatterValue(task lib.Task, key string, value interface{}) lib.
 	return copied
 }
 
+// admissionPriority is the tie-break that decides which waiting task gets a free
+// slot when several are eligible at once.
+//
+// Key, in order: a task that has NEVER been attempted (no job_started_at) sorts
+// ahead of every task that has; among attempted tasks the earliest queue-entry
+// time wins — queued_at, the moment the first wait began, falling back to
+// job_started_at for a task that ran without ever being deferred.
+//
+// The "never attempted first" clause is the load-bearing one. Without it the order
+// is whichever path the caller happens to walk first: on the reconcile floor that
+// is git-rest's path order, which for the trading vault is filename order, so a
+// child delegated today (named 20261021-…) sorts behind every older child and is
+// never admitted while any of them is still eligible. Measured on prod 2026-10-21:
+// 67 eligible children against maxConcurrentJobs 1, and both admissions in a
+// 20-minute window were the first two files in filename order. Those older tasks
+// are the ones already given up on — maxConsecutiveRedrives retires a task after
+// three spawns at an unchanged phase — so replaying them ahead of fresh work is
+// exactly what starves the pipeline.
+func admissionPriority(task lib.Task) time.Time {
+	startedAt, err := task.Frontmatter.JobStartedAt()
+	if err != nil || startedAt.IsZero() {
+		return time.Time{}
+	}
+	if v, ok := task.Frontmatter.String("queued_at"); ok && v != "" {
+		if queuedAt, parseErr := time.Parse(time.RFC3339, v); parseErr == nil {
+			return queuedAt.UTC()
+		}
+	}
+	return startedAt.UTC()
+}
+
+// sortDeferredByAdmissionPriority orders the due deferred entries in place so the
+// first one the loop reaches is the one that most deserves the freed slot. The
+// collection step ranges a Go map, whose iteration order is randomized per tick,
+// so without this sort the winner is drawn at random — the shape that lets the
+// same task ids recur in the concurrency_cap log for hours while others are
+// dispatched.
+func sortDeferredByAdmissionPriority(entries []deferredEntry) {
+	sort.SliceStable(entries, func(i, j int) bool {
+		return admissionPriority(entries[i].task).Before(admissionPriority(entries[j].task))
+	})
+}
+
 // evalDeferredRespawns checks all pending deferred-respawn entries and spawns a job
 // for each entry whose retryAfter has been reached. Entries are removed once processed.
 // The respawn_after_grace_window metric and log line fire ONLY when the call actually
@@ -1078,6 +1122,12 @@ func (h *taskEventHandler) evalDeferredRespawns(ctx context.Context) error {
 		}
 	}
 	h.deferredMu.Unlock()
+
+	// The collection above ranges a map, so `ready` arrives in a randomized order.
+	// Sort before spawning: only the first entry can win the free slot (every later
+	// one re-enters deferIfAtConcurrencyCap and is re-deferred), so leaving the
+	// order random is what lets the same task ids recur in the cap log indefinitely.
+	sortDeferredByAdmissionPriority(ready)
 
 	for _, entry := range ready {
 		select {
@@ -1257,38 +1307,29 @@ func (h *taskEventHandler) ReconcileOnce(ctx context.Context) error {
 	h.taskStore.PruneSucceededBefore(
 		h.currentDateTime.Now().Time().Add(-defaultRespawnGracePeriod),
 	)
-	evaluated, redriven, deferred, skipped, capped := 0, 0, 0, 0, 0
 	// Collected across the whole pass and published only once it completes: an
 	// aborted pass would otherwise disown every task it had not reached yet, and
 	// the instance would refuse to spawn its own tasks until the next tick.
 	seen := make(map[lib.TaskIdentifier]struct{}, len(paths))
-	for _, relPath := range paths {
-		select {
-		case <-passCtx.Done():
-			metrics.ReconcilePassesTotal.WithLabelValues("aborted").Inc()
-			glog.Infof(
-				"event=reconcile_aborted reason=context_cancelled evaluated=%d re_driven=%d deferred=%d skipped=%d",
-				evaluated,
-				redriven,
-				deferred,
-				skipped,
-			)
+	c := reconcileCounters{}
+	// Two phases, deliberately. The gather below reads and filters every file and
+	// holds the eligible ones; the drive loop then admits them in admission order.
+	// Spawning inside the path loop would admit whichever file git-rest listed
+	// first — filename order for this vault — so a child delegated today sorts
+	// behind every older child and is never reached while any of them is still
+	// eligible.
+	candidates := h.gatherCandidates(passCtx, paths, seen, &c)
+	if h.passDone(passCtx) {
+		c.logAborted()
+		return nil
+	}
+	sortCandidatesByAdmissionPriority(candidates)
+	for _, candidate := range candidates {
+		if h.passDone(passCtx) {
+			c.logAborted()
 			return nil
-		default:
 		}
-		switch outcome := h.reconcileOne(passCtx, relPath, seen); outcome {
-		case reconcileOutcomeSkipped:
-			skipped++
-		case reconcileOutcomeRedriven:
-			evaluated++
-			redriven++
-		case reconcileOutcomeDeferred:
-			evaluated++
-			deferred++
-		case reconcileOutcomeCapped:
-			evaluated++
-			capped++
-		}
+		c.add(h.driveCandidate(passCtx, candidate))
 	}
 	h.publishVaultTasks(seen)
 	// Counted on every pass that got past List, so rate(ok)==0 is a true
@@ -1296,9 +1337,86 @@ func (h *taskEventHandler) ReconcileOnce(ctx context.Context) error {
 	metrics.ReconcilePassesTotal.WithLabelValues("ok").Inc()
 	glog.Infof(
 		"event=reconcile evaluated=%d re_driven=%d deferred=%d skipped=%d capped=%d glob=%q",
-		evaluated, redriven, deferred, skipped, capped, h.taskGlob,
+		c.evaluated, c.redriven, c.deferred, c.skipped, c.capped, h.taskGlob,
 	)
 	return nil
+}
+
+// passDone reports whether the reconcile pass has run out of time. It receives
+// from Done rather than reading Err so the cancellation check keeps the shape the
+// rest of this file uses; the pass is bounded by reconcilePassTimeout.
+func (h *taskEventHandler) passDone(passCtx context.Context) bool {
+	select {
+	case <-passCtx.Done():
+		return true
+	default:
+		return false
+	}
+}
+
+// reconcileCounters is the per-pass tally. A struct rather than five locals so the
+// gather helper, the drive loop and the abort path share it without ReconcileOnce
+// growing past the funlen bound.
+type reconcileCounters struct {
+	evaluated, redriven, deferred, skipped, capped int
+}
+
+// add folds one outcome into the tally. reconcileOutcomeCollected is never passed
+// here: a collected candidate is driven in the second phase, which reports its own
+// outcome.
+func (c *reconcileCounters) add(outcome reconcileOutcome) {
+	switch outcome {
+	case reconcileOutcomeRedriven:
+		c.evaluated++
+		c.redriven++
+	case reconcileOutcomeDeferred:
+		c.evaluated++
+		c.deferred++
+	case reconcileOutcomeCapped:
+		c.evaluated++
+		c.capped++
+	default:
+		c.skipped++
+	}
+}
+
+// logAborted records a pass cut short by its context, with the tally reached so far.
+func (c *reconcileCounters) logAborted() {
+	metrics.ReconcilePassesTotal.WithLabelValues("aborted").Inc()
+	glog.Infof(
+		"event=reconcile_aborted reason=context_cancelled evaluated=%d re_driven=%d deferred=%d skipped=%d",
+		c.evaluated,
+		c.redriven,
+		c.deferred,
+		c.skipped,
+	)
+}
+
+// gatherCandidates runs the pass's read-and-filter phase, returning the eligible
+// files and tallying everything else into c. It stops early when the pass context
+// is done; the caller checks passCtx.Err() to tell an early stop from a complete
+// gather, because an incomplete one must not publish the ownership set.
+func (h *taskEventHandler) gatherCandidates(
+	passCtx context.Context,
+	paths []string,
+	seen map[lib.TaskIdentifier]struct{},
+	c *reconcileCounters,
+) []reconcileCandidate {
+	candidates := make([]reconcileCandidate, 0, len(paths))
+	for _, relPath := range paths {
+		if h.passDone(passCtx) {
+			return candidates
+		}
+		candidate, outcome := h.gatherCandidate(passCtx, relPath, seen)
+		if outcome == reconcileOutcomeCollected {
+			candidates = append(candidates, candidate)
+			continue
+		}
+		// The parked-assignee restore publishes a routing value and consumes no
+		// spawn budget, so it reports from here rather than competing for a slot.
+		c.add(outcome)
+	}
+	return candidates
 }
 
 // reconcileOutcome is what one vault file contributed to a pass's counters.
@@ -1316,26 +1434,48 @@ const (
 	reconcileOutcomeRedriven
 	reconcileOutcomeDeferred
 	reconcileOutcomeCapped
+	// reconcileOutcomeCollected means the file is eligible and has been held for
+	// the pass's admission-ordered drive phase; it contributes nothing to the
+	// counters yet.
+	reconcileOutcomeCollected
 )
 
-// reconcileOne evaluates one vault file and drives it when it is eligible. It
-// owns the whole per-file decision — read, eligibility filter, the
-// consecutive-re-drive cap, and the spawn — so ReconcileOnce stays a pass-level
-// loop over paths.
+// reconcileCandidate is one eligible vault file waiting to be driven. The pass
+// collects these first and sorts them before spawning anything, so admission
+// follows the queue's own order rather than the order git-rest listed paths.
+type reconcileCandidate struct {
+	task    lib.Task
+	config  *pkg.AgentConfiguration
+	relPath string
+}
+
+// sortCandidatesByAdmissionPriority orders the pass's candidates in place so the
+// first one driven is the one that most deserves a free slot. See
+// admissionPriority for the rule and the measurement behind it.
+func sortCandidatesByAdmissionPriority(candidates []reconcileCandidate) {
+	sort.SliceStable(candidates, func(i, j int) bool {
+		return admissionPriority(candidates[i].task).Before(admissionPriority(candidates[j].task))
+	})
+}
+
+// gatherCandidate reads one vault file and applies the eligibility filter,
+// returning the candidate for the pass's drive phase. It owns everything that
+// does not compete for a spawn slot: the read, the filter, ownership recording,
+// and the parked-assignee restore.
 //
 // seen collects every identifier this pass parsed, eligible or not; ReconcileOnce
 // publishes it as the instance's ownership set once the pass completes. Recording
 // before the eligibility gate is deliberate: the ownership test answers "is this
 // file in my vault", which eligibility does not change.
-func (h *taskEventHandler) reconcileOne(
+func (h *taskEventHandler) gatherCandidate(
 	ctx context.Context,
 	relPath string,
 	seen map[lib.TaskIdentifier]struct{},
-) reconcileOutcome {
+) (reconcileCandidate, reconcileOutcome) {
 	content, err := h.gitRestClient.Get(ctx, relPath)
 	if err != nil {
 		glog.Warningf("event=reconcile_skip path=%s reason=get_failed err=%v", relPath, err)
-		return reconcileOutcomeSkipped
+		return reconcileCandidate{}, reconcileOutcomeSkipped
 	}
 	task, config, ok, err := h.reconcileTask(ctx, content)
 	if task.TaskIdentifier != "" {
@@ -1350,7 +1490,7 @@ func (h *taskEventHandler) reconcileOne(
 			task.Frontmatter.TaskType(),
 			err,
 		)
-		return reconcileOutcomeSkipped
+		return reconcileCandidate{}, reconcileOutcomeSkipped
 	}
 	if !ok {
 		// Left the eligibility filter — it advanced, or it carries no routing
@@ -1358,30 +1498,43 @@ func (h *taskEventHandler) reconcileOne(
 		// to no Config). Nothing to clear here: the streak's phase key is what
 		// retires a task that genuinely moved on, and a task that left the filter
 		// is not spawned again either way.
-		return reconcileOutcomeSkipped
+		return reconcileCandidate{}, reconcileOutcomeSkipped
 	}
 	// A parked task whose declared task_type resolved to a Config: restoring the
 	// routing value is the whole action. The restore consumes no spawn budget, so
-	// this branches BEFORE the streak cap — a task the floor already re-drove
-	// maxConsecutiveRedrives times at this phase must still get its routing value
-	// back, otherwise it returns capped and stays parked forever, which is exactly
-	// the re-drive-and-re-park class this recovery path exists for. No Job is
-	// spawned here: the restore changes the file, the controller publishes
-	// TaskUpdated for it, and that event drives the normal spawn path.
+	// it happens here in the gather phase rather than being ordered against the
+	// admission queue — a task the floor already re-drove maxConsecutiveRedrives
+	// times at this phase must still get its routing value back, otherwise it
+	// stays parked forever, which is exactly the re-drive-and-re-park class this
+	// recovery path exists for. No Job is spawned here: the restore changes the
+	// file, the controller publishes TaskUpdated for it, and that event drives the
+	// normal spawn path.
 	if task.Frontmatter.Assignee() == "" {
-		return h.restoreParkedAssignee(ctx, task, config, relPath)
+		return reconcileCandidate{}, h.restoreParkedAssignee(ctx, task, config, relPath)
 	}
+	return reconcileCandidate{task: task, config: config, relPath: relPath},
+		reconcileOutcomeCollected
+}
+
+// driveCandidate drives one collected candidate: the consecutive-re-drive cap and
+// the spawn. ReconcileOnce calls it in admission order, so the first candidate
+// that finds a free slot takes it and every later one is deferred by
+// deferIfAtConcurrencyCap.
+func (h *taskEventHandler) driveCandidate(
+	ctx context.Context,
+	candidate reconcileCandidate,
+) reconcileOutcome {
 	// Checked here as well as in spawnIfNeeded so the pass summary can report the
 	// skip as `capped` rather than folding it into `deferred`. Only the capped
 	// branch signals, so the two checks cannot double-count.
-	if h.redriveStreakCapped(task, relPath) {
+	if h.redriveStreakCapped(candidate.task, candidate.relPath) {
 		return reconcileOutcomeCapped
 	}
-	spawned, err := h.spawnIfNeeded(ctx, task, config)
+	spawned, err := h.spawnIfNeeded(ctx, candidate.task, candidate.config)
 	if err != nil {
 		glog.Warningf(
 			"event=reconcile_skip task=%s reason=spawn_error err=%v",
-			task.TaskIdentifier,
+			candidate.task.TaskIdentifier,
 			err,
 		)
 		return reconcileOutcomeSkipped
@@ -1390,7 +1543,11 @@ func (h *taskEventHandler) reconcileOne(
 		return reconcileOutcomeDeferred
 	}
 	metrics.ReconcileRedrivenTotal.Inc()
-	glog.Infof("event=reconcile_redrive task=%s path=%s", task.TaskIdentifier, relPath)
+	glog.Infof(
+		"event=reconcile_redrive task=%s path=%s",
+		candidate.task.TaskIdentifier,
+		candidate.relPath,
+	)
 	return reconcileOutcomeRedriven
 }
 
