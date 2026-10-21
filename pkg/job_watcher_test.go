@@ -6,6 +6,7 @@ package pkg_test
 
 import (
 	"context"
+	"time"
 
 	lib "github.com/bborbe/agent"
 	. "github.com/onsi/ginkgo/v2"
@@ -81,6 +82,30 @@ var _ = Describe("JobWatcher", func() {
 	}
 
 	Describe("HandleJob", func() {
+		It("records the success time even when the task is not in the store", func() {
+			completedAt := metav1.NewTime(time.Date(2026, 10, 21, 5, 55, 43, 0, time.UTC))
+			job := makeJob("job-s", string(testTaskID), succeededCondition())
+			job.Status.CompletionTime = &completedAt
+			job.Annotations = map[string]string{pkg.TaskPhaseAnnotationKey: "execution"}
+
+			watcher.HandleJob(ctx, job)
+
+			succeeded, ok := taskStore.LastSucceeded(testTaskID)
+			Expect(ok).To(BeTrue())
+			Expect(succeeded.CompletedAt).To(Equal(completedAt.Time))
+			Expect(succeeded.Phase).To(Equal("execution"))
+		})
+
+		It("records no success for a failed Job", func() {
+			job := makeJob("job-f", string(testTaskID), failedCondition("OOMKilled"))
+			taskStore.Store(testTaskID, testTask)
+
+			watcher.HandleJob(ctx, job)
+
+			_, ok := taskStore.LastSucceeded(testTaskID)
+			Expect(ok).To(BeFalse())
+		})
+
 		It("publishes synthetic failure and deletes job on Failed state", func() {
 			job := makeJob("job-1", string(testTaskID), failedCondition("OOMKilled"))
 			_, err := fakeKubeClient.BatchV1().
