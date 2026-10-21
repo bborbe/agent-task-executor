@@ -1138,6 +1138,7 @@ var _ = Describe("TaskEventHandler reconcile loop", func() {
 				return nil, nil
 			}
 			loopCtx, cancel := context.WithCancel(ctx)
+			defer cancel()
 			done := make(chan error, 1)
 			go func() { done <- newTimedHandler(time.Second, 10*time.Millisecond).RunReconcileLoop(loopCtx) }()
 			Eventually(passes.Load, time.Second, 5*time.Millisecond).Should(BeNumerically(">=", 3))
