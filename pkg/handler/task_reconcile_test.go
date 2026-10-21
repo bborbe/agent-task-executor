@@ -1010,7 +1010,7 @@ var _ = Describe("TaskEventHandler reconcile loop", func() {
 	// assignee is deliberately distinct from the fake's Resolve default ("claude")
 	// so a spec cannot pass by reading the wrong resolution.
 	restoreConfig := pkg.AgentConfiguration{
-		Assignee: "correct-agent",
+		Assignee: "resolved-agent",
 		Image:    "my-image:latest",
 	}
 
@@ -1029,7 +1029,7 @@ var _ = Describe("TaskEventHandler reconcile loop", func() {
 		Expect(fakeResultPublisher.PublishRestoreAssigneeCallCount()).To(Equal(1))
 		_, publishedTask, assignee := fakeResultPublisher.PublishRestoreAssigneeArgsForCall(0)
 		Expect(publishedTask.TaskIdentifier).To(Equal(lib.TaskIdentifier("tid-parked")))
-		Expect(assignee).To(Equal("correct-agent"))
+		Expect(assignee).To(Equal("resolved-agent"))
 
 		// The declared task_type is what resolved it — not the assignee, which is
 		// empty, and not previous_assignee, which this fixture does not carry.
@@ -1054,11 +1054,13 @@ var _ = Describe("TaskEventHandler reconcile loop", func() {
 
 		Expect(fakeResultPublisher.PublishRestoreAssigneeCallCount()).To(Equal(1))
 		_, _, assignee := fakeResultPublisher.PublishRestoreAssigneeArgsForCall(0)
-		Expect(assignee).To(Equal("correct-agent"))
+		Expect(assignee).To(Equal("resolved-agent"))
 
-		// stale-agent appears in no published command at all. Reading
-		// previous_assignee as a routing source is the substitution the operator
-		// runbook records a full night lost to (2026-09-13).
+		// stale-agent appears in no published command at all. previous_assignee is
+		// only a tie-break among Configs that already declare the task_type, never
+		// the sole routing source: routing on it alone is the substitution the
+		// operator runbook records a full night lost to (2026-09-13). The restore
+		// always writes the assignee of the Config the resolver returned.
 		for i := 0; i < fakeResultPublisher.PublishRestoreAssigneeCallCount(); i++ {
 			_, _, published := fakeResultPublisher.PublishRestoreAssigneeArgsForCall(i)
 			Expect(published).NotTo(Equal("stale-agent"))
@@ -1125,7 +1127,7 @@ var _ = Describe("TaskEventHandler reconcile loop", func() {
 	It("does not re-drive a parked task outside its Config's trigger set (AC 6)", func() {
 		fakeResolver.ResolveByTaskTypeReturns(
 			pkg.AgentConfiguration{
-				Assignee: "correct-agent",
+				Assignee: "resolved-agent",
 				Image:    "my-image:latest",
 				Trigger: &agentv1.Trigger{
 					Phases:   domain.TaskPhases{domain.TaskPhaseExecution},
@@ -1190,11 +1192,15 @@ var _ = Describe("TaskEventHandler reconcile loop", func() {
 	It("passes previous_assignee to the task_type lookup as the tie-break", func() {
 		// On sun two Configs declared github-update-go and every parked task of
 		// that type was skipped as ambiguous. previous_assignee, written at
-		// escalation, is handed to the resolver so it can pick between them; the
-		// resolver alone decides, and the restore still writes its Config's assignee.
-		fakeResolver.ResolveByTaskTypeReturns(restoreConfig, nil)
+		// escalation, is handed to the resolver only as a tie-break among the
+		// Configs that already declare the task_type, never as the sole routing
+		// source; the resolver decides, and the restore writes its Config's assignee.
+		fakeResolver.ResolveByTaskTypeReturns(
+			pkg.AgentConfiguration{Assignee: "tie-break-agent", Image: "my-image:latest"},
+			nil,
+		)
 		task := parkedTask(domain.TaskPhaseExecution, "github-update-go")
-		task.Frontmatter["previous_assignee"] = "correct-agent"
+		task.Frontmatter["previous_assignee"] = "tie-break-agent"
 		fakeGitRestClient.ListReturns([]string{"24 Tasks/tid-parked.md"}, nil)
 		fakeGitRestClient.GetReturns([]byte(renderTaskFile(task)), nil)
 
@@ -1203,10 +1209,45 @@ var _ = Describe("TaskEventHandler reconcile loop", func() {
 		Expect(fakeResolver.ResolveByTaskTypeCallCount()).To(Equal(1))
 		_, resolvedType, preferAssignee := fakeResolver.ResolveByTaskTypeArgsForCall(0)
 		Expect(resolvedType).To(Equal("github-update-go"))
-		Expect(preferAssignee).To(Equal("correct-agent"))
+		Expect(preferAssignee).To(Equal("tie-break-agent"))
 		Expect(fakeResultPublisher.PublishRestoreAssigneeCallCount()).To(Equal(1))
 		_, _, assignee := fakeResultPublisher.PublishRestoreAssigneeArgsForCall(0)
-		Expect(assignee).To(Equal("correct-agent"))
+		Expect(assignee).To(Equal("tie-break-agent"))
+	})
+
+	It(
+		"still skips a parked task whose task_type matches no Config despite previous_assignee",
+		func() {
+			fakeResolver.ResolveByTaskTypeReturns(pkg.AgentConfiguration{}, pkg.ErrConfigNotFound)
+			task := parkedTask(domain.TaskPhaseExecution, "no-such-type")
+			task.Frontmatter["previous_assignee"] = "tie-break-agent"
+			fakeGitRestClient.ListReturns([]string{"24 Tasks/tid-parked.md"}, nil)
+			fakeGitRestClient.GetReturns([]byte(renderTaskFile(task)), nil)
+
+			Expect(h.ReconcileOnce(ctx)).To(Succeed())
+
+			// previous_assignee never routes on its own: no type match, no restore.
+			Expect(fakeResolver.ResolveByTaskTypeCallCount()).To(Equal(1))
+			_, _, preferAssignee := fakeResolver.ResolveByTaskTypeArgsForCall(0)
+			Expect(preferAssignee).To(Equal("tie-break-agent"))
+			Expect(fakeResultPublisher.PublishRestoreAssigneeCallCount()).To(Equal(0))
+			Expect(fakeSpawner.SpawnJobCallCount()).To(Equal(0))
+		},
+	)
+
+	It("still skips a parked task that stays ambiguous despite previous_assignee", func() {
+		fakeResolver.ResolveByTaskTypeReturns(pkg.AgentConfiguration{}, pkg.ErrConfigAmbiguous)
+		task := parkedTask(domain.TaskPhaseExecution, "shared-type")
+		task.Frontmatter["previous_assignee"] = "tie-break-agent"
+		fakeGitRestClient.ListReturns([]string{"24 Tasks/tid-parked.md"}, nil)
+		fakeGitRestClient.GetReturns([]byte(renderTaskFile(task)), nil)
+
+		// The ambiguity propagates to reconcileOne's resolve_error skip as before:
+		// the pass still completes and nothing touches the task.
+		Expect(h.ReconcileOnce(ctx)).To(Succeed())
+		Expect(fakeResolver.ResolveByTaskTypeCallCount()).To(Equal(1))
+		Expect(fakeResultPublisher.PublishRestoreAssigneeCallCount()).To(Equal(0))
+		Expect(fakeSpawner.SpawnJobCallCount()).To(Equal(0))
 	})
 
 	It("leaves a parked task with no declared type untouched (no routing information)", func() {

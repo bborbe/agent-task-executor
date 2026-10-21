@@ -393,6 +393,7 @@ var _ = Describe("ConfigResolver", func() {
 				Expect(err).NotTo(BeNil())
 				Expect(errors.Is(err, pkg.ErrConfigAmbiguous)).To(BeTrue())
 				Expect(err.Error()).To(ContainSubstring("matches 2 configs"))
+				Expect(err.Error()).To(ContainSubstring(`previous_assignee "c"`))
 			})
 
 			It("stays ambiguous when preferAssignee is empty", func() {
@@ -400,14 +401,27 @@ var _ = Describe("ConfigResolver", func() {
 				_, err := resolver.ResolveByTaskType(ctx, "shared-type", "")
 				Expect(err).NotTo(BeNil())
 				Expect(errors.Is(err, pkg.ErrConfigAmbiguous)).To(BeTrue())
+				Expect(err.Error()).NotTo(ContainSubstring("previous_assignee"))
 			})
 
-			It("stays ambiguous when preferAssignee names two matches", func() {
+			It("stays ambiguous when two matches share the composed preferAssignee", func() {
 				provider.items = sharedTypeConfigs("a-personal", "a-personal")
 				_, err := resolver.ResolveByTaskType(ctx, "shared-type", "a")
 				Expect(err).NotTo(BeNil())
 				Expect(errors.Is(err, pkg.ErrConfigAmbiguous)).To(BeTrue())
+				Expect(err.Error()).To(ContainSubstring(`previous_assignee "a"`))
 			})
+
+			It(
+				"does not fall through to the plain tier when the composed tier is ambiguous",
+				func() {
+					provider.items = sharedTypeConfigs("a-personal", "a-personal", "a")
+					_, err := resolver.ResolveByTaskType(ctx, "shared-type", "a")
+					Expect(err).NotTo(BeNil())
+					Expect(errors.Is(err, pkg.ErrConfigAmbiguous)).To(BeTrue())
+					Expect(err.Error()).To(ContainSubstring("matches 3 configs"))
+				},
+			)
 
 			It("never selects a preferred Config that does not declare the type", func() {
 				provider.items = append(

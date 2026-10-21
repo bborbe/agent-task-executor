@@ -11,6 +11,7 @@ import (
 	"github.com/bborbe/cqrs/base"
 	"github.com/bborbe/errors"
 	"github.com/bborbe/k8s"
+	"github.com/golang/glog"
 
 	agentv1 "github.com/bborbe/agent-task-executor/k8s/apis/agent.benjamin-borbe.de/v1"
 )
@@ -167,7 +168,25 @@ func (r *configResolver) ResolveByTaskType(
 		return convert(ctx, matches[0], r.branch.String())
 	default:
 		if preferred, ok := r.narrowByAssignee(matches, preferAssignee); ok {
+			glog.V(2).Infof(
+				"task_type %s matches %d configs: previous_assignee %s picks config %s (assignee %s)",
+				taskType,
+				len(matches),
+				preferAssignee,
+				preferred.Name,
+				preferred.Spec.Assignee,
+			)
 			return convert(ctx, preferred, r.branch.String())
+		}
+		if preferAssignee != "" {
+			return AgentConfiguration{}, errors.Wrapf(
+				ctx,
+				ErrConfigAmbiguous,
+				"task_type %q matches %d configs and previous_assignee %q names none of them uniquely",
+				taskType,
+				len(matches),
+				preferAssignee,
+			)
 		}
 		return AgentConfiguration{}, errors.Wrapf(
 			ctx,
