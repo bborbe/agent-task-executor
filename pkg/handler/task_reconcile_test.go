@@ -1275,4 +1275,3 @@ var _ = Describe("TaskEventHandler reconcile loop", func() {
 		Expect(spawned).NotTo(ContainElement(lib.TaskIdentifier("tid-a")))
 	})
 })
-
