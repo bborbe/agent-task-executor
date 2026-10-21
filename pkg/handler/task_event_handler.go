@@ -247,9 +247,12 @@ type taskEventHandler struct {
 	vaultTasks           map[lib.TaskIdentifier]struct{}
 	vaultScanned         bool
 	pathIDs              map[string]lib.TaskIdentifier
-	jobCacheMu           sync.Mutex
-	jobCache             map[string]map[lib.TaskIdentifier]bool
-	jobCacheArmed        bool
+	// spawnGens counts Jobs created by this executor per assignee, on any path.
+	// A pass cache entry read at an older generation is refetched, so a Job
+	// spawned by the Kafka consumer or the deferred loop mid-pass is never
+	// missed, and a spawn for one assignee leaves the others' entries valid.
+	spawnGenMu sync.Mutex
+	spawnGens  map[string]uint64
 }
 
 // lockAssigneeSpawn serializes the count-then-spawn sequence for one assignee and
@@ -287,72 +290,6 @@ func (h *taskEventHandler) lockAssigneeSpawn(assignee string) func() {
 
 	mu.Lock()
 	return mu.Unlock
-}
-
-// beginJobCache arms the per-reconcile-pass active-Job cache and returns the
-// function that disarms it. Inside a pass every lookup is answered from one
-// `list jobs` per assignee; outside a pass lookups go straight to the API, so
-// the Kafka consumer path is never served a snapshot a reconcile pass froze.
-//
-// Added 2026-10-19: spawnIfNeeded made two list calls per eligible task
-// (IsJobActive and CountActiveJobs). A pass over ~70 eligible tasks therefore
-// issued ~140 calls, and client-go's default 5 QPS limiter consumed the whole
-// 30 s pass budget before the first spawn — the `spawn_error ... context
-// deadline exceeded` that kept github-update-go at zero dispatch.
-func (h *taskEventHandler) beginJobCache() func() {
-	h.jobCacheMu.Lock()
-	h.jobCache = make(map[string]map[lib.TaskIdentifier]bool)
-	h.jobCacheArmed = true
-	h.jobCacheMu.Unlock()
-	return func() {
-		h.jobCacheMu.Lock()
-		h.jobCache = nil
-		h.jobCacheArmed = false
-		h.jobCacheMu.Unlock()
-	}
-}
-
-// invalidateJobCache drops the per-pass cache after a Job is created, so a later
-// lookup in the same pass cannot miss a Job this executor just made. The cache is
-// reset to an empty map rather than nil so it keeps repopulating for the rest of
-// the pass; nil is reserved for "no pass is armed".
-func (h *taskEventHandler) invalidateJobCache() {
-	h.jobCacheMu.Lock()
-	if h.jobCacheArmed {
-		h.jobCache = make(map[string]map[lib.TaskIdentifier]bool)
-	}
-	h.jobCacheMu.Unlock()
-}
-
-// activeJobsFor returns the set of task identifiers with an active Job for the
-// assignee. Inside an armed reconcile pass the answer is memoized per assignee;
-// outside one it is read live. Callers treat the returned map as read-only.
-func (h *taskEventHandler) activeJobsFor(
-	ctx context.Context,
-	assignee string,
-) (map[lib.TaskIdentifier]bool, error) {
-	h.jobCacheMu.Lock()
-	armed := h.jobCacheArmed
-	if armed {
-		if cached, ok := h.jobCache[assignee]; ok {
-			h.jobCacheMu.Unlock()
-			return cached, nil
-		}
-	}
-	h.jobCacheMu.Unlock()
-
-	active, err := h.jobSpawner.ListActiveJobs(ctx, assignee)
-	if err != nil {
-		return nil, err
-	}
-	if armed {
-		h.jobCacheMu.Lock()
-		if h.jobCache != nil {
-			h.jobCache[assignee] = active
-		}
-		h.jobCacheMu.Unlock()
-	}
-	return active, nil
 }
 
 // isJobActive reports whether an active Job exists for the task. Answered from
@@ -810,7 +747,7 @@ func (h *taskEventHandler) spawnIfNeeded(
 	// reasons leaves the budget untouched, and a Job that did start is charged.
 	// Record the Job before the counter write: if the write fails and this
 	// returns an error, the in-memory store must still know the Job exists.
-	h.invalidateJobCache()
+	h.bumpSpawnGen(config.Assignee)
 	h.storeSpawnedJob(task, jobName)
 
 	if err := h.recordTriggerSpawn(ctx, task); err != nil {
@@ -1235,9 +1172,8 @@ func (h *taskEventHandler) ReconcileOnce(ctx context.Context) error {
 	defer cancel()
 
 	// One `list jobs` per assignee for the whole pass, instead of two per task.
-	// Disarmed on return so the event path never reads a frozen snapshot.
-	disarmJobCache := h.beginJobCache()
-	defer disarmJobCache()
+	// Scoped to passCtx so the event path never reads a frozen snapshot.
+	passCtx = withJobCache(passCtx)
 
 	ready, err := h.gitRestClient.IsReady(passCtx)
 	if err != nil {
