@@ -2,6 +2,10 @@
 
 All notable changes to this project will be documented in this file.
 
+## Unreleased
+
+- fix: **a freshly delegated task is no longer starved by the filename-ordered admission queue.** The reconcile floor walked the vault paths in the order git-rest returned them and spawned the first eligible one, so with `maxConcurrentJobs: 1` a child delegated today — named `20261021-…`, and therefore last — was never reached while any older child remained eligible. Measured on prod 2026-10-21: 67 eligible children against one slot, and both admissions in a 20-minute window were the first two files in filename order. Both admission paths now order by `admissionPriority`: a task that has never been attempted (no `job_started_at`) goes ahead of every task that has, then the earliest queue-entry time (`queued_at`, falling back to `job_started_at`) wins. `evalDeferredRespawns` sorts its due entries the same way — it previously spawned in Go map-iteration order, so each tick's winner was drawn at random. The reconcile pass is now two phases: gather and filter every file, sort, then drive, so admission follows the queue rather than the path listing.
+
 ## v0.22.0
 
 - feat: **a cluster can refuse untagged tasks.** The new `RUN_UNTAGGED` env (default `true`) decides whether a task with no `cluster:` frontmatter runs here. With `false`, the executor skips it before Config resolution on both the Kafka path and the reconcile path, logs `skip task <id>: untagged`, and counts `agent_executor_task_events_total{result="skipped_untagged"}`. Set it on sun (`CLUSTER=sun`, controller `PUBLISH_UNTAGGED=false`): until now an untagged task was local on every executor, so with `STAGE_FILTER=false` sun ran untagged prod tasks. Nuke dev and nuke prod keep the default.

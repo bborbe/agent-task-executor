@@ -349,6 +349,62 @@ var _ = Describe("TaskEventHandler", func() {
 				Expect(fakeSpawner.SpawnJobCallCount()).To(Equal(1))
 			})
 
+			It("admits a never-attempted task ahead of an already-attempted one", func() {
+				// evalDeferredRespawns collects the due entries by ranging a Go map,
+				// so without a tie-break the order is randomized per tick and the same
+				// task ids recur in the concurrency_cap log for hours while others are
+				// dispatched (prod, 2026-10-21). A task that has never been attempted
+				// must win the freed slot over one that has already had a turn.
+				fakeResolver.ResolveReturns(
+					pkg.AgentConfiguration{
+						Assignee:          "claude",
+						Image:             "my-image:latest",
+						MaxConcurrentJobs: 1,
+					},
+					nil,
+				)
+				buildQueueTask := func(id lib.TaskIdentifier, jobStartedAt string) lib.Task {
+					fm := lib.TaskFrontmatter{
+						"status":   "in_progress",
+						"phase":    string(domain.TaskPhasePlanning),
+						"assignee": "claude",
+						"stage":    "prod",
+					}
+					if jobStartedAt != "" {
+						fm["job_started_at"] = jobStartedAt
+					}
+					return lib.Task{TaskIdentifier: id, Frontmatter: fm}
+				}
+				running := 1 // at cap, so both events defer instead of spawning
+				fakeSpawner.ListActiveJobsStub = func(
+					context.Context, string,
+				) (map[lib.TaskIdentifier]bool, error) {
+					return activeJobs(running), nil
+				}
+				fakeSpawner.SpawnJobStub = func(
+					context.Context, lib.Task, pkg.AgentConfiguration,
+				) (string, error) {
+					running = 1
+					return "job-admitted", nil
+				}
+
+				currentDateTime.SetNow(libtimetest.ParseDateTime("2026-10-21T08:00:00Z"))
+				attempted := buildQueueTask("tid-attempted", "2026-10-21T07:00:00Z")
+				fresh := buildQueueTask("tid-fresh", "")
+				Expect(h.ConsumeMessage(ctx, buildMsg(attempted))).To(BeNil())
+				Expect(h.ConsumeMessage(ctx, buildMsg(fresh))).To(BeNil())
+				Expect(fakeSpawner.SpawnJobCallCount()).To(Equal(0))
+
+				// The slot frees and both deferred entries come due in the same tick.
+				running = 0
+				currentDateTime.SetNow(libtimetest.ParseDateTime("2026-10-21T08:01:30Z"))
+				Expect(h.EvalDeferredRespawns(ctx)).To(Succeed())
+
+				Expect(fakeSpawner.SpawnJobCallCount()).To(Equal(1))
+				_, spawnedTask, _ := fakeSpawner.SpawnJobArgsForCall(0)
+				Expect(spawnedTask.TaskIdentifier).To(Equal(lib.TaskIdentifier("tid-fresh")))
+			})
+
 			It(
 				"deferred re-eval is idempotent when an event-driven spawn occurs during grace",
 				func() {
