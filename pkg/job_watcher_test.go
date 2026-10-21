@@ -86,12 +86,14 @@ var _ = Describe("JobWatcher", func() {
 			completedAt := metav1.NewTime(time.Date(2026, 10, 21, 5, 55, 43, 0, time.UTC))
 			job := makeJob("job-s", string(testTaskID), succeededCondition())
 			job.Status.CompletionTime = &completedAt
+			job.Annotations = map[string]string{pkg.TaskPhaseAnnotationKey: "execution"}
 
 			watcher.HandleJob(ctx, job)
 
-			at, ok := taskStore.LastSucceededAt(testTaskID)
+			succeeded, ok := taskStore.LastSucceeded(testTaskID)
 			Expect(ok).To(BeTrue())
-			Expect(at).To(Equal(completedAt.Time))
+			Expect(succeeded.CompletedAt).To(Equal(completedAt.Time))
+			Expect(succeeded.Phase).To(Equal("execution"))
 		})
 
 		It("records no success for a failed Job", func() {
@@ -100,7 +102,7 @@ var _ = Describe("JobWatcher", func() {
 
 			watcher.HandleJob(ctx, job)
 
-			_, ok := taskStore.LastSucceededAt(testTaskID)
+			_, ok := taskStore.LastSucceeded(testTaskID)
 			Expect(ok).To(BeFalse())
 		})
 

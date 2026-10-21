@@ -171,7 +171,11 @@ func (w *jobWatcher) HandleJob(ctx context.Context, job *batchv1.Job) {
 		// path still needs to know a result is on its way to the vault.
 		// CompletionTime, not now, so a re-delivered old Job keeps its age.
 		if job.Status.CompletionTime != nil {
-			w.taskStore.MarkSucceeded(taskID, job.Status.CompletionTime.Time)
+			w.taskStore.MarkSucceeded(
+				taskID,
+				job.Annotations[TaskPhaseAnnotationKey],
+				job.Status.CompletionTime.Time,
+			)
 		}
 		if task, ok := w.taskStore.Load(taskID); ok {
 			w.handleSucceeded(ctx, taskID, task, job)

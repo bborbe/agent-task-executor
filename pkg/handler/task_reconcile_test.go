@@ -160,7 +160,11 @@ var _ = Describe("TaskEventHandler reconcile loop", func() {
 		// Measured nuke dev 2026-10-21: task a055d019's claude-headless Job
 		// finished in ~20 s, the file still read `phase: execution` with no
 		// current_job, and every 60 s reconcile tick spawned it again.
+		var now time.Time
+
 		BeforeEach(func() {
+			now = time.Date(2026, 10, 21, 5, 56, 23, 0, time.UTC)
+			currentDateTime.SetNow(libtime.DateTime(now))
 			fakeGitRestClient.ListReturns([]string{"24 Tasks/tid-a.md"}, nil)
 			fakeGitRestClient.GetReturns(
 				[]byte(renderTaskFile(eligibleTask(domain.TaskPhaseExecution))),
@@ -169,14 +173,33 @@ var _ = Describe("TaskEventHandler reconcile loop", func() {
 		})
 
 		It("is not re-driven while the success is inside the grace window", func() {
-			taskStore.MarkSucceeded("tid-a", time.Now().Add(-20*time.Second))
+			taskStore.MarkSucceeded("tid-a", "execution", now.Add(-20*time.Second))
 
 			Expect(h.ReconcileOnce(ctx)).To(BeNil())
 			Expect(fakeSpawner.SpawnJobCallCount()).To(Equal(0))
 		})
 
+		It(
+			"is not re-driven when the success is stamped slightly in the future (clock skew)",
+			func() {
+				taskStore.MarkSucceeded("tid-a", "execution", now.Add(2*time.Second))
+
+				Expect(h.ReconcileOnce(ctx)).To(BeNil())
+				Expect(fakeSpawner.SpawnJobCallCount()).To(Equal(0))
+			},
+		)
+
+		It("is spawned at once when the agent advanced the task to its next phase", func() {
+			// The success was for planning; the file now reads execution, so the
+			// Job for the next phase must not wait out the grace window.
+			taskStore.MarkSucceeded("tid-a", "planning", now.Add(-20*time.Second))
+
+			Expect(h.ReconcileOnce(ctx)).To(BeNil())
+			Expect(fakeSpawner.SpawnJobCallCount()).To(Equal(1))
+		})
+
 		It("is re-driven once the grace window has passed", func() {
-			taskStore.MarkSucceeded("tid-a", time.Now().Add(-10*time.Minute))
+			taskStore.MarkSucceeded("tid-a", "execution", now.Add(-10*time.Minute))
 
 			Expect(h.ReconcileOnce(ctx)).To(BeNil())
 			Expect(fakeSpawner.SpawnJobCallCount()).To(Equal(1))

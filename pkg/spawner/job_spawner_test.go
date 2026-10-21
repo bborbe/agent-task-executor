@@ -1408,6 +1408,52 @@ var _ = Describe("JobSpawner", func() {
 		})
 	})
 
+	Describe("task phase annotation", func() {
+		var capturedJob *batchv1.Job
+
+		BeforeEach(func() {
+			capturedJob = nil
+			fakeClient.PrependReactor(
+				"create",
+				"jobs",
+				func(action k8stesting.Action) (bool, runtime.Object, error) {
+					createAction, ok := action.(k8stesting.CreateAction)
+					if !ok {
+						return false, nil, nil
+					}
+					capturedJob, _ = createAction.GetObject().(*batchv1.Job)
+					return false, nil, nil
+				},
+			)
+		})
+
+		It("records the phase the Job was spawned for", func() {
+			task := lib.Task{
+				TaskIdentifier: lib.TaskIdentifier("phase-task"),
+				Frontmatter:    lib.TaskFrontmatter{"assignee": "claude", "phase": "execution"},
+			}
+			_, err := jobSpawner.SpawnJob(ctx, task, pkg.AgentConfiguration{
+				Assignee: "claude", Image: "my-image:latest",
+			})
+			Expect(err).To(BeNil())
+			Expect(capturedJob).NotTo(BeNil())
+			Expect(capturedJob.Annotations[pkg.TaskPhaseAnnotationKey]).To(Equal("execution"))
+		})
+
+		It("sets no annotation for a task without a phase", func() {
+			task := lib.Task{
+				TaskIdentifier: lib.TaskIdentifier("no-phase-task"),
+				Frontmatter:    lib.TaskFrontmatter{"assignee": "claude"},
+			}
+			_, err := jobSpawner.SpawnJob(ctx, task, pkg.AgentConfiguration{
+				Assignee: "claude", Image: "my-image:latest",
+			})
+			Expect(err).To(BeNil())
+			Expect(capturedJob).NotTo(BeNil())
+			Expect(capturedJob.Annotations).NotTo(HaveKey(pkg.TaskPhaseAnnotationKey))
+		})
+	})
+
 	Describe("ActiveDeadlineSeconds", func() {
 		ptrInt32 := func(v int32) *int32 { return &v }
 
