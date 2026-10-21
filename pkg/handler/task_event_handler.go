@@ -682,7 +682,10 @@ func (h *taskEventHandler) spawnIfNeeded(
 // spawnIfNeededClaimed is spawnIfNeeded with an optional removal claim. With a
 // non-nil claim, both deferral stores and the final spawn decision re-check the
 // task's epoch, so a removeDeferredEntry that lands after the entry was
-// collected always wins.
+// collected wins unless it arrives after the final claim check: the remaining
+// window is the duration of the SpawnJob call, which deliberately runs outside
+// deferredMu (an eviction blocked behind an in-flight create could not stop that
+// Job anyway). The next reconcile pass's foreign read is the backstop for it.
 func (h *taskEventHandler) spawnIfNeededClaimed(
 	ctx context.Context,
 	task lib.Task,
@@ -757,7 +760,9 @@ func (h *taskEventHandler) spawnIfNeededClaimed(
 	}
 
 	// Claimed replays decide under deferredMu, released before SpawnJob; the
-	// lock order is assignee spawn lock → deferredMu. See claimStillValid.
+	// lock order is assignee spawn lock → deferredMu. An eviction landing after
+	// this check and during SpawnJob does not stop the spawn — see
+	// spawnIfNeededClaimed. See claimStillValid.
 	if !h.claimStillValid(claim) {
 		h.recordClaimInvalidated(task)
 		return false, nil
