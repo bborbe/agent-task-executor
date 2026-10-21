@@ -5,6 +5,8 @@
 package pkg_test
 
 import (
+	"time"
+
 	lib "github.com/bborbe/agent"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
@@ -58,5 +60,27 @@ var _ = Describe("TaskStore", func() {
 		loaded, ok := store.Load(lib.TaskIdentifier("tid-3"))
 		Expect(ok).To(BeTrue())
 		Expect(loaded.Content).To(Equal(lib.TaskContent("second")))
+	})
+
+	It("records the latest success and ignores an older re-delivery", func() {
+		id := lib.TaskIdentifier("tid-s")
+		_, ok := store.LastSucceededAt(id)
+		Expect(ok).To(BeFalse())
+		later := time.Date(2026, 10, 21, 5, 56, 0, 0, time.UTC)
+		earlier := later.Add(-time.Minute)
+		store.MarkSucceeded(id, later)
+		store.MarkSucceeded(id, earlier)
+		at, ok := store.LastSucceededAt(id)
+		Expect(ok).To(BeTrue())
+		Expect(at).To(Equal(later))
+	})
+
+	It("keeps the success record after the task entry is deleted", func() {
+		id := lib.TaskIdentifier("tid-k")
+		store.Store(id, lib.Task{TaskIdentifier: id})
+		store.MarkSucceeded(id, time.Now())
+		store.Delete(id)
+		_, ok := store.LastSucceededAt(id)
+		Expect(ok).To(BeTrue())
 	})
 })

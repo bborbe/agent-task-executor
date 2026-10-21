@@ -156,6 +156,43 @@ var _ = Describe("TaskEventHandler reconcile loop", func() {
 		Expect(testutil.ToFloat64(metrics.ReconcileRedrivenTotal)).To(Equal(before + 1))
 	})
 
+	Describe("a Job that already succeeded but whose result has not reached the vault", func() {
+		// Measured nuke dev 2026-10-21: task a055d019's claude-headless Job
+		// finished in ~20 s, the file still read `phase: execution` with no
+		// current_job, and every 60 s reconcile tick spawned it again.
+		BeforeEach(func() {
+			fakeGitRestClient.ListReturns([]string{"24 Tasks/tid-a.md"}, nil)
+			fakeGitRestClient.GetReturns(
+				[]byte(renderTaskFile(eligibleTask(domain.TaskPhaseExecution))),
+				nil,
+			)
+		})
+
+		It("is not re-driven while the success is inside the grace window", func() {
+			taskStore.MarkSucceeded("tid-a", time.Now().Add(-20*time.Second))
+
+			Expect(h.ReconcileOnce(ctx)).To(BeNil())
+			Expect(fakeSpawner.SpawnJobCallCount()).To(Equal(0))
+		})
+
+		It("is re-driven once the grace window has passed", func() {
+			taskStore.MarkSucceeded("tid-a", time.Now().Add(-10*time.Minute))
+
+			Expect(h.ReconcileOnce(ctx)).To(BeNil())
+			Expect(fakeSpawner.SpawnJobCallCount()).To(Equal(1))
+		})
+
+		It("still re-drives a task whose Job failed, up to the redrive cap", func() {
+			// No success is recorded for a failed Job, so the guard stays out of
+			// the way and the existing streak cap (maxConsecutiveRedrives = 3)
+			// is what stops it.
+			for range 5 {
+				Expect(h.ReconcileOnce(ctx)).To(BeNil())
+			}
+			Expect(fakeSpawner.SpawnJobCallCount()).To(Equal(3))
+		})
+	})
+
 	It(
 		"honours the Config trigger phases — a phase the Config does not list is not re-driven",
 		func() {
