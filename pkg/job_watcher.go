@@ -166,6 +166,17 @@ func (w *jobWatcher) HandleJob(ctx context.Context, job *batchv1.Job) {
 		glog.V(2).
 			Infof("job %s/%s succeeded (task %s): trusting agent publish, no synthetic result",
 				job.Namespace, job.Name, taskID)
+		// Remembered before the store check: the task entry may already be
+		// evicted (or, after an executor restart, never stored), but the spawn
+		// path still needs to know a result is on its way to the vault.
+		// CompletionTime, not now, so a re-delivered old Job keeps its age.
+		if job.Status.CompletionTime != nil {
+			w.taskStore.MarkSucceeded(
+				taskID,
+				job.Annotations[TaskPhaseAnnotationKey],
+				job.Status.CompletionTime.Time,
+			)
+		}
 		if task, ok := w.taskStore.Load(taskID); ok {
 			w.handleSucceeded(ctx, taskID, task, job)
 		}

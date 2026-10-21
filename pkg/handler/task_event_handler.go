@@ -782,6 +782,10 @@ func (h *taskEventHandler) spawnIfNeeded(
 		return false, nil
 	}
 
+	if h.recentlySucceeded(task) {
+		return false, nil
+	}
+
 	// The last bound, and the only one that covers every path: a task that has
 	// been spawned maxConsecutiveRedrives times in a row at an unchanged phase is
 	// looping, not advancing. Checked here rather than at the call sites because
@@ -1265,6 +1269,11 @@ func (h *taskEventHandler) ReconcileOnce(ctx context.Context) error {
 		return nil
 	}
 	paths = h.prioritizeUncachedPaths(paths)
+	// Once per pass: forget successes older than the grace window, so the
+	// record stays bounded to results that may still be in flight.
+	h.taskStore.PruneSucceededBefore(
+		h.currentDateTime.Now().Time().Add(-defaultRespawnGracePeriod),
+	)
 	// Collected across the whole pass and published only once it completes: an
 	// aborted pass would otherwise disown every task it had not reached yet, and
 	// the instance would refuse to spawn its own tasks until the next tick.
