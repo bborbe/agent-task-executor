@@ -2,6 +2,10 @@
 
 All notable changes to this project will be documented in this file.
 
+## Unreleased
+
+- chore: update github.com/IBM/sarama to v1.61.1, github.com/bborbe/agent to v0.112.0, github.com/bborbe/cqrs to v0.6.12, github.com/bborbe/cron to v1.9.4, github.com/bborbe/errors to v1.6.3, github.com/bborbe/http to v1.26.30, github.com/bborbe/k8s to v1.14.23, github.com/bborbe/kafka to v1.28.4, github.com/bborbe/log to v1.7.4, github.com/bborbe/metrics to v0.6.7, github.com/bborbe/run to v1.11.2, github.com/bborbe/sentry to v1.10.5, github.com/bborbe/service to v1.11.0, github.com/bborbe/time to v1.27.17, github.com/bborbe/validation to v1.5.5, github.com/bborbe/vault-cli to v0.177.0, github.com/onsi/ginkgo/v2 to v2.33.1, github.com/onsi/gomega to v1.44.0, github.com/prometheus/client_golang to v1.25.0, k8s.io/api to v0.37.1, k8s.io/apiextensions-apiserver to v0.37.1, k8s.io/apimachinery to v0.37.1, k8s.io/client-go to v0.37.1
+
 ## v0.23.1
 
 - fix: **a freshly delegated task is no longer starved by the filename-ordered admission queue.** The reconcile floor walked the vault paths in the order git-rest returned them and spawned the first eligible one, so with `maxConcurrentJobs: 1` a child delegated today — named `20261021-…`, and therefore last — was never reached while any older child remained eligible. Measured on prod 2026-10-21: 67 eligible children against one slot, and both admissions in a 20-minute window were the first two files in filename order. Both admission paths now order by `admissionPriority`: a task that has never been attempted (no `job_started_at`) goes ahead of every task that has, then the earliest queue-entry time (`queued_at`, falling back to `job_started_at`) wins. `evalDeferredRespawns` sorts its due entries the same way — it previously spawned in Go map-iteration order, so each tick's winner was drawn at random. The reconcile pass is now two phases: gather and filter every file, sort, then drive, so admission follows the queue rather than the path listing.
