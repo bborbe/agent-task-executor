@@ -1210,6 +1210,7 @@ var _ = Describe("TaskEventHandler reconcile loop", func() {
 		liveClaude.Store(6)
 		codexListed := make(chan struct{})
 		releaseCodex := make(chan struct{})
+		var holdCodex sync.Once
 		fakeResolver.ResolveStub = func(_ context.Context, assignee string) (pkg.AgentConfiguration, error) {
 			return pkg.AgentConfiguration{
 				Assignee:          assignee,
@@ -1222,9 +1223,12 @@ var _ = Describe("TaskEventHandler reconcile loop", func() {
 			assignee string,
 		) (map[lib.TaskIdentifier]bool, error) {
 			if assignee == "codex" {
-				// Hold the pass open after it has cached claude's count.
-				close(codexListed)
-				<-releaseCodex
+				// Hold the pass open after it has cached claude's count. Only the
+				// first codex lookup blocks; a refetch after a spawn returns at once.
+				holdCodex.Do(func() {
+					close(codexListed)
+					<-releaseCodex
+				})
 				return activeJobs(0), nil
 			}
 			return activeJobs(int(liveClaude.Load())), nil
@@ -1280,7 +1284,11 @@ var _ = Describe("TaskEventHandler reconcile loop", func() {
 		// two per task (2026-10-19, client-go's 5 QPS limiter). Scoping it to the
 		// pass context must not disable it.
 		fakeResolver.ResolveReturns(
-			pkg.AgentConfiguration{Assignee: "claude", Image: "my-image:latest", MaxConcurrentJobs: 1},
+			pkg.AgentConfiguration{
+				Assignee:          "claude",
+				Image:             "my-image:latest",
+				MaxConcurrentJobs: 1,
+			},
 			nil,
 		)
 		fakeSpawner.ListActiveJobsReturns(activeJobs(1), nil) // at cap: every candidate defers
@@ -1298,5 +1306,108 @@ var _ = Describe("TaskEventHandler reconcile loop", func() {
 		Expect(h.ReconcileOnce(ctx)).To(Succeed())
 		Expect(fakeSpawner.SpawnJobCallCount()).To(Equal(0))
 		Expect(fakeSpawner.ListActiveJobsCallCount()).To(Equal(1))
+	})
+
+	It("counts a Job the event path spawned mid-pass against the pass's cap check", func() {
+		// The pass cache must never read too low: a Job created on another path
+		// while the pass runs has to count, or the pass admits past the cap.
+		var mu sync.Mutex
+		liveClaude := map[lib.TaskIdentifier]bool{"tid-x": true}
+		codexListed := make(chan struct{})
+		releaseCodex := make(chan struct{})
+		var holdCodex sync.Once
+		fakeResolver.ResolveStub = func(_ context.Context, assignee string) (pkg.AgentConfiguration, error) {
+			return pkg.AgentConfiguration{
+				Assignee:          assignee,
+				Image:             "my-image:latest",
+				MaxConcurrentJobs: 2,
+			}, nil
+		}
+		fakeSpawner.ListActiveJobsStub = func(
+			_ context.Context,
+			assignee string,
+		) (map[lib.TaskIdentifier]bool, error) {
+			if assignee == "codex" {
+				holdCodex.Do(func() {
+					close(codexListed)
+					<-releaseCodex
+				})
+				return activeJobs(0), nil
+			}
+			mu.Lock()
+			defer mu.Unlock()
+			snapshot := make(map[lib.TaskIdentifier]bool, len(liveClaude))
+			for id := range liveClaude {
+				snapshot[id] = true
+			}
+			return snapshot, nil
+		}
+		fakeSpawner.SpawnJobStub = func(
+			_ context.Context,
+			task lib.Task,
+			config pkg.AgentConfiguration,
+		) (string, error) {
+			if config.Assignee == "claude" {
+				mu.Lock()
+				liveClaude[task.TaskIdentifier] = true
+				mu.Unlock()
+			}
+			return "job-name", nil
+		}
+
+		running := eligibleTask(
+			domain.TaskPhaseExecution,
+		) // its Job is active: caches claude at 1/2
+		running.TaskIdentifier = "tid-x"
+		codexTask := eligibleTask(domain.TaskPhaseExecution)
+		codexTask.TaskIdentifier = "tid-codex"
+		codexTask.Frontmatter["assignee"] = "codex"
+		late := eligibleTask(domain.TaskPhaseExecution)
+		late.TaskIdentifier = "tid-c"
+		files := map[string]lib.Task{
+			"tid-x.md":     running,
+			"tid-codex.md": codexTask,
+			"tid-c.md":     late,
+		}
+		fakeGitRestClient.ListReturns(
+			[]string{"24 Tasks/tid-x.md", "24 Tasks/tid-codex.md", "24 Tasks/tid-c.md"},
+			nil,
+		)
+		fakeGitRestClient.GetStub = func(_ context.Context, relPath string) ([]byte, error) {
+			for name, task := range files {
+				if strings.HasSuffix(relPath, name) {
+					return []byte(renderTaskFile(task)), nil
+				}
+			}
+			return nil, errors.Errorf(ctx, "unexpected path %s", relPath)
+		}
+
+		passDone := make(chan error, 1)
+		go func() { passDone <- h.ReconcileOnce(ctx) }()
+		Eventually(codexListed).Should(BeClosed())
+
+		// The event path fills the second slot while the pass is held open.
+		eventTask := lib.Task{
+			TaskIdentifier: "tid-event",
+			Frontmatter: lib.TaskFrontmatter{
+				"status":   "in_progress",
+				"phase":    string(domain.TaskPhaseExecution),
+				"assignee": "claude",
+				"stage":    "prod",
+			},
+		}
+		value, err := json.Marshal(eventTask)
+		Expect(err).To(BeNil())
+		Expect(h.ConsumeMessage(ctx, &sarama.ConsumerMessage{Value: value})).To(Succeed())
+
+		close(releaseCodex)
+		Eventually(passDone).Should(Receive(BeNil()))
+		mu.Lock()
+		defer mu.Unlock()
+		Expect(liveClaude).To(HaveKey(lib.TaskIdentifier("tid-event")))
+		Expect(
+			liveClaude,
+		).NotTo(HaveKey(lib.TaskIdentifier("tid-c")))
+		// 2/2: the pass must defer it
 	})
 })

@@ -11,6 +11,7 @@ import (
 	"fmt"
 	"sort"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/IBM/sarama"
@@ -247,6 +248,10 @@ type taskEventHandler struct {
 	vaultTasks           map[lib.TaskIdentifier]struct{}
 	vaultScanned         bool
 	pathIDs              map[string]lib.TaskIdentifier
+	// spawnGen counts Jobs created by this executor on any path. A pass cache
+	// entry read at an older generation is refetched, so a Job spawned by the
+	// Kafka consumer or the deferred loop mid-pass is never missed.
+	spawnGen atomic.Uint64
 }
 
 // lockAssigneeSpawn serializes the count-then-spawn sequence for one assignee and
@@ -292,7 +297,14 @@ type jobCacheKey struct{}
 // passJobCache memoizes ListActiveJobs per assignee for one reconcile pass.
 type passJobCache struct {
 	mu     sync.Mutex
-	active map[string]map[lib.TaskIdentifier]bool
+	active map[string]cachedActiveJobs
+}
+
+// cachedActiveJobs is one assignee's active set and the spawn generation it
+// was read at.
+type cachedActiveJobs struct {
+	active map[lib.TaskIdentifier]bool
+	gen    uint64
 }
 
 // withJobCache returns a context carrying a fresh per-pass active-Job cache.
@@ -313,7 +325,7 @@ type passJobCache struct {
 // deadline exceeded` that kept github-update-go at zero dispatch.
 func withJobCache(ctx context.Context) context.Context {
 	return context.WithValue(ctx, jobCacheKey{}, &passJobCache{
-		active: make(map[string]map[lib.TaskIdentifier]bool),
+		active: make(map[string]cachedActiveJobs),
 	})
 }
 
@@ -323,34 +335,24 @@ func jobCacheFrom(ctx context.Context) *passJobCache {
 	return cache
 }
 
-// invalidateJobCache drops the pass cache after a Job is created, so a later
-// lookup in the same pass cannot miss a Job this executor just made. A no-op
-// outside a pass.
-func invalidateJobCache(ctx context.Context) {
-	cache := jobCacheFrom(ctx)
-	if cache == nil {
-		return
-	}
-	cache.mu.Lock()
-	cache.active = make(map[string]map[lib.TaskIdentifier]bool)
-	cache.mu.Unlock()
-}
-
 // activeJobsFor returns the set of task identifiers with an active Job for the
 // assignee. Inside a reconcile pass (ctx carries its cache) the answer is
-// memoized per assignee; outside one it is read live. Callers treat the
+// memoized per assignee until any path spawns a Job (spawnGen moves); outside
+// a pass it is read live. Completions are not tracked, so a cached count can
+// only be too high — which defers, never over-admits. Callers treat the
 // returned map as read-only.
 func (h *taskEventHandler) activeJobsFor(
 	ctx context.Context,
 	assignee string,
 ) (map[lib.TaskIdentifier]bool, error) {
 	cache := jobCacheFrom(ctx)
+	gen := h.spawnGen.Load()
 	if cache != nil {
 		cache.mu.Lock()
 		cached, ok := cache.active[assignee]
 		cache.mu.Unlock()
-		if ok {
-			return cached, nil
+		if ok && cached.gen == gen {
+			return cached.active, nil
 		}
 	}
 
@@ -360,7 +362,7 @@ func (h *taskEventHandler) activeJobsFor(
 	}
 	if cache != nil {
 		cache.mu.Lock()
-		cache.active[assignee] = active
+		cache.active[assignee] = cachedActiveJobs{active: active, gen: gen}
 		cache.mu.Unlock()
 	}
 	return active, nil
@@ -817,7 +819,7 @@ func (h *taskEventHandler) spawnIfNeeded(
 	// reasons leaves the budget untouched, and a Job that did start is charged.
 	// Record the Job before the counter write: if the write fails and this
 	// returns an error, the in-memory store must still know the Job exists.
-	invalidateJobCache(ctx)
+	h.spawnGen.Add(1)
 	h.storeSpawnedJob(task, jobName)
 
 	if err := h.recordTriggerSpawn(ctx, task); err != nil {
