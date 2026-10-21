@@ -2,9 +2,12 @@
 
 All notable changes to this project will be documented in this file.
 
-## v0.23.4
+## Unreleased
 
 - fix: **Evicted deferred respawns stay evicted.** A replay or reconcile drive whose entry was evicted mid-flight no longer spawns or re-parks the stale snapshot, and every event filter skip now evicts the task's deferred entry.
+
+## v0.23.4
+
 - fix: **a task retagged to another cluster while parked behind the concurrency cap no longer runs on the cluster it was parked on.** The deferred-respawn entry held the pre-retag snapshot and was spawned locally once a slot freed (prod 2026-10-21, nukeprod ran a `cluster: sun` task). A foreign-cluster event or reconcile read now evicts the pending entry.
 
 ## v0.23.3
