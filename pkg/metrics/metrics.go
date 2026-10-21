@@ -83,6 +83,16 @@ var SkippedUnknownAssigneeTotal = promauto.NewCounterVec(
 	[]string{"assignee"},
 )
 
+// ClaimTotal counts claim lease outcomes by result. The result set is closed;
+// keys and task ids are never label values.
+var ClaimTotal = promauto.NewCounterVec(
+	prometheus.CounterOpts{
+		Name: "executor_claim_total",
+		Help: "Total number of claim lease outcomes by result.",
+	},
+	[]string{"result"},
+)
+
 // DeferredConcurrencyCapTotal counts tasks deferred because their assignee was
 // already at its configured concurrency cap, labelled by that assignee. The
 // bare TaskEventsTotal{result="deferred_concurrency_cap"} counter says a

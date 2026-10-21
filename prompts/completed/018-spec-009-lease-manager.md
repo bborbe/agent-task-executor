@@ -1,8 +1,13 @@
 ---
-status: approved
+status: completed
 spec: [009-claim-lease-client-library]
+summary: Implemented the claim lease state machine (claim/release/takeover/tick/fence/renew/restart recovery/loop) with 13-result metrics and deterministic Ginkgo tests on the fake clock and in-process fake git-rest.
+execution_id: agent-task-executor-claim-client-exec-018-spec-009-lease-manager
+dark-factory-version: v0.198.7
 created: "2026-10-21T18:52:26Z"
 queued: "2026-10-21T19:14:22Z"
+started: "2026-10-21T19:23:03Z"
+completed: "2026-10-21T19:36:37Z"
 branch: dark-factory/claim-lease-client-library
 ---
 
