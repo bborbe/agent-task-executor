@@ -189,6 +189,7 @@ func NewTaskEventHandler(
 	branch base.Branch,
 	cluster string,
 	stageFilter bool,
+	runUntagged bool,
 	resolver pkg.ConfigResolver,
 	resultPublisher pkg.ResultPublisher,
 	taskStore *pkg.TaskStore,
@@ -201,6 +202,7 @@ func NewTaskEventHandler(
 		branch:           branch,
 		cluster:          cluster,
 		stageFilter:      stageFilter,
+		runUntagged:      runUntagged,
 		resolver:         resolver,
 		resultPublisher:  resultPublisher,
 		taskStore:        taskStore,
@@ -220,6 +222,7 @@ type taskEventHandler struct {
 	branch           base.Branch
 	cluster          string
 	stageFilter      bool
+	runUntagged      bool
 	resolver         pkg.ConfigResolver
 	resultPublisher  pkg.ResultPublisher
 	taskStore        *pkg.TaskStore
@@ -1786,11 +1789,15 @@ func taskCluster(task lib.Task) string {
 }
 
 // isForeignCluster reports whether the task names a cluster other than the one
-// this executor runs in. A task without a cluster is never foreign, so tasks
-// filed before the field existed keep their previous routing.
+// this executor runs in. A task without a cluster is foreign only when the
+// executor opted out of untagged tasks (RUN_UNTAGGED=false), so tasks filed
+// before the field existed keep their previous routing on every other cluster.
 func (h *taskEventHandler) isForeignCluster(task lib.Task) bool {
 	c := taskCluster(task)
-	return c != "" && c != h.cluster
+	if c == "" {
+		return !h.runUntagged
+	}
+	return c != h.cluster
 }
 
 // skipForeignCluster logs and counts a task routed to another cluster and
@@ -1798,6 +1805,12 @@ func (h *taskEventHandler) isForeignCluster(task lib.Task) bool {
 func (h *taskEventHandler) skipForeignCluster(task lib.Task) bool {
 	if !h.isForeignCluster(task) {
 		return false
+	}
+	if taskCluster(task) == "" {
+		glog.V(2).
+			Infof("skip task %s: untagged (executor cluster %s runs only tagged tasks)", task.TaskIdentifier, h.cluster)
+		metrics.TaskEventsTotal.WithLabelValues("skipped_untagged").Inc()
+		return true
 	}
 	glog.V(2).Infof(
 		"skip task %s: foreign cluster %s (executor cluster %s)",

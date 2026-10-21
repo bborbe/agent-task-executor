@@ -78,6 +78,7 @@ var _ = Describe("TaskEventHandler", func() {
 			base.Branch("prod"),
 			"",
 			true,
+			true,
 			fakeResolver,
 			fakeResultPublisher,
 			taskStore,
@@ -997,6 +998,7 @@ var _ = Describe("TaskEventHandler", func() {
 					base.Branch("prod"),
 					"nukedev",
 					true,
+					true,
 					clusterResolver,
 					&mocks.FakeResultPublisher{},
 					pkg.NewTaskStore(),
@@ -1038,6 +1040,69 @@ var _ = Describe("TaskEventHandler", func() {
 			})
 		})
 
+		Context("untagged tasks disabled", func() {
+			var untaggedSpawner *mocks.FakeJobSpawner
+			var untaggedResolver *mocks.FakeConfigResolver
+			newHandler := func(runUntagged bool) handler.TaskEventHandler {
+				return handler.NewTaskEventHandler(
+					untaggedSpawner,
+					base.Branch("prod"),
+					"sun",
+					true,
+					runUntagged,
+					untaggedResolver,
+					&mocks.FakeResultPublisher{},
+					pkg.NewTaskStore(),
+					libtime.NewCurrentDateTime(),
+					fakeGitRestClient,
+					"24 Tasks/*.md",
+				)
+			}
+			buildTask := func(cluster string) lib.Task {
+				frontmatter := lib.TaskFrontmatter{
+					"status":   "in_progress",
+					"phase":    string(domain.TaskPhaseExecution),
+					"assignee": "claude",
+					"stage":    "prod",
+				}
+				if cluster != "" {
+					frontmatter["cluster"] = cluster
+				}
+				return lib.Task{
+					TaskIdentifier: lib.TaskIdentifier("tid-untagged-" + cluster),
+					Frontmatter:    frontmatter,
+				}
+			}
+			BeforeEach(func() {
+				untaggedSpawner = new(mocks.FakeJobSpawner)
+				untaggedSpawner.IsJobActiveReturns(false, nil)
+				untaggedResolver = &mocks.FakeConfigResolver{}
+				untaggedResolver.ResolveReturns(
+					pkg.AgentConfiguration{Assignee: "claude", Image: "my-image:latest"},
+					nil,
+				)
+			})
+			It(
+				"skips an untagged task on a CLUSTER=sun executor without resolving its Config",
+				func() {
+					err := newHandler(false).ConsumeMessage(ctx, buildMsg(buildTask("")))
+					Expect(err).To(BeNil())
+					Expect(untaggedSpawner.SpawnJobCallCount()).To(Equal(0))
+					Expect(untaggedResolver.ResolveCallCount()).To(Equal(0))
+				},
+			)
+			It("still spawns a task naming this executor's cluster", func() {
+				err := newHandler(false).ConsumeMessage(ctx, buildMsg(buildTask("sun")))
+				Expect(err).To(BeNil())
+				Expect(untaggedSpawner.SpawnJobCallCount()).To(Equal(1))
+			})
+			It("spawns an untagged task with the default RUN_UNTAGGED=true", func() {
+				err := newHandler(true).ConsumeMessage(ctx, buildMsg(buildTask("")))
+				Expect(err).To(BeNil())
+				Expect(untaggedSpawner.SpawnJobCallCount()).To(Equal(1))
+			})
+		})
+
 		Context("stage filter disabled", func() {
 			var stageSpawner *mocks.FakeJobSpawner
 			var stageHandler handler.TaskEventHandler
@@ -1054,6 +1119,7 @@ var _ = Describe("TaskEventHandler", func() {
 					base.Branch("dev"),
 					"sun",
 					false,
+					true,
 					stageResolver,
 					&mocks.FakeResultPublisher{},
 					pkg.NewTaskStore(),
@@ -1090,6 +1156,7 @@ var _ = Describe("TaskEventHandler", func() {
 				localSpawner,
 				base.Branch("dev"),
 				"",
+				true,
 				true,
 				localResolver,
 				&mocks.FakeResultPublisher{},
@@ -1140,6 +1207,7 @@ var _ = Describe("TaskEventHandler", func() {
 				localSpawner,
 				base.Branch("dev"),
 				"",
+				true,
 				true,
 				localResolver,
 				&mocks.FakeResultPublisher{},
