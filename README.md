@@ -34,6 +34,27 @@ vault edit. It is configured by:
 | `GITREST_GATEWAY_SECRET` | empty (auth disabled) | NAME of the K8s Secret carrying the git-rest gateway secret (data key `gateway-secret`) — never the secret value. The executor reads the value from the Secret at startup and uses it only in memory. The executor's ServiceAccount must be able to `get` this Secret (chart-side Role grant). |
 | `TASK_GLOB` | empty (required) | git-rest single-level glob selecting the vault task files the reconcile loop evaluates. Required: the executor refuses to start when it is empty, because git-rest treats an empty glob as match-everything over the whole vault. |
 
+## Task frontmatter fields written by the executor
+
+These keys are owned by the executor. An agent's own result write-back must never
+emit them: the executor is the only writer, and a value arriving from a pod is a
+clobber, not an update.
+
+| Field | Written when | Format | Meaning |
+|---|---|---|---|
+| `queued_at` | The task is first deferred behind an agent's `maxConcurrentJobs` cap. | RFC3339, `2006-01-02T15:04:05Z07:00` | When the task started waiting. Written **once**: a re-deferral on a later reconcile cycle keeps the first value, so the field marks the queue entry and not the last retry. |
+
+`queued_at` is stamped from the executor's injected clock through the same
+`UpdateFrontmatterCommand` CQRS path `PublishSpawnNotification` uses, and only
+when a vault read finds no existing value — the event payload alone does not
+decide, because a deferred entry holds the pre-write copy of the task. The write
+is logged at `V(1)` as `event=queued_at_written task=<id> queued_at=<value>`.
+
+Paired with `job_started_at` it yields a queue age, `job_started_at - queued_at`.
+`job_started_at` is **not** executor-owned in practice: the agent pod rewrites the
+frontmatter from its start-of-run snapshot, so that key reverts on write-back
+while `queued_at` survives.
+
 ## Links
 
 Dev:
