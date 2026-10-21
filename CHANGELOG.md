@@ -2,7 +2,7 @@
 
 All notable changes to this project will be documented in this file.
 
-## Unreleased
+## v0.23.3
 
 - fix: **the concurrency cap no longer counts against a running reconcile pass's frozen Job snapshot.** The per-pass active-Job cache was a handler field armed for the whole pass, so the Kafka consumer and the deferred cap retries, running concurrently, were answered from it too. It was invalidated only when a Job was created, never when one completed. On sun, where a pass runs for minutes, a snapshot taken at 6 stayed at 6 while Jobs finished: the executor logged `concurrency_cap running=6 cap=6` while only 4 Jobs were active and the quota showed 4/6. Measured 2026-10-21: 132 refusals between 10:46 and 11:00Z, and queued tasks stranded once their retries ran out. The cache now travels on the pass's context, so only the pass's own lookups use it. Each entry also records the assignee's spawn generation, which every Job creation on any path bumps, so a Job the event path spawns mid-pass is never missed by the pass's own cap check, and a spawn for one assignee leaves the others cached. An entry expires after 10s, so a long pass sitting at the cap re-reads instead of refusing with free slots for its whole lifetime.
 
