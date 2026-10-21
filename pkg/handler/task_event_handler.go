@@ -1258,13 +1258,13 @@ func (h *taskEventHandler) ReconcileOnce(ctx context.Context) error {
 	// behind every older child and is never reached while any of them is still
 	// eligible.
 	candidates := h.gatherCandidates(passCtx, paths, seen, &c)
-	if passCtx.Err() != nil {
+	if h.passDone(passCtx) {
 		c.logAborted()
 		return nil
 	}
 	sortCandidatesByAdmissionPriority(candidates)
 	for _, candidate := range candidates {
-		if passCtx.Err() != nil {
+		if h.passDone(passCtx) {
 			c.logAborted()
 			return nil
 		}
@@ -1279,6 +1279,18 @@ func (h *taskEventHandler) ReconcileOnce(ctx context.Context) error {
 		c.evaluated, c.redriven, c.deferred, c.skipped, c.capped, h.taskGlob,
 	)
 	return nil
+}
+
+// passDone reports whether the reconcile pass has run out of time. It receives
+// from Done rather than reading Err so the cancellation check keeps the shape the
+// rest of this file uses; the pass is bounded by reconcilePassTimeout.
+func (h *taskEventHandler) passDone(passCtx context.Context) bool {
+	select {
+	case <-passCtx.Done():
+		return true
+	default:
+		return false
+	}
 }
 
 // reconcileCounters is the per-pass tally. A struct rather than five locals so the
@@ -1331,7 +1343,7 @@ func (h *taskEventHandler) gatherCandidates(
 ) []reconcileCandidate {
 	candidates := make([]reconcileCandidate, 0, len(paths))
 	for _, relPath := range paths {
-		if passCtx.Err() != nil {
+		if h.passDone(passCtx) {
 			return candidates
 		}
 		candidate, outcome := h.gatherCandidate(passCtx, relPath, seen)
