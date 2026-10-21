@@ -2,9 +2,11 @@
 
 All notable changes to this project will be documented in this file.
 
-## v0.23.2
+## Unreleased
 
 - fix: **the concurrency cap no longer counts against a running reconcile pass's frozen Job snapshot.** The per-pass active-Job cache was a handler field armed for the whole pass, so the Kafka consumer and the deferred cap retries, running concurrently, were answered from it too. It was invalidated only when a Job was created, never when one completed. On sun, where a pass runs for minutes, a snapshot taken at 6 stayed at 6 while Jobs finished: the executor logged `concurrency_cap running=6 cap=6` while only 4 Jobs were active and the quota showed 4/6. Measured 2026-10-21: 132 refusals between 10:46 and 11:00Z, and queued tasks stranded once their retries ran out. The cache now travels on the pass's context, so only the pass's own lookups use it. Each entry also records the assignee's spawn generation, which every Job creation on any path bumps, so a Job the event path spawns mid-pass is never missed by the pass's own cap check, and a spawn for one assignee leaves the others cached. An entry expires after 10s, so a long pass sitting at the cap re-reads instead of refusing with free slots for its whole lifetime.
+
+## v0.23.2
 
 - fix: **a task whose Job already succeeded is no longer re-spawned while its result is still on its way to the vault.** Measured on nuke dev 2026-10-21: task `a055d019`'s claude-headless Job finished in ~20 s, the task file still read `phase: execution` with no `current_job` (neither the spawn notification nor the write-back had synced through git-rest), so the reconcile floor found no active Job and spawned it again on every ~60 s tick — 3 starts for one task, and the same on sun. A spawned Job now carries the phase it ran for (annotation `agent.benjamin-borbe.de/task-phase`); the job watcher records each task's latest success with that phase and the Job's `completionTime` (so the informer's re-delivery of an old Job cannot refresh it, and a restart re-learns it from Jobs still within their TTL); and `spawnIfNeeded` skips a task still at that same phase whose Job succeeded within the 300 s respawn grace window (`event=skip_recent_success`, counter `skipped_recent_success`). A task the agent advanced to its next phase is spawned at once, a failed Job records nothing so it is still re-driven up to the existing redrive cap, and the record is pruned to the grace window once per reconcile pass.
 
