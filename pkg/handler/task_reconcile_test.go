@@ -1470,4 +1470,87 @@ var _ = Describe("TaskEventHandler reconcile loop", func() {
 		).NotTo(HaveKey(lib.TaskIdentifier("tid-c")))
 		// 2/2: the pass must defer it
 	})
+
+	It(
+		"re-reads an assignee's active Jobs once the pass cache entry is older than its TTL",
+		func() {
+			// A pass on sun runs for minutes and, at the cap, never spawns to refresh
+			// itself. Without a TTL it refuses with free slots for its whole lifetime.
+			start := time.Date(2026, 10, 21, 11, 0, 0, 0, time.UTC)
+			currentDateTime.SetNow(libtime.DateTime(start))
+			fakeResolver.ResolveReturns(
+				pkg.AgentConfiguration{
+					Assignee:          "claude",
+					Image:             "my-image:latest",
+					MaxConcurrentJobs: 1,
+				},
+				nil,
+			)
+			fakeSpawner.ListActiveJobsStub = func(_ context.Context, _ string) (map[lib.TaskIdentifier]bool, error) {
+				if fakeSpawner.ListActiveJobsCallCount() == 1 {
+					// The other Job finishes while the pass is still running.
+					currentDateTime.SetNow(libtime.DateTime(start.Add(11 * time.Second)))
+					return map[lib.TaskIdentifier]bool{"tid-other": true}, nil
+				}
+				return activeJobs(0), nil
+			}
+			fakeSpawner.SpawnJobReturns("job-name", nil)
+			fakeGitRestClient.ListReturns([]string{"24 Tasks/tid-a.md"}, nil)
+			fakeGitRestClient.GetReturns(
+				[]byte(renderTaskFile(eligibleTask(domain.TaskPhaseExecution))),
+				nil,
+			)
+
+			Expect(h.ReconcileOnce(ctx)).To(Succeed())
+			Expect(fakeSpawner.ListActiveJobsCallCount()).To(Equal(2))
+			Expect(fakeSpawner.SpawnJobCallCount()).To(Equal(1))
+		},
+	)
+
+	It("keeps other assignees' pass cache entries when one assignee spawns", func() {
+		fakeResolver.ResolveStub = func(_ context.Context, assignee string) (pkg.AgentConfiguration, error) {
+			return pkg.AgentConfiguration{
+				Assignee:          assignee,
+				Image:             "my-image:latest",
+				MaxConcurrentJobs: 2,
+			}, nil
+		}
+		var claudeLists atomic.Int64
+		fakeSpawner.ListActiveJobsStub = func(_ context.Context, assignee string) (map[lib.TaskIdentifier]bool, error) {
+			if assignee == "claude" {
+				claudeLists.Add(1)
+				return map[lib.TaskIdentifier]bool{"tid-x": true}, nil
+			}
+			return activeJobs(0), nil
+		}
+		fakeSpawner.SpawnJobReturns("job-name", nil)
+		running := eligibleTask(domain.TaskPhaseExecution)
+		running.TaskIdentifier = "tid-x"
+		codexTask := eligibleTask(domain.TaskPhaseExecution)
+		codexTask.TaskIdentifier = "tid-codex"
+		codexTask.Frontmatter["assignee"] = "codex"
+		late := eligibleTask(domain.TaskPhaseExecution)
+		late.TaskIdentifier = "tid-c"
+		files := map[string]lib.Task{
+			"tid-x.md":     running,
+			"tid-codex.md": codexTask,
+			"tid-c.md":     late,
+		}
+		fakeGitRestClient.ListReturns(
+			[]string{"24 Tasks/tid-x.md", "24 Tasks/tid-codex.md", "24 Tasks/tid-c.md"},
+			nil,
+		)
+		fakeGitRestClient.GetStub = func(_ context.Context, relPath string) ([]byte, error) {
+			for name, task := range files {
+				if strings.HasSuffix(relPath, name) {
+					return []byte(renderTaskFile(task)), nil
+				}
+			}
+			return nil, errors.Errorf(ctx, "unexpected path %s", relPath)
+		}
+
+		Expect(h.ReconcileOnce(ctx)).To(Succeed())
+		Expect(fakeSpawner.SpawnJobCallCount()).To(Equal(2)) // codex, then tid-c at 1/2
+		Expect(claudeLists.Load()).To(Equal(int64(1)))       // the codex spawn left claude cached
+	})
 })
