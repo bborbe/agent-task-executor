@@ -1274,4 +1274,29 @@ var _ = Describe("TaskEventHandler reconcile loop", func() {
 		Expect(spawned).To(ContainElement(lib.TaskIdentifier("tid-event")))
 		Expect(spawned).NotTo(ContainElement(lib.TaskIdentifier("tid-a")))
 	})
+
+	It("lists active Jobs once per assignee for a whole reconcile pass", func() {
+		// The pass cache exists so a pass costs one `list jobs` per assignee, not
+		// two per task (2026-10-19, client-go's 5 QPS limiter). Scoping it to the
+		// pass context must not disable it.
+		fakeResolver.ResolveReturns(
+			pkg.AgentConfiguration{Assignee: "claude", Image: "my-image:latest", MaxConcurrentJobs: 1},
+			nil,
+		)
+		fakeSpawner.ListActiveJobsReturns(activeJobs(1), nil) // at cap: every candidate defers
+		first := eligibleTask(domain.TaskPhaseExecution)
+		second := eligibleTask(domain.TaskPhaseExecution)
+		second.TaskIdentifier = "tid-b"
+		fakeGitRestClient.ListReturns([]string{"24 Tasks/tid-a.md", "24 Tasks/tid-b.md"}, nil)
+		fakeGitRestClient.GetStub = func(_ context.Context, relPath string) ([]byte, error) {
+			if strings.HasSuffix(relPath, "tid-b.md") {
+				return []byte(renderTaskFile(second)), nil
+			}
+			return []byte(renderTaskFile(first)), nil
+		}
+
+		Expect(h.ReconcileOnce(ctx)).To(Succeed())
+		Expect(fakeSpawner.SpawnJobCallCount()).To(Equal(0))
+		Expect(fakeSpawner.ListActiveJobsCallCount()).To(Equal(1))
+	})
 })
