@@ -2,7 +2,7 @@
 
 All notable changes to this project will be documented in this file.
 
-## Unreleased
+## v0.23.2
 
 - fix: **a task whose Job already succeeded is no longer re-spawned while its result is still on its way to the vault.** Measured on nuke dev 2026-10-21: task `a055d019`'s claude-headless Job finished in ~20 s, the task file still read `phase: execution` with no `current_job` (neither the spawn notification nor the write-back had synced through git-rest), so the reconcile floor found no active Job and spawned it again on every ~60 s tick — 3 starts for one task, and the same on sun. A spawned Job now carries the phase it ran for (annotation `agent.benjamin-borbe.de/task-phase`); the job watcher records each task's latest success with that phase and the Job's `completionTime` (so the informer's re-delivery of an old Job cannot refresh it, and a restart re-learns it from Jobs still within their TTL); and `spawnIfNeeded` skips a task still at that same phase whose Job succeeded within the 300 s respawn grace window (`event=skip_recent_success`, counter `skipped_recent_success`). A task the agent advanced to its next phase is spawned at once, a failed Job records nothing so it is still re-driven up to the existing redrive cap, and the record is pruned to the grace window once per reconcile pass.
 
