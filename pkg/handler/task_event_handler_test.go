@@ -78,6 +78,7 @@ var _ = Describe("TaskEventHandler", func() {
 			base.Branch("prod"),
 			"",
 			true,
+			true,
 			fakeResolver,
 			fakeResultPublisher,
 			taskStore,
@@ -999,6 +1000,7 @@ var _ = Describe("TaskEventHandler", func() {
 					base.Branch("prod"),
 					"nukedev",
 					true,
+					true,
 					clusterResolver,
 					&mocks.FakeResultPublisher{},
 					pkg.NewTaskStore(),
@@ -1042,15 +1044,92 @@ var _ = Describe("TaskEventHandler", func() {
 			})
 		})
 
+		Context("untagged tasks disabled", func() {
+			var untaggedSpawner *mocks.FakeJobSpawner
+			var untaggedResolver *mocks.FakeConfigResolver
+			newHandler := func(runUntagged bool) handler.TaskEventHandler {
+				return handler.NewTaskEventHandler(
+					untaggedSpawner,
+					base.Branch("prod"),
+					"sun",
+					true,
+					runUntagged,
+					untaggedResolver,
+					&mocks.FakeResultPublisher{},
+					pkg.NewTaskStore(),
+					libtime.NewCurrentDateTime(),
+					fakeGitRestClient,
+					"24 Tasks/*.md",
+					handler.DefaultReconcilePassTimeout,
+					handler.DefaultReconcileInterval,
+				)
+			}
+			buildTask := func(cluster string) lib.Task {
+				frontmatter := lib.TaskFrontmatter{
+					"status":   "in_progress",
+					"phase":    string(domain.TaskPhaseExecution),
+					"assignee": "claude",
+					"stage":    "prod",
+				}
+				if cluster != "" {
+					frontmatter["cluster"] = cluster
+				}
+				return lib.Task{
+					TaskIdentifier: lib.TaskIdentifier("tid-untagged-" + cluster),
+					Frontmatter:    frontmatter,
+				}
+			}
+			BeforeEach(func() {
+				untaggedSpawner = new(mocks.FakeJobSpawner)
+				untaggedSpawner.IsJobActiveReturns(false, nil)
+				untaggedResolver = &mocks.FakeConfigResolver{}
+				untaggedResolver.ResolveReturns(
+					pkg.AgentConfiguration{Assignee: "claude", Image: "my-image:latest"},
+					nil,
+				)
+			})
+			It(
+				"skips an untagged task on a CLUSTER=sun executor without resolving its Config",
+				func() {
+					err := newHandler(false).ConsumeMessage(ctx, buildMsg(buildTask("")))
+					Expect(err).To(BeNil())
+					Expect(untaggedSpawner.SpawnJobCallCount()).To(Equal(0))
+					Expect(untaggedResolver.ResolveCallCount()).To(Equal(0))
+				},
+			)
+			It("still spawns a task naming this executor's cluster", func() {
+				err := newHandler(false).ConsumeMessage(ctx, buildMsg(buildTask("sun")))
+				Expect(err).To(BeNil())
+				Expect(untaggedSpawner.SpawnJobCallCount()).To(Equal(1))
+			})
+			It("spawns an untagged task with the default RUN_UNTAGGED=true", func() {
+				err := newHandler(true).ConsumeMessage(ctx, buildMsg(buildTask("")))
+				Expect(err).To(BeNil())
+				Expect(untaggedSpawner.SpawnJobCallCount()).To(Equal(1))
+			})
+		})
+
+		// The routing contract the claims rollout depends on: `stage` selects the
+		// pool, `cluster:` is only a hand-set pin. It holds today and must keep
+		// holding as claims land, so it is pinned here rather than left implicit.
+		//
+		// RUN_UNTAGGED stays in the matrix because it is the guard that keeps a
+		// pool member out of the untagged set until claims are on — with claims
+		// off, an untagged task eligible on two clusters is a duplicate run.
 		Context("stage selects the pool, cluster is only a pin", func() {
 			var poolSpawner *mocks.FakeJobSpawner
 			var poolResolver *mocks.FakeConfigResolver
-			newPoolHandler := func(branch base.Branch, cluster string) handler.TaskEventHandler {
+			newPoolHandler := func(
+				branch base.Branch,
+				cluster string,
+				runUntagged bool,
+			) handler.TaskEventHandler {
 				return handler.NewTaskEventHandler(
 					poolSpawner,
 					branch,
 					cluster,
 					true,
+					runUntagged,
 					poolResolver,
 					&mocks.FakeResultPublisher{},
 					pkg.NewTaskStore(),
@@ -1087,21 +1166,29 @@ var _ = Describe("TaskEventHandler", func() {
 					nil,
 				)
 			})
-			// Every stage x pin case. A missing stage means prod, and a missing
-			// cluster means "no pin": the task belongs to every cluster in its pool.
+			// A missing stage means prod. A missing cluster means "no pin": the
+			// task belongs to every cluster in its pool that accepts untagged work.
 			DescribeTable(
 				"spawn decision",
-				func(branch base.Branch, cluster, stage, pin string, want int) {
-					err := newPoolHandler(branch, cluster).ConsumeMessage(
+				func(
+					branch base.Branch,
+					cluster string,
+					runUntagged bool,
+					stage, pin string,
+					want int,
+				) {
+					err := newPoolHandler(branch, cluster, runUntagged).ConsumeMessage(
 						ctx, buildMsg(buildPoolTask(stage, pin)),
 					)
 					Expect(err).To(BeNil())
 					Expect(poolSpawner.SpawnJobCallCount()).To(Equal(want))
 				},
+				// Claims on: untagged work is in the pool.
 				Entry(
 					"prod executor, prod task, no pin",
 					base.Branch("prod"),
 					"nukeprod",
+					true,
 					"prod",
 					"",
 					1,
@@ -1110,6 +1197,7 @@ var _ = Describe("TaskEventHandler", func() {
 					"dev executor, dev task, no pin",
 					base.Branch("dev"),
 					"nukedev",
+					true,
 					"dev",
 					"",
 					1,
@@ -1118,6 +1206,7 @@ var _ = Describe("TaskEventHandler", func() {
 					"prod executor, dev task, no pin",
 					base.Branch("prod"),
 					"nukeprod",
+					true,
 					"dev",
 					"",
 					0,
@@ -1126,6 +1215,7 @@ var _ = Describe("TaskEventHandler", func() {
 					"dev executor, prod task, no pin",
 					base.Branch("dev"),
 					"nukedev",
+					true,
 					"prod",
 					"",
 					0,
@@ -1134,6 +1224,7 @@ var _ = Describe("TaskEventHandler", func() {
 					"prod executor, absent stage defaults to prod",
 					base.Branch("prod"),
 					"nukeprod",
+					true,
 					"",
 					"",
 					1,
@@ -1142,24 +1233,44 @@ var _ = Describe("TaskEventHandler", func() {
 					"dev executor, absent stage defaults to prod",
 					base.Branch("dev"),
 					"nukedev",
+					true,
 					"",
 					"",
 					0,
 				),
-				Entry("sun executor, prod task, no pin", base.Branch("prod"), "sun", "prod", "", 1),
-				Entry("sun executor, dev task, no pin", base.Branch("prod"), "sun", "dev", "", 0),
 				Entry(
-					"sun executor, absent stage defaults to prod",
+					"sun executor, prod task, no pin",
 					base.Branch("prod"),
 					"sun",
-					"",
+					true,
+					"prod",
 					"",
 					1,
 				),
 				Entry(
+					"sun executor, dev task, no pin",
+					base.Branch("prod"),
+					"sun",
+					true,
+					"dev",
+					"",
+					0,
+				),
+				Entry(
+					"sun executor, absent stage defaults to prod",
+					base.Branch("prod"),
+					"sun",
+					true,
+					"",
+					"",
+					1,
+				),
+				// A pin narrows to one cluster inside the pool.
+				Entry(
 					"prod executor, pinned to self",
 					base.Branch("prod"),
 					"nukeprod",
+					true,
 					"prod",
 					"nukeprod",
 					1,
@@ -1168,15 +1279,25 @@ var _ = Describe("TaskEventHandler", func() {
 					"prod executor, pinned to sun",
 					base.Branch("prod"),
 					"nukeprod",
+					true,
 					"prod",
 					"sun",
 					0,
 				),
-				Entry("sun executor, pinned to self", base.Branch("prod"), "sun", "prod", "sun", 1),
+				Entry(
+					"sun executor, pinned to self",
+					base.Branch("prod"),
+					"sun",
+					true,
+					"prod",
+					"sun",
+					1,
+				),
 				Entry(
 					"sun executor, pinned to nukeprod",
 					base.Branch("prod"),
 					"sun",
+					true,
 					"prod",
 					"nukeprod",
 					0,
@@ -1185,6 +1306,7 @@ var _ = Describe("TaskEventHandler", func() {
 					"dev executor, pinned to self",
 					base.Branch("dev"),
 					"nukedev",
+					true,
 					"dev",
 					"nukedev",
 					1,
@@ -1193,17 +1315,58 @@ var _ = Describe("TaskEventHandler", func() {
 					"dev executor, pinned to nukeprod",
 					base.Branch("dev"),
 					"nukedev",
+					true,
 					"dev",
 					"nukeprod",
 					0,
 				),
+				// A pin never overrides the pool.
 				Entry(
 					"prod executor, dev task pinned to self",
 					base.Branch("prod"),
 					"nukeprod",
+					true,
 					"dev",
 					"nukeprod",
 					0,
+				),
+				// Claims off (RUN_UNTAGGED=false): no untagged work at all, so two
+				// clusters can never start the same task. A pin still works.
+				Entry(
+					"claims off, sun, prod task, no pin",
+					base.Branch("prod"),
+					"sun",
+					false,
+					"prod",
+					"",
+					0,
+				),
+				Entry(
+					"claims off, prod executor, prod task, no pin",
+					base.Branch("prod"),
+					"nukeprod",
+					false,
+					"prod",
+					"",
+					0,
+				),
+				Entry(
+					"claims off, sun, pinned to self",
+					base.Branch("prod"),
+					"sun",
+					false,
+					"prod",
+					"sun",
+					1,
+				),
+				Entry(
+					"claims off, prod executor, pinned to self",
+					base.Branch("prod"),
+					"nukeprod",
+					false,
+					"prod",
+					"nukeprod",
+					1,
 				),
 			)
 		})
@@ -1224,6 +1387,7 @@ var _ = Describe("TaskEventHandler", func() {
 					base.Branch("dev"),
 					"sun",
 					false,
+					true,
 					stageResolver,
 					&mocks.FakeResultPublisher{},
 					pkg.NewTaskStore(),
@@ -1262,6 +1426,7 @@ var _ = Describe("TaskEventHandler", func() {
 				localSpawner,
 				base.Branch("dev"),
 				"",
+				true,
 				true,
 				localResolver,
 				&mocks.FakeResultPublisher{},
@@ -1314,6 +1479,7 @@ var _ = Describe("TaskEventHandler", func() {
 				localSpawner,
 				base.Branch("dev"),
 				"",
+				true,
 				true,
 				localResolver,
 				&mocks.FakeResultPublisher{},

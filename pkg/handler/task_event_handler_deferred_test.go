@@ -74,6 +74,7 @@ var _ = Describe("TaskEventHandler", func() {
 			base.Branch("prod"),
 			"",
 			true,
+			true,
 			fakeResolver,
 			fakeResultPublisher,
 			taskStore,
@@ -421,15 +422,16 @@ var _ = Describe("TaskEventHandler", func() {
 				return task
 			}
 
-			// newRoutingHandler builds a handler for the given cluster, sharing the
-			// suite's fakes and clock so the deferred map is driven through the real
-			// ConsumeMessage -> EvalDeferredRespawns path.
-			newRoutingHandler := func(cluster string) handler.TaskEventHandler {
+			// newRoutingHandler builds a handler for the given cluster/runUntagged
+			// pair, sharing the suite's fakes and clock so the deferred map is driven
+			// through the real ConsumeMessage -> EvalDeferredRespawns path.
+			newRoutingHandler := func(cluster string, runUntagged bool) handler.TaskEventHandler {
 				return handler.NewTaskEventHandler(
 					fakeSpawner,
 					base.Branch("prod"),
 					cluster,
 					true,
+					runUntagged,
 					fakeResolver,
 					fakeResultPublisher,
 					pkg.NewTaskStore(),
@@ -485,7 +487,7 @@ var _ = Describe("TaskEventHandler", func() {
 					// untagged was retagged cluster: sun, yet the parked copy still held
 					// the pre-retag snapshot and spawned on nukeprod once a slot freed.
 					setRunning := setupCapDeferral()
-					routingHandler := newRoutingHandler("nukeprod")
+					routingHandler := newRoutingHandler("nukeprod", true)
 
 					currentDateTime.SetNow(libtimetest.ParseDateTime("2026-10-21T08:00:00Z"))
 					Expect(
@@ -520,7 +522,7 @@ var _ = Describe("TaskEventHandler", func() {
 				// Positive control: proves the regression spec above cannot pass
 				// vacuously because the deferred path was never exercised.
 				setRunning := setupCapDeferral()
-				routingHandler := newRoutingHandler("nukeprod")
+				routingHandler := newRoutingHandler("nukeprod", true)
 
 				currentDateTime.SetNow(libtimetest.ParseDateTime("2026-10-21T08:00:00Z"))
 				Expect(
@@ -563,11 +565,11 @@ var _ = Describe("TaskEventHandler", func() {
 			})
 
 			It(
-				"spawns a deferred task whose later event drops its cluster tag, "+
-					"because an untagged task belongs to every cluster in its pool",
+				"does not spawn a deferred task whose later event drops its cluster tag "+
+					"on a cluster that refuses untagged tasks",
 				func() {
 					setRunning := setupCapDeferral()
-					routingHandler := newRoutingHandler("nukeprod")
+					routingHandler := newRoutingHandler("nukeprod", false)
 
 					currentDateTime.SetNow(libtimetest.ParseDateTime("2026-10-21T08:00:00Z"))
 					tagged := buildRoutingTask("tid-untagged", "nukeprod")
@@ -581,7 +583,7 @@ var _ = Describe("TaskEventHandler", func() {
 					currentDateTime.SetNow(libtimetest.ParseDateTime("2026-10-21T08:01:30Z"))
 					Expect(routingHandler.EvalDeferredRespawns(ctx)).To(Succeed())
 
-					Expect(fakeSpawner.SpawnJobCallCount()).To(Equal(1))
+					Expect(fakeSpawner.SpawnJobCallCount()).To(Equal(0))
 				},
 			)
 
@@ -624,7 +626,7 @@ var _ = Describe("TaskEventHandler", func() {
 				// exact gap by the ListActiveJobs stub, which runs inside
 				// spawnIfNeeded after the collection and before the claim re-check.
 				fakeResolver.ResolveReturns(capConfig, nil)
-				routingHandler := newRoutingHandler("nukeprod")
+				routingHandler := newRoutingHandler("nukeprod", true)
 
 				running := 1
 				armed := false
@@ -682,7 +684,7 @@ var _ = Describe("TaskEventHandler", func() {
 					// what forces that store; without it the spec also passes on the old
 					// code.
 					fakeResolver.ResolveReturns(capConfig, nil)
-					routingHandler := newRoutingHandler("nukeprod")
+					routingHandler := newRoutingHandler("nukeprod", true)
 
 					running := 1
 					armed := false
@@ -739,7 +741,7 @@ var _ = Describe("TaskEventHandler", func() {
 				// exactly once. Proves those specs are not passing because the replay
 				// path was never exercised.
 				fakeResolver.ResolveReturns(capConfig, nil)
-				routingHandler := newRoutingHandler("nukeprod")
+				routingHandler := newRoutingHandler("nukeprod", true)
 
 				running := 1
 				armed := false
@@ -788,7 +790,7 @@ var _ = Describe("TaskEventHandler", func() {
 					if configure != nil {
 						configure()
 					}
-					routingHandler := newRoutingHandler("nukeprod")
+					routingHandler := newRoutingHandler("nukeprod", true)
 					running := 1
 					installCapSpawner(&running)
 
@@ -917,7 +919,7 @@ var _ = Describe("TaskEventHandler", func() {
 				// a pass is the drive's isJobActive (gather makes none), so the stub
 				// lands the eviction exactly in that gap.
 				fakeResolver.ResolveReturns(capConfig, nil)
-				routingHandler := newRoutingHandler("nukeprod")
+				routingHandler := newRoutingHandler("nukeprod", true)
 				running := 0
 				evicted := false
 				fakeSpawner.ListActiveJobsStub = func(
@@ -956,7 +958,7 @@ var _ = Describe("TaskEventHandler", func() {
 				// at the cap, then spawned it after the slot freed. Keeping the agent at
 				// the cap forces the store.
 				fakeResolver.ResolveReturns(capConfig, nil)
-				routingHandler := newRoutingHandler("nukeprod")
+				routingHandler := newRoutingHandler("nukeprod", true)
 				running := 1
 				evicted := false
 				fakeSpawner.ListActiveJobsStub = func(
@@ -1122,6 +1124,7 @@ var _ = Describe("TaskEventHandler", func() {
 						base.Branch("prod"),
 						"",
 						true,
+						true,
 						fakeResolver,
 						fakeResultPublisher,
 						restartStore,
@@ -1173,6 +1176,7 @@ var _ = Describe("TaskEventHandler", func() {
 						fakeSpawner,
 						base.Branch("prod"),
 						"",
+						true,
 						true,
 						fakeResolver,
 						fakeResultPublisher,
