@@ -42,13 +42,18 @@ clobber, not an update.
 
 | Field | Written when | Format | Meaning |
 |---|---|---|---|
-| `queued_at` | The task is first deferred behind an agent's `maxConcurrentJobs` cap. | RFC3339, `2006-01-02T15:04:05Z07:00` | When the task started waiting. Written **once**: a re-deferral on a later reconcile cycle keeps the first value, so the field marks the queue entry and not the last retry. |
+| `queued_at` | The task is first deferred behind an agent's `maxConcurrentJobs` cap. | RFC3339, `2006-01-02T15:04:05Z07:00` | When the task started waiting. A re-deferral on a later reconcile cycle keeps the first value, so the field marks the queue entry and not the last retry. |
 
 `queued_at` is stamped from the executor's injected clock through the same
 `UpdateFrontmatterCommand` CQRS path `PublishSpawnNotification` uses, and only
 when a vault read finds no existing value — the event payload alone does not
 decide, because a deferred entry holds the pre-write copy of the task. The write
 is logged at `V(1)` as `event=queued_at_written task=<id> queued_at=<value>`.
+
+The guard is a vault read, not a lock, so it is best-effort rather than atomic:
+two events processed inside one write's git-rest commit latency can each stamp,
+and the value then advances by a few seconds right after the first write. It does
+not move on later reconcile cycles.
 
 Paired with `job_started_at` it yields a queue age, `job_started_at - queued_at`.
 `job_started_at` is **not** executor-owned in practice: the agent pod rewrites the
