@@ -2,6 +2,10 @@
 
 All notable changes to this project will be documented in this file.
 
+## Unreleased
+
+- feat: **the reconcile pass timeout and interval are configurable.** New envs `RECONCILE_PASS_TIMEOUT` (default `45s`) and `RECONCILE_INTERVAL` (default `60s`) replace the package constants; a non-positive value is rejected at startup. On sun the openclaw executor reads ~15k task files over the git-rest ingress (~7 ms each), so every 45s pass aborted with `evaluated=0` and redrive/backfill never ran there. Nuke dev and nuke prod keep the defaults.
+
 ## v0.22.0
 
 - feat: **a cluster can refuse untagged tasks.** The new `RUN_UNTAGGED` env (default `true`) decides whether a task with no `cluster:` frontmatter runs here. With `false`, the executor skips it before Config resolution on both the Kafka path and the reconcile path, logs `skip task <id>: untagged`, and counts `agent_executor_task_events_total{result="skipped_untagged"}`. Set it on sun (`CLUSTER=sun`, controller `PUBLISH_UNTAGGED=false`): until now an untagged task was local on every executor, so with `STAGE_FILTER=false` sun ran untagged prod tasks. Nuke dev and nuke prod keep the default.

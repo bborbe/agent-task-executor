@@ -80,6 +80,8 @@ var _ = Describe("TaskEventHandler reconcile loop", func() {
 			currentDateTime,
 			fakeGitRestClient,
 			"24 Tasks/*.md",
+			handler.DefaultReconcilePassTimeout,
+			handler.DefaultReconcileInterval,
 		)
 	})
 
@@ -127,6 +129,8 @@ var _ = Describe("TaskEventHandler reconcile loop", func() {
 			currentDateTime,
 			fakeGitRestClient,
 			"24 Tasks/*.md",
+			handler.DefaultReconcilePassTimeout,
+			handler.DefaultReconcileInterval,
 		)
 		fakeGitRestClient.ListReturns([]string{"24 Tasks/tid-a.md"}, nil)
 		fakeGitRestClient.GetReturns(
@@ -1094,5 +1098,52 @@ var _ = Describe("TaskEventHandler reconcile loop", func() {
 		// A publish failure is a skip, not a pass failure: the next tick retries.
 		Expect(h.ReconcileOnce(ctx)).To(Succeed())
 		Expect(fakeSpawner.SpawnJobCallCount()).To(Equal(0))
+	})
+	Describe("configurable reconcile timing", func() {
+		newTimedHandler := func(passTimeout, interval time.Duration) handler.TaskEventHandler {
+			return handler.NewTaskEventHandler(
+				fakeSpawner,
+				base.Branch("prod"),
+				"",
+				true,
+				true,
+				fakeResolver,
+				fakeResultPublisher,
+				taskStore,
+				currentDateTime,
+				fakeGitRestClient,
+				"24 Tasks/*.md",
+				passTimeout,
+				interval,
+			)
+		}
+
+		It("bounds the pass by the configured timeout, not the default", func() {
+			var remaining time.Duration
+			fakeGitRestClient.ListStub = func(listCtx context.Context, _ string) ([]string, error) {
+				deadline, ok := listCtx.Deadline()
+				Expect(ok).To(BeTrue())
+				remaining = time.Until(deadline)
+				return nil, nil
+			}
+			Expect(newTimedHandler(150*time.Second, time.Minute).ReconcileOnce(ctx)).To(Succeed())
+			Expect(remaining).To(BeNumerically(">", handler.DefaultReconcilePassTimeout))
+			Expect(remaining).To(BeNumerically("~", 150*time.Second, time.Second))
+		})
+
+		It("ticks at the configured interval", func() {
+			var passes atomic.Int32
+			fakeGitRestClient.ListStub = func(context.Context, string) ([]string, error) {
+				passes.Add(1)
+				return nil, nil
+			}
+			loopCtx, cancel := context.WithCancel(ctx)
+			defer cancel()
+			done := make(chan error, 1)
+			go func() { done <- newTimedHandler(time.Second, 10*time.Millisecond).RunReconcileLoop(loopCtx) }()
+			Eventually(passes.Load, time.Second, 5*time.Millisecond).Should(BeNumerically(">=", 3))
+			cancel()
+			Eventually(done).Should(Receive(BeNil()))
+		})
 	})
 })
