@@ -2,7 +2,7 @@
 
 All notable changes to this project will be documented in this file.
 
-## Unreleased
+## v0.23.5
 
 - feat: add a claim lease client library for git-rest `refs/claims` endpoints, with a compare-and-swap lease manager, fake-clock unit tests and `docs/claim-lease-protocol.md`.
 - feat: add `spec.rerunOnLostClaim` to the Config CRD — a per-agent optional boolean (default `true`) deciding whether a task is re-dispatched or parked at `human_review` after another executor takes over this agent's expired claim; the property is declared in the executor-installed CRD schema so the API server does not prune it, and a pure `ConfigSpec.LostClaimAction` maps it to `RedispatchAfterLostClaim`/`ParkAfterLostClaim` (no runtime wiring yet)
