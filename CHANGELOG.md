@@ -2,7 +2,7 @@
 
 All notable changes to this project will be documented in this file.
 
-## Unreleased
+## v0.21.1
 
 - fix: **`govulncheck` no longer fails `make precommit` on `GO-2026-6809`.** The Go toolchain moves 1.27.2 → 1.27.3 in `go.mod` and in the `Dockerfile` builder image, which is where the advisory is fixed (stdlib `crypto/x509`, distrust of compromised intermediate certificates). CI on `master` had been red since the v0.21.0 push: `vulncheck` runs inside `make precommit`, and the ID was not in `VULNCHECK_IGNORE`, so the target exited 1 on every push.
 
