@@ -152,6 +152,8 @@ func CreateConsumer(
 	jobFsGroup int64,
 	gitRestClient gitrestclient.GitRestClient,
 	taskGlob string,
+	reconcilePassTimeout time.Duration,
+	reconcileInterval time.Duration,
 ) (libkafka.Consumer, handler.TaskEventHandler) {
 	jobSpawner := spawner.NewJobSpawner(
 		kubeClient,
@@ -177,6 +179,8 @@ func CreateConsumer(
 		currentDateTimeGetter,
 		gitRestClient,
 		taskGlob,
+		reconcilePassTimeout,
+		reconcileInterval,
 	)
 	topic := lib.TaskV1SchemaID.EventTopic(topicPrefix)
 	offsetManager := libkafka.NewSaramaOffsetManager(
