@@ -78,7 +78,6 @@ var _ = Describe("TaskEventHandler", func() {
 			base.Branch("prod"),
 			"",
 			true,
-			true,
 			fakeResolver,
 			fakeResultPublisher,
 			taskStore,
@@ -1000,7 +999,6 @@ var _ = Describe("TaskEventHandler", func() {
 					base.Branch("prod"),
 					"nukedev",
 					true,
-					true,
 					clusterResolver,
 					&mocks.FakeResultPublisher{},
 					pkg.NewTaskStore(),
@@ -1044,17 +1042,16 @@ var _ = Describe("TaskEventHandler", func() {
 			})
 		})
 
-		Context("untagged tasks disabled", func() {
-			var untaggedSpawner *mocks.FakeJobSpawner
-			var untaggedResolver *mocks.FakeConfigResolver
-			newHandler := func(runUntagged bool) handler.TaskEventHandler {
+		Context("stage selects the pool, cluster is only a pin", func() {
+			var poolSpawner *mocks.FakeJobSpawner
+			var poolResolver *mocks.FakeConfigResolver
+			newPoolHandler := func(branch base.Branch, cluster string) handler.TaskEventHandler {
 				return handler.NewTaskEventHandler(
-					untaggedSpawner,
-					base.Branch("prod"),
-					"sun",
+					poolSpawner,
+					branch,
+					cluster,
 					true,
-					runUntagged,
-					untaggedResolver,
+					poolResolver,
 					&mocks.FakeResultPublisher{},
 					pkg.NewTaskStore(),
 					libtime.NewCurrentDateTime(),
@@ -1064,49 +1061,151 @@ var _ = Describe("TaskEventHandler", func() {
 					handler.DefaultReconcileInterval,
 				)
 			}
-			buildTask := func(cluster string) lib.Task {
+			buildPoolTask := func(stage, cluster string) lib.Task {
 				frontmatter := lib.TaskFrontmatter{
 					"status":   "in_progress",
 					"phase":    string(domain.TaskPhaseExecution),
 					"assignee": "claude",
-					"stage":    "prod",
+				}
+				if stage != "" {
+					frontmatter["stage"] = stage
 				}
 				if cluster != "" {
 					frontmatter["cluster"] = cluster
 				}
 				return lib.Task{
-					TaskIdentifier: lib.TaskIdentifier("tid-untagged-" + cluster),
+					TaskIdentifier: lib.TaskIdentifier("tid-pool-" + stage + "-" + cluster),
 					Frontmatter:    frontmatter,
 				}
 			}
 			BeforeEach(func() {
-				untaggedSpawner = new(mocks.FakeJobSpawner)
-				untaggedSpawner.IsJobActiveReturns(false, nil)
-				untaggedResolver = &mocks.FakeConfigResolver{}
-				untaggedResolver.ResolveReturns(
+				poolSpawner = new(mocks.FakeJobSpawner)
+				poolSpawner.IsJobActiveReturns(false, nil)
+				poolResolver = &mocks.FakeConfigResolver{}
+				poolResolver.ResolveReturns(
 					pkg.AgentConfiguration{Assignee: "claude", Image: "my-image:latest"},
 					nil,
 				)
 			})
-			It(
-				"skips an untagged task on a CLUSTER=sun executor without resolving its Config",
-				func() {
-					err := newHandler(false).ConsumeMessage(ctx, buildMsg(buildTask("")))
+			// Every stage x pin case. A missing stage means prod, and a missing
+			// cluster means "no pin": the task belongs to every cluster in its pool.
+			DescribeTable(
+				"spawn decision",
+				func(branch base.Branch, cluster, stage, pin string, want int) {
+					err := newPoolHandler(branch, cluster).ConsumeMessage(
+						ctx, buildMsg(buildPoolTask(stage, pin)),
+					)
 					Expect(err).To(BeNil())
-					Expect(untaggedSpawner.SpawnJobCallCount()).To(Equal(0))
-					Expect(untaggedResolver.ResolveCallCount()).To(Equal(0))
+					Expect(poolSpawner.SpawnJobCallCount()).To(Equal(want))
 				},
+				Entry(
+					"prod executor, prod task, no pin",
+					base.Branch("prod"),
+					"nukeprod",
+					"prod",
+					"",
+					1,
+				),
+				Entry(
+					"dev executor, dev task, no pin",
+					base.Branch("dev"),
+					"nukedev",
+					"dev",
+					"",
+					1,
+				),
+				Entry(
+					"prod executor, dev task, no pin",
+					base.Branch("prod"),
+					"nukeprod",
+					"dev",
+					"",
+					0,
+				),
+				Entry(
+					"dev executor, prod task, no pin",
+					base.Branch("dev"),
+					"nukedev",
+					"prod",
+					"",
+					0,
+				),
+				Entry(
+					"prod executor, absent stage defaults to prod",
+					base.Branch("prod"),
+					"nukeprod",
+					"",
+					"",
+					1,
+				),
+				Entry(
+					"dev executor, absent stage defaults to prod",
+					base.Branch("dev"),
+					"nukedev",
+					"",
+					"",
+					0,
+				),
+				Entry("sun executor, prod task, no pin", base.Branch("prod"), "sun", "prod", "", 1),
+				Entry("sun executor, dev task, no pin", base.Branch("prod"), "sun", "dev", "", 0),
+				Entry(
+					"sun executor, absent stage defaults to prod",
+					base.Branch("prod"),
+					"sun",
+					"",
+					"",
+					1,
+				),
+				Entry(
+					"prod executor, pinned to self",
+					base.Branch("prod"),
+					"nukeprod",
+					"prod",
+					"nukeprod",
+					1,
+				),
+				Entry(
+					"prod executor, pinned to sun",
+					base.Branch("prod"),
+					"nukeprod",
+					"prod",
+					"sun",
+					0,
+				),
+				Entry("sun executor, pinned to self", base.Branch("prod"), "sun", "prod", "sun", 1),
+				Entry(
+					"sun executor, pinned to nukeprod",
+					base.Branch("prod"),
+					"sun",
+					"prod",
+					"nukeprod",
+					0,
+				),
+				Entry(
+					"dev executor, pinned to self",
+					base.Branch("dev"),
+					"nukedev",
+					"dev",
+					"nukedev",
+					1,
+				),
+				Entry(
+					"dev executor, pinned to nukeprod",
+					base.Branch("dev"),
+					"nukedev",
+					"dev",
+					"nukeprod",
+					0,
+				),
+				Entry(
+					"prod executor, dev task pinned to self",
+					base.Branch("prod"),
+					"nukeprod",
+					"dev",
+					"nukeprod",
+					0,
+				),
 			)
-			It("still spawns a task naming this executor's cluster", func() {
-				err := newHandler(false).ConsumeMessage(ctx, buildMsg(buildTask("sun")))
-				Expect(err).To(BeNil())
-				Expect(untaggedSpawner.SpawnJobCallCount()).To(Equal(1))
-			})
-			It("spawns an untagged task with the default RUN_UNTAGGED=true", func() {
-				err := newHandler(true).ConsumeMessage(ctx, buildMsg(buildTask("")))
-				Expect(err).To(BeNil())
-				Expect(untaggedSpawner.SpawnJobCallCount()).To(Equal(1))
-			})
 		})
 
 		Context("stage filter disabled", func() {
@@ -1125,7 +1224,6 @@ var _ = Describe("TaskEventHandler", func() {
 					base.Branch("dev"),
 					"sun",
 					false,
-					true,
 					stageResolver,
 					&mocks.FakeResultPublisher{},
 					pkg.NewTaskStore(),
@@ -1164,7 +1262,6 @@ var _ = Describe("TaskEventHandler", func() {
 				localSpawner,
 				base.Branch("dev"),
 				"",
-				true,
 				true,
 				localResolver,
 				&mocks.FakeResultPublisher{},
@@ -1217,7 +1314,6 @@ var _ = Describe("TaskEventHandler", func() {
 				localSpawner,
 				base.Branch("dev"),
 				"",
-				true,
 				true,
 				localResolver,
 				&mocks.FakeResultPublisher{},

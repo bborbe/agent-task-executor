@@ -2,6 +2,11 @@
 
 All notable changes to this project will be documented in this file.
 
+## Unreleased
+
+- feat: **stage selects the claim pool; `cluster:` is only a pin.** An executor now skips a task only when the task names a *different* cluster, so a task with no `cluster:` frontmatter is eligible on every cluster whose `stage` matches its `BRANCH` — nuke dev is the dev pool, nuke prod and sun share the prod pool. `RUN_UNTAGGED` is retired: it existed only because sun ran `STAGE_FILTER=false`, and the stage filter now does that partitioning. A pin never overrides the pool, so a `stage: dev` task pinned to a prod-pool cluster still skips. Unit tests cover every stage x pin case on both the Kafka and the reconcile path.
+- feat: **every executor deployment gets its own Kafka consumer group.** The task event topic has one partition, so a shared group hands the whole topic to a single member; that member filters by assignee, skips what it cannot run, and commits those offsets, and the other clusters never see the events. `CONSUMER_GROUP` already existed as the knob — it is now set per deployment. A live-broker test (`pkg/kafkatest`, needs `KAFKA_BROKERS`) runs two groups against one single-partition topic and asserts both receive every event.
+
 ## v0.23.5
 
 - fix: **Evicted deferred respawns stay evicted.** A replay or reconcile drive whose entry was evicted mid-flight no longer spawns or re-parks the stale snapshot, and every event filter skip now evicts the task's deferred entry.
