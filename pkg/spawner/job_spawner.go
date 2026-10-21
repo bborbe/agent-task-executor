@@ -164,6 +164,7 @@ func (s *jobSpawner) SpawnJob(
 
 	applyTaskIDLabel(task.TaskIdentifier, job)
 	applyAssigneeLabel(config.Assignee, job)
+	applyTaskPhaseAnnotation(taskPhaseString(task.Frontmatter), job)
 	applySecretEnvFrom(config, job)
 	applyEphemeralStorage(config, job)
 	s.applyKafkaCertVolumes(job)
@@ -475,6 +476,17 @@ func applyAssigneeLabel(assignee string, job *batchv1.Job) {
 		job.Spec.Template.Labels = map[string]string{}
 	}
 	job.Spec.Template.Labels[assigneeLabelKey] = assignee
+}
+
+// applyTaskPhaseAnnotation stamps the task phase the Job was spawned for.
+func applyTaskPhaseAnnotation(phase string, job *batchv1.Job) {
+	if phase == "" {
+		return
+	}
+	if job.Annotations == nil {
+		job.Annotations = map[string]string{}
+	}
+	job.Annotations[pkg.TaskPhaseAnnotationKey] = phase
 }
 
 // applyActiveDeadlineSeconds stamps Job.Spec.ActiveDeadlineSeconds from the config's
