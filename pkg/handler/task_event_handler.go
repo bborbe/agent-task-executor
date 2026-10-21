@@ -685,7 +685,8 @@ func (h *taskEventHandler) spawnIfNeeded(
 // collected wins unless it arrives after the final claim check: the remaining
 // window is the duration of the SpawnJob call, which deliberately runs outside
 // deferredMu (an eviction blocked behind an in-flight create could not stop that
-// Job anyway). The next reconcile pass's foreign read is the backstop for it.
+// Job anyway). That window is accepted: the next reconcile pass's foreign read
+// only stops the task being re-parked, it does not remove a Job already created.
 func (h *taskEventHandler) spawnIfNeededClaimed(
 	ctx context.Context,
 	task lib.Task,
