@@ -36,9 +36,19 @@ type ConfigResolver interface {
 	// the recovery path's routing lookup for a task whose assignee was cleared:
 	// the task's own task_type still identifies exactly one agent.
 	//
+	// When more than one Config declares taskType, a non-empty preferAssignee
+	// narrows the matches to the ones Resolve would pick for that assignee
+	// ({preferAssignee}-{vaultName} first, then the plain preferAssignee); a
+	// single survivor is returned.
+	//
 	// Returns ErrConfigNotFound when no Config declares taskType, and
-	// ErrConfigAmbiguous when more than one does.
-	ResolveByTaskType(ctx context.Context, taskType string) (AgentConfiguration, error)
+	// ErrConfigAmbiguous when more than one does and preferAssignee does not
+	// narrow them to exactly one.
+	ResolveByTaskType(
+		ctx context.Context,
+		taskType string,
+		preferAssignee string,
+	) (AgentConfiguration, error)
 }
 
 // NewConfigResolver returns a ConfigResolver backed by the given
@@ -117,10 +127,13 @@ func (r *configResolver) Resolve(
 // ResolveByTaskType returns the single AgentConfiguration whose effective
 // task-type set contains taskType. It is deliberately vault-agnostic: the
 // lookup scans every Config the executor's informer holds, keyed on the task
-// type rather than the assignee.
+// type rather than the assignee. preferAssignee only breaks a tie between
+// several type matches; it never selects a Config that does not declare
+// taskType.
 func (r *configResolver) ResolveByTaskType(
 	ctx context.Context,
 	taskType string,
+	preferAssignee string,
 ) (AgentConfiguration, error) {
 	items, err := r.provider.Get(ctx)
 	if err != nil {
@@ -153,6 +166,9 @@ func (r *configResolver) ResolveByTaskType(
 	case 1:
 		return convert(ctx, matches[0], r.branch.String())
 	default:
+		if preferred, ok := r.narrowByAssignee(matches, preferAssignee); ok {
+			return convert(ctx, preferred, r.branch.String())
+		}
 		return AgentConfiguration{}, errors.Wrapf(
 			ctx,
 			ErrConfigAmbiguous,
@@ -161,6 +177,36 @@ func (r *configResolver) ResolveByTaskType(
 			len(matches),
 		)
 	}
+}
+
+// narrowByAssignee picks the single match Resolve would pick for assignee, in
+// Resolve's own order: the composed {assignee}-{vaultName} Config first, then
+// the plain assignee. It reports false when assignee is empty or the candidate
+// tier it lands on does not hold exactly one match.
+func (r *configResolver) narrowByAssignee(
+	matches []agentv1.Config,
+	assignee string,
+) (agentv1.Config, bool) {
+	if assignee == "" {
+		return agentv1.Config{}, false
+	}
+	for _, candidate := range []string{assignee + "-" + r.vaultName, assignee} {
+		var hits []agentv1.Config
+		for _, it := range matches {
+			if it.Spec.Assignee == candidate {
+				hits = append(hits, it)
+			}
+		}
+		switch len(hits) {
+		case 0:
+			continue
+		case 1:
+			return hits[0], true
+		default:
+			return agentv1.Config{}, false
+		}
+	}
+	return agentv1.Config{}, false
 }
 
 func convert(ctx context.Context, obj agentv1.Config, branch string) (AgentConfiguration, error) {

@@ -261,7 +261,7 @@ var _ = Describe("ConfigResolver", func() {
 					},
 				},
 			}
-			config, err := resolver.ResolveByTaskType(ctx, "github-update-go")
+			config, err := resolver.ResolveByTaskType(ctx, "github-update-go", "")
 			Expect(err).To(BeNil())
 			Expect(config.Assignee).To(Equal("update-go-agent-personal"))
 			Expect(config.Image).To(Equal("foo/bar:dev"))
@@ -278,7 +278,7 @@ var _ = Describe("ConfigResolver", func() {
 				},
 			}
 			for _, taskType := range []string{"pr-review", "oauth-probe"} {
-				config, err := resolver.ResolveByTaskType(ctx, taskType)
+				config, err := resolver.ResolveByTaskType(ctx, taskType, "")
 				Expect(err).To(BeNil())
 				Expect(config.Assignee).To(Equal("pr-reviewer-agent-personal"))
 			}
@@ -296,7 +296,7 @@ var _ = Describe("ConfigResolver", func() {
 				},
 			}
 			for _, taskType := range []string{"github-update-go", "go-vuln"} {
-				config, err := resolver.ResolveByTaskType(ctx, taskType)
+				config, err := resolver.ResolveByTaskType(ctx, taskType, "")
 				Expect(err).To(BeNil())
 				Expect(config.Assignee).To(Equal("a-personal"))
 			}
@@ -312,7 +312,7 @@ var _ = Describe("ConfigResolver", func() {
 					},
 				},
 			}
-			_, err := resolver.ResolveByTaskType(ctx, "github-update-go")
+			_, err := resolver.ResolveByTaskType(ctx, "github-update-go", "")
 			Expect(err).NotTo(BeNil())
 			Expect(errors.Is(err, pkg.ErrConfigNotFound)).To(BeTrue())
 			Expect(errors.Is(err, pkg.ErrConfigAmbiguous)).To(BeFalse())
@@ -320,7 +320,7 @@ var _ = Describe("ConfigResolver", func() {
 
 		It("returns ErrConfigNotFound when store is empty", func() {
 			provider.items = []agentv1.Config{}
-			_, err := resolver.ResolveByTaskType(ctx, "github-update-go")
+			_, err := resolver.ResolveByTaskType(ctx, "github-update-go", "")
 			Expect(err).NotTo(BeNil())
 			Expect(errors.Is(err, pkg.ErrConfigNotFound)).To(BeTrue())
 			Expect(errors.Is(err, pkg.ErrConfigAmbiguous)).To(BeFalse())
@@ -343,11 +343,85 @@ var _ = Describe("ConfigResolver", func() {
 					},
 				},
 			}
-			_, err := resolver.ResolveByTaskType(ctx, "shared-type")
+			_, err := resolver.ResolveByTaskType(ctx, "shared-type", "")
 			Expect(err).NotTo(BeNil())
 			Expect(errors.Is(err, pkg.ErrConfigAmbiguous)).To(BeTrue())
 			Expect(errors.Is(err, pkg.ErrConfigNotFound)).To(BeFalse())
 			Expect(err.Error()).To(ContainSubstring("shared-type"))
+		})
+
+		Describe("preferAssignee tie-break", func() {
+			sharedTypeConfigs := func(assignees ...string) []agentv1.Config {
+				items := make([]agentv1.Config, 0, len(assignees))
+				for _, assignee := range assignees {
+					items = append(items, agentv1.Config{
+						Spec: agentv1.ConfigSpec{
+							Assignee:  assignee,
+							Image:     "img",
+							TaskTypes: []string{"shared-type"},
+						},
+					})
+				}
+				return items
+			}
+
+			It("picks the match named by the composed preferAssignee", func() {
+				provider.items = sharedTypeConfigs("a-personal", "b-personal")
+				config, err := resolver.ResolveByTaskType(ctx, "shared-type", "b")
+				Expect(err).To(BeNil())
+				Expect(config.Assignee).To(Equal("b-personal"))
+				Expect(config.Image).To(Equal("img:dev"))
+			})
+
+			It("falls back to the plain preferAssignee like Resolve does", func() {
+				provider.items = sharedTypeConfigs("a", "b")
+				config, err := resolver.ResolveByTaskType(ctx, "shared-type", "a")
+				Expect(err).To(BeNil())
+				Expect(config.Assignee).To(Equal("a"))
+			})
+
+			It("prefers the composed match over the plain one", func() {
+				provider.items = sharedTypeConfigs("a", "a-personal")
+				config, err := resolver.ResolveByTaskType(ctx, "shared-type", "a")
+				Expect(err).To(BeNil())
+				Expect(config.Assignee).To(Equal("a-personal"))
+			})
+
+			It("stays ambiguous when preferAssignee names neither match", func() {
+				provider.items = sharedTypeConfigs("a-personal", "b-personal")
+				_, err := resolver.ResolveByTaskType(ctx, "shared-type", "c")
+				Expect(err).NotTo(BeNil())
+				Expect(errors.Is(err, pkg.ErrConfigAmbiguous)).To(BeTrue())
+				Expect(err.Error()).To(ContainSubstring("matches 2 configs"))
+			})
+
+			It("stays ambiguous when preferAssignee is empty", func() {
+				provider.items = sharedTypeConfigs("a-personal", "b-personal")
+				_, err := resolver.ResolveByTaskType(ctx, "shared-type", "")
+				Expect(err).NotTo(BeNil())
+				Expect(errors.Is(err, pkg.ErrConfigAmbiguous)).To(BeTrue())
+			})
+
+			It("stays ambiguous when preferAssignee names two matches", func() {
+				provider.items = sharedTypeConfigs("a-personal", "a-personal")
+				_, err := resolver.ResolveByTaskType(ctx, "shared-type", "a")
+				Expect(err).NotTo(BeNil())
+				Expect(errors.Is(err, pkg.ErrConfigAmbiguous)).To(BeTrue())
+			})
+
+			It("never selects a preferred Config that does not declare the type", func() {
+				provider.items = append(
+					sharedTypeConfigs("a-personal", "b-personal"),
+					agentv1.Config{Spec: agentv1.ConfigSpec{
+						Assignee: "c-personal",
+						Image:    "img",
+						TaskType: "other-type",
+					}},
+				)
+				_, err := resolver.ResolveByTaskType(ctx, "shared-type", "c")
+				Expect(err).NotTo(BeNil())
+				Expect(errors.Is(err, pkg.ErrConfigAmbiguous)).To(BeTrue())
+			})
 		})
 
 		It("never matches an empty taskType", func() {
@@ -360,7 +434,7 @@ var _ = Describe("ConfigResolver", func() {
 					},
 				},
 			}
-			_, err := resolver.ResolveByTaskType(ctx, "")
+			_, err := resolver.ResolveByTaskType(ctx, "", "")
 			Expect(err).NotTo(BeNil())
 			Expect(errors.Is(err, pkg.ErrConfigNotFound)).To(BeTrue())
 		})
@@ -374,14 +448,14 @@ var _ = Describe("ConfigResolver", func() {
 					},
 				},
 			}
-			_, err := resolver.ResolveByTaskType(ctx, "anything")
+			_, err := resolver.ResolveByTaskType(ctx, "anything", "")
 			Expect(err).NotTo(BeNil())
 			Expect(errors.Is(err, pkg.ErrConfigNotFound)).To(BeTrue())
 		})
 
 		It("returns a wrapped error when provider.Get fails", func() {
 			provider.err = errors.Errorf(ctx, "storage unavailable")
-			_, err := resolver.ResolveByTaskType(ctx, "github-update-go")
+			_, err := resolver.ResolveByTaskType(ctx, "github-update-go", "")
 			Expect(err).NotTo(BeNil())
 			Expect(errors.Is(err, pkg.ErrConfigNotFound)).To(BeFalse())
 			Expect(errors.Is(err, pkg.ErrConfigAmbiguous)).To(BeFalse())

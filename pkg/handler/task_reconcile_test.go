@@ -1034,8 +1034,9 @@ var _ = Describe("TaskEventHandler reconcile loop", func() {
 		// The declared task_type is what resolved it — not the assignee, which is
 		// empty, and not previous_assignee, which this fixture does not carry.
 		Expect(fakeResolver.ResolveByTaskTypeCallCount()).To(Equal(1))
-		_, resolvedType := fakeResolver.ResolveByTaskTypeArgsForCall(0)
+		_, resolvedType, preferAssignee := fakeResolver.ResolveByTaskTypeArgsForCall(0)
 		Expect(resolvedType).To(Equal("github-update-go"))
+		Expect(preferAssignee).To(BeEmpty())
 
 		// The restore is the whole action: no Job, and the pass counts it redriven.
 		Expect(fakeSpawner.SpawnJobCallCount()).To(Equal(0))
@@ -1185,6 +1186,28 @@ var _ = Describe("TaskEventHandler reconcile loop", func() {
 			Expect(fakeSpawner.SpawnJobCallCount()).To(Equal(0))
 		},
 	)
+
+	It("passes previous_assignee to the task_type lookup as the tie-break", func() {
+		// On sun two Configs declared github-update-go and every parked task of
+		// that type was skipped as ambiguous. previous_assignee, written at
+		// escalation, is handed to the resolver so it can pick between them; the
+		// resolver alone decides, and the restore still writes its Config's assignee.
+		fakeResolver.ResolveByTaskTypeReturns(restoreConfig, nil)
+		task := parkedTask(domain.TaskPhaseExecution, "github-update-go")
+		task.Frontmatter["previous_assignee"] = "correct-agent"
+		fakeGitRestClient.ListReturns([]string{"24 Tasks/tid-parked.md"}, nil)
+		fakeGitRestClient.GetReturns([]byte(renderTaskFile(task)), nil)
+
+		Expect(h.ReconcileOnce(ctx)).To(Succeed())
+
+		Expect(fakeResolver.ResolveByTaskTypeCallCount()).To(Equal(1))
+		_, resolvedType, preferAssignee := fakeResolver.ResolveByTaskTypeArgsForCall(0)
+		Expect(resolvedType).To(Equal("github-update-go"))
+		Expect(preferAssignee).To(Equal("correct-agent"))
+		Expect(fakeResultPublisher.PublishRestoreAssigneeCallCount()).To(Equal(1))
+		_, _, assignee := fakeResultPublisher.PublishRestoreAssigneeArgsForCall(0)
+		Expect(assignee).To(Equal("correct-agent"))
+	})
 
 	It("leaves a parked task with no declared type untouched (no routing information)", func() {
 		task := parkedTask(domain.TaskPhaseExecution, "")

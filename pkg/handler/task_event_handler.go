@@ -532,7 +532,10 @@ func (h *taskEventHandler) resolveConfigForReconcile(
 	if taskType == "" {
 		return nil, false, nil
 	}
-	resolved, err := h.resolver.ResolveByTaskType(ctx, string(taskType))
+	// previous_assignee (written at escalation) only breaks a tie between several
+	// Configs declaring this task_type; it never routes a task on its own.
+	previousAssignee, _ := task.Frontmatter.String("previous_assignee")
+	resolved, err := h.resolver.ResolveByTaskType(ctx, string(taskType), previousAssignee)
 	if err != nil {
 		if stderrors.Is(err, pkg.ErrConfigNotFound) {
 			glog.V(2).Infof(

@@ -2,6 +2,10 @@
 
 All notable changes to this project will be documented in this file.
 
+## Unreleased
+
+- fix: **a parked task whose task_type two Configs claim is re-driven to the Config its `previous_assignee` names.** On sun two Configs declared `github-update-go`, so the reconcile floor's task_type lookup returned `task_type "github-update-go" matches 2 configs` and skipped 66 tasks, including parked ones whose assignee had been cleared at escalation. `ResolveByTaskType` now takes a preferred assignee: when several Configs match, it narrows them the way `Resolve` matches an assignee (`<assignee>-<vault>` first, then the plain `<assignee>`) and returns the single survivor. The reconcile path passes the task's `previous_assignee`. A `previous_assignee` naming none of the matches, or no `previous_assignee` at all, still returns `ErrConfigAmbiguous`, and it never selects a Config that does not declare the task_type.
+
 ## v0.23.4
 
 - fix: **a task retagged to another cluster while parked behind the concurrency cap no longer runs on the cluster it was parked on.** The deferred-respawn entry held the pre-retag snapshot and was spawned locally once a slot freed (prod 2026-10-21, nukeprod ran a `cluster: sun` task). A foreign-cluster event or reconcile read now evicts the pending entry.
