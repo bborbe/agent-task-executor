@@ -2,7 +2,7 @@
 
 All notable changes to this project will be documented in this file.
 
-## Unreleased
+## v0.21.0
 
 - feat: **a cluster can opt out of the stage check.** The new `STAGE_FILTER` env (default `true`) turns off the stage-vs-`BRANCH` skip on both the Kafka path and the reconcile path. Set it to `false` on a cluster whose controller already scopes tasks by cluster (sun, with `CLUSTER=sun` and `PUBLISH_UNTAGGED=false`); a task there then needs only `cluster: sun`, with no `stage:` field. `BRANCH` is unchanged and still sets the topic prefix and the child Job env. Nuke dev and nuke prod keep the default and still respect `stage`.
 
