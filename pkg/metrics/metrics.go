@@ -55,16 +55,16 @@ var RedriveCappedTotal = promauto.NewCounter(
 
 // ReconcilePassesTotal counts reconcile pass outcomes, labelled by result. The
 // failure reasons mirror ReconcileOnce's log events, and `ok` is counted on
-// every pass that gets past its List — so an alert can fire on a backstop that
-// never succeeds. That is the exact shape of the 2026-09 outage: the reconcile
-// loop logged `reconcile_list_failed` once a minute and no other reconcile
-// outcome was ever recorded, for months. A failure-only counter cannot express
-// it — it saturates and then looks identical to a healthy quiet fleet, which is
-// why the pass is counted on both sides of the outcome.
+// every pass that gets past the vault classification — so an alert can fire on a
+// backstop that never succeeds. That is the exact shape of the 2026-09 outage:
+// the reconcile loop logged `reconcile_list_failed` once a minute and no other
+// reconcile outcome was ever recorded, for months. A failure-only counter cannot
+// express it — it saturates and then looks identical to a healthy quiet fleet,
+// which is why the pass is counted on both sides of the outcome.
 var ReconcilePassesTotal = promauto.NewCounterVec(
 	prometheus.CounterOpts{
 		Name: "executor_reconcile_passes_total",
-		Help: "Total number of reconcile passes by outcome (ok, vault_unavailable, list_failed, aborted).",
+		Help: "Total number of reconcile passes by outcome (ok, aborted, view_not_ready, task_vault_mismatch, task_vault_unstamped).",
 	},
 	[]string{"result"},
 )
@@ -127,6 +127,7 @@ func init() {
 	TaskEventsTotal.WithLabelValues("skipped_recent_success").Add(0)
 	TaskEventsTotal.WithLabelValues("skipped_stage").Add(0)
 	TaskEventsTotal.WithLabelValues("skipped_foreign_cluster").Add(0)
+	TaskEventsTotal.WithLabelValues("skipped_foreign_vault").Add(0)
 	TaskEventsTotal.WithLabelValues("skipped_untagged").Add(0)
 	TaskEventsTotal.WithLabelValues("skipped_trigger_cap").Add(0)
 	TaskEventsTotal.WithLabelValues("error").Add(0)
@@ -141,9 +142,10 @@ func init() {
 	// "backstop never succeeds" alert never fire.
 	for _, result := range []string{
 		"ok",
-		"vault_unavailable",
-		"list_failed",
 		"aborted",
+		"view_not_ready",
+		"task_vault_mismatch",
+		"task_vault_unstamped",
 	} {
 		ReconcilePassesTotal.WithLabelValues(result).Add(0)
 	}

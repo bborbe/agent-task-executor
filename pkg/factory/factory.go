@@ -151,8 +151,8 @@ func CreateConsumer(
 	jobKafkaClientCertSecret string,
 	jobKafkaCaCertSecret string,
 	jobFsGroup int64,
-	gitRestClient gitrestclient.GitRestClient,
-	taskGlob string,
+	view handler.TaskView,
+	taskVault string,
 	reconcilePassTimeout time.Duration,
 	reconcileInterval time.Duration,
 ) (libkafka.Consumer, handler.TaskEventHandler) {
@@ -178,8 +178,8 @@ func CreateConsumer(
 		resultPublisher,
 		taskStore,
 		currentDateTimeGetter,
-		gitRestClient,
-		taskGlob,
+		view,
+		taskVault,
 		reconcilePassTimeout,
 		reconcileInterval,
 	)

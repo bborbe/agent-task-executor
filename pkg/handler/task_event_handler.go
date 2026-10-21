@@ -9,6 +9,7 @@ import (
 	stderrors "errors"
 	"fmt"
 	"sort"
+	"strings"
 	"sync"
 	"time"
 
@@ -21,7 +22,6 @@ import (
 	"github.com/golang/glog"
 
 	pkg "github.com/bborbe/agent-task-executor/pkg"
-	"github.com/bborbe/agent-task-executor/pkg/gitrestclient"
 	"github.com/bborbe/agent-task-executor/pkg/metrics"
 	"github.com/bborbe/agent-task-executor/pkg/spawner"
 )
@@ -173,10 +173,10 @@ type TaskEventHandler interface {
 	// RunDeferredRespawnLoop polls evalDeferredRespawns every deferredRespawnInterval
 	// until ctx is cancelled. Must be run alongside the Kafka consumer.
 	RunDeferredRespawnLoop(ctx context.Context) error
-	// ReconcileOnce runs one reconcile pass: lists the task files under the
-	// configured task glob via git-rest, parses each file's frontmatter, and
-	// re-drives every eligible task through the existing spawn path. Called by
-	// RunReconcileLoop on each tick; also callable directly in tests.
+	// ReconcileOnce runs one reconcile pass: it snapshots the in-memory task
+	// view, applies the eligibility filter, and re-drives every eligible owned
+	// task through the existing spawn path. Called by RunReconcileLoop on each
+	// tick; also callable directly in tests.
 	ReconcileOnce(ctx context.Context) error
 	// RunReconcileLoop runs one pass immediately at startup, then every
 	// reconcile interval until ctx is cancelled. Must be run
@@ -195,8 +195,8 @@ func NewTaskEventHandler(
 	resultPublisher pkg.ResultPublisher,
 	taskStore *pkg.TaskStore,
 	currentDateTime libtime.CurrentDateTimeGetter,
-	gitRestClient gitrestclient.GitRestClient,
-	taskGlob string,
+	view TaskView,
+	taskVault string,
 	reconcilePassTimeout time.Duration,
 	reconcileInterval time.Duration,
 ) TaskEventHandler {
@@ -212,13 +212,11 @@ func NewTaskEventHandler(
 		currentDateTime:      currentDateTime,
 		deferredRespawns:     make(map[lib.TaskIdentifier]deferredEntry),
 		spawnLocks:           make(map[string]*sync.Mutex),
-		gitRestClient:        gitRestClient,
-		taskGlob:             taskGlob,
+		view:                 view,
+		taskVault:            taskVault,
 		reconcilePassTimeout: reconcilePassTimeout,
 		reconcileInterval:    reconcileInterval,
 		redriveStreaks:       make(map[lib.TaskIdentifier]redriveStreak),
-		vaultTasks:           make(map[lib.TaskIdentifier]struct{}),
-		pathIDs:              make(map[string]lib.TaskIdentifier),
 	}
 }
 
@@ -236,16 +234,12 @@ type taskEventHandler struct {
 	deferredRespawns     map[lib.TaskIdentifier]deferredEntry
 	spawnLocksMu         sync.Mutex
 	spawnLocks           map[string]*sync.Mutex
-	gitRestClient        gitrestclient.GitRestClient
-	taskGlob             string
+	view                 TaskView
+	taskVault            string
 	reconcilePassTimeout time.Duration
 	reconcileInterval    time.Duration
 	redriveMu            sync.Mutex
 	redriveStreaks       map[lib.TaskIdentifier]redriveStreak
-	vaultMu              sync.RWMutex
-	vaultTasks           map[lib.TaskIdentifier]struct{}
-	vaultScanned         bool
-	pathIDs              map[string]lib.TaskIdentifier
 	// spawnGens counts Jobs created by this executor per assignee, on any path.
 	// A pass cache entry read at an older generation is refetched, so a Job
 	// spawned by the Kafka consumer or the deferred loop mid-pass is never
@@ -712,7 +706,7 @@ func (h *taskEventHandler) spawnIfNeeded(
 	// looping, not advancing. Checked here rather than at the call sites because
 	// the Kafka consumer, the deferred-respawn loop and the reconcile floor all
 	// funnel through this function — see maxConsecutiveRedrives.
-	if h.redriveStreakCapped(task, "") {
+	if h.redriveStreakCapped(task) {
 		return false, nil
 	}
 
@@ -872,7 +866,7 @@ func (h *taskEventHandler) stampQueueEntry(ctx context.Context, task lib.Task) l
 	if v, ok := task.Frontmatter.String("queued_at"); ok && v != "" {
 		return task
 	}
-	if v := h.queuedAtFromVault(ctx, task.TaskIdentifier); v != "" {
+	if v := h.queuedAtFromView(task.TaskIdentifier); v != "" {
 		return taskWithFrontmatterValue(task, "queued_at", v)
 	}
 	queuedAt := h.currentDateTime.Now().UTC().Format("2006-01-02T15:04:05Z07:00")
@@ -890,46 +884,18 @@ func (h *taskEventHandler) stampQueueEntry(ctx context.Context, task lib.Task) l
 	return taskWithFrontmatterValue(task, "queued_at", queuedAt)
 }
 
-// queuedAtFromVault reads the task file through git-rest and returns its
-// queued_at frontmatter value, or "" when the path is unknown, the read fails,
-// the file is unparseable, or the field is absent/empty.
+// queuedAtFromView returns the queued_at the view holds for id, or "".
 //
 // It exists for a duplicate event that arrives after PublishQueueEntry but
-// before the controller has applied the write: without this read that event
-// would stamp a second, later timestamp. The read is a single bounded call on
-// the deferral path, which holds the per-assignee spawn lock — git-rest owns its
-// own timeouts and retries, so this adds no retry loop of its own. A failed read
-// only logs: the deferral itself must never fail because of this best-effort
-// write.
-func (h *taskEventHandler) queuedAtFromVault(
-	ctx context.Context,
-	id lib.TaskIdentifier,
-) string {
-	h.vaultMu.RLock()
-	var relPath string
-	for path, cachedID := range h.pathIDs {
-		if cachedID == id {
-			relPath = path
-			break
-		}
-	}
-	h.vaultMu.RUnlock()
-	if relPath == "" {
-		return ""
-	}
-	content, err := h.gitRestClient.Get(ctx, relPath)
-	if err != nil {
-		glog.Warningf(
-			"event=queued_at_vault_read_failed task=%s path=%s err=%v",
-			id, relPath, err,
-		)
-		return ""
-	}
-	task, ok := parseTaskFile(ctx, content)
+// before the controller has applied the write: without this lookup that event
+// would stamp a second, later timestamp. The view is already in memory, so this
+// costs a map lookup on the deferral path rather than a vault read.
+func (h *taskEventHandler) queuedAtFromView(id lib.TaskIdentifier) string {
+	viewTask, ok := h.view.Get(id)
 	if !ok {
 		return ""
 	}
-	v, ok := task.Frontmatter.String("queued_at")
+	v, ok := viewTask.Frontmatter.String("queued_at")
 	if !ok || v == "" {
 		return ""
 	}
@@ -1143,30 +1109,32 @@ func (h *taskEventHandler) RunDeferredRespawnLoop(ctx context.Context) error {
 	}
 }
 
-// ReconcileOnce runs a single reconcile pass: lists the task files under the
-// configured task glob via git-rest, parses each file's frontmatter, and drives
-// every eligible task. There are two outcomes for an eligible task: a parked
-// task — one whose routing value was cleared but whose declared task_type
-// resolves to a Config — gets that Config's assignee written back onto it (no
-// Job is spawned; the write's TaskUpdated drives the normal spawn path), and
-// every other eligible task is re-driven through the existing spawnIfNeeded path.
+// ReconcileOnce runs a single reconcile pass over a point-in-time snapshot of
+// the in-memory task view: it applies the eligibility filter and drives every
+// eligible task owned by this executor. There are two outcomes for an eligible
+// task: a parked task — one whose routing value was cleared but whose declared
+// task_type resolves to a Config — gets that Config's assignee written back onto
+// it (no Job is spawned; the write's TaskUpdated drives the normal spawn path),
+// and every other eligible task is re-driven through the existing
+// spawnIfNeeded path.
 //
 // The reconcile loop is the source-of-truth floor (spec 005): it derives state
-// from the world — the vault via git-rest, live Jobs via the spawner — rather
-// than from the in-memory maps a restart wipes, so a task whose concurrency-cap
-// deferral was lost across an executor restart is re-driven without a new Kafka
-// event and without a current_job value. It does NOT consult deferredRespawns.
+// from the world — the replayed task topic and live Jobs via the spawner —
+// rather than from the in-memory maps a restart wipes, so a task whose
+// concurrency-cap deferral was lost across an executor restart is re-driven
+// without a new Kafka event and without a current_job value. It does NOT consult
+// deferredRespawns.
 //
-// git-rest unavailability degrades gracefully (spec 005 Failure Modes): a
-// failed readiness, List, or Get skips the pass with a log line and the next
-// tick retries. ReconcileOnce returns nil for all vault-side failures so the
-// loop can never tear down the executor via service.Run.
+// View-side conditions degrade gracefully: a not-ready view, a snapshot with no
+// task from this executor's vault, and a snapshot in which every task is
+// unstamped each skip the pass with a log line and the next tick retries.
+// ReconcileOnce returns nil for all of them so the loop can never tear down the
+// executor via service.Run.
 func (h *taskEventHandler) ReconcileOnce(ctx context.Context) error {
-	// Bound the whole pass so a slow or large vault cannot hold it open
-	// indefinitely (spec 005 Failure Modes: "Pass bounded by a per-pass
-	// timeout; logs evaluate count so cost is visible"). On timeout the
-	// in-flight git-rest call returns a deadline error, which the gates below
-	// log and skip; the next tick retries.
+	// Bound the whole pass so a large view cannot hold it open indefinitely
+	// (spec 005 Failure Modes: "Pass bounded by a per-pass timeout; logs
+	// evaluate count so cost is visible"). The snapshot itself is in memory; the
+	// deadline bounds the per-task Job lookups and spawns that follow.
 	passCtx, cancel := context.WithTimeout(ctx, h.reconcilePassTimeout)
 	defer cancel()
 
@@ -1174,41 +1142,40 @@ func (h *taskEventHandler) ReconcileOnce(ctx context.Context) error {
 	// Scoped to passCtx so the event path never reads a frozen snapshot.
 	passCtx = withJobCache(passCtx)
 
-	ready, err := h.gitRestClient.IsReady(passCtx)
-	if err != nil {
-		metrics.ReconcilePassesTotal.WithLabelValues("vault_unavailable").Inc()
-		glog.Warningf("event=reconcile_vault_unavailable reason=readiness_error err=%v", err)
+	if !h.view.Ready() {
+		metrics.ReconcilePassesTotal.WithLabelValues("view_not_ready").Inc()
+		glog.Warningf("event=reconcile_view_not_ready task_vault=%s", h.taskVault)
 		return nil
 	}
-	if !ready {
-		metrics.ReconcilePassesTotal.WithLabelValues("vault_unavailable").Inc()
-		glog.Warningf("event=reconcile_vault_unavailable reason=not_ready")
+	snapshot := h.view.Snapshot()
+	outcome, seen := classifyVaults(snapshot, h.taskVault)
+	switch outcome {
+	case vaultOutcomeUnstamped:
+		metrics.ReconcilePassesTotal.WithLabelValues("task_vault_unstamped").Inc()
+		glog.Warningf("event=task_vault_unstamped tasks=%d", len(snapshot))
+		return nil
+	case vaultOutcomeMismatch:
+		metrics.ReconcilePassesTotal.WithLabelValues("task_vault_mismatch").Inc()
+		glog.Warningf(
+			"event=task_vault_mismatch task_vault=%s seen=%s",
+			h.taskVault, strings.Join(seen, ","),
+		)
 		return nil
 	}
-	paths, err := h.gitRestClient.List(passCtx, h.taskGlob)
-	if err != nil {
-		metrics.ReconcilePassesTotal.WithLabelValues("list_failed").Inc()
-		glog.Warningf("event=reconcile_list_failed glob=%q err=%v", h.taskGlob, err)
-		return nil
-	}
-	paths = h.prioritizeUncachedPaths(paths)
+
 	// Once per pass: forget successes older than the grace window, so the
 	// record stays bounded to results that may still be in flight.
 	h.taskStore.PruneSucceededBefore(
 		h.currentDateTime.Now().Time().Add(-defaultRespawnGracePeriod),
 	)
-	// Collected across the whole pass and published only once it completes: an
-	// aborted pass would otherwise disown every task it had not reached yet, and
-	// the instance would refuse to spawn its own tasks until the next tick.
-	seen := make(map[lib.TaskIdentifier]struct{}, len(paths))
+	owned := ownedTasks(snapshot, h.taskVault)
 	c := reconcileCounters{}
-	// Two phases, deliberately. The gather below reads and filters every file and
-	// holds the eligible ones; the drive loop then admits them in admission order.
-	// Spawning inside the path loop would admit whichever file git-rest listed
-	// first — filename order for this vault — so a child delegated today sorts
-	// behind every older child and is never reached while any of them is still
-	// eligible.
-	candidates := h.gatherCandidates(passCtx, paths, seen, &c)
+	// Two phases, deliberately. The gather below filters every task and holds
+	// the eligible ones; the drive loop then admits them in admission order.
+	// Spawning inside the gather loop would admit whichever task the map
+	// iteration happened to yield first, so a child delegated today sorts behind
+	// every older child and is never reached while any of them is still eligible.
+	candidates := h.gatherCandidates(passCtx, owned, &c)
 	if h.passDone(passCtx) {
 		c.logAborted()
 		return nil
@@ -1221,15 +1188,70 @@ func (h *taskEventHandler) ReconcileOnce(ctx context.Context) error {
 		}
 		c.add(h.driveCandidate(passCtx, candidate))
 	}
-	h.publishVaultTasks(seen)
-	// Counted on every pass that got past List, so rate(ok)==0 is a true
-	// "the backstop is not running" signal rather than an absence of errors.
+	// Counted on every pass that got past the vault classification, so
+	// rate(ok)==0 is a true "the backstop is not running" signal rather than an
+	// absence of errors.
 	metrics.ReconcilePassesTotal.WithLabelValues("ok").Inc()
 	glog.Infof(
-		"event=reconcile evaluated=%d re_driven=%d deferred=%d skipped=%d capped=%d glob=%q",
-		c.evaluated, c.redriven, c.deferred, c.skipped, c.capped, h.taskGlob,
+		"event=reconcile evaluated=%d re_driven=%d deferred=%d skipped=%d capped=%d task_vault=%q",
+		c.evaluated, c.redriven, c.deferred, c.skipped, c.capped, h.taskVault,
 	)
 	return nil
+}
+
+// vaultPassOutcome is what a ready view snapshot says about task ownership.
+type vaultPassOutcome int
+
+const (
+	vaultOutcomeOK vaultPassOutcome = iota
+	vaultOutcomeMismatch
+	vaultOutcomeUnstamped
+)
+
+// classifyVaults decides whether a ready view snapshot lets the pass run and
+// returns the distinct non-empty vault slugs it saw, sorted.
+//
+// The mismatch and unstamped outcomes are unconditional: a view that holds
+// tasks but none from this executor's vault means the deployment is
+// misconfigured, and idling would look identical to a healthy quiet fleet.
+func classifyVaults(tasks []lib.Task, taskVault string) (vaultPassOutcome, []string) {
+	if len(tasks) == 0 {
+		return vaultOutcomeOK, nil
+	}
+	distinct := make(map[string]struct{}, len(tasks))
+	owned := false
+	for _, task := range tasks {
+		if task.Vault == "" {
+			continue
+		}
+		distinct[task.Vault] = struct{}{}
+		if task.Vault == taskVault {
+			owned = true
+		}
+	}
+	if len(distinct) == 0 {
+		return vaultOutcomeUnstamped, nil
+	}
+	seen := make([]string, 0, len(distinct))
+	for vault := range distinct {
+		seen = append(seen, vault)
+	}
+	sort.Strings(seen)
+	if !owned {
+		return vaultOutcomeMismatch, seen
+	}
+	return vaultOutcomeOK, seen
+}
+
+// ownedTasks returns the tasks whose stamped vault equals taskVault.
+func ownedTasks(tasks []lib.Task, taskVault string) []lib.Task {
+	owned := make([]lib.Task, 0, len(tasks))
+	for _, task := range tasks {
+		if task.Vault == taskVault {
+			owned = append(owned, task)
+		}
+	}
+	return owned
 }
 
 // passDone reports whether the reconcile pass has run out of time. It receives
@@ -1282,22 +1304,20 @@ func (c *reconcileCounters) logAborted() {
 	)
 }
 
-// gatherCandidates runs the pass's read-and-filter phase, returning the eligible
-// files and tallying everything else into c. It stops early when the pass context
-// is done; the caller checks passCtx.Err() to tell an early stop from a complete
-// gather, because an incomplete one must not publish the ownership set.
+// gatherCandidates runs the pass's filter phase, returning the eligible tasks
+// and tallying everything else into c. It stops early when the pass context is
+// done; the caller checks passDone to tell an early stop from a complete gather.
 func (h *taskEventHandler) gatherCandidates(
 	passCtx context.Context,
-	paths []string,
-	seen map[lib.TaskIdentifier]struct{},
+	tasks []lib.Task,
 	c *reconcileCounters,
 ) []reconcileCandidate {
-	candidates := make([]reconcileCandidate, 0, len(paths))
-	for _, relPath := range paths {
+	candidates := make([]reconcileCandidate, 0, len(tasks))
+	for _, task := range tasks {
 		if h.passDone(passCtx) {
 			return candidates
 		}
-		candidate, outcome := h.gatherCandidate(passCtx, relPath, seen)
+		candidate, outcome := h.gatherCandidate(passCtx, task)
 		if outcome == reconcileOutcomeCollected {
 			candidates = append(candidates, candidate)
 			continue
@@ -1309,9 +1329,9 @@ func (h *taskEventHandler) gatherCandidates(
 	return candidates
 }
 
-// reconcileOutcome is what one vault file contributed to a pass's counters.
-// The three decision outcomes count as evaluated; Skipped covers an unreadable
-// file, an ineligible task, or a spawn error.
+// reconcileOutcome is what one task contributed to a pass's counters.
+// The three decision outcomes count as evaluated; Skipped covers an ineligible
+// task or a spawn error.
 //
 // One deliberate difference from the pre-extraction accounting: a spawn error
 // used to increment BOTH evaluated and skipped, because evaluated was incremented
@@ -1324,19 +1344,18 @@ const (
 	reconcileOutcomeRedriven
 	reconcileOutcomeDeferred
 	reconcileOutcomeCapped
-	// reconcileOutcomeCollected means the file is eligible and has been held for
+	// reconcileOutcomeCollected means the task is eligible and has been held for
 	// the pass's admission-ordered drive phase; it contributes nothing to the
 	// counters yet.
 	reconcileOutcomeCollected
 )
 
-// reconcileCandidate is one eligible vault file waiting to be driven. The pass
+// reconcileCandidate is one eligible task waiting to be driven. The pass
 // collects these first and sorts them before spawning anything, so admission
-// follows the queue's own order rather than the order git-rest listed paths.
+// follows the queue's own order rather than map iteration order.
 type reconcileCandidate struct {
-	task    lib.Task
-	config  *pkg.AgentConfiguration
-	relPath string
+	task   lib.Task
+	config *pkg.AgentConfiguration
 }
 
 // sortCandidatesByAdmissionPriority orders the pass's candidates in place so the
@@ -1348,34 +1367,21 @@ func sortCandidatesByAdmissionPriority(candidates []reconcileCandidate) {
 	})
 }
 
-// gatherCandidate reads one vault file and applies the eligibility filter,
+// gatherCandidate applies the eligibility filter to one snapshot task,
 // returning the candidate for the pass's drive phase. It owns everything that
-// does not compete for a spawn slot: the read, the filter, ownership recording,
-// and the parked-assignee restore.
+// does not compete for a spawn slot: the filter and the parked-assignee restore.
 //
-// seen collects every identifier this pass parsed, eligible or not; ReconcileOnce
-// publishes it as the instance's ownership set once the pass completes. Recording
-// before the eligibility gate is deliberate: the ownership test answers "is this
-// file in my vault", which eligibility does not change.
+// Snapshot tasks are treated as read-only. The snapshot is a shallow copy and
+// its frontmatter map is shared with the view, so nothing here may write into it
+// in place.
 func (h *taskEventHandler) gatherCandidate(
 	ctx context.Context,
-	relPath string,
-	seen map[lib.TaskIdentifier]struct{},
+	task lib.Task,
 ) (reconcileCandidate, reconcileOutcome) {
-	content, err := h.gitRestClient.Get(ctx, relPath)
-	if err != nil {
-		glog.Warningf("event=reconcile_skip path=%s reason=get_failed err=%v", relPath, err)
-		return reconcileCandidate{}, reconcileOutcomeSkipped
-	}
-	task, config, ok, err := h.reconcileTask(ctx, content)
-	if task.TaskIdentifier != "" {
-		seen[task.TaskIdentifier] = struct{}{}
-		h.recordPathID(relPath, task.TaskIdentifier)
-	}
+	task, config, ok, err := h.reconcileTask(ctx, task)
 	if err != nil {
 		glog.Warningf(
-			"event=reconcile_skip path=%s reason=resolve_error task=%s task_type=%s err=%v",
-			relPath,
+			"event=reconcile_skip task=%s reason=resolve_error task_type=%s err=%v",
 			task.TaskIdentifier,
 			task.Frontmatter.TaskType(),
 			err,
@@ -1400,10 +1406,9 @@ func (h *taskEventHandler) gatherCandidate(
 	// file, the controller publishes TaskUpdated for it, and that event drives the
 	// normal spawn path.
 	if task.Frontmatter.Assignee() == "" {
-		return reconcileCandidate{}, h.restoreParkedAssignee(ctx, task, config, relPath)
+		return reconcileCandidate{}, h.restoreParkedAssignee(ctx, task, config)
 	}
-	return reconcileCandidate{task: task, config: config, relPath: relPath},
-		reconcileOutcomeCollected
+	return reconcileCandidate{task: task, config: config}, reconcileOutcomeCollected
 }
 
 // driveCandidate drives one collected candidate: the consecutive-re-drive cap and
@@ -1417,7 +1422,7 @@ func (h *taskEventHandler) driveCandidate(
 	// Checked here as well as in spawnIfNeeded so the pass summary can report the
 	// skip as `capped` rather than folding it into `deferred`. Only the capped
 	// branch signals, so the two checks cannot double-count.
-	if h.redriveStreakCapped(candidate.task, candidate.relPath) {
+	if h.redriveStreakCapped(candidate.task) {
 		return reconcileOutcomeCapped
 	}
 	spawned, err := h.spawnIfNeeded(ctx, candidate.task, candidate.config)
@@ -1433,11 +1438,7 @@ func (h *taskEventHandler) driveCandidate(
 		return reconcileOutcomeDeferred
 	}
 	metrics.ReconcileRedrivenTotal.Inc()
-	glog.Infof(
-		"event=reconcile_redrive task=%s path=%s",
-		candidate.task.TaskIdentifier,
-		candidate.relPath,
-	)
+	glog.Infof("event=reconcile_redrive task=%s", candidate.task.TaskIdentifier)
 	return reconcileOutcomeRedriven
 }
 
@@ -1451,7 +1452,6 @@ func (h *taskEventHandler) restoreParkedAssignee(
 	ctx context.Context,
 	task lib.Task,
 	config *pkg.AgentConfiguration,
-	relPath string,
 ) reconcileOutcome {
 	if err := h.resultPublisher.PublishRestoreAssignee(ctx, task, config.Assignee); err != nil {
 		glog.Warningf(
@@ -1463,22 +1463,20 @@ func (h *taskEventHandler) restoreParkedAssignee(
 	}
 	metrics.ReconcileRedrivenTotal.Inc()
 	glog.Infof(
-		"event=reconcile_redrive task=%s path=%s reason=restore_assignee assignee=%s",
+		"event=reconcile_redrive task=%s reason=restore_assignee assignee=%s",
 		task.TaskIdentifier,
-		relPath,
 		config.Assignee,
 	)
 	return reconcileOutcomeRedriven
 }
 
-// reconcileTask parses a task file and applies the reconcile eligibility filter.
-// Returns (task, config, ok, err): ok=false when the file is not an eligible
-// task (unparseable frontmatter, missing task_identifier, status not in the
-// Config's trigger set, phase not in the Config's trigger set, stage mismatch, or
-// no routing information — an empty assignee whose declared task_type resolves to
-// no Config) — mirroring parseAndFilter's gates, except that a parked task whose
-// declared task_type resolves IS eligible here and is not eligible on the Kafka
-// path.
+// reconcileTask applies the reconcile eligibility filter to one snapshot task.
+// Returns (task, config, ok, err): ok=false when the task is not eligible (status
+// not in the Config's trigger set, phase not in the Config's trigger set, stage
+// mismatch, or no routing information — an empty assignee whose declared
+// task_type resolves to no Config) — mirroring parseAndFilter's gates, except
+// that a parked task whose declared task_type resolves IS eligible here and is
+// not eligible on the Kafka path.
 //
 // The trigger sets come from the resolved Config via effectiveTriggerPhases /
 // effectiveTriggerStatuses, NOT from the hardcoded defaults. Those helpers still
@@ -1498,12 +1496,8 @@ func (h *taskEventHandler) restoreParkedAssignee(
 // orphaned task is at a phase its own Config lists, so it is still re-driven.
 func (h *taskEventHandler) reconcileTask(
 	ctx context.Context,
-	content []byte,
+	task lib.Task,
 ) (lib.Task, *pkg.AgentConfiguration, bool, error) {
-	task, ok := parseTaskFile(ctx, content)
-	if !ok {
-		return task, nil, false, nil
-	}
 	if h.isForeignCluster(task) {
 		// Backstop for a reconcile-driven cap deferral that stored the pre-retag
 		// snapshot after the Kafka retag event was already consumed.
@@ -1558,14 +1552,12 @@ type redriveStreak struct {
 // the same reason event=concurrency_cap is V(1). The metric carries the alerting
 // signal.
 //
-// relPath is empty on the Kafka path, which has no vault path to name.
-//
 // The phase comparison is not redundant with recordRedriveSpawn's reset. The
 // streak is only ever rewritten AFTER a spawn succeeds, so a task that advanced
 // to a new phase still carries its old phase in the streak until that spawn
 // happens — and a count-only check would cap it before it ever could, stranding
 // exactly the task the reset exists to release.
-func (h *taskEventHandler) redriveStreakCapped(task lib.Task, relPath string) bool {
+func (h *taskEventHandler) redriveStreakCapped(task lib.Task) bool {
 	id := task.TaskIdentifier
 	phase := taskPhaseString(task)
 	h.redriveMu.Lock()
@@ -1576,8 +1568,8 @@ func (h *taskEventHandler) redriveStreakCapped(task lib.Task, relPath string) bo
 	}
 	metrics.RedriveCappedTotal.Inc()
 	glog.V(1).Infof(
-		"event=redrive_capped task=%s path=%s streak=%d cap=%d phase=%q",
-		id, relPath, streak.count, maxConsecutiveRedrives, streak.phase,
+		"event=redrive_capped task=%s streak=%d cap=%d phase=%q",
+		id, streak.count, maxConsecutiveRedrives, streak.phase,
 	)
 	return true
 }
@@ -1618,118 +1610,35 @@ func (h *taskEventHandler) clearRedriveStreak(id lib.TaskIdentifier) {
 	delete(h.redriveStreaks, id)
 }
 
-// vaultTasksOwned reports whether this executor instance owns the task — that is,
-// whether the task's file lives in the vault this instance serves.
-//
-// Ownership is decided from the vault, not from the event: a task event carries
-// only TaskIdentifier, frontmatter and content (lib.Task), so it names no vault,
-// and the Kafka consumer group is shared across every executor deployment — a
-// task's events reach whichever instance owns the partition, not the instance
-// whose vault holds the file. Without this test every instance drives every
-// vault's tasks. That is what made the consecutive-re-drive cap per-pod instead
-// of per-task: measured on dev 2026-10-14, one OpenClaw fixture was spawned by
-// three different pods (openclaw 18:19/18:33/18:48, trading 19:03/19:49,
-// personal 19:34), each starting its own streak at zero, so the loop produced
-// >=7 Jobs against a cap of 3.
-//
-// The set is refreshed wholesale at the end of every completed reconcile pass,
-// which already Lists and parses this vault's glob — so the test costs one map
-// lookup and no extra vault read, and a file deleted from the vault stops being
-// owned on the next tick.
-//
-// Fail-open until the first completed pass: a freshly started instance has not
-// scanned yet, and dropping every event in that window would leave each task to
-// be picked up only by the next tick. The window is one pass (<=60s) and the
-// instance's own floor covers whatever it misses.
-func (h *taskEventHandler) vaultTasksOwned(id lib.TaskIdentifier) bool {
-	h.vaultMu.RLock()
-	defer h.vaultMu.RUnlock()
-	if !h.vaultScanned {
-		return true
-	}
-	_, ok := h.vaultTasks[id]
-	return ok
-}
-
-// prioritizeUncachedPaths prunes the path→identifier cache to the paths the
-// vault still lists, folds the surviving identifiers into the ownership set, and
-// returns paths with the never-parsed ones first.
-//
-// A pass over a large vault can hit the reconcile pass timeout before it completes, and
-// an aborted pass publishes nothing — so without the cache a vault that grows past
-// one pass's budget freezes ownership at its last completed pass and every task
-// filed afterwards is skipped as foreign. Visiting new paths first means a new
-// task is owned within one pass, completed or not.
-func (h *taskEventHandler) prioritizeUncachedPaths(paths []string) []string {
-	h.vaultMu.Lock()
-	defer h.vaultMu.Unlock()
-	listed := make(map[string]struct{}, len(paths))
-	uncached := make([]string, 0)
-	cached := make([]string, 0, len(paths))
-	for _, relPath := range paths {
-		listed[relPath] = struct{}{}
-		if _, ok := h.pathIDs[relPath]; ok {
-			cached = append(cached, relPath)
-			continue
-		}
-		uncached = append(uncached, relPath)
-	}
-	for relPath := range h.pathIDs {
-		if _, ok := listed[relPath]; !ok {
-			delete(h.pathIDs, relPath)
-		}
-	}
-	if h.vaultScanned {
-		owned := make(map[lib.TaskIdentifier]struct{}, len(h.pathIDs))
-		for _, id := range h.pathIDs {
-			owned[id] = struct{}{}
-		}
-		h.vaultTasks = owned
-	}
-	return append(uncached, cached...)
-}
-
-// recordPathID caches the identifier parsed from relPath and owns it at once,
-// rather than waiting for the pass to complete.
-func (h *taskEventHandler) recordPathID(relPath string, id lib.TaskIdentifier) {
-	h.vaultMu.Lock()
-	defer h.vaultMu.Unlock()
-	h.pathIDs[relPath] = id
-	if h.vaultScanned {
-		h.vaultTasks[id] = struct{}{}
-	}
-}
-
-// publishVaultTasks replaces this instance's view of which tasks live in its
-// vault, from the identifiers one completed reconcile pass parsed.
-func (h *taskEventHandler) publishVaultTasks(seen map[lib.TaskIdentifier]struct{}) {
-	h.vaultMu.Lock()
-	defer h.vaultMu.Unlock()
-	h.vaultTasks = seen
-	h.vaultScanned = true
-}
-
 // skipForeignVaultTask reports whether the spawn must be dropped because the
-// task's file is not in this instance's vault, recording the skip signal when it
-// must. It is the cheapest and the widest gate in spawnIfNeeded — a foreign task
-// is not this instance's to spawn, whatever path delivered the event — so it runs
+// task is not owned by this executor, recording the skip signal when it must.
+//
+// Ownership is a plain comparison: the task's stamped vault must equal this
+// executor's TASK_VAULT. The Kafka consumer group is shared across every
+// executor deployment — a task's events reach whichever instance owns the
+// partition, not the instance whose vault holds the file — so without this test
+// every instance drives every vault's tasks. A task with no stamped vault is
+// never owned.
+//
+// It is the cheapest and the widest gate in spawnIfNeeded — a foreign task is
+// not this instance's to spawn, whatever path delivered the event — so it runs
 // first, and it is factored out only to keep spawnIfNeeded inside funlen.
 func (h *taskEventHandler) skipForeignVaultTask(task lib.Task) bool {
-	if h.vaultTasksOwned(task.TaskIdentifier) {
+	if task.Vault == h.taskVault {
 		return false
 	}
 	metrics.TaskEventsTotal.WithLabelValues("skipped_foreign_vault").Inc()
 	glog.V(2).Infof(
-		"skip task %s: not in this executor's vault glob=%q",
-		task.TaskIdentifier, h.taskGlob,
+		"skip task %s: foreign vault vault=%s task_vault=%s",
+		task.TaskIdentifier, task.Vault, h.taskVault,
 	)
 	return true
 }
 
 // RunReconcileLoop runs one reconcile pass immediately at startup, then every
-// reconcile interval until ctx is cancelled. ReconcileOnce returns
-// nil for all vault-side failures, so this loop cannot crash the executor when
-// git-rest is unreachable — the next tick just retries (spec 005 Failure Modes).
+// reconcile interval until ctx is cancelled. ReconcileOnce returns nil for all
+// view-side conditions, so this loop cannot crash the executor — the next tick
+// just retries (spec 005 Failure Modes).
 func (h *taskEventHandler) RunReconcileLoop(ctx context.Context) error {
 	if err := h.ReconcileOnce(ctx); err != nil {
 		glog.Errorf("event=reconcile initial pass failed: %v", err)

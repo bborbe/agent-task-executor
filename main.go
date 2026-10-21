@@ -53,6 +53,7 @@ type application struct {
 	TopicPrefix                base.TopicPrefix  `required:"false" arg:"topic-prefix"                   env:"TOPIC_PREFIX"                   usage:"Explicit Kafka topic prefix; empty means unprefixed topics"`
 	Namespace                  libk8s.Namespace  `required:"true"  arg:"namespace"                      env:"NAMESPACE"                      usage:"K8s namespace to spawn Jobs in"`
 	VaultName                  string            `required:"true"  arg:"vault-name"                     env:"VAULT_NAME"                     usage:"Obsidian vault name this executor instance serves; Config CRs are resolved by the composed {assignee}-{vaultName} assignee"`
+	TaskVault                  string            `required:"false" arg:"task-vault"                     env:"TASK_VAULT"                     usage:"Vault slug this executor owns tasks for; empty means VAULT_NAME. A task is owned when its stamped vault equals this value"`
 	BuildGitVersion            string            `required:"false" arg:"build-git-version"              env:"BUILD_GIT_VERSION"              usage:"Build Git version (git describe --tags --always --dirty)"                                                                                                                                                                                                                           default:"dev"`
 	BuildGitCommit             string            `required:"false" arg:"build-git-commit"               env:"BUILD_GIT_COMMIT"               usage:"Build Git commit hash"                                                                                                                                                                                                                                                              default:"none"`
 	BuildDate                  *libtime.DateTime `required:"false" arg:"build-date"                     env:"BUILD_DATE"                     usage:"Build timestamp (RFC3339)"`
@@ -112,12 +113,18 @@ var vaultSlugRegexp = regexp.MustCompile(`^[a-z][a-z0-9-]*$`)
 // is the only component that knows the glob is unset, so it refuses at startup.
 var ErrTaskGlobEmpty = stderrors.New("task-glob is empty")
 
-//nolint:funlen // Initialization sequence; wiring is linear with no branching.
-func (a *application) Run(ctx context.Context, sentryClient libsentry.Client) error {
-	libmetrics.NewBuildInfoMetrics().SetBuildInfo(a.BuildGitVersion, a.BuildGitCommit, a.BuildDate)
-	glog.V(1).
-		Infof("agent-task-executor started version=%s commit=%s", a.BuildGitVersion, a.BuildGitCommit)
+// effectiveTaskVault returns TASK_VAULT, defaulting to VAULT_NAME when unset.
+// VAULT_NAME keeps its meaning for Config CR resolution; this setting only
+// decides which tasks this executor owns.
+func (a *application) effectiveTaskVault() string {
+	if a.TaskVault != "" {
+		return a.TaskVault
+	}
+	return a.VaultName
+}
 
+// validate checks the startup configuration before any client is constructed.
+func (a *application) validate(ctx context.Context) error {
 	if a.JobTTLSecondsAfterFinished < 0 {
 		return errors.Errorf(
 			ctx,
@@ -132,14 +139,13 @@ func (a *application) Run(ctx context.Context, sentryClient libsentry.Client) er
 			a.VaultName,
 		)
 	}
-	if a.TaskGlob == "" {
-		return errors.Wrapf(
+	if !vaultSlugRegexp.MatchString(a.effectiveTaskVault()) {
+		return errors.Errorf(
 			ctx,
-			ErrTaskGlobEmpty,
-			"task-glob (TASK_GLOB) must be set: it selects the vault task files the reconcile loop evaluates, and an empty glob makes git-rest match every file in the vault",
+			"task-vault (TASK_VAULT) must match ^[a-z][a-z0-9-]*$ (lowercase letter, then lowercase/digits/hyphens), got %q",
+			a.effectiveTaskVault(),
 		)
 	}
-
 	if a.ReconcilePassTimeout <= 0 {
 		return errors.Errorf(
 			ctx,
@@ -154,6 +160,17 @@ func (a *application) Run(ctx context.Context, sentryClient libsentry.Client) er
 			a.ReconcileInterval,
 		)
 	}
+	return nil
+}
+
+//nolint:funlen // Initialization sequence; wiring is linear with no branching.
+func (a *application) Run(ctx context.Context, sentryClient libsentry.Client) error {
+	if err := a.validate(ctx); err != nil {
+		return err
+	}
+	libmetrics.NewBuildInfoMetrics().SetBuildInfo(a.BuildGitVersion, a.BuildGitCommit, a.BuildDate)
+	glog.V(1).
+		Infof("agent-task-executor started version=%s commit=%s", a.BuildGitVersion, a.BuildGitCommit)
 
 	kubeConfig, err := rest.InClusterConfig()
 	if err != nil {
@@ -213,20 +230,6 @@ func (a *application) Run(ctx context.Context, sentryClient libsentry.Client) er
 		currentDateTimeGetter,
 	)
 
-	// The git-rest gateway secret is read by NAME from K8s (never logged, never
-	// in env) so the reconcile loop can authenticate to git-rest without secret
-	// material entering the Deployment manifest (spec 005 Security).
-	gitRestGatewaySecretValue, err := pkg.ReadGitRestGatewaySecret(
-		ctx,
-		kubeClient,
-		a.Namespace,
-		a.GitRestGatewaySecret,
-	)
-	if err != nil {
-		return errors.Wrapf(ctx, err, "read git-rest gateway secret")
-	}
-	gitRestClient := factory.CreateGitRestClient(a.GitRestURL, gitRestGatewaySecretValue)
-
 	healthcheckRunner := factory.CreateHealthcheckRunner(
 		eventHandlerConfig,
 		syncProducer,
@@ -238,7 +241,11 @@ func (a *application) Run(ctx context.Context, sentryClient libsentry.Client) er
 		healthcheckRunner,
 	)
 
-	_, runTaskView := factory.CreateTaskView(saramaClient, a.TopicPrefix, currentDateTimeGetter)
+	taskView, runTaskView := factory.CreateTaskView(
+		saramaClient,
+		a.TopicPrefix,
+		currentDateTimeGetter,
+	)
 
 	consumer, taskEventHandler := factory.CreateConsumer(
 		saramaClient,
@@ -260,8 +267,8 @@ func (a *application) Run(ctx context.Context, sentryClient libsentry.Client) er
 		a.JobKafkaClientCertSecret,
 		a.JobKafkaCaCertSecret,
 		a.JobFsGroup,
-		gitRestClient,
-		a.TaskGlob,
+		taskView,
+		a.effectiveTaskVault(),
 		a.ReconcilePassTimeout,
 		a.ReconcileInterval,
 	)

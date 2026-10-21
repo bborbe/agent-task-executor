@@ -46,6 +46,22 @@ var _ = Describe("Metrics", func() {
 		))
 	})
 
+	It("AC13: pre-initializes the reconcile pass outcomes and drops the git-rest ones", func() {
+		mfs, err := prometheus.DefaultGatherer.Gather()
+		Expect(err).NotTo(HaveOccurred())
+
+		labels := gatherLabels(mfs, "executor_reconcile_passes_total", "result")
+		Expect(labels).To(ContainElements(
+			"ok",
+			"aborted",
+			"view_not_ready",
+			"task_vault_mismatch",
+			"task_vault_unstamped",
+		))
+		Expect(labels).NotTo(ContainElement("vault_unavailable"))
+		Expect(labels).NotTo(ContainElement("list_failed"))
+	})
+
 	It("exposes the concurrency-cap deferral counter labelled by assignee", func() {
 		// Asserted here rather than in the registry-name spec above: a
 		// CounterVec with no observed label values emits no metric family at

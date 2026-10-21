@@ -41,7 +41,7 @@ func buildQueueTask(id lib.TaskIdentifier, jobStartedAt string) lib.Task {
 	if jobStartedAt != "" {
 		fm["job_started_at"] = jobStartedAt
 	}
-	return lib.Task{TaskIdentifier: id, Frontmatter: fm}
+	return lib.Task{TaskIdentifier: id, Vault: testTaskVault, Frontmatter: fm}
 }
 
 var _ = Describe("TaskEventHandler", func() {
@@ -50,7 +50,7 @@ var _ = Describe("TaskEventHandler", func() {
 		fakeSpawner         *mocks.FakeJobSpawner
 		fakeResolver        *mocks.FakeConfigResolver
 		fakeResultPublisher *mocks.FakeResultPublisher
-		fakeGitRestClient   *mocks.FakeGitRestClient
+		fakeView            *mocks.FakeTaskView
 		taskStore           *pkg.TaskStore
 		currentDateTime     libtime.CurrentDateTime
 		h                   handler.TaskEventHandler
@@ -65,8 +65,10 @@ var _ = Describe("TaskEventHandler", func() {
 			nil,
 		)
 		fakeResultPublisher = &mocks.FakeResultPublisher{}
-		fakeGitRestClient = &mocks.FakeGitRestClient{}
-		fakeGitRestClient.IsReadyReturns(true, nil)
+		fakeView = &mocks.FakeTaskView{}
+		fakeView.ReadyReturns(true)
+		fakeView.SnapshotReturns(nil)
+		fakeView.GetReturns(lib.Task{}, false)
 		taskStore = pkg.NewTaskStore()
 		currentDateTime = libtime.NewCurrentDateTime()
 		h = handler.NewTaskEventHandler(
@@ -79,14 +81,17 @@ var _ = Describe("TaskEventHandler", func() {
 			fakeResultPublisher,
 			taskStore,
 			currentDateTime,
-			fakeGitRestClient,
-			"24 Tasks/*.md",
+			fakeView,
+			testTaskVault,
 			handler.DefaultReconcilePassTimeout,
 			handler.DefaultReconcileInterval,
 		)
 	})
 
 	buildMsg := func(task lib.Task) *sarama.ConsumerMessage {
+		if task.Vault == "" {
+			task.Vault = testTaskVault
+		}
 		value, err := json.Marshal(task)
 		Expect(err).To(BeNil())
 		return &sarama.ConsumerMessage{Value: value}
@@ -296,6 +301,7 @@ var _ = Describe("TaskEventHandler", func() {
 			buildGraceTask := func(phase domain.TaskPhase, triggerCount, maxTriggers int) lib.Task {
 				return lib.Task{
 					TaskIdentifier: lib.TaskIdentifier("tid-deferred-037"),
+					Vault:          testTaskVault,
 					Frontmatter: lib.TaskFrontmatter{
 						"status": "in_progress",
 						"phase":  string(phase),
@@ -436,8 +442,8 @@ var _ = Describe("TaskEventHandler", func() {
 					fakeResultPublisher,
 					pkg.NewTaskStore(),
 					currentDateTime,
-					fakeGitRestClient,
-					"24 Tasks/*.md",
+					fakeView,
+					testTaskVault,
 					handler.DefaultReconcilePassTimeout,
 					handler.DefaultReconcileInterval,
 				)
@@ -469,16 +475,19 @@ var _ = Describe("TaskEventHandler", func() {
 				return func(n int) { running = n }
 			}
 
-			// foreignRetaggedTaskFile is the vault view of tid-retagged after the
+			// foreignRetaggedTask is the view snapshot of tid-retagged after the
 			// retag to cluster sun; the reconcile pass must read it as foreign.
-			foreignRetaggedTaskFile := "---\n" +
-				"task_identifier: tid-retagged\n" +
-				"status: in_progress\n" +
-				"phase: planning\n" +
-				"assignee: claude\n" +
-				"stage: prod\n" +
-				"cluster: sun\n" +
-				"---\nbody\n"
+			foreignRetaggedTask := lib.Task{
+				TaskIdentifier: lib.TaskIdentifier("tid-retagged"),
+				Vault:          testTaskVault,
+				Frontmatter: lib.TaskFrontmatter{
+					"status":   "in_progress",
+					"phase":    string(domain.TaskPhasePlanning),
+					"assignee": "claude",
+					"stage":    "prod",
+					"cluster":  "sun",
+				},
+			}
 
 			It(
 				"does not spawn a deferred task that a later event retagged to another cluster",
@@ -553,8 +562,7 @@ var _ = Describe("TaskEventHandler", func() {
 					To(Succeed())
 				Expect(fakeSpawner.SpawnJobCallCount()).To(Equal(0))
 
-				fakeGitRestClient.ListReturns([]string{"24 Tasks/tid-retagged.md"}, nil)
-				fakeGitRestClient.GetReturns([]byte(foreignRetaggedTaskFile), nil)
+				fakeView.SnapshotReturns([]lib.Task{foreignRetaggedTask})
 				Expect(h.ReconcileOnce(ctx)).To(Succeed())
 
 				setRunning(0)
@@ -720,8 +728,8 @@ var _ = Describe("TaskEventHandler", func() {
 						fakeResultPublisher,
 						restartStore,
 						currentDateTime,
-						fakeGitRestClient,
-						"24 Tasks/*.md",
+						fakeView,
+						testTaskVault,
 						handler.DefaultReconcilePassTimeout,
 						handler.DefaultReconcileInterval,
 					)
@@ -773,8 +781,8 @@ var _ = Describe("TaskEventHandler", func() {
 						fakeResultPublisher,
 						restartStore,
 						currentDateTime,
-						fakeGitRestClient,
-						"24 Tasks/*.md",
+						fakeView,
+						testTaskVault,
 						handler.DefaultReconcilePassTimeout,
 						handler.DefaultReconcileInterval,
 					)
@@ -902,28 +910,6 @@ var _ = Describe("TaskEventHandler", func() {
 				afterRetryDelay = "2026-05-17T09:35:01Z"
 			)
 
-			// A full frontmatter-delimited document is required: parseTaskFile
-			// rejects a bare YAML fragment, and without a parsed identifier
-			// recordPathID never runs.
-			queuedTaskFile := "---\n" +
-				"task_identifier: tid-queued\n" +
-				"status: in_progress\n" +
-				"phase: execution\n" +
-				"assignee: claude\n" +
-				"stage: prod\n" +
-				"queued_at: \"2026-05-17T09:34:00Z\"\n" +
-				"---\nbody\n"
-			// Ineligible on the reconcile floor (status/phase outside the trigger
-			// set) so the pass records the path but drives nothing — the only
-			// queued_at publish in these rows must come from ConsumeMessage.
-			ineligibleTaskFile := "---\n" +
-				"task_identifier: tid-queued\n" +
-				"status: done\n" +
-				"phase: done\n" +
-				"assignee: claude\n" +
-				"stage: prod\n" +
-				"---\nbody\n"
-
 			var payload lib.Task
 
 			BeforeEach(func() {
@@ -963,10 +949,14 @@ var _ = Describe("TaskEventHandler", func() {
 				Expect(queuedAt).To(Equal("2026-05-17T09:34:00Z"))
 			})
 
-			It("does not publish when the vault already carries queued_at", func() {
-				fakeGitRestClient.ListReturns([]string{"24 Tasks/tid-queued.md"}, nil)
-				fakeGitRestClient.GetReturns([]byte(queuedTaskFile), nil)
-				Expect(h.ReconcileOnce(ctx)).To(Succeed())
+			It("does not publish when the view already carries queued_at", func() {
+				fakeView.GetReturns(lib.Task{
+					TaskIdentifier: lib.TaskIdentifier("tid-queued"),
+					Vault:          testTaskVault,
+					Frontmatter: lib.TaskFrontmatter{
+						"queued_at": queuedAtValue,
+					},
+				}, true)
 
 				before := testutil.ToFloat64(
 					metrics.DeferredConcurrencyCapTotal.WithLabelValues("claude"),
@@ -992,7 +982,7 @@ var _ = Describe("TaskEventHandler", func() {
 				Expect(fakeResultPublisher.PublishQueueEntryCallCount()).To(Equal(1))
 			})
 
-			DescribeTable("queuedAtFromVault failure branches still publish once",
+			DescribeTable("queuedAtFromView miss branches still publish once",
 				func(setup func(), id lib.TaskIdentifier) {
 					setup()
 					task := payload
@@ -1001,26 +991,17 @@ var _ = Describe("TaskEventHandler", func() {
 					Expect(fakeResultPublisher.PublishQueueEntryCallCount()).To(Equal(1))
 				},
 				Entry(
-					"unknown id with empty pathIDs",
+					"unknown id",
 					func() {},
 					lib.TaskIdentifier("tid-unknown"),
 				),
 				Entry(
-					"vault read fails after the path was recorded",
+					"view task carries no queued_at",
 					func() {
-						fakeGitRestClient.ListReturns([]string{"24 Tasks/tid-queued.md"}, nil)
-						fakeGitRestClient.GetReturnsOnCall(0, []byte(ineligibleTaskFile), nil)
-						fakeGitRestClient.GetReturns(nil, errors.Errorf(ctx, "read failed"))
-						Expect(h.ReconcileOnce(ctx)).To(Succeed())
-					},
-					lib.TaskIdentifier("tid-queued"),
-				),
-				Entry(
-					"reconciled file has no queued_at",
-					func() {
-						fakeGitRestClient.ListReturns([]string{"24 Tasks/tid-queued.md"}, nil)
-						fakeGitRestClient.GetReturns([]byte(ineligibleTaskFile), nil)
-						Expect(h.ReconcileOnce(ctx)).To(Succeed())
+						fakeView.GetReturns(lib.Task{
+							TaskIdentifier: lib.TaskIdentifier("tid-queued"),
+							Vault:          testTaskVault,
+						}, true)
 					},
 					lib.TaskIdentifier("tid-queued"),
 				),

@@ -1,8 +1,13 @@
 ---
-status: approved
+status: completed
 spec: [009-kafka-task-view-replaces-gitrest-reconcile]
+summary: Reconcile now reads the in-memory task view and task ownership is a Task.Vault == TASK_VAULT comparison on both the live and reconcile paths, with TASK_VAULT validation and new pass outcomes.
+execution_id: agent-task-executor-kafka-view-exec-018-spec-009-vault-ownership-reconcile
+dark-factory-version: v0.198.7
 created: "2026-10-21T18:40:07Z"
 queued: "2026-10-21T19:39:58Z"
+started: "2026-10-21T19:50:03Z"
+completed: "2026-10-21T20:24:17Z"
 branch: dark-factory/kafka-task-view-replaces-gitrest-reconcile
 ---
 
