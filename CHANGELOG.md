@@ -2,6 +2,10 @@
 
 All notable changes to this project will be documented in this file.
 
+## Unreleased
+
+- fix: **the concurrency cap no longer counts against a running reconcile pass's frozen Job snapshot.** The per-pass active-Job cache was a handler field armed for the whole pass, so the Kafka consumer and the deferred cap retries, running concurrently, were answered from it too. It was invalidated only when a Job was created, never when one completed. On sun, where a pass runs for minutes, a snapshot taken at 6 stayed at 6 while Jobs finished: the executor logged `concurrency_cap running=6 cap=6` while only 4 Jobs were active and the quota showed 4/6. Measured 2026-10-21: 132 refusals between 10:46 and 11:00Z, and queued tasks stranded once their retries ran out. The cache now travels on the pass's context, so only the pass's own lookups use it.
+
 ## v0.23.1
 
 - fix: **a freshly delegated task is no longer starved by the filename-ordered admission queue.** The reconcile floor walked the vault paths in the order git-rest returned them and spawned the first eligible one, so with `maxConcurrentJobs: 1` a child delegated today — named `20261021-…`, and therefore last — was never reached while any older child remained eligible. Measured on prod 2026-10-21: 67 eligible children against one slot, and both admissions in a 20-minute window were the first two files in filename order. Both admission paths now order by `admissionPriority`: a task that has never been attempted (no `job_started_at`) goes ahead of every task that has, then the earliest queue-entry time (`queued_at`, falling back to `job_started_at`) wins. `evalDeferredRespawns` sorts its due entries the same way — it previously spawned in Go map-iteration order, so each tick's winner was drawn at random. The reconcile pass is now two phases: gather and filter every file, sort, then drive, so admission follows the queue rather than the path listing.

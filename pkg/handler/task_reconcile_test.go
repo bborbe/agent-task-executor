@@ -1199,4 +1199,88 @@ var _ = Describe("TaskEventHandler reconcile loop", func() {
 			Eventually(done).Should(Receive(BeNil()))
 		})
 	})
+
+	It("does not serve the event path the active-Job snapshot a running pass froze", func() {
+		// Regression for sun 2026-10-21: a reconcile pass ran for minutes, and
+		// while it ran the Kafka consumer and the deferred cap retries were
+		// answered from the pass's per-assignee cache. A snapshot taken at 6
+		// stayed at 6 while Jobs completed, so the executor logged
+		// `concurrency_cap running=6 cap=6` with only 4 Jobs active.
+		var liveClaude atomic.Int64
+		liveClaude.Store(6)
+		codexListed := make(chan struct{})
+		releaseCodex := make(chan struct{})
+		fakeResolver.ResolveStub = func(_ context.Context, assignee string) (pkg.AgentConfiguration, error) {
+			return pkg.AgentConfiguration{
+				Assignee:          assignee,
+				Image:             "my-image:latest",
+				MaxConcurrentJobs: 6,
+			}, nil
+		}
+		fakeSpawner.ListActiveJobsStub = func(
+			_ context.Context,
+			assignee string,
+		) (map[lib.TaskIdentifier]bool, error) {
+			if assignee == "codex" {
+				// Hold the pass open after it has cached claude's count.
+				close(codexListed)
+				<-releaseCodex
+				return activeJobsFor("codex", 0), nil
+			}
+			return activeJobsFor("claude", int(liveClaude.Load())), nil
+		}
+		fakeSpawner.SpawnJobReturns("job-name", nil)
+
+		claudeTask := eligibleTask(domain.TaskPhaseExecution)
+		codexTask := eligibleTask(domain.TaskPhaseExecution)
+		codexTask.TaskIdentifier = "tid-codex"
+		codexTask.Frontmatter["assignee"] = "codex"
+		fakeGitRestClient.ListReturns([]string{"24 Tasks/tid-a.md", "24 Tasks/tid-codex.md"}, nil)
+		fakeGitRestClient.GetStub = func(_ context.Context, relPath string) ([]byte, error) {
+			if strings.HasSuffix(relPath, "tid-codex.md") {
+				return []byte(renderTaskFile(codexTask)), nil
+			}
+			return []byte(renderTaskFile(claudeTask)), nil
+		}
+
+		passDone := make(chan error, 1)
+		go func() { passDone <- h.ReconcileOnce(ctx) }()
+		Eventually(codexListed).Should(BeClosed())
+		Expect(fakeSpawner.SpawnJobCallCount()).To(Equal(0)) // claude deferred at 6/6
+
+		// Two of claude's Jobs complete while the pass is still running.
+		liveClaude.Store(4)
+		eventTask := lib.Task{
+			TaskIdentifier: "tid-event",
+			Frontmatter: lib.TaskFrontmatter{
+				"status":   "in_progress",
+				"phase":    string(domain.TaskPhaseExecution),
+				"assignee": "claude",
+				"stage":    "prod",
+			},
+		}
+		value, err := json.Marshal(eventTask)
+		Expect(err).To(BeNil())
+		Expect(h.ConsumeMessage(ctx, &sarama.ConsumerMessage{Value: value})).To(Succeed())
+
+		close(releaseCodex)
+		Eventually(passDone).Should(Receive(BeNil()))
+		spawned := make([]lib.TaskIdentifier, 0, fakeSpawner.SpawnJobCallCount())
+		for i := range fakeSpawner.SpawnJobCallCount() {
+			_, spawnedTask, _ := fakeSpawner.SpawnJobArgsForCall(i)
+			spawned = append(spawned, spawnedTask.TaskIdentifier)
+		}
+		// The event path read the live 4/6 and admitted; the frozen 6/6 would defer it.
+		Expect(spawned).To(ContainElement(lib.TaskIdentifier("tid-event")))
+		Expect(spawned).NotTo(ContainElement(lib.TaskIdentifier("tid-a")))
+	})
 })
+
+// activeJobsFor builds an active-Job set of n distinct task identifiers.
+func activeJobsFor(prefix string, n int) map[lib.TaskIdentifier]bool {
+	m := make(map[lib.TaskIdentifier]bool, n)
+	for i := 0; i < n; i++ {
+		m[lib.TaskIdentifier(prefix+"-job-"+string(rune('a'+i)))] = true
+	}
+	return m
+}
