@@ -67,17 +67,6 @@ var _ = Describe("application struct field guards", func() {
 })
 
 var _ = Describe("application.Run startup validation", func() {
-	Describe("TaskGlob", func() {
-		It("declares no built-in default on the flag", func() {
-			typ := reflect.TypeOf(application{})
-			f, ok := typ.FieldByName("TaskGlob")
-			Expect(ok).To(BeTrue())
-			Expect(f.Tag.Get("env")).To(Equal("TASK_GLOB"))
-			Expect(f.Tag.Get("arg")).To(Equal("task-glob"))
-			Expect(f.Tag.Get("default")).To(BeEmpty())
-		})
-	})
-
 	Describe("reconcile timing", func() {
 		It("declares env, arg, and the 45s/60s defaults", func() {
 			typ := reflect.TypeOf(application{})
@@ -98,7 +87,6 @@ var _ = Describe("application.Run startup validation", func() {
 		It("rejects a non-positive pass timeout before the k8s client", func() {
 			a := &application{
 				VaultName:         "personal",
-				TaskGlob:          "t/*.md",
 				ReconcileInterval: time.Minute,
 			}
 			err := a.Run(context.Background(), nil)
@@ -109,7 +97,6 @@ var _ = Describe("application.Run startup validation", func() {
 		It("rejects a non-positive interval before the k8s client", func() {
 			a := &application{
 				VaultName:            "personal",
-				TaskGlob:             "t/*.md",
 				ReconcilePassTimeout: time.Minute,
 			}
 			err := a.Run(context.Background(), nil)
@@ -142,7 +129,7 @@ var _ = Describe("application.Run startup validation", func() {
 			Expect(err.Error()).To(ContainSubstring("task-vault"))
 		})
 
-		It("AC9: validates with no TASK_GLOB and no git-rest settings", func() {
+		It("AC9: validates with no git-rest settings", func() {
 			a := &application{
 				VaultName:            "personal",
 				ReconcilePassTimeout: time.Minute,

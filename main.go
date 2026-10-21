@@ -6,7 +6,6 @@ package main
 
 import (
 	"context"
-	stderrors "errors"
 	"os"
 	"regexp"
 	"time"
@@ -77,26 +76,9 @@ type application struct {
 	// Ignored when cert mounting is disabled — the produced pod spec stays
 	// byte-identical to pre-fsGroup behavior for plaintext (quant) deployments.
 	JobFsGroup int64 `required:"false" arg:"job-fs-group"                   env:"JOB_FS_GROUP"                   usage:"Pod fsGroup stamped onto spawned Jobs when Kafka cert mounting is active (0 disables); 65534 is the fleet convention"                                                                                                                                                               default:"65534"`
-	// GitRestURL is the git-rest HTTP API base URL the reconcile loop reads the
-	// vault through. Matches the controller's default git-rest service address.
-	// Consumed by the reconcile loop in the follow-up prompt.
-	GitRestURL string `required:"false" arg:"git-rest-url"                   env:"GITREST_URL"                    usage:"git-rest HTTP API base URL the reconcile loop reads vault task files through"                                                                                                                                                                                                       default:"http://vault-obsidian-openclaw:9090"`
-	// GitRestGatewaySecret holds the NAME of the K8s Secret carrying the
-	// git-rest gateway secret (data key `gateway-secret`) — not the secret
-	// value itself. Same resource-reference pattern as JobKafkaClientCertSecret:
-	// a name, not secret material, so nothing secret-shaped enters the image or
-	// the Deployment manifest. Consumed by the reconcile loop in the follow-up
-	// prompt.
-	GitRestGatewaySecret string `required:"false" arg:"git-rest-gateway-secret"        env:"GITREST_GATEWAY_SECRET"         usage:"Name of the existing K8s secret holding the git-rest gateway secret (data key gateway-secret); empty disables gateway auth"`
-	// TaskGlob is the git-rest single-level glob selecting the vault task files
-	// the reconcile loop evaluates, relative to the repo root. It has no built-in
-	// default: the glob names a vault directory the binary cannot know, so an
-	// empty value is rejected at startup with ErrTaskGlobEmpty.
-	TaskGlob string `required:"false" arg:"task-glob"                      env:"TASK_GLOB"                      usage:"git-rest glob selecting vault task files to reconcile"`
 	// ReconcilePassTimeout and ReconcileInterval bound and pace the reconcile
-	// loop. A large vault read over a slow git-rest path needs a longer pass
-	// than the default; a non-positive value is rejected at startup.
-	ReconcilePassTimeout time.Duration `required:"false" arg:"reconcile-pass-timeout"         env:"RECONCILE_PASS_TIMEOUT"         usage:"Deadline for one reconcile pass over the vault task files"                                                                                                                                                                                                                          default:"45s"`
+	// loop. A non-positive value is rejected at startup.
+	ReconcilePassTimeout time.Duration `required:"false" arg:"reconcile-pass-timeout"         env:"RECONCILE_PASS_TIMEOUT"         usage:"Deadline for one reconcile pass over the in-memory task view"                                                                                                                                                                                                                       default:"45s"`
 	ReconcileInterval    time.Duration `required:"false" arg:"reconcile-interval"             env:"RECONCILE_INTERVAL"             usage:"Interval between reconcile passes"                                                                                                                                                                                                                                                  default:"60s"`
 }
 
@@ -105,13 +87,6 @@ type application struct {
 // {assignee}-{vaultName} lookup key depends on a well-formed vault slug — a
 // malformed value would silently never match a Config CR.
 var vaultSlugRegexp = regexp.MustCompile(`^[a-z][a-z0-9-]*$`)
-
-// ErrTaskGlobEmpty is returned by application.Run when TaskGlob is empty. An
-// unset glob is indistinguishable from a healthy quiet fleet once the reconcile
-// loop is running: git-rest treats an empty pattern as match-everything, so the
-// loop would silently widen to the whole vault instead of failing. The executor
-// is the only component that knows the glob is unset, so it refuses at startup.
-var ErrTaskGlobEmpty = stderrors.New("task-glob is empty")
 
 // effectiveTaskVault returns TASK_VAULT, defaulting to VAULT_NAME when unset.
 // VAULT_NAME keeps its meaning for Config CR resolution; this setting only

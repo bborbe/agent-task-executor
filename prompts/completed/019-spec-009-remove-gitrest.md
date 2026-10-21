@@ -1,11 +1,14 @@
 ---
-status: failed
+status: completed
 spec: [009-kafka-task-view-replaces-gitrest-reconcile]
+summary: Removed all git-rest artifacts (config fields, validation, client package, gateway-secret reader, mock) and documented the Kafka task view in README and CHANGELOG
+execution_id: agent-task-executor-kafka-view-exec-019-spec-009-remove-gitrest
+dark-factory-version: v0.198.7
 created: "2026-10-21T18:40:07Z"
 queued: "2026-10-21T19:39:58Z"
-completed: "2026-10-21T20:24:18Z"
+started: "2026-10-21T20:43:12Z"
+completed: "2026-10-21T20:49:47Z"
 branch: dark-factory/kafka-task-view-replaces-gitrest-reconcile
-lastFailReason: 'setup workflow: git merge origin default branch: merge origin/master: : git merge origin/master failed: exit status 1'
 ---
 
 # Remove the git-rest reader, its configuration, and its documentation

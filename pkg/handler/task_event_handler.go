@@ -109,8 +109,8 @@ const maxConsecutiveRedrives = 3
 // reached. The per-assignee active-Job cache added in the same change removes
 // most of the cost; this is the headroom that keeps a slow pass from re-opening
 // the same window. Overridable per deployment via RECONCILE_PASS_TIMEOUT: on
-// 2026-10-21 a sun executor reading the 15k-file openclaw vault over the
-// git-rest ingress (~7 ms per GET) aborted every pass at 45s with evaluated=0.
+// 2026-10-21 a sun executor reading the 15k-file openclaw vault aborted every
+// pass at 45s with evaluated=0.
 const DefaultReconcilePassTimeout = 45 * time.Second
 
 // terminalPhases is the set of phases that must never trigger a new spawn.
@@ -992,8 +992,8 @@ func taskWithFrontmatterValue(task lib.Task, key string, value interface{}) lib.
 // job_started_at for a task that ran without ever being deferred.
 //
 // The "never attempted first" clause is the load-bearing one. Without it the order
-// is whichever path the caller happens to walk first: on the reconcile floor that
-// is git-rest's path order, which for the trading vault is filename order, so a
+// is whichever order the caller happens to walk first: on the old reconcile floor
+// that was vault path order, which for the trading vault is filename order, so a
 // child delegated today (named 20261021-…) sorts behind every older child and is
 // never admitted while any of them is still eligible. Measured on prod 2026-10-21:
 // 67 eligible children against maxConcurrentJobs 1, and both admissions in a
