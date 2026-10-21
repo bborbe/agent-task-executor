@@ -72,6 +72,7 @@ var _ = Describe("TaskEventHandler reconcile loop", func() {
 			fakeSpawner,
 			base.Branch("prod"),
 			"",
+			true,
 			fakeResolver,
 			fakeResultPublisher,
 			taskStore,

@@ -77,6 +77,7 @@ var _ = Describe("TaskEventHandler", func() {
 			fakeSpawner,
 			base.Branch("prod"),
 			"",
+			true,
 			fakeResolver,
 			fakeResultPublisher,
 			taskStore,
@@ -995,6 +996,7 @@ var _ = Describe("TaskEventHandler", func() {
 					clusterSpawner,
 					base.Branch("prod"),
 					"nukedev",
+					true,
 					clusterResolver,
 					&mocks.FakeResultPublisher{},
 					pkg.NewTaskStore(),
@@ -1036,6 +1038,46 @@ var _ = Describe("TaskEventHandler", func() {
 			})
 		})
 
+		Context("stage filter disabled", func() {
+			var stageSpawner *mocks.FakeJobSpawner
+			var stageHandler handler.TaskEventHandler
+			BeforeEach(func() {
+				stageSpawner = new(mocks.FakeJobSpawner)
+				stageSpawner.IsJobActiveReturns(false, nil)
+				stageResolver := &mocks.FakeConfigResolver{}
+				stageResolver.ResolveReturns(
+					pkg.AgentConfiguration{Assignee: "claude", Image: "my-image:latest"},
+					nil,
+				)
+				stageHandler = handler.NewTaskEventHandler(
+					stageSpawner,
+					base.Branch("dev"),
+					"sun",
+					false,
+					stageResolver,
+					&mocks.FakeResultPublisher{},
+					pkg.NewTaskStore(),
+					libtime.NewCurrentDateTime(),
+					fakeGitRestClient,
+					"24 Tasks/*.md",
+				)
+			})
+			It("spawns a cluster task without a stage field on a dev-branch executor", func() {
+				task := lib.Task{
+					TaskIdentifier: lib.TaskIdentifier("tid-stage-off"),
+					Frontmatter: lib.TaskFrontmatter{
+						"status":   "in_progress",
+						"phase":    string(domain.TaskPhaseExecution),
+						"assignee": "claude",
+						"cluster":  "sun",
+					},
+				}
+				err := stageHandler.ConsumeMessage(ctx, buildMsg(task))
+				Expect(err).To(BeNil())
+				Expect(stageSpawner.SpawnJobCallCount()).To(Equal(1))
+			})
+		})
+
 		It("spawns job with stage=dev when executor branch is dev", func() {
 			localSpawner := new(mocks.FakeJobSpawner)
 			localSpawner.IsJobActiveReturns(false, nil)
@@ -1048,6 +1090,7 @@ var _ = Describe("TaskEventHandler", func() {
 				localSpawner,
 				base.Branch("dev"),
 				"",
+				true,
 				localResolver,
 				&mocks.FakeResultPublisher{},
 				pkg.NewTaskStore(),
@@ -1097,6 +1140,7 @@ var _ = Describe("TaskEventHandler", func() {
 				localSpawner,
 				base.Branch("dev"),
 				"",
+				true,
 				localResolver,
 				&mocks.FakeResultPublisher{},
 				pkg.NewTaskStore(),
