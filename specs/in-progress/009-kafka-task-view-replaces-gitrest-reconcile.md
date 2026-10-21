@@ -1,11 +1,12 @@
 ---
-status: prompted
+status: verifying
 tags:
     - dark-factory
     - spec
 approved: "2026-10-21T18:29:44Z"
 generating: "2026-10-21T18:33:16Z"
 prompted: "2026-10-21T18:51:02Z"
+verifying: "2026-10-21T20:49:48Z"
 branch: dark-factory/kafka-task-view-replaces-gitrest-reconcile
 ---
 
