@@ -424,6 +424,59 @@ var _ = Describe("TaskEventHandler reconcile loop", func() {
 		Expect(fakeSpawner.SpawnJobCallCount()).To(Equal(0))
 	})
 
+	It("admits a never-attempted child ahead of an older task that already ran", func() {
+		// Prod 2026-10-21: 67 eligible children against maxConcurrentJobs 1, and
+		// both admissions in a 20-minute window were the first two files in
+		// filename order — so a child delegated today (named 20261021-…) sorted
+		// last and was never reached. The pass must admit the never-attempted
+		// child, not whichever path git-rest happens to list first.
+		fakeResolver.ResolveReturns(
+			pkg.AgentConfiguration{
+				Assignee:          "claude",
+				Image:             "my-image:latest",
+				MaxConcurrentJobs: 1,
+			},
+			nil,
+		)
+		older := eligibleTask(domain.TaskPhaseExecution)
+		older.TaskIdentifier = "tid-older"
+		older.Frontmatter["job_started_at"] = "2026-10-21T08:00:00Z"
+		newer := eligibleTask(domain.TaskPhasePlanning)
+		newer.TaskIdentifier = "tid-newer"
+
+		files := map[string][]byte{
+			"24 Tasks/20261011-081237-older.md": []byte(renderTaskFile(older)),
+			"24 Tasks/20261021-070305-newer.md": []byte(renderTaskFile(newer)),
+		}
+		// Older first, exactly as git-rest returns this vault: lexicographic.
+		fakeGitRestClient.ListReturns([]string{
+			"24 Tasks/20261011-081237-older.md",
+			"24 Tasks/20261021-070305-newer.md",
+		}, nil)
+		fakeGitRestClient.GetCalls(func(_ context.Context, path string) ([]byte, error) {
+			return files[path], nil
+		})
+		fakeSpawner.IsJobActiveReturns(false, nil)
+		running := 0
+		fakeSpawner.ListActiveJobsStub = func(
+			context.Context, string,
+		) (map[lib.TaskIdentifier]bool, error) {
+			return activeJobs(running), nil
+		}
+		fakeSpawner.SpawnJobStub = func(
+			context.Context, lib.Task, pkg.AgentConfiguration,
+		) (string, error) {
+			running = 1
+			return "job-newer", nil
+		}
+
+		err := h.ReconcileOnce(ctx)
+		Expect(err).To(BeNil())
+		Expect(fakeSpawner.SpawnJobCallCount()).To(Equal(1))
+		_, spawnedTask, _ := fakeSpawner.SpawnJobArgsForCall(0)
+		Expect(spawnedTask.TaskIdentifier).To(Equal(lib.TaskIdentifier("tid-newer")))
+	})
+
 	It("skips the pass when git-rest is not ready (failure mode)", func() {
 		fakeGitRestClient.IsReadyReturns(false, nil)
 		fakeGitRestClient.ListReturns([]string{"24 Tasks/tid-a.md"}, nil)

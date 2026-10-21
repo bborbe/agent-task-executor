@@ -28,6 +28,22 @@ import (
 	"github.com/bborbe/agent-task-executor/pkg/metrics"
 )
 
+// buildQueueTask is the minimal eligible task the admission-ordering specs defer
+// behind the concurrency cap. It carries no current_job, so spawnIfNeeded takes
+// the cap path rather than the grace-window path.
+func buildQueueTask(id lib.TaskIdentifier, jobStartedAt string) lib.Task {
+	fm := lib.TaskFrontmatter{
+		"status":   "in_progress",
+		"phase":    string(domain.TaskPhasePlanning),
+		"assignee": "claude",
+		"stage":    "prod",
+	}
+	if jobStartedAt != "" {
+		fm["job_started_at"] = jobStartedAt
+	}
+	return lib.Task{TaskIdentifier: id, Frontmatter: fm}
+}
+
 var _ = Describe("TaskEventHandler", func() {
 	var (
 		ctx                 context.Context
@@ -349,6 +365,93 @@ var _ = Describe("TaskEventHandler", func() {
 				err = h.EvalDeferredRespawns(ctx)
 				Expect(err).To(BeNil())
 				Expect(fakeSpawner.SpawnJobCallCount()).To(Equal(1))
+			})
+
+			It("admits a never-attempted task ahead of an already-attempted one", func() {
+				// evalDeferredRespawns collects the due entries by ranging a Go map,
+				// so without a tie-break the order is randomized per tick and the same
+				// task ids recur in the concurrency_cap log for hours while others are
+				// dispatched (prod, 2026-10-21). A task that has never been attempted
+				// must win the freed slot over one that has already had a turn.
+				fakeResolver.ResolveReturns(
+					pkg.AgentConfiguration{
+						Assignee:          "claude",
+						Image:             "my-image:latest",
+						MaxConcurrentJobs: 1,
+					},
+					nil,
+				)
+				running := 1 // at cap, so both events defer instead of spawning
+				fakeSpawner.ListActiveJobsStub = func(
+					context.Context, string,
+				) (map[lib.TaskIdentifier]bool, error) {
+					return activeJobs(running), nil
+				}
+				fakeSpawner.SpawnJobStub = func(
+					context.Context, lib.Task, pkg.AgentConfiguration,
+				) (string, error) {
+					running = 1
+					return "job-admitted", nil
+				}
+
+				currentDateTime.SetNow(libtimetest.ParseDateTime("2026-10-21T08:00:00Z"))
+				attempted := buildQueueTask("tid-attempted", "2026-10-21T07:00:00Z")
+				fresh := buildQueueTask("tid-fresh", "")
+				Expect(h.ConsumeMessage(ctx, buildMsg(attempted))).To(BeNil())
+				Expect(h.ConsumeMessage(ctx, buildMsg(fresh))).To(BeNil())
+				Expect(fakeSpawner.SpawnJobCallCount()).To(Equal(0))
+
+				// The slot frees and both deferred entries come due in the same tick.
+				running = 0
+				currentDateTime.SetNow(libtimetest.ParseDateTime("2026-10-21T08:01:30Z"))
+				Expect(h.EvalDeferredRespawns(ctx)).To(Succeed())
+
+				Expect(fakeSpawner.SpawnJobCallCount()).To(Equal(1))
+				_, spawnedTask, _ := fakeSpawner.SpawnJobArgsForCall(0)
+				Expect(spawnedTask.TaskIdentifier).To(Equal(lib.TaskIdentifier("tid-fresh")))
+			})
+
+			It("orders already-attempted tasks by queue-entry time, not last attempt", func() {
+				// queued_at is when the FIRST wait began, so it is the fair key among
+				// tasks that have all had a turn. job_started_at is deliberately
+				// inverted here: this spec fails if the comparator falls back to it.
+				fakeResolver.ResolveReturns(
+					pkg.AgentConfiguration{
+						Assignee:          "claude",
+						Image:             "my-image:latest",
+						MaxConcurrentJobs: 1,
+					},
+					nil,
+				)
+				running := 1
+				fakeSpawner.ListActiveJobsStub = func(
+					context.Context, string,
+				) (map[lib.TaskIdentifier]bool, error) {
+					return activeJobs(running), nil
+				}
+				fakeSpawner.SpawnJobStub = func(
+					context.Context, lib.Task, pkg.AgentConfiguration,
+				) (string, error) {
+					running = 1
+					return "job-admitted", nil
+				}
+
+				currentDateTime.SetNow(libtimetest.ParseDateTime("2026-10-21T08:00:00Z"))
+				early := buildQueueTask("tid-early", "2026-10-21T07:55:00Z")
+				early.Frontmatter["queued_at"] = "2026-10-21T06:00:00Z"
+				late := buildQueueTask("tid-late", "2026-10-21T06:30:00Z")
+				late.Frontmatter["queued_at"] = "2026-10-21T07:00:00Z"
+				Expect(h.ConsumeMessage(ctx, buildMsg(late))).To(BeNil())
+				Expect(h.ConsumeMessage(ctx, buildMsg(early))).To(BeNil())
+				Expect(fakeSpawner.SpawnJobCallCount()).To(Equal(0))
+
+				running = 0
+				currentDateTime.SetNow(libtimetest.ParseDateTime("2026-10-21T08:01:30Z"))
+				Expect(h.EvalDeferredRespawns(ctx)).To(Succeed())
+
+				Expect(fakeSpawner.SpawnJobCallCount()).To(Equal(1))
+				_, spawnedTask, _ := fakeSpawner.SpawnJobArgsForCall(0)
+				Expect(spawnedTask.TaskIdentifier).To(Equal(lib.TaskIdentifier("tid-early")))
 			})
 
 			It(
