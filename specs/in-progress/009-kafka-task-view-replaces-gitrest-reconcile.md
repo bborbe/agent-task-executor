@@ -1,9 +1,11 @@
 ---
-status: approved
+status: prompted
 tags:
     - dark-factory
     - spec
 approved: "2026-10-21T18:29:44Z"
+generating: "2026-10-21T18:33:16Z"
+prompted: "2026-10-21T18:51:02Z"
 branch: dark-factory/kafka-task-view-replaces-gitrest-reconcile
 ---
 
@@ -48,7 +50,7 @@ Container-executable criteria are observed by `make test` / `make precommit` exi
 - [ ] **AC7 — `TASK_VAULT` mismatch fails loudly.** In a test with `TASK_VAULT=openclaw` and a ready view holding tasks stamped `trading`, `personal` and `trading`, plus one with `Vault=""`, `ReconcileOnce` emits `event=task_vault_mismatch task_vault=openclaw seen=personal,trading`, increments `executor_reconcile_passes_total{result="task_vault_mismatch"}` by exactly 1, makes 0 spawner calls and leaves `{result="ok"}` unchanged. Negative companion: adding one `openclaw` task to the same view produces no `task_vault_mismatch` line, and the pass increments `{result="ok"}`. Evidence: both tests passing.
 - [ ] **AC7a — An all-unstamped view fails loudly.** A test with a ready view of 3 tasks, all `Vault=""`, makes `ReconcileOnce` emit `event=task_vault_unstamped tasks=3`, increment `{result="task_vault_unstamped"}` by exactly 1, make 0 spawner calls, and leave `{result="ok"}` unchanged. Evidence: test passing.
 - [ ] **AC8 — `TASK_VAULT` defaults to `VAULT_NAME` and is independent of it.** A test in `main_internal_test.go` covers three cases. With `TASK_VAULT` unset and `VAULT_NAME=openclaw`, the effective task vault is `openclaw`. With `TASK_VAULT=personal` and `VAULT_NAME=shared`, the effective task vault is `personal` and the Config resolver still composes with `shared`. With `TASK_VAULT=Bad_Vault`, `Run` returns an error whose message contains `task-vault`. Evidence: test passing.
-- [ ] **AC9 — Startup no longer needs git-rest.** A test shows that `application.Run`'s validation succeeds with no `TASK_GLOB` and no git-rest settings, and that no K8s Secret read happens at startup (the fake clientset records 0 `get secrets` actions). Evidence: test passing.
+- [ ] **AC9 — Startup no longer needs git-rest.** A test shows that `application.Run`'s validation succeeds with no `TASK_GLOB` and no git-rest settings, and that no K8s Secret read happens at startup. Evidence: the validation test passing, plus (negative) `grep -rnE 'ReadGitRestGatewaySecret|CoreV1\(\)\.Secrets' main.go pkg/factory` returning 0 lines. `application.Run` builds its in-cluster client internally, so there is no fake-clientset seam without a Run refactor this spec does not authorise.
 - [ ] **AC10 — `queued_at` comes from the view.** In a test, the view holds task T with frontmatter `queued_at: 2026-10-21T10:00:00Z`, and a live event for T without `queued_at` is deferred at the concurrency cap. The result: 0 `PublishQueueEntry` calls, and the deferred entry carries `queued_at=2026-10-21T10:00:00Z`. When the view entry has no `queued_at`, exactly 1 `PublishQueueEntry` call happens (pre-spec behaviour). Evidence: test passing.
 - [ ] **AC11 — A pass over 15,000 tasks finishes in under 1 s.** A test builds a ready view of 15,000 tasks (at least 100 of them owned and eligible, the rest foreign or ineligible) with fake spawner and job lookups, runs `ReconcileOnce` and asserts that it returns in < 1 s wall-clock, logs `event=reconcile evaluated=<n>` where n equals the number of owned eligible tasks, makes a spawner call count equal to that number (or the concurrency cap, if lower), and logs no `event=reconcile_aborted`. Evidence: test passing, with the measured duration printed in the test output.
 - [ ] **AC12 — The reconcile summary line keeps its fields and swaps `glob=` for `task_vault=`.** Evidence: `git grep -n 'event=reconcile evaluated=%d re_driven=%d deferred=%d skipped=%d capped=%d task_vault=%q' -- pkg` returns 1 line, and (negative) `git grep -n 'glob=' -- pkg main.go` returns 0 lines.
