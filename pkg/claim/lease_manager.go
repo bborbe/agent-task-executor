@@ -70,6 +70,11 @@ type LeaseManager interface {
 	// deletion or pending release are included: they are still held until the
 	// pending action completes or the fence drops them.
 	HeldClaims() []HeldClaim
+	// AuditMismatch compares the claims this manager holds with the given set of
+	// running Job task ids. It adds 1 to executor_claim_mismatch_total for every
+	// running Job with no held claim and for every held claim with no running
+	// Job, and logs which case each was. A task present in both is not counted.
+	AuditMismatch(ctx context.Context, runningTaskIDs map[string]bool)
 }
 
 // NewLeaseManager constructs a LeaseManager. An empty cluster is an error.

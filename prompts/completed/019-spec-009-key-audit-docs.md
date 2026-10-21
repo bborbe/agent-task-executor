@@ -1,8 +1,13 @@
 ---
-status: approved
+status: completed
 spec: [009-claim-lease-client-library]
+summary: Added claim key derivation, held-claim/running-Job mismatch audit, 13-series claim metric pre-initialisation, protocol doc and changelog entry, with no live wiring and make precommit green.
+execution_id: agent-task-executor-claim-client-exec-019-spec-009-key-audit-docs
+dark-factory-version: v0.198.7
 created: "2026-10-21T18:52:26Z"
 queued: "2026-10-21T19:14:22Z"
+started: "2026-10-21T19:52:20Z"
+completed: "2026-10-21T20:06:26Z"
 branch: dark-factory/claim-lease-client-library
 ---
 

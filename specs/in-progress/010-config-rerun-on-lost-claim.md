@@ -1,7 +1,8 @@
 ---
-status: approved
+status: prompted
 approved: "2026-10-21T18:47:55Z"
 generating: "2026-10-21T19:08:12Z"
+prompted: "2026-10-21T20:00:54Z"
 branch: dark-factory/config-rerun-on-lost-claim
 ---
 
