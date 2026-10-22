@@ -2,6 +2,10 @@
 
 All notable changes to this project will be documented in this file.
 
+## Unreleased
+
+- feat: add the `CLAIM_MODE` setting (`off` | `shadow` | `on`) and the `GITREST_URL` / `GITREST_GATEWAY_SECRET` settings, all validated at startup. An absent `CLAIM_MODE` is `off`; an explicitly empty or unrecognised value is an error rather than a silent default; and a claim-taking mode with no `GITREST_URL` refuses to start instead of failing on its first dispatch. `GITREST_GATEWAY_SECRET` is the NAME of the K8s Secret, never the secret value. The claim client itself is wired in the follow-up change.
+
 ## v0.26.3
 
 - fix: **the task view stops retaining a task's body once that task reaches a terminal phase.** A body is held only so a spawn can render the agent's task file, and a terminal task is never spawned again, so keeping it was pure cost: at 15,000 tasks the bodies are ~88% of the view's bytes and put the live heap near 105 MiB, which the default GC target doubles past a 256Mi container limit — v0.26.0 therefore OOM-killed every cold start at ~100 s and never reached ready on nuke dev. Retaining bodies only for tasks that can still spawn takes the same 15,000-task view to ~40 MiB. Frontmatter is always retained, since the skip decisions read it, and a reopened task publishes a new event that carries its body back, so nothing is lost. The reconcile floor now also refuses a task at a terminal phase: it previously gated only on the Config's `trigger.phases`, so a Config listing `human_review` or `done` — both documented as valid values — could drive a terminal task from the view snapshot and render an empty task file for the agent.

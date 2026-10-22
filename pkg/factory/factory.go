@@ -147,6 +147,7 @@ func CreateConsumer(
 	taskVault string,
 	reconcilePassTimeout time.Duration,
 	reconcileInterval time.Duration,
+	claimMode pkg.ClaimMode,
 ) (libkafka.Consumer, handler.TaskEventHandler) {
 	jobSpawner := spawner.NewJobSpawner(
 		kubeClient,
@@ -174,6 +175,7 @@ func CreateConsumer(
 		taskVault,
 		reconcilePassTimeout,
 		reconcileInterval,
+		claimMode,
 	)
 	topic := lib.TaskV1SchemaID.EventTopic(topicPrefix)
 	offsetManager := libkafka.NewSaramaOffsetManager(

@@ -70,6 +70,7 @@ var _ = Describe("TaskEventHandler reconcile loop", func() {
 			testTaskVault,
 			handler.DefaultReconcilePassTimeout,
 			handler.DefaultReconcileInterval,
+			pkg.ClaimModeOff,
 		)
 	})
 
@@ -129,6 +130,7 @@ var _ = Describe("TaskEventHandler reconcile loop", func() {
 			testTaskVault,
 			handler.DefaultReconcilePassTimeout,
 			handler.DefaultReconcileInterval,
+			pkg.ClaimModeOff,
 		)
 		fakeView.SnapshotReturns([]lib.Task{eligibleTask(domain.TaskPhasePlanning)})
 		fakeSpawner.IsJobActiveReturns(false, nil)
@@ -950,6 +952,7 @@ var _ = Describe("TaskEventHandler reconcile loop", func() {
 				testTaskVault,
 				passTimeout,
 				interval,
+				pkg.ClaimModeOff,
 			)
 		}
 
@@ -1289,6 +1292,7 @@ var _ = Describe("TaskEventHandler reconcile loop", func() {
 				testTaskVault,
 				handler.DefaultReconcilePassTimeout,
 				handler.DefaultReconcileInterval,
+				pkg.ClaimModeOff,
 			)
 			owned := eligibleTask(domain.TaskPhaseExecution)
 			owned.TaskIdentifier = "tid-owned"

@@ -85,6 +85,7 @@ var _ = Describe("TaskEventHandler", func() {
 			testTaskVault,
 			handler.DefaultReconcilePassTimeout,
 			handler.DefaultReconcileInterval,
+			pkg.ClaimModeOff,
 		)
 	})
 
@@ -446,6 +447,7 @@ var _ = Describe("TaskEventHandler", func() {
 					testTaskVault,
 					handler.DefaultReconcilePassTimeout,
 					handler.DefaultReconcileInterval,
+					pkg.ClaimModeOff,
 				)
 			}
 
@@ -1129,6 +1131,7 @@ var _ = Describe("TaskEventHandler", func() {
 						testTaskVault,
 						handler.DefaultReconcilePassTimeout,
 						handler.DefaultReconcileInterval,
+						pkg.ClaimModeOff,
 					)
 
 					// Clock is past grace expiry — simulating the executor coming back up
@@ -1182,6 +1185,7 @@ var _ = Describe("TaskEventHandler", func() {
 						testTaskVault,
 						handler.DefaultReconcilePassTimeout,
 						handler.DefaultReconcileInterval,
+						pkg.ClaimModeOff,
 					)
 
 					currentDateTime.SetNow(libtimetest.ParseDateTime(graceExpiredR))

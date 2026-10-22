@@ -53,6 +53,8 @@ type application struct {
 	Namespace                  libk8s.Namespace  `required:"true"  arg:"namespace"                      env:"NAMESPACE"                      usage:"K8s namespace to spawn Jobs in"`
 	VaultName                  string            `required:"true"  arg:"vault-name"                     env:"VAULT_NAME"                     usage:"Obsidian vault name this executor instance serves; Config CRs are resolved by the composed {assignee}-{vaultName} assignee"`
 	TaskVault                  string            `required:"false" arg:"task-vault"                     env:"TASK_VAULT"                     usage:"Vault slug this executor owns tasks for; empty means VAULT_NAME. A task is owned when its stamped vault equals this value"`
+	GitRestURL                 string            `required:"false" arg:"gitrest-url"                    env:"GITREST_URL"                    usage:"git-rest HTTP API base URL the claim ref client writes leased claim refs through"`
+	GitRestGatewaySecret       string            `required:"false" arg:"gitrest-gateway-secret"         env:"GITREST_GATEWAY_SECRET"         usage:"NAME of the K8s Secret carrying the git-rest gateway secret (data key gateway-secret) — never the secret value; empty disables gateway auth"`
 	BuildGitVersion            string            `required:"false" arg:"build-git-version"              env:"BUILD_GIT_VERSION"              usage:"Build Git version (git describe --tags --always --dirty)"                                                                                                                                                                                                                           default:"dev"`
 	BuildGitCommit             string            `required:"false" arg:"build-git-commit"               env:"BUILD_GIT_COMMIT"               usage:"Build Git commit hash"                                                                                                                                                                                                                                                              default:"none"`
 	BuildDate                  *libtime.DateTime `required:"false" arg:"build-date"                     env:"BUILD_DATE"                     usage:"Build timestamp (RFC3339)"`
@@ -87,6 +89,16 @@ type application struct {
 // {assignee}-{vaultName} lookup key depends on a well-formed vault slug — a
 // malformed value would silently never match a Config CR.
 var vaultSlugRegexp = regexp.MustCompile(`^[a-z][a-z0-9-]*$`)
+
+// claimModeEnv is the environment variable carrying the executor's claim mode.
+const claimModeEnv = "CLAIM_MODE"
+
+// parseClaimModeFromEnv reads CLAIM_MODE, distinguishing an absent variable
+// (off) from an explicitly empty one (invalid).
+func parseClaimModeFromEnv(ctx context.Context) (pkg.ClaimMode, error) {
+	value, present := os.LookupEnv(claimModeEnv)
+	return pkg.ParseClaimMode(ctx, value, present)
+}
 
 // effectiveTaskVault returns TASK_VAULT, defaulting to VAULT_NAME when unset.
 // VAULT_NAME keeps its meaning for Config CR resolution; this setting only
@@ -138,6 +150,27 @@ func (a *application) validate(ctx context.Context) error {
 	return nil
 }
 
+// validateClaimTransport checks the settings the claim transport needs, in the
+// modes that take a claim. off builds no client and reads no secret, so its
+// transport settings stay unused and unvalidated — but a claim-taking mode with
+// no git-rest URL would otherwise fail on its first dispatch instead of here.
+func (a *application) validateClaimTransport(
+	ctx context.Context,
+	claimMode pkg.ClaimMode,
+) error {
+	if !claimMode.TakesClaim() {
+		return nil
+	}
+	if a.GitRestURL == "" {
+		return errors.Errorf(
+			ctx,
+			"gitrest-url (GITREST_URL) must be set when CLAIM_MODE is %q",
+			claimMode,
+		)
+	}
+	return nil
+}
+
 //nolint:funlen // Initialization sequence; wiring is linear with no branching.
 func (a *application) Run(ctx context.Context, sentryClient libsentry.Client) error {
 	if err := a.validate(ctx); err != nil {
@@ -146,6 +179,14 @@ func (a *application) Run(ctx context.Context, sentryClient libsentry.Client) er
 	libmetrics.NewBuildInfoMetrics().SetBuildInfo(a.BuildGitVersion, a.BuildGitCommit, a.BuildDate)
 	glog.V(1).
 		Infof("agent-task-executor started version=%s commit=%s", a.BuildGitVersion, a.BuildGitCommit)
+
+	claimMode, err := parseClaimModeFromEnv(ctx)
+	if err != nil {
+		return errors.Wrapf(ctx, err, "parse claim mode")
+	}
+	if err := a.validateClaimTransport(ctx, claimMode); err != nil {
+		return err
+	}
 
 	kubeConfig, err := rest.InClusterConfig()
 	if err != nil {
@@ -246,6 +287,7 @@ func (a *application) Run(ctx context.Context, sentryClient libsentry.Client) er
 		a.effectiveTaskVault(),
 		a.ReconcilePassTimeout,
 		a.ReconcileInterval,
+		claimMode,
 	)
 
 	return service.Run(
