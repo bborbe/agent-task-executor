@@ -94,4 +94,37 @@ var _ = Describe("ReadGitRestGatewaySecret", func() {
 			Expect(secretValue).To(Equal(""))
 		})
 	})
+
+	Context("gateway-secret data key is present but empty", func() {
+		BeforeEach(func() {
+			kubeClient = fake.NewSimpleClientset(&corev1.Secret{
+				ObjectMeta: metav1.ObjectMeta{Name: "gw-secret", Namespace: "test-ns"},
+				Data:       map[string][]byte{"gateway-secret": {}},
+			})
+			secretName = "gw-secret"
+		})
+
+		It("fails loudly instead of silently disabling gateway auth", func() {
+			Expect(err).To(HaveOccurred())
+			Expect(err.Error()).To(ContainSubstring("empty"))
+			Expect(err.Error()).To(ContainSubstring("gw-secret"))
+			Expect(secretValue).To(Equal(""))
+		})
+	})
+
+	Context("secret exists only in another namespace", func() {
+		BeforeEach(func() {
+			kubeClient = fake.NewSimpleClientset(&corev1.Secret{
+				ObjectMeta: metav1.ObjectMeta{Name: "gw-secret", Namespace: "other-ns"},
+				Data:       map[string][]byte{"gateway-secret": []byte("s3cret")},
+			})
+			secretName = "gw-secret"
+		})
+
+		It("returns an error, proving the namespace argument is applied", func() {
+			Expect(err).To(HaveOccurred())
+			Expect(secretValue).To(Equal(""))
+			Expect(err.Error()).NotTo(ContainSubstring("s3cret"))
+		})
+	})
 })
