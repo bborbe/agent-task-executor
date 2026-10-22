@@ -2,6 +2,10 @@
 
 All notable changes to this project will be documented in this file.
 
+## Unreleased
+
+- feat: add the `ClaimMode` type (`off` | `shadow` | `on`) and `ParseClaimMode`, which treats an unset variable as `off` and an explicitly empty or unrecognised value as an error rather than defaulting. `ClaimMode.TakesClaim` reports whether a mode needs the claim transport; it is an allow-list, so a zero-value or unparsed mode reports false and fails closed. No runtime wiring yet.
+
 ## v0.26.0
 
 - feat: **the reconcile floor reads the in-memory task view instead of listing and fetching vault files, and task ownership is a `Task.Vault` comparison.** Each pass snapshots the view, classifies the snapshot against the new `TASK_VAULT` setting (defaulting to `VAULT_NAME`), and drives only the tasks stamped with this executor's vault; a pass over 15,000 tasks is an in-memory scan that completes well under a second. A not-ready view counts `view_not_ready`; a snapshot with tasks but none from this vault counts `task_vault_mismatch` and logs the vaults it saw; a snapshot in which every task is unstamped counts `task_vault_unstamped`. The same `Task.Vault == TASK_VAULT` rule gates the live event path, replacing the path-derived ownership set and counting a foreign task as `agent_executor_task_events_total{result="skipped_foreign_vault"}`, and `queued_at` is read from the view rather than git-rest. `TASK_VAULT` is validated as a vault slug at startup; `TASK_GLOB` is no longer required.
