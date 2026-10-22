@@ -2,6 +2,10 @@
 
 All notable changes to this project will be documented in this file.
 
+## Unreleased
+
+- feat: allow `CLAIM_MODE=on`. The lease lifecycle now ships — release at every end point, renewal and fence from the service run list, and takeover of an expired claim — so a claim no longer outlives its task. An unset `CLAIM_MODE` remains `off`: each cluster opts in explicitly through its own config.
+
 ## v0.28.1
 
 - fix: wire a real Kubernetes `JobControl` into the claim lease manager. The fence and restart recovery previously ran against a control that refused every call, so a claim that could not renew logged an error and left its Job running unclaimed — the duplicate the claims exist to prevent.
