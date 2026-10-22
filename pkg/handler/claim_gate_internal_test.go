@@ -143,6 +143,7 @@ func newGateHandler(mode pkg.ClaimMode, client claim.ClaimRefClient) *taskEventH
 		cluster:               "self",
 		currentDateTime:       libtime.NewCurrentDateTime(),
 		claimRefClientFactory: func() claim.ClaimRefClient { return client },
+		claimJobControl:       noopJobControl{},
 	}
 }
 
@@ -153,6 +154,7 @@ func TestAcquireSpawnClaimOffSkipsFactory(t *testing.T) {
 		claimRefClientFactory: func() claim.ClaimRefClient {
 			panic("factory must not be called in claim mode off")
 		},
+		claimJobControl: noopJobControl{},
 		currentDateTime: libtime.NewCurrentDateTime(),
 	}
 	if !h.acquireSpawnClaim(ctx, gateTask("", "")) {

@@ -22,22 +22,6 @@ import (
 // most once per process, and only when CLAIM_MODE is shadow or on.
 type ClaimRefClientFactory func() claim.ClaimRefClient
 
-// unmanagedJobControl is the JobControl handed to the dispatch-only lease
-// manager. Claim and Takeover never call it; Recover and the fence do, and the
-// lease-lifecycle spec owns those paths. It fails loud so a future wiring that
-// starts them cannot silently run without Job control.
-type unmanagedJobControl struct{}
-
-// IsJobRunning reports that claim Job control is not wired.
-func (unmanagedJobControl) IsJobRunning(ctx context.Context, taskID string) (bool, error) {
-	return false, errors.Errorf(ctx, "claim job control not wired: IsJobRunning(%s)", taskID)
-}
-
-// DeleteJob reports that claim Job control is not wired.
-func (unmanagedJobControl) DeleteJob(ctx context.Context, taskID string) error {
-	return errors.Errorf(ctx, "claim job control not wired: DeleteJob(%s)", taskID)
-}
-
 // leaseManager returns this process's single lease manager, constructing it on
 // first use. Only the two claim-taking modes construct one, so a zero-value or
 // otherwise unparsed mode fails closed instead of building a manager nothing
@@ -82,10 +66,21 @@ func (h *taskEventHandler) createLeaseManager(
 			h.claimMode,
 		)
 	}
+	// The fence and restart recovery act on a Job. A mode that takes a claim must
+	// never run them against the loud unmanaged control, so a nil injection is a
+	// construction failure rather than a silent no-op.
+	jobControl := h.claimJobControl
+	if jobControl == nil {
+		return nil, errors.Errorf(
+			ctx,
+			"claim job control is nil for claim mode %q",
+			h.claimMode,
+		)
+	}
 	manager, err := claim.NewLeaseManager(
 		h.cluster,
 		refClient,
-		unmanagedJobControl{},
+		jobControl,
 		h.currentDateTime,
 		libtime.NewWaiterDuration(),
 	)

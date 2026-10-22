@@ -6,6 +6,16 @@ All notable changes to this project will be documented in this file.
 
 - feat: attempt one lease takeover on a 409 claim conflict and proceed on an expired lease
 
+## v0.28.1
+
+- fix: wire a real Kubernetes `JobControl` into the claim lease manager. The fence and restart recovery previously ran against a control that refused every call, so a claim that could not renew logged an error and left its Job running unclaimed — the duplicate the claims exist to prevent.
+- feat: renew a held claim while its Job runs, and retry a release an end point could not deliver, from one lease-loop entry in the service run list. `off` adds no loop.
+
+## v0.28.0
+
+- feat: release the dispatch claim when its Job ends or its spawn fails
+- feat: release the dispatch claim when a task reaches a terminal status or phase
+
 ## v0.27.0
 
 - feat: gate task dispatch on a git-rest lease claim after all existing gates (off/shadow/on; off unchanged). A claim-taking mode now also requires `CLUSTER` and a well-formed `GITREST_URL` (`http`/`https` with a hostname), both refused at startup rather than on the first dispatch — a deployment that set only `GITREST_URL` will fail to start until `CLUSTER` is set. `CLAIM_MODE=on` is refused outright until the lease lifecycle ships: nothing releases, renews or takes over a lease yet, so a claim would outlive its task and block every later dispatch of that key. `shadow` is unaffected, because it proceeds on a conflict.

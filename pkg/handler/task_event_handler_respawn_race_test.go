@@ -71,7 +71,13 @@ var _ = Describe("respawned-second-success race", func() {
 			pkg.ClaimModeOff,
 			nil,
 		)
-		watcher = pkg.NewJobWatcher(fake.NewClientset(), "test-ns", taskStore, fakeResultPublisher)
+		watcher = pkg.NewJobWatcher(
+			fake.NewClientset(),
+			"test-ns",
+			taskStore,
+			fakeResultPublisher,
+			nil,
+		)
 	})
 
 	buildMsg := func(task lib.Task) *sarama.ConsumerMessage {

@@ -63,8 +63,18 @@ func CreateJobWatcher(
 	namespace libk8s.Namespace,
 	taskStore *pkg.TaskStore,
 	publisher pkg.ResultPublisher,
+	claimReleaser pkg.ClaimReleaser,
 ) pkg.JobWatcher {
-	return pkg.NewJobWatcher(kubeClient, namespace, taskStore, publisher)
+	return pkg.NewJobWatcher(kubeClient, namespace, taskStore, publisher, claimReleaser)
+}
+
+// CreateClaimLifecycleRunFuncs returns the run funcs that keep the lease
+// manager's claims alive: the loop renews a held claim while its Job runs,
+// fences a claim whose renewals fail, and retries a release an end point could
+// not deliver. Whether a manager exists at all is decided at boot in main, so
+// this factory only wires the manager it is given.
+func CreateClaimLifecycleRunFuncs(manager claim.LeaseManager) []run.Func {
+	return []run.Func{manager.Run}
 }
 
 // CreateZombieSweeper creates a deadline sweeper that classifies stuck tasks as
@@ -161,7 +171,7 @@ func CreateConsumer(
 	reconcileInterval time.Duration,
 	claimMode pkg.ClaimMode,
 	claimRefClientFactory handler.ClaimRefClientFactory,
-) (libkafka.Consumer, handler.TaskEventHandler) {
+) (libkafka.Consumer, handler.ClaimLifecycleEventHandler) {
 	jobSpawner := spawner.NewJobSpawner(
 		kubeClient,
 		namespace,
@@ -190,6 +200,7 @@ func CreateConsumer(
 		reconcileInterval,
 		claimMode,
 		claimRefClientFactory,
+		handler.NewKubeJobControl(kubeClient, namespace),
 	)
 	topic := lib.TaskV1SchemaID.EventTopic(topicPrefix)
 	offsetManager := libkafka.NewSaramaOffsetManager(
