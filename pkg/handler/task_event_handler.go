@@ -847,6 +847,14 @@ func (h *taskEventHandler) spawnIfNeededClaimed(
 	// would hold a lease for a task a gate skips; taken later it could not prevent
 	// the duplicate it exists to prevent. Do not confuse this lease with the
 	// deferred-removal claim argument of this function.
+	// Marked BEFORE the claim: acquireSpawnClaim stores the fresh claim, so a
+	// marker set after it would leave the window between the claim and the marker
+	// wide enough for a terminal event for the previous Job to see a
+	// current-looking store and release the claim just taken. Held until this
+	// function returns, i.e. past storeSpawnedJob.
+	h.markSpawnPending(task.TaskIdentifier)
+	defer h.clearSpawnPending(task.TaskIdentifier)
+
 	if !h.acquireSpawnClaim(ctx, task) {
 		return false, nil
 	}
@@ -855,18 +863,15 @@ func (h *taskEventHandler) spawnIfNeededClaimed(
 }
 
 // spawnClaimedJob creates the Job for a task whose claim is already held, and
-// records it. The in-flight marker spans the whole call — through
-// storeSpawnedJob — because between the claim and the store entry there is no
-// Job name to compare against, so a terminal event for the previous Job would
-// otherwise look current and release the claim just taken.
+// records it. The caller holds the in-flight marker across this call — from
+// before the claim through storeSpawnedJob — because between the claim and the
+// store entry there is no Job name to compare against, so a terminal event for
+// the previous Job would otherwise look current and release the claim.
 func (h *taskEventHandler) spawnClaimedJob(
 	ctx context.Context,
 	task lib.Task,
 	config *pkg.AgentConfiguration,
 ) (bool, error) {
-	h.markSpawnPending(task.TaskIdentifier)
-	defer h.clearSpawnPending(task.TaskIdentifier)
-
 	jobName, err := h.jobSpawner.SpawnJob(ctx, task, *config)
 	if err != nil {
 		metrics.TaskEventsTotal.WithLabelValues("error").Inc()

@@ -23,6 +23,9 @@ import (
 type countingClaimRefClient struct {
 	mu      sync.Mutex
 	deletes int
+	// onPut runs while a Put is in flight, so a test can observe the handler's
+	// state at exactly that moment.
+	onPut func()
 }
 
 func (c *countingClaimRefClient) List(context.Context, string) ([]claim.ClaimRef, error) {
@@ -32,6 +35,9 @@ func (c *countingClaimRefClient) List(context.Context, string) ([]claim.ClaimRef
 func (c *countingClaimRefClient) Put(
 	context.Context, string, string, string, string, libtime.DateTime,
 ) (string, error) {
+	if c.onPut != nil {
+		c.onPut()
+	}
 	return "sha-1", nil
 }
 
