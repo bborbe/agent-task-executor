@@ -1445,6 +1445,14 @@ func (h *taskEventHandler) reconcileTask(
 	if phase == nil || !effectiveTriggerPhases(config).Contains(*phase) {
 		return task, nil, false, nil
 	}
+	// A terminal task is never driven, even when a Config lists its phase in
+	// trigger.phases. The event path already refuses these in applyPhaseGate; this
+	// floor needs the same rule because the task view retains a task's body only
+	// while it can still spawn, so driving a terminal task here would hand the
+	// agent an empty task file instead of the task text.
+	if IsTerminal(*phase) {
+		return task, nil, false, nil
+	}
 	if h.stageFilter && task.Frontmatter.Stage() != string(h.branch) {
 		return task, nil, false, nil
 	}
