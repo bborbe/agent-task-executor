@@ -4,6 +4,7 @@ All notable changes to this project will be documented in this file.
 
 ## Unreleased
 
+- fix: **`Release` no longer drops a claim while this cluster's Job is still running.** It deleted the ref and removed the held entry with no Job check, and because the fence only iterates the held set, a release that fired while the Job ran left that Job running unclaimed and invisible to the fence — so another cluster could take the task over and run it a second time. A release now keeps the claim held, so the loop keeps renewing it, and logs `event=release_deferred_job_running`; the Job's own terminal event releases the claim as before. A release for a Job that is already gone is unchanged.
 - fix: **startup recovery now actually runs.** `LeaseManager.Recover` was implemented, tested and on the interface but had no production call site, so a restarted executor began with an empty held set: nothing renewed and nothing fenced the Jobs it had been running, their leases lapsed, and another cluster legitimately took the work over while the original Job ran on to its natural end. Every rollout replaces a pod, so this happened on every apply — on 2026-10-22 it produced a 2 m 33 s duplicate of task `94c1801c` across sun and nuke prod. The lease manager's run funcs now begin with a recovery step that re-adopts, releases or fences the claims this cluster held before the restart, retried a bounded number of times; a git-rest outage at boot is logged and never crash-loops an executor that can still process tasks.
 
 ## v0.30.1
