@@ -145,6 +145,13 @@ type ConfigSpec struct {
 	// means unlimited, preserving existing behaviour for every agent that does
 	// not set it.
 	MaxConcurrentJobs int `json:"maxConcurrentJobs,omitempty"`
+	// RerunOnLostClaim decides what happens to this agent's task after another
+	// executor takes over the claim this cluster stopped renewing. True or unset
+	// re-dispatches the task; false parks it at phase human_review for a person
+	// to decide. Pointer-typed so "unset" is distinguishable from false, and
+	// unset reads as true so every existing Config keeps re-dispatching.
+	// Independent of max_triggers and spec.retries.
+	RerunOnLostClaim *bool `json:"rerunOnLostClaim,omitempty"`
 	// Trigger declares the per-agent phase and status conditions under which the executor spawns a Job.
 	Trigger *Trigger `json:"trigger,omitempty"`
 	// ZombieSweeperIntervalSeconds is how often the executor's deadline sweeper
@@ -263,6 +270,7 @@ func (s ConfigSpec) Equal(o ConfigSpec) bool {
 		reflect.DeepEqual(s.ConfigMapItems, o.ConfigMapItems) &&
 		s.PriorityClassName == o.PriorityClassName &&
 		s.MaxConcurrentJobs == o.MaxConcurrentJobs &&
+		reflect.DeepEqual(s.RerunOnLostClaim, o.RerunOnLostClaim) &&
 		reflect.DeepEqual(s.Env, o.Env) &&
 		reflect.DeepEqual(s.Resources, o.Resources) &&
 		reflect.DeepEqual(s.Trigger, o.Trigger) &&
