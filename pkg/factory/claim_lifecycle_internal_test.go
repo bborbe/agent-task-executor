@@ -5,31 +5,60 @@
 package factory
 
 import (
+	"context"
 	"testing"
 
-	pkg "github.com/bborbe/agent-task-executor/pkg"
+	"github.com/bborbe/agent-task-executor/pkg/claim"
 )
 
-// TestCreateClaimLifecycleRunFuncs asserts the lease loop is present exactly in
-// the modes that take a claim. Plain testing, not Ginkgo: this repo's Ginkgo
+// stubLeaseManager records Run calls so a test can assert the factory hands
+// back the manager's own loop. Plain testing, not Ginkgo: this repo's Ginkgo
 // specs declared in an internal test package never run.
+type stubLeaseManager struct {
+	runCalls int
+}
+
+func (s *stubLeaseManager) Claim(
+	context.Context, string, string,
+) (*claim.HeldClaim, error) {
+	return nil, nil
+}
+
+func (s *stubLeaseManager) Release(context.Context, string) error { return nil }
+
+func (s *stubLeaseManager) Takeover(
+	context.Context, string, string,
+) (*claim.TakeoverResult, error) {
+	return nil, nil
+}
+
+func (s *stubLeaseManager) Tick(context.Context) error { return nil }
+
+func (s *stubLeaseManager) Run(context.Context) error {
+	s.runCalls++
+	return nil
+}
+
+func (s *stubLeaseManager) Recover(context.Context) error { return nil }
+
+func (s *stubLeaseManager) HeldClaims() []claim.HeldClaim { return nil }
+
+func (s *stubLeaseManager) AuditMismatch(context.Context, map[string]bool) {}
+
+// TestCreateClaimLifecycleRunFuncs asserts the factory wires exactly one run
+// func and that it is the lease manager's own loop.
 func TestCreateClaimLifecycleRunFuncs(t *testing.T) {
-	tests := []struct {
-		name string
-		mode pkg.ClaimMode
-		want int
-	}{
-		{name: "off adds no lease loop", mode: pkg.ClaimModeOff, want: 0},
-		{name: "shadow adds the lease loop", mode: pkg.ClaimModeShadow, want: 1},
-		{name: "on adds the lease loop", mode: pkg.ClaimModeOn, want: 1},
-		{name: "an unparsed mode adds no lease loop", mode: pkg.ClaimMode(""), want: 0},
+	manager := &stubLeaseManager{}
+
+	runFuncs := CreateClaimLifecycleRunFuncs(manager)
+
+	if len(runFuncs) != 1 {
+		t.Fatalf("run funcs = %d, want 1", len(runFuncs))
 	}
-	for _, test := range tests {
-		t.Run(test.name, func(t *testing.T) {
-			got := CreateClaimLifecycleRunFuncs(test.mode, nil)
-			if len(got) != test.want {
-				t.Fatalf("run funcs = %d, want %d", len(got), test.want)
-			}
-		})
+	if err := runFuncs[0](context.Background()); err != nil {
+		t.Fatalf("run func: %v", err)
+	}
+	if manager.runCalls != 1 {
+		t.Fatalf("lease manager Run calls = %d, want 1", manager.runCalls)
 	}
 }
