@@ -19,6 +19,7 @@ import (
 	"github.com/bborbe/log"
 	"github.com/bborbe/run"
 	libtime "github.com/bborbe/time"
+	"github.com/golang/glog"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/cache"
@@ -83,7 +84,13 @@ func CreateClaimLifecycleRunFuncs(
 		func(ctx context.Context) error {
 			manager, err := claimHandler.ClaimLeaseManager(ctx)
 			if err != nil {
-				return errors.Wrapf(ctx, err, "get claim lease manager")
+				// Not fatal: a manager that cannot be built takes no claim, so
+				// there is nothing to renew and the mode's own dispatch decision
+				// (shadow proceeds, on fails closed) stays authoritative. Killing
+				// the executor here would stop every task on the cluster over a
+				// claim fault the mode already tolerates.
+				glog.Warningf("claim lease loop disabled: %v", err)
+				return nil
 			}
 			if manager == nil {
 				return nil
