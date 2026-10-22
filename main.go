@@ -373,8 +373,13 @@ func (a *application) Run(ctx context.Context, sentryClient libsentry.Client) er
 		currentDateTimeGetter,
 	)
 
-	return service.Run(
-		ctx,
+	// The lease loop is one more run func: a claim taken at dispatch must be
+	// renewed while its Job runs and retried when a release fails. off adds
+	// nothing, because no lease manager is constructed in that mode. The mode
+	// decision lives here at boot, not in the factory.
+	runFuncs := make([]run.Func, 0, 11)
+	runFuncs = append(
+		runFuncs,
 		func(ctx context.Context) error {
 			return connector.Listen(ctx, a.Namespace, resourceEventHandler)
 		},
@@ -388,6 +393,22 @@ func (a *application) Run(ctx context.Context, sentryClient libsentry.Client) er
 		a.createHTTPServer(eventHandlerConfig, healthcheckRunner),
 		healthcheckCron.Run,
 	)
+	if claimMode.TakesClaim() {
+		manager, managerErr := taskEventHandler.ClaimLeaseManager(ctx)
+		switch {
+		case managerErr != nil:
+			// Not fatal: a manager that cannot be built takes no claim, so there
+			// is nothing to renew, and the mode's own dispatch decision (shadow
+			// proceeds, on fails closed) stays authoritative. Killing the
+			// executor here would stop every task on the cluster over a claim
+			// fault the mode already tolerates.
+			glog.Warningf("claim lease loop disabled: %v", managerErr)
+		case manager != nil:
+			runFuncs = append(runFuncs, factory.CreateClaimLifecycleRunFuncs(manager)...)
+		}
+	}
+
+	return service.Run(ctx, runFuncs...)
 }
 
 func (a *application) createHTTPServer(

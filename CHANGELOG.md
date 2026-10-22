@@ -5,6 +5,7 @@ All notable changes to this project will be documented in this file.
 ## v0.28.1
 
 - fix: wire a real Kubernetes `JobControl` into the claim lease manager. The fence and restart recovery previously ran against a control that refused every call, so a claim that could not renew logged an error and left its Job running unclaimed — the duplicate the claims exist to prevent.
+- feat: renew a held claim while its Job runs, and retry a release an end point could not deliver, from one lease-loop entry in the service run list. `off` adds no loop.
 
 ## v0.28.0
 
