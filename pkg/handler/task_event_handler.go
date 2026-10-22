@@ -328,7 +328,7 @@ func (h *taskEventHandler) isJobActive(
 // otherwise clear the entry, so without this a deferred entry created during the grace
 // window fires ~300s later and respawns a job for an already-done task (the "path C"
 // respawn observed on dev 2026-07-13 for probe 095c58d7).
-func (h *taskEventHandler) cleanupTerminalTask(task lib.Task) {
+func (h *taskEventHandler) cleanupTerminalTask(ctx context.Context, task lib.Task) {
 	status := string(task.Frontmatter.Status())
 	if status != "completed" && status != "aborted" {
 		return
@@ -353,6 +353,9 @@ func (h *taskEventHandler) cleanupTerminalTask(task lib.Task) {
 			return
 		}
 	}
+	// Release after the stale-event guard: releasing before it would drop the
+	// claim of a job that is still running under a newer current_job.
+	h.ReleaseTaskClaim(ctx, task.TaskIdentifier)
 	h.taskStore.Delete(task.TaskIdentifier)
 	h.removeDeferredEntry(task.TaskIdentifier)
 	h.clearRedriveStreak(task.TaskIdentifier)
@@ -393,7 +396,7 @@ func (h *taskEventHandler) parseAndFilter(
 		return lib.Task{}, nil, true, nil
 	}
 
-	h.cleanupTerminalTask(task)
+	h.cleanupTerminalTask(ctx, task)
 
 	if h.skipForeignCluster(task) { // before Config resolution: not an unknown assignee
 		// A pending deferred entry holds a pre-retag snapshot; it must not outlive this.
@@ -439,6 +442,7 @@ func (h *taskEventHandler) parseAndFilter(
 	phase := task.Frontmatter.Phase()
 	// terminal phases must not be spawned again — operator escalation required
 	if phase != nil && applyPhaseGate(task, *phase) {
+		h.ReleaseTaskClaim(ctx, task.TaskIdentifier)
 		h.removeDeferredEntry(task.TaskIdentifier)
 		return lib.Task{}, nil, true, nil
 	}

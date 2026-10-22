@@ -30,6 +30,22 @@ func heldTaskIDs(manager claim.LeaseManager) []string {
 // shaPut returns the sha the fake ref client reports for a created claim.
 func shaPut(taskID string) string { return "sha-" + taskID }
 
+// terminalStatusTask is a qualifying task whose frontmatter status is status.
+func terminalStatusTask(taskID, status string) lib.Task {
+	task := qualifyingClaimTask()
+	task.TaskIdentifier = lib.TaskIdentifier(taskID)
+	task.Frontmatter["status"] = status
+	return task
+}
+
+// terminalPhaseTask is a qualifying task whose frontmatter phase is phase.
+func terminalPhaseTask(taskID, phase string) lib.Task {
+	task := qualifyingClaimTask()
+	task.TaskIdentifier = lib.TaskIdentifier(taskID)
+	task.Frontmatter["phase"] = phase
+	return task
+}
+
 var _ = Describe("claim release at the Job-watcher end points", func() {
 	var (
 		ctx     context.Context
@@ -163,5 +179,117 @@ var _ = Describe("claim release at the Job-watcher end points", func() {
 			Expect(harness.client.DeleteCallCount()).To(Equal(0))
 			expectClaimDelta(before, snapshotClaims(), map[string]float64{})
 		})
+	})
+})
+
+var _ = Describe("claim release at the vault end points", func() {
+	var (
+		ctx     context.Context
+		harness *claimHarness
+	)
+
+	BeforeEach(func() {
+		ctx = context.Background()
+		harness = newClaimHarness(pkg.ClaimModeShadow)
+		harness.client.PutStub = func(
+			_ context.Context, _, _, _, taskID string, _ libtime.DateTime,
+		) (string, error) {
+			return shaPut(taskID), nil
+		}
+	})
+
+	It("AC1(c) releases only the claim of the task whose status is completed", func() {
+		harness.holdClaim("task-a")
+		harness.holdClaim("task-b")
+		manager, err := harness.handler.ClaimLeaseManager(ctx)
+		Expect(err).NotTo(HaveOccurred())
+		before := snapshotClaims()
+
+		Expect(harness.consume(terminalStatusTask("task-a", "completed"))).To(Succeed())
+
+		Expect(harness.client.DeleteCallCount()).To(Equal(1))
+		_, key, sha := harness.client.DeleteArgsForCall(0)
+		Expect(key).To(Equal("claims/task/task-a"))
+		Expect(sha).To(Equal(shaPut("task-a")))
+		expectClaimDelta(before, snapshotClaims(), map[string]float64{"released": 1})
+		Expect(heldTaskIDs(manager)).To(ContainElement("task-b"))
+		Expect(heldTaskIDs(manager)).NotTo(ContainElement("task-a"))
+	})
+
+	It("AC1(c) releases on aborted the same way", func() {
+		harness.holdClaim("task-a")
+		harness.holdClaim("task-b")
+		manager, err := harness.handler.ClaimLeaseManager(ctx)
+		Expect(err).NotTo(HaveOccurred())
+		before := snapshotClaims()
+
+		Expect(harness.consume(terminalStatusTask("task-a", "aborted"))).To(Succeed())
+
+		Expect(harness.client.DeleteCallCount()).To(Equal(1))
+		_, key, sha := harness.client.DeleteArgsForCall(0)
+		Expect(key).To(Equal("claims/task/task-a"))
+		Expect(sha).To(Equal(shaPut("task-a")))
+		expectClaimDelta(before, snapshotClaims(), map[string]float64{"released": 1})
+		Expect(heldTaskIDs(manager)).NotTo(ContainElement("task-a"))
+	})
+
+	It("AC1(d) releases only the claim of the task whose phase is human_review", func() {
+		harness.holdClaim("task-a")
+		harness.holdClaim("task-b")
+		manager, err := harness.handler.ClaimLeaseManager(ctx)
+		Expect(err).NotTo(HaveOccurred())
+		before := snapshotClaims()
+
+		Expect(harness.consume(terminalPhaseTask("task-a", "human_review"))).To(Succeed())
+
+		Expect(harness.client.DeleteCallCount()).To(Equal(1))
+		_, key, sha := harness.client.DeleteArgsForCall(0)
+		Expect(key).To(Equal("claims/task/task-a"))
+		Expect(sha).To(Equal(shaPut("task-a")))
+		expectClaimDelta(before, snapshotClaims(), map[string]float64{"released": 1})
+		Expect(heldTaskIDs(manager)).To(ContainElement("task-b"))
+		Expect(heldTaskIDs(manager)).NotTo(ContainElement("task-a"))
+	})
+
+	It("AC1(d) releases on the done phase the same way", func() {
+		harness.holdClaim("task-a")
+		harness.holdClaim("task-b")
+		manager, err := harness.handler.ClaimLeaseManager(ctx)
+		Expect(err).NotTo(HaveOccurred())
+		before := snapshotClaims()
+
+		Expect(harness.consume(terminalPhaseTask("task-a", "done"))).To(Succeed())
+
+		Expect(harness.client.DeleteCallCount()).To(Equal(1))
+		_, key, sha := harness.client.DeleteArgsForCall(0)
+		Expect(key).To(Equal("claims/task/task-a"))
+		Expect(sha).To(Equal(shaPut("task-a")))
+		expectClaimDelta(before, snapshotClaims(), map[string]float64{"released": 1})
+		Expect(heldTaskIDs(manager)).NotTo(ContainElement("task-a"))
+	})
+
+	It("AC2 leaves a failed release on the vault path to the tick", func() {
+		harness.holdClaim("task-a")
+		manager, err := harness.handler.ClaimLeaseManager(ctx)
+		Expect(err).NotTo(HaveOccurred())
+		harness.client.DeleteReturnsOnCall(0, stderrors.New("git-rest throttled"))
+		before := snapshotClaims()
+
+		Expect(harness.consume(terminalStatusTask("task-a", "completed"))).To(Succeed())
+
+		Expect(harness.client.DeleteCallCount()).To(Equal(1))
+		expectClaimDelta(before, snapshotClaims(), map[string]float64{"error": 1})
+		Expect(heldTaskIDs(manager)).To(ContainElement("task-a"))
+	})
+
+	It("AC1(c) releases once when the same end event arrives twice", func() {
+		harness.holdClaim("task-a")
+		before := snapshotClaims()
+
+		Expect(harness.consume(terminalStatusTask("task-a", "completed"))).To(Succeed())
+		Expect(harness.consume(terminalStatusTask("task-a", "completed"))).To(Succeed())
+
+		Expect(harness.client.DeleteCallCount()).To(Equal(1))
+		expectClaimDelta(before, snapshotClaims(), map[string]float64{"released": 1})
 	})
 })
