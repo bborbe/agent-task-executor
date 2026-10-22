@@ -376,7 +376,10 @@ func (a *application) Run(ctx context.Context, sentryClient libsentry.Client) er
 	// The lease loop is one more run func: a claim taken at dispatch must be
 	// renewed while its Job runs and retried when a release fails. off adds
 	// nothing, because no lease manager is constructed in that mode.
-	runFuncs := []run.Func{
+	claimRunFuncs := factory.CreateClaimLifecycleRunFuncs(claimMode, taskEventHandler)
+	runFuncs := make([]run.Func, 0, 10+len(claimRunFuncs))
+	runFuncs = append(
+		runFuncs,
 		func(ctx context.Context) error {
 			return connector.Listen(ctx, a.Namespace, resourceEventHandler)
 		},
@@ -389,11 +392,8 @@ func (a *application) Run(ctx context.Context, sentryClient libsentry.Client) er
 		zombieSweeper.Run,
 		a.createHTTPServer(eventHandlerConfig, healthcheckRunner),
 		healthcheckCron.Run,
-	}
-	runFuncs = append(
-		runFuncs,
-		factory.CreateClaimLifecycleRunFuncs(claimMode, taskEventHandler)...,
 	)
+	runFuncs = append(runFuncs, claimRunFuncs...)
 
 	return service.Run(ctx, runFuncs...)
 }
