@@ -19,6 +19,7 @@ import (
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/util/validation"
 	"k8s.io/client-go/kubernetes/fake"
 	k8stesting "k8s.io/client-go/testing"
 
@@ -400,6 +401,29 @@ var _ = Describe("JobSpawner", func() {
 			jobs, err := fakeClient.BatchV1().Jobs("test-ns").List(ctx, metav1.ListOptions{})
 			Expect(err).To(BeNil())
 			Expect(jobs.Items[0].Name).To(Equal("backtest-agent-abcdefgh-20260403173500"))
+		})
+
+		It("lowercases the job name for an uppercase task id", func() {
+			task := lib.Task{
+				TaskIdentifier: lib.TaskIdentifier("1AACF3FC-7F44-4E66-A45C-EE9ACCFB739D"),
+				Frontmatter: lib.TaskFrontmatter{
+					"assignee": "trading-backtest-agent",
+				},
+			}
+			jobName, err := jobSpawner.SpawnJob(
+				ctx,
+				task,
+				pkg.AgentConfiguration{Image: "img:latest", Env: map[string]string{}},
+			)
+			Expect(err).To(BeNil())
+
+			jobs, err := fakeClient.BatchV1().Jobs("test-ns").List(ctx, metav1.ListOptions{})
+			Expect(err).To(BeNil())
+			Expect(jobs.Items).To(HaveLen(1))
+			name := jobs.Items[0].Name
+			Expect(name).To(Equal("trading-backtest-agent-1aacf3fc-20260403173500"))
+			Expect(validation.IsDNS1123Label(name)).To(BeEmpty())
+			Expect(jobName).To(Equal(name))
 		})
 
 		It("falls back to 'agent' prefix when assignee is empty", func() {

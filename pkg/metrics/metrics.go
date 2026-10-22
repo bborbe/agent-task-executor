@@ -156,6 +156,7 @@ func init() {
 	TaskEventsTotal.WithLabelValues("respawn_after_grace_window").Add(0)
 	TaskEventsTotal.WithLabelValues("deferred_concurrency_cap").Add(0)
 	TaskEventsTotal.WithLabelValues("deferred_claim_invalidated").Add(0)
+	TaskEventsTotal.WithLabelValues("deferred_respawn_spawn_failed").Add(0)
 	// Pre-initialise every reconcile outcome so rate() sees a 0 series rather
 	// than no data — an absent series makes `rate(...)==0` skip silently and the
 	// "backstop never succeeds" alert never fire.
