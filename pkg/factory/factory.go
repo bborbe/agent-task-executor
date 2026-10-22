@@ -13,6 +13,7 @@ import (
 	"github.com/bborbe/cqrs/base"
 	cdb "github.com/bborbe/cqrs/cdb"
 	libcron "github.com/bborbe/cron"
+	"github.com/bborbe/errors"
 	libk8s "github.com/bborbe/k8s"
 	libkafka "github.com/bborbe/kafka"
 	"github.com/bborbe/log"
@@ -213,6 +214,39 @@ func CreateConsumer(
 		run.NewTrigger(),
 		logSamplerFactory,
 	), taskEventHandler
+}
+
+// CreateTaskView returns the in-memory task view and the run.Func that captures
+// the topic's high-water marks and then replays the compacted task event topic
+// from the oldest offset on every partition. The reader is a non-group simple
+// consumer: it never joins CONSUMER_GROUP and never commits offsets, so it cannot
+// steal partitions from, or move the offsets of, the live consumer.
+func CreateTaskView(
+	saramaClient sarama.Client,
+	topicPrefix base.TopicPrefix,
+	currentDateTimeGetter libtime.CurrentDateTimeGetter,
+) (handler.TaskView, run.Func) {
+	topic := lib.TaskV1SchemaID.EventTopic(topicPrefix)
+	view := handler.NewTaskView(
+		func(ctx context.Context, topic libkafka.Topic) (libkafka.PartitionOffsets, error) {
+			return libkafka.HighWaterMarks(ctx, saramaClient, topic)
+		},
+		topic,
+		currentDateTimeGetter,
+	)
+	consumer := libkafka.NewSimpleConsumer(
+		saramaClient,
+		topic,
+		libkafka.OffsetOldest,
+		view,
+		log.DefaultSamplerFactory,
+	)
+	return view, func(ctx context.Context) error {
+		if err := view.CaptureHighWaterMarks(ctx); err != nil {
+			return errors.Wrapf(ctx, err, "capture task view high-water marks")
+		}
+		return consumer.Consume(ctx)
+	}
 }
 
 // CreateHealthcheckRunner creates the healthcheck runner shared between the cron path and the

@@ -128,6 +128,13 @@ var DeferredConcurrencyCapTotal = promauto.NewCounterVec(
 	[]string{"assignee"},
 )
 
+// TaskViewSkippedTotal counts task event messages the in-memory task view
+// could not decode. A skipped message never blocks readiness.
+var TaskViewSkippedTotal = promauto.NewCounter(prometheus.CounterOpts{
+	Name: "executor_task_view_skipped_total",
+	Help: "Total number of task event messages the task view could not decode.",
+})
+
 func init() {
 	TaskEventsTotal.WithLabelValues("spawned").Add(0)
 	TaskEventsTotal.WithLabelValues("skipped_status").Add(0)

@@ -6,7 +6,6 @@ package handler
 
 import (
 	"context"
-	"encoding/json"
 	stderrors "errors"
 	"fmt"
 	"sort"
@@ -387,19 +386,16 @@ func (h *taskEventHandler) parseAndFilter(
 	ctx context.Context,
 	msg *sarama.ConsumerMessage,
 ) (lib.Task, *pkg.AgentConfiguration, bool, error) {
-	if len(msg.Value) == 0 {
-		glog.V(3).Infof("skip empty message at offset %d", msg.Offset)
-		return lib.Task{}, nil, true, nil
-	}
-
-	var task lib.Task
-	if err := json.Unmarshal(msg.Value, &task); err != nil {
-		glog.Warningf("failed to unmarshal task event at offset %d: %v", msg.Offset, err)
-		return lib.Task{}, nil, true, nil
-	}
-
-	if task.TaskIdentifier == "" {
-		glog.Warningf("task event at offset %d has empty TaskIdentifier, skipping", msg.Offset)
+	task, err := decodeTaskEvent(ctx, msg.Value)
+	if err != nil {
+		switch {
+		case stderrors.Is(err, errEmptyTaskEvent):
+			glog.V(3).Infof("skip empty message at offset %d", msg.Offset)
+		case stderrors.Is(err, errEmptyTaskIdentifier):
+			glog.Warningf("task event at offset %d has empty TaskIdentifier, skipping", msg.Offset)
+		default:
+			glog.Warningf("failed to unmarshal task event at offset %d: %v", msg.Offset, err)
+		}
 		return lib.Task{}, nil, true, nil
 	}
 

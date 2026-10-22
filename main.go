@@ -257,6 +257,8 @@ func (a *application) Run(ctx context.Context, sentryClient libsentry.Client) er
 		healthcheckRunner,
 	)
 
+	_, runTaskView := factory.CreateTaskView(saramaClient, a.TopicPrefix, currentDateTimeGetter)
+
 	consumer, taskEventHandler := factory.CreateConsumer(
 		saramaClient,
 		a.Branch,
@@ -291,6 +293,7 @@ func (a *application) Run(ctx context.Context, sentryClient libsentry.Client) er
 			return connector.Listen(ctx, a.Namespace, resourceEventHandler)
 		},
 		consumer.Consume,
+		runTaskView,
 		taskEventHandler.RunDeferredRespawnLoop,
 		taskEventHandler.RunReconcileLoop,
 		serviceReconcileLoop.Run,
