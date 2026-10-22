@@ -4,6 +4,7 @@ All notable changes to this project will be documented in this file.
 
 ## Unreleased
 
+- feat: construct the git-rest claim ref client in the claim-taking modes. The gateway secret is read by NAME from a K8s Secret (`GITREST_GATEWAY_SECRET`) and never logged, never placed in the Deployment manifest and never set as an env var; the client itself is built lazily on the first claim. `off` reads no secret and builds no client. The client keeps a git-rest transport of its own because leased claim refs are written through git-rest even though task state is now read from the in-memory task view — an intended exception to the change that removed the executor's git-rest reader.
 - feat: add the `CLAIM_MODE` setting (`off` | `shadow` | `on`) and the `GITREST_URL` / `GITREST_GATEWAY_SECRET` settings, all validated at startup. An absent `CLAIM_MODE` is `off`; an explicitly empty or unrecognised value is an error rather than a silent default; and a claim-taking mode with no `GITREST_URL` refuses to start instead of failing on its first dispatch. `GITREST_GATEWAY_SECRET` is the NAME of the K8s Secret, never the secret value. The claim client itself is wired in the follow-up change.
 
 ## v0.26.3

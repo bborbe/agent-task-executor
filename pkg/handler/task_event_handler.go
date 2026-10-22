@@ -22,6 +22,7 @@ import (
 	"github.com/golang/glog"
 
 	pkg "github.com/bborbe/agent-task-executor/pkg"
+	"github.com/bborbe/agent-task-executor/pkg/claim"
 	"github.com/bborbe/agent-task-executor/pkg/metrics"
 	"github.com/bborbe/agent-task-executor/pkg/spawner"
 )
@@ -192,26 +193,28 @@ func NewTaskEventHandler(
 	reconcilePassTimeout time.Duration,
 	reconcileInterval time.Duration,
 	claimMode pkg.ClaimMode,
+	claimRefClientFactory ClaimRefClientFactory,
 ) TaskEventHandler {
 	return &taskEventHandler{
-		jobSpawner:           jobSpawner,
-		branch:               branch,
-		cluster:              cluster,
-		stageFilter:          stageFilter,
-		runUntagged:          runUntagged,
-		resolver:             resolver,
-		resultPublisher:      resultPublisher,
-		taskStore:            taskStore,
-		currentDateTime:      currentDateTime,
-		deferredRespawns:     make(map[lib.TaskIdentifier]deferredEntry),
-		deferredEpochs:       make(map[lib.TaskIdentifier]uint64),
-		spawnLocks:           make(map[string]*sync.Mutex),
-		view:                 view,
-		taskVault:            taskVault,
-		reconcilePassTimeout: reconcilePassTimeout,
-		reconcileInterval:    reconcileInterval,
-		claimMode:            claimMode,
-		redriveStreaks:       make(map[lib.TaskIdentifier]redriveStreak),
+		jobSpawner:            jobSpawner,
+		branch:                branch,
+		cluster:               cluster,
+		stageFilter:           stageFilter,
+		runUntagged:           runUntagged,
+		resolver:              resolver,
+		resultPublisher:       resultPublisher,
+		taskStore:             taskStore,
+		currentDateTime:       currentDateTime,
+		deferredRespawns:      make(map[lib.TaskIdentifier]deferredEntry),
+		deferredEpochs:        make(map[lib.TaskIdentifier]uint64),
+		spawnLocks:            make(map[string]*sync.Mutex),
+		view:                  view,
+		taskVault:             taskVault,
+		reconcilePassTimeout:  reconcilePassTimeout,
+		reconcileInterval:     reconcileInterval,
+		claimMode:             claimMode,
+		claimRefClientFactory: claimRefClientFactory,
+		redriveStreaks:        make(map[lib.TaskIdentifier]redriveStreak),
 	}
 }
 
@@ -230,16 +233,20 @@ type taskEventHandler struct {
 	// deferredEpochs counts removals per task, so a replay collected before an
 	// eviction can detect it. Entries are never deleted: resetting an epoch would
 	// re-validate a stale claim.
-	deferredEpochs       map[lib.TaskIdentifier]uint64
-	spawnLocksMu         sync.Mutex
-	spawnLocks           map[string]*sync.Mutex
-	view                 TaskView
-	taskVault            string
-	reconcilePassTimeout time.Duration
-	reconcileInterval    time.Duration
-	claimMode            pkg.ClaimMode
-	redriveMu            sync.Mutex
-	redriveStreaks       map[lib.TaskIdentifier]redriveStreak
+	deferredEpochs        map[lib.TaskIdentifier]uint64
+	spawnLocksMu          sync.Mutex
+	spawnLocks            map[string]*sync.Mutex
+	view                  TaskView
+	taskVault             string
+	reconcilePassTimeout  time.Duration
+	reconcileInterval     time.Duration
+	claimMode             pkg.ClaimMode
+	claimRefClientFactory ClaimRefClientFactory
+	claimManagerOnce      sync.Once
+	claimManager          claim.LeaseManager
+	claimManagerErr       error
+	redriveMu             sync.Mutex
+	redriveStreaks        map[lib.TaskIdentifier]redriveStreak
 	// spawnGens counts Jobs created by this executor per assignee, on any path.
 	// A pass cache entry read at an older generation is refetched, so a Job
 	// spawned by the Kafka consumer or the deferred loop mid-pass is never

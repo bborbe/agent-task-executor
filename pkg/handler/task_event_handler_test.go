@@ -94,6 +94,7 @@ var _ = Describe("TaskEventHandler", func() {
 			handler.DefaultReconcilePassTimeout,
 			handler.DefaultReconcileInterval,
 			pkg.ClaimModeOff,
+			nil,
 		)
 	})
 
@@ -1020,6 +1021,7 @@ var _ = Describe("TaskEventHandler", func() {
 					handler.DefaultReconcilePassTimeout,
 					handler.DefaultReconcileInterval,
 					pkg.ClaimModeOff,
+					nil,
 				)
 			})
 			buildClusterTask := func(cluster string) lib.Task {
@@ -1074,6 +1076,7 @@ var _ = Describe("TaskEventHandler", func() {
 					handler.DefaultReconcilePassTimeout,
 					handler.DefaultReconcileInterval,
 					pkg.ClaimModeOff,
+					nil,
 				)
 			}
 			buildTask := func(cluster string) lib.Task {
@@ -1147,6 +1150,7 @@ var _ = Describe("TaskEventHandler", func() {
 					handler.DefaultReconcilePassTimeout,
 					handler.DefaultReconcileInterval,
 					pkg.ClaimModeOff,
+					nil,
 				)
 			})
 			It("spawns a cluster task without a stage field on a dev-branch executor", func() {
@@ -1188,6 +1192,7 @@ var _ = Describe("TaskEventHandler", func() {
 				handler.DefaultReconcilePassTimeout,
 				handler.DefaultReconcileInterval,
 				pkg.ClaimModeOff,
+				nil,
 			)
 			task := lib.Task{
 				TaskIdentifier: lib.TaskIdentifier("tid-stage-3"),
@@ -1242,6 +1247,7 @@ var _ = Describe("TaskEventHandler", func() {
 				handler.DefaultReconcilePassTimeout,
 				handler.DefaultReconcileInterval,
 				pkg.ClaimModeOff,
+				nil,
 			)
 			task := lib.Task{
 				TaskIdentifier: lib.TaskIdentifier("tid-stage-4"),
