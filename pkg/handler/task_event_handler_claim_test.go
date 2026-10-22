@@ -117,7 +117,13 @@ func (h *claimHarness) holdClaim(taskID string) claim.HeldClaim {
 
 // watcher returns a JobWatcher that releases through this harness's handler.
 func (h *claimHarness) watcher() pkg.JobWatcher {
-	return pkg.NewJobWatcher(fake.NewClientset(), "test-ns", h.taskStore, h.publisher, h.eventHandler)
+	return pkg.NewJobWatcher(
+		fake.NewClientset(),
+		"test-ns",
+		h.taskStore,
+		h.publisher,
+		h.eventHandler,
+	)
 }
 
 // terminalJob returns a Job carrying taskID and the given terminal condition.
