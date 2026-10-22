@@ -672,6 +672,17 @@ func (h *taskEventHandler) spawnIfNeeded(
 	return h.spawnIfNeededClaimed(ctx, task, config, nil)
 }
 
+// spawnJobError marks a failed JobSpawner.SpawnJob call so the deferred-respawn
+// loop can skip that entry instead of exiting the whole process. Every other
+// error from the spawn path stays fatal.
+type spawnJobError struct {
+	err error
+}
+
+func (e *spawnJobError) Error() string { return e.err.Error() }
+
+func (e *spawnJobError) Unwrap() error { return e.err }
+
 // spawnIfNeededClaimed is spawnIfNeeded with an optional removal claim. With a
 // non-nil claim, both deferral stores and the final spawn decision re-check the
 // task's epoch, so a removeDeferredEntry that lands after the entry was
@@ -765,7 +776,12 @@ func (h *taskEventHandler) spawnIfNeededClaimed(
 	jobName, err := h.jobSpawner.SpawnJob(ctx, task, *config)
 	if err != nil {
 		metrics.TaskEventsTotal.WithLabelValues("error").Inc()
-		return false, errors.Wrapf(ctx, err, "spawn job for task %s failed", task.TaskIdentifier)
+		return false, errors.Wrapf(
+			ctx,
+			&spawnJobError{err: err},
+			"spawn job for task %s failed",
+			task.TaskIdentifier,
+		)
 	}
 
 	if err := h.finishSpawn(ctx, task, config, jobName); err != nil {

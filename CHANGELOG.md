@@ -2,6 +2,11 @@
 
 All notable changes to this project will be documented in this file.
 
+## Unreleased
+
+- fix: **spawned Job names are always lowercase.** `jobNameFromTask` concatenated the raw task-id prefix, so an uppercase UUID produced `trading-backtest-agent-1AACF3FC-...`, which Kubernetes rejects because `metadata.name` must be a lowercase RFC 1123 label. The whole name is now lowercased.
+- fix: **a failed Job create in the deferred-respawn loop no longer exits the executor.** A `SpawnJob` failure is logged with the task id, counted as `agent_executor_task_events_total{result="deferred_respawn_spawn_failed"}`, and the loop continues with the next due entry; the entry is not re-parked and the reconcile floor re-drives the task. Every other deferred-loop error stays fatal.
+
 ## v0.26.3
 
 - fix: **the task view stops retaining a task's body once that task reaches a terminal phase.** A body is held only so a spawn can render the agent's task file, and a terminal task is never spawned again, so keeping it was pure cost: at 15,000 tasks the bodies are ~88% of the view's bytes and put the live heap near 105 MiB, which the default GC target doubles past a 256Mi container limit — v0.26.0 therefore OOM-killed every cold start at ~100 s and never reached ready on nuke dev. Retaining bodies only for tasks that can still spawn takes the same 15,000-task view to ~40 MiB. Frontmatter is always retained, since the skip decisions read it, and a reopened task publishes a new event that carries its body back, so nothing is lost. The reconcile floor now also refuses a task at a terminal phase: it previously gated only on the Config's `trigger.phases`, so a Config listing `human_review` or `done` — both documented as valid values — could drive a terminal task from the view snapshot and render an empty task file for the agent.
