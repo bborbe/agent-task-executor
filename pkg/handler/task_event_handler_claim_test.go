@@ -37,6 +37,16 @@ type claimHarness struct {
 	factoryCalls int
 }
 
+// noopClaimJobControl satisfies claim.JobControl where a spec exercises the
+// dispatch gate but not the fence or restart recovery.
+type noopClaimJobControl struct{}
+
+func (noopClaimJobControl) IsJobRunning(context.Context, string) (bool, error) {
+	return false, nil
+}
+
+func (noopClaimJobControl) DeleteJob(context.Context, string) error { return nil }
+
 // claimHarnessVault is the vault slug the handler owns. The event path skips any
 // task stamped with another vault, so every fixture carries this one.
 const claimHarnessVault = "private-personal"
@@ -74,6 +84,7 @@ func newClaimHarness(mode pkg.ClaimMode) *claimHarness {
 			h.factoryCalls++
 			return client
 		},
+		noopClaimJobControl{},
 	)
 	return h
 }

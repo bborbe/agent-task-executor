@@ -194,8 +194,11 @@ func NewTaskEventHandler(
 	reconcileInterval time.Duration,
 	claimMode pkg.ClaimMode,
 	claimRefClientFactory ClaimRefClientFactory,
+	// claimJobControl is optional so the many test call sites stay readable; a
+	// claim-taking mode without one fails loudly at lease-manager construction.
+	claimJobControl ...claim.JobControl,
 ) TaskEventHandler {
-	return &taskEventHandler{
+	handler := &taskEventHandler{
 		jobSpawner:            jobSpawner,
 		branch:                branch,
 		cluster:               cluster,
@@ -216,6 +219,10 @@ func NewTaskEventHandler(
 		claimRefClientFactory: claimRefClientFactory,
 		redriveStreaks:        make(map[lib.TaskIdentifier]redriveStreak),
 	}
+	if len(claimJobControl) > 0 {
+		handler.claimJobControl = claimJobControl[0]
+	}
+	return handler
 }
 
 type taskEventHandler struct {
@@ -242,7 +249,11 @@ type taskEventHandler struct {
 	reconcileInterval     time.Duration
 	claimMode             pkg.ClaimMode
 	claimRefClientFactory ClaimRefClientFactory
-	claimManagerOnce      sync.Once
+	// claimJobControl lets the lease manager's fence and restart recovery act on
+	// a Job. Nil falls back to the loud unmanaged control, so a mode that takes a
+	// claim cannot silently run without it.
+	claimJobControl  claim.JobControl
+	claimManagerOnce sync.Once
 	claimManager          claim.LeaseManager
 	claimManagerErr       error
 	redriveMu             sync.Mutex
