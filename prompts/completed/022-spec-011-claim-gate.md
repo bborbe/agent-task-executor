@@ -1,7 +1,13 @@
 ---
-status: draft
+status: completed
 spec: [011-claim-mode-dispatch-wiring]
+summary: Added acquireSpawnClaim to the single dispatch funnel with off/shadow/on semantics, shared failure logging, internal and external tests, and a changelog entry.
+execution_id: agent-task-executor-claim-wiring-exec-022-spec-011-claim-gate
+dark-factory-version: v0.198.7
 created: "2026-10-21T23:30:14Z"
+queued: "2026-10-22T00:10:24Z"
+started: "2026-10-22T00:10:25Z"
+completed: "2026-10-22T00:15:59Z"
 branch: dark-factory/claim-mode-dispatch-wiring
 ---
 

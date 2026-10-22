@@ -114,12 +114,20 @@ if h.claimJobControl == nil {
 ```go
 // CreateClaimLifecycleRunFuncs returns the claim lease loop as a service run
 // func. In claim mode off it returns an empty slice and never starts a loop.
+// In shadow and on a nil loop is a wiring bug: it must fail loud at startup,
+// not silently return an empty slice, or a miswired mode looks identical to a
+// healthy idle one.
 func CreateClaimLifecycleRunFuncs(
 	claimMode pkg.ClaimMode,
 	leaseLoop run.Func,
 ) []run.Func {
-	if claimMode == pkg.ClaimModeOff || leaseLoop == nil {
+	if claimMode == pkg.ClaimModeOff {
 		return []run.Func{}
+	}
+	if leaseLoop == nil {
+		return []run.Func{func(ctx context.Context) error {
+			return errors.Errorf(ctx, "claim lifecycle loop is nil in mode %s", claimMode)
+		}}
 	}
 	return []run.Func{leaseLoop}
 }
@@ -221,12 +229,12 @@ type fakeClaimJobControl struct {
 
     with `SetRunning(map[string]bool)`, `IsJobRunning` (answers from the set), `DeleteJob` (records the task id), `RunningTaskIDs` (returns a copy of the set), and `DeleteCallCount() int`.
 
-11. Create `pkg/factory/factory_suite_test.go` (package `factory_test`) with a standard Ginkgo `RunSpecs` suite, then create `pkg/factory/claim_lifecycle_test.go` (package `factory_test`) with:
+11. Create `pkg/factory/claim_lifecycle_test.go` as **plain `testing` with `t.Run`** — `pkg/factory` has no test suite today and you must not create a Ginkgo `RunSpecs` suite (Ginkgo suites in a package that has none are the trap this repo already fell into; see the note at the end of `<context>`):
     - mode `off` with a non-nil loop func → `len(CreateClaimLifecycleRunFuncs(pkg.ClaimModeOff, fn)) == 0`
     - mode `shadow` → `len == 1` and calling the entry invokes `fn`
     - mode `on` → `len == 1`
 
-12. Create `pkg/factory/claim_job_control_test.go` (package `factory_test`) using `k8s.io/client-go/kubernetes/fake`:
+12. Create `pkg/factory/claim_job_control_test.go` (package `factory_test`, plain `testing` with `t.Run`) using `k8s.io/client-go/kubernetes/fake`. Build every fixture Job with the **literal** label key `agent.benjamin-borbe.de/task-id`, never the production constant — a fixture that reuses the constant cannot catch the constant drifting away from the label the spawner actually writes:
     - a running Job (no terminal condition, `Status.Active > 0`) for task `t1` → `IsJobRunning` true and `RunningTaskIDs` contains `t1`
     - a succeeded Job (JobComplete condition) for task `t2` → `IsJobRunning` false and `RunningTaskIDs` does not contain `t2`
     - `DeleteJob` removes the Jobs for the task; a second `DeleteJob` on the same task returns nil
@@ -262,30 +270,38 @@ func captureGlog(fn func()) string {
 }
 ```
 
-14. Add to `main_internal_test.go` (package `main`, no new `RunSpecs`):
+14. Add to `main_internal_test.go` (package `main`) as **plain `testing` with `t.Run`, NOT Ginkgo** — measured 2026-10-22, a Ginkgo spec in `package main` never runs here (`go test . -v` reports 0 of the existing ones), so a `Describe` block would pass by absence:
 
 ```go
-var _ = Describe("application.runFuncs", func() {
-	It("appends the claim lifecycle run funcs to the base list", func() {
-		base := []run.Func{func(context.Context) error { return nil }}
-		claimRan := false
-		claimFunc := run.Func(func(context.Context) error {
-			claimRan = true
-			return nil
-		})
-		a := &application{}
-		list := a.runFuncs(base, []run.Func{claimFunc})
-		Expect(list).To(HaveLen(2))
-		for _, fn := range list {
-			Expect(fn(context.Background())).To(Succeed())
-		}
-		Expect(claimRan).To(BeTrue())
-		Expect(a.runFuncs(base, nil)).To(HaveLen(1))
+func TestApplicationRunFuncs(t *testing.T) {
+	claimRan := false
+	claimFunc := run.Func(func(context.Context) error {
+		claimRan = true
+		return nil
 	})
-})
+
+	base := []run.Func{func(context.Context) error { return nil }}
+	a := &application{baseRunFuncs: base}
+
+	list := a.runFuncs([]run.Func{claimFunc})
+	if len(list) != 2 {
+		t.Fatalf("expected 2 run funcs, got %d", len(list))
+	}
+	for _, fn := range list {
+		if err := fn(context.Background()); err != nil {
+			t.Fatalf("run func returned %v", err)
+		}
+	}
+	if !claimRan {
+		t.Fatal("the claim lifecycle run func was not in the list")
+	}
+	if got := a.runFuncs(nil); len(got) != 1 {
+		t.Fatalf("expected the base list alone, got %d", len(got))
+	}
+}
 ```
 
-    Add the `github.com/bborbe/run` import to that file.
+    The seam must be inspectable without a synthetic base: `application` gains a `baseRunFuncs []run.Func` field holding the eight entries currently passed inline to `service.Run`, `Run` assigns it, and `runFuncs(claimRunFuncs []run.Func) []run.Func` returns `append(a.baseRunFuncs, claimRunFuncs...)`. Add the `github.com/bborbe/run` import to that file.
 
 15. Remove the `unmanagedJobControl` specs from `pkg/handler/claim_wiring_internal_test.go` (the block asserting each method returns an error containing `not wired`). Keep the other specs in that file.
 
@@ -315,13 +331,14 @@ ROOTDIR=/workspace make precommit
 go test -race -count=1 ./...
 grep -rn 'Recover\|AuditMismatch' main.go pkg/ | grep -v _test.go
 grep -rn 'AuditMismatch(' pkg/handler/ | grep -v _test.go
-git diff --stat pkg/metrics/
+grep -c 'ClaimMismatchTotal' pkg/metrics/metrics.go
+grep -c 'promauto.New' pkg/metrics/metrics.go
 grep -rn 'unmanagedJobControl' pkg/ main.go
 ```
 - `make precommit` exits 0.
 - `go test -race -count=1 ./...` exits 0.
 - The `Recover\|AuditMismatch` grep shows exactly one `claimManager.Recover(` call in `main.go`, before `service.Run`, and exactly one `AuditMismatch(` call in `pkg/handler/task_event_handler.go` inside `ReconcileOnce`. The `pkg/claim` definition sites also match the broad grep; that is expected.
-- `git diff --stat pkg/metrics/` prints nothing (no new metric registration).
+- `grep -c 'ClaimMismatchTotal' pkg/metrics/metrics.go` prints `1` and `grep -c 'promauto.New' pkg/metrics/metrics.go` prints the same number it printed before your change — no new metric is registered. (Do not use `git diff` here: the container has no git.)
 - `grep -rn 'unmanagedJobControl' pkg/ main.go` prints nothing.
 - `grep -c 'AuditMismatch(' pkg/handler/task_event_handler.go` prints `1`.
 - `grep -n 'a.runFuncs(' main.go` shows the `service.Run` call uses the method.

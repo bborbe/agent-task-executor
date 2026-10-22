@@ -24,7 +24,7 @@ Establish the single claim-release handle and wire it to the two Job-watcher ter
 </objective>
 
 <context>
-Spec 011 (`specs/in-progress/011-claim-mode-dispatch-wiring.md`) lands first. Read its prompts `prompts/1-spec-011-claim-mode-config.md` and `prompts/2-spec-011-claim-gate.md` to see the exact seam this prompt builds on: `pkg.ClaimMode`, `pkg/handler/claim_wiring.go` (`ClaimRefClientFactory`, `leaseManager(ctx)`), the `taskEventHandler` claim fields, and the test harness `newClaimHarness` in `pkg/handler/task_event_handler_claim_test.go`.
+Spec 011 (`specs/in-progress/011-claim-mode-dispatch-wiring.md`) lands first. Read `prompts/completed/021-spec-011-claim-mode-config.md` and the code it produced (`pkg/handler/claim_wiring.go`: `leaseManager`, `acquireSpawnClaim`, `claimFailureDecision`) to see the exact seam this prompt builds on: `pkg.ClaimMode`, `ClaimRefClientFactory`, the `taskEventHandler` claim fields, and the test harness `newClaimHarness` in `pkg/handler/task_event_handler_claim_test.go`.
 
 Read these files before changing anything:
 
@@ -169,7 +169,7 @@ func (h *taskEventHandler) ClaimLeaseManager(
    - `pkg/envtest/job_watcher_envtest_test.go`
 
 9. Extend the spec-011 harness in `pkg/handler/task_event_handler_claim_test.go` (package `handler_test`). Add the imports this file now needs: `batchv1 "k8s.io/api/batch/v1"`, `corev1 "k8s.io/api/core/v1"`, `metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"`, `"k8s.io/client-go/kubernetes/fake"`, `"github.com/bborbe/agent-task-executor/pkg/claim"`, and `"github.com/bborbe/agent-task-executor/pkg"`:
-   - Add the fields `handler handler.ClaimLifecycleEventHandler`, `taskStore *pkg.TaskStore`, `publisher *mocks.FakeResultPublisher`, `spawner *mocks.FakeJobSpawner`, and `gitRestClient *mocks.FakeGitRestClient` to `claimHarness` (add only those not already present), and populate them in `newClaimHarness`.
+   - `claimHarness` already carries `eventHandler handler.TaskEventHandler` (`pkg/handler/task_event_handler_claim_test.go:31`, assigned at `:51`, used by `consume` at `:80`). Rename that field to `handler` and retype it `handler.ClaimLifecycleEventHandler`, updating both usages. Also add `taskStore *pkg.TaskStore`, `publisher *mocks.FakeResultPublisher` and `gitRestClient *mocks.FakeGitRestClient` by extracting the values currently constructed inline in the `NewTaskEventHandler(...)` call, and populate them in `newClaimHarness`. `spawner` and `client` already exist — do not add them again.
    - Add this helper:
 
 ```go
@@ -198,6 +198,9 @@ func (h *claimHarness) watcher() pkg.JobWatcher {
 
 ```go
 // terminalJob returns a Job carrying taskID and the given terminal condition.
+// It MUST set Labels["agent.benjamin-borbe.de/task-id"] = taskID: HandleJob
+// returns early without that label (pkg/job_watcher.go:142), so a helper that
+// omits it makes every spec below pass vacuously.
 func terminalJob(name, taskID string, condition batchv1.JobCondition) *batchv1.Job
 ```
 
@@ -230,7 +233,7 @@ func failedCondition(message string) batchv1.JobCondition {
 11. Add a `CHANGELOG.md` entry under `## Unreleased`:
     `- feat: release the dispatch claim when its Job ends or its spawn fails`
 
-12. Before finishing, walk every acceptance criterion above against the change and re-run `<verification>`.
+12. Before finishing, walk AC1(a), AC1(b), AC1(e) and AC2 against the change and re-run `<verification>`. AC1(c)/(d) belong to prompt 2 and AC3/AC4 to prompt 3 — do not implement them here.
 </requirements>
 
 <constraints>
@@ -261,7 +264,7 @@ grep -rn 'claimReleaser' pkg/job_watcher.go
 - The `NewJobWatcher(` grep shows the definition and every call site; no call site still passes the old argument count.
 - `! grep -q 'ClaimTotal.WithLabelValues' pkg/handler/claim_lifecycle.go pkg/job_watcher.go` exits 0 (the wiring increments nothing).
 - `grep -c 'w.releaseClaim(ctx, taskID)' pkg/job_watcher.go` prints `2` (one per terminal branch).
-- Inspect `pkg/handler/claim_lifecycle.go`: the only loop around `Release` is the `HeldClaims` match loop, and there is no retry loop.
+- `grep -c 'for _, held := range manager.HeldClaims()' pkg/handler/claim_lifecycle.go` prints `1`, and `! grep -nE 'retry' pkg/handler/claim_lifecycle.go` exits 0 — the only loop around `Release` is the `HeldClaims` match loop and there is no retry loop.
 
 Completion report (appended by dark-factory): set `"status":"success"` only when `make precommit` exits 0; otherwise `"status":"failed"`. Include the actual `make precommit` exit code in the `verification` block.
 </verification>

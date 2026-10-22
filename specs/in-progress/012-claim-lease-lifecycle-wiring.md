@@ -54,7 +54,7 @@ All container-executable. Tests use the counterfeiter fake at `mocks/claim_ref_c
 - `make precommit` — lint, vet and the full test suite exit 0
 - `go test -race -count=1 ./...` — exits 0
 - `grep -rn 'Recover\|AuditMismatch' main.go pkg/ | grep -v _test.go` — exactly one `Recover` call site in `main.go`, before the `service.Run` list, and exactly one `AuditMismatch` call site, inside `ReconcileOnce`
-- `git diff --stat pkg/metrics/` — empty
+- `grep -c 'promauto.New' pkg/metrics/metrics.go` — same count as before the change (the container has no git, so a `git diff` check is not container-executable; the diff form belongs to the host rung)
 
 ## Desired Behavior
 
