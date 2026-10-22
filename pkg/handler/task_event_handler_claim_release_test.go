@@ -99,6 +99,24 @@ var _ = Describe("claim release at the Job-watcher end points", func() {
 			expectClaimDelta(before, snapshotClaims(), map[string]float64{"released": 1})
 		})
 
+		It("does not release the claim of a newer Job on a stale terminal event", func() {
+			harness.holdClaim("task-a")
+			task := qualifyingClaimTask()
+			task.TaskIdentifier = lib.TaskIdentifier("task-a")
+			task.Frontmatter["current_job"] = "job-new"
+			harness.taskStore.Store(lib.TaskIdentifier("task-a"), task)
+			manager, err := harness.eventHandler.ClaimLeaseManager(ctx)
+			Expect(err).NotTo(HaveOccurred())
+			before := snapshotClaims()
+
+			harness.watcher().
+				HandleJob(ctx, terminalJob("job-old", "task-a", succeededCondition()))
+
+			Expect(harness.client.DeleteCallCount()).To(Equal(0))
+			expectClaimDelta(before, snapshotClaims(), map[string]float64{})
+			Expect(heldTaskIDs(manager)).To(ContainElement("task-a"))
+		})
+
 		It("AC1(b) releases only the claim of the Job that failed", func() {
 			harness.holdClaim("task-a")
 			harness.holdClaim("task-b")

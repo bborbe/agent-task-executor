@@ -144,8 +144,25 @@ func (w *jobWatcher) PodLister() corev1listers.PodLister {
 // releaseClaim releases this executor's held claim for taskID. A nil releaser
 // (claim mode off) is a no-op. ReleaseTaskClaim logs its own failures; the
 // lease loop's retryPendingReleases retries a failed delete on its next tick.
-func (w *jobWatcher) releaseClaim(ctx context.Context, taskID lib.TaskIdentifier) {
+//
+// A store entry that tracks a NEWER job means this is a stale re-delivery of a
+// superseded Job's terminal event (the informer re-delivers terminal Jobs every
+// ~5 min). Releasing there would delete the claim taken for the job that is
+// still running, leaving it unclaimed for a peer to take over. An absent entry
+// is not stale — after a restart the claim must still be released.
+func (w *jobWatcher) releaseClaim(
+	ctx context.Context,
+	taskID lib.TaskIdentifier,
+	jobName string,
+) {
 	if w.claimReleaser == nil {
+		return
+	}
+	if task, ok := w.taskStore.Load(taskID); ok && !w.tracksJob(task, jobName) {
+		glog.V(2).Infof(
+			"skip claim release for task %s: job %s superseded by %s",
+			taskID, jobName, task.Frontmatter.CurrentJob(),
+		)
 		return
 	}
 	w.claimReleaser.ReleaseTaskClaim(ctx, taskID)
@@ -161,7 +178,7 @@ func (w *jobWatcher) HandleJob(ctx context.Context, job *batchv1.Job) {
 	if IsJobFailed(job) {
 		reason := w.failureReason(job)
 		glog.V(2).Infof("job %s/%s failed (task %s): %s", job.Namespace, job.Name, taskID, reason)
-		w.releaseClaim(ctx, taskID)
+		w.releaseClaim(ctx, taskID, job.Name)
 		w.handleTerminal(ctx, taskID, job, reason, true)
 		return
 	}
@@ -191,7 +208,7 @@ func (w *jobWatcher) HandleJob(ctx context.Context, job *batchv1.Job) {
 				job.Status.CompletionTime.Time,
 			)
 		}
-		w.releaseClaim(ctx, taskID)
+		w.releaseClaim(ctx, taskID, job.Name)
 		if task, ok := w.taskStore.Load(taskID); ok {
 			w.handleSucceeded(ctx, taskID, task, job)
 		}
