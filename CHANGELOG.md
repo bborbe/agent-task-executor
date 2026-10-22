@@ -2,7 +2,7 @@
 
 All notable changes to this project will be documented in this file.
 
-## Unreleased
+## v0.26.1
 
 - refactor: restore `pkg.ReadGitRestGatewaySecret`, which reads the git-rest gateway secret by NAME from a K8s Secret (data key `gateway-secret`) — never logged, never in env, never in the Deployment manifest. The task-view change removed it along with the git-rest client; the leased claim ref transport needs it back.
 
