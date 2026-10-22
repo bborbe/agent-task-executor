@@ -67,27 +67,6 @@ var _ = Describe("application struct field guards", func() {
 })
 
 var _ = Describe("application.Run startup validation", func() {
-	Describe("empty TaskGlob", func() {
-		It("fails before the k8s client is constructed, naming the glob setting", func() {
-			a := &application{VaultName: "personal", TaskGlob: ""}
-			err := a.Run(context.Background(), nil)
-			Expect(err).To(HaveOccurred())
-			// Off-cluster rest.InClusterConfig() fails too, so asserting only
-			// HaveOccurred() would pass whichever check ran first. Naming the
-			// glob setting proves the guard precedes the k8s client.
-			Expect(err.Error()).To(ContainSubstring("task-glob"))
-		})
-
-		It("declares no built-in default on the flag", func() {
-			typ := reflect.TypeOf(application{})
-			f, ok := typ.FieldByName("TaskGlob")
-			Expect(ok).To(BeTrue())
-			Expect(f.Tag.Get("env")).To(Equal("TASK_GLOB"))
-			Expect(f.Tag.Get("arg")).To(Equal("task-glob"))
-			Expect(f.Tag.Get("default")).To(BeEmpty())
-		})
-	})
-
 	Describe("reconcile timing", func() {
 		It("declares env, arg, and the 45s/60s defaults", func() {
 			typ := reflect.TypeOf(application{})
@@ -108,7 +87,6 @@ var _ = Describe("application.Run startup validation", func() {
 		It("rejects a non-positive pass timeout before the k8s client", func() {
 			a := &application{
 				VaultName:         "personal",
-				TaskGlob:          "t/*.md",
 				ReconcileInterval: time.Minute,
 			}
 			err := a.Run(context.Background(), nil)
@@ -119,12 +97,45 @@ var _ = Describe("application.Run startup validation", func() {
 		It("rejects a non-positive interval before the k8s client", func() {
 			a := &application{
 				VaultName:            "personal",
-				TaskGlob:             "t/*.md",
 				ReconcilePassTimeout: time.Minute,
 			}
 			err := a.Run(context.Background(), nil)
 			Expect(err).To(HaveOccurred())
 			Expect(err.Error()).To(ContainSubstring("reconcile-interval"))
+		})
+	})
+
+	Describe("TaskVault", func() {
+		It("AC8: defaults to VAULT_NAME when unset", func() {
+			a := &application{VaultName: "openclaw"}
+			Expect(a.effectiveTaskVault()).To(Equal("openclaw"))
+		})
+
+		It("AC8: uses TASK_VAULT when set and leaves VAULT_NAME untouched", func() {
+			a := &application{VaultName: "shared", TaskVault: "personal"}
+			Expect(a.effectiveTaskVault()).To(Equal("personal"))
+			Expect(a.VaultName).To(Equal("shared"))
+		})
+
+		It("AC8: rejects a malformed TASK_VAULT, naming the setting", func() {
+			a := &application{
+				VaultName:            "personal",
+				TaskVault:            "Bad_Vault",
+				ReconcilePassTimeout: time.Minute,
+				ReconcileInterval:    time.Minute,
+			}
+			err := a.Run(context.Background(), nil)
+			Expect(err).To(HaveOccurred())
+			Expect(err.Error()).To(ContainSubstring("task-vault"))
+		})
+
+		It("AC9: validates with no git-rest settings", func() {
+			a := &application{
+				VaultName:            "personal",
+				ReconcilePassTimeout: time.Minute,
+				ReconcileInterval:    time.Minute,
+			}
+			Expect(a.validate(context.Background())).To(BeNil())
 		})
 	})
 })

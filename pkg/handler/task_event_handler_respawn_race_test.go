@@ -34,7 +34,7 @@ var _ = Describe("respawned-second-success race", func() {
 		fakeSpawner         *mocks.FakeJobSpawner
 		fakeResolver        *mocks.FakeConfigResolver
 		fakeResultPublisher *mocks.FakeResultPublisher
-		fakeGitRestClient   *mocks.FakeGitRestClient
+		fakeView            *mocks.FakeTaskView
 		taskStore           *pkg.TaskStore
 		h                   handler.TaskEventHandler
 		watcher             pkg.JobWatcher
@@ -49,8 +49,10 @@ var _ = Describe("respawned-second-success race", func() {
 			nil,
 		)
 		fakeResultPublisher = &mocks.FakeResultPublisher{}
-		fakeGitRestClient = &mocks.FakeGitRestClient{}
-		fakeGitRestClient.IsReadyReturns(true, nil)
+		fakeView = &mocks.FakeTaskView{}
+		fakeView.ReadyReturns(true)
+		fakeView.SnapshotReturns(nil)
+		fakeView.GetReturns(lib.Task{}, false)
 		taskStore = pkg.NewTaskStore()
 		h = handler.NewTaskEventHandler(
 			fakeSpawner,
@@ -62,8 +64,8 @@ var _ = Describe("respawned-second-success race", func() {
 			fakeResultPublisher,
 			taskStore,
 			libtime.NewCurrentDateTime(),
-			fakeGitRestClient,
-			"24 Tasks/*.md",
+			fakeView,
+			testTaskVault,
 			handler.DefaultReconcilePassTimeout,
 			handler.DefaultReconcileInterval,
 		)
@@ -71,6 +73,9 @@ var _ = Describe("respawned-second-success race", func() {
 	})
 
 	buildMsg := func(task lib.Task) *sarama.ConsumerMessage {
+		if task.Vault == "" {
+			task.Vault = testTaskVault
+		}
 		value, err := json.Marshal(task)
 		Expect(err).To(BeNil())
 		return &sarama.ConsumerMessage{Value: value}
