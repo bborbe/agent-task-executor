@@ -226,6 +226,24 @@ var _ = Describe("claim gate", func() {
 		expectClaimDelta(before, after, map[string]float64{"claimed": 1})
 	})
 
+	It("AC8: a repo-keyed task claims under one key per repository", func() {
+		harness := newClaimHarness(pkg.ClaimModeOn)
+		task := qualifyingClaimTask()
+		task.Frontmatter["task_type"] = "update-go"
+		task.Frontmatter["repo"] = "Bborbe/Agent"
+		harness.client.PutReturns("sha-1", nil)
+		before := snapshotClaims()
+
+		Expect(harness.consume(task)).To(Succeed())
+
+		Expect(harness.spawner.SpawnJobCallCount()).To(Equal(1))
+		_, key, expectedSha, _, taskID, _ := harness.client.PutArgsForCall(0)
+		Expect(key).To(Equal("claims/repo/bborbe-agent"))
+		Expect(expectedSha).To(Equal(""))
+		Expect(taskID).To(Equal(string(task.TaskIdentifier)))
+		expectClaimDelta(before, snapshotClaims(), map[string]float64{"claimed": 1})
+	})
+
 	It("AC3: shadow spawns when the lease is still live", func() {
 		harness := newClaimHarness(pkg.ClaimModeShadow)
 		harness.client.PutStub = conflictOnCreate()
@@ -241,7 +259,10 @@ var _ = Describe("claim gate", func() {
 		Expect(harness.consume(qualifyingClaimTask())).To(Succeed())
 
 		Expect(harness.spawner.SpawnJobCallCount()).To(Equal(1))
-		expectClaimDelta(before, snapshotClaims(), map[string]float64{"conflict": 1})
+		expectClaimDelta(before, snapshotClaims(), map[string]float64{
+			"conflict":           1,
+			"takeover_too_early": 1,
+		})
 	})
 
 	It("AC4: on blocks the Job when the lease is still live", func() {
@@ -259,7 +280,76 @@ var _ = Describe("claim gate", func() {
 		Expect(harness.consume(qualifyingClaimTask())).To(Succeed())
 
 		Expect(harness.spawner.SpawnJobCallCount()).To(Equal(0))
-		expectClaimDelta(before, snapshotClaims(), map[string]float64{"conflict": 1})
+		expectClaimDelta(before, snapshotClaims(), map[string]float64{
+			"conflict":           1,
+			"takeover_too_early": 1,
+		})
+	})
+
+	It("AC6: on spawns after taking over an expired lease", func() {
+		harness := newClaimHarness(pkg.ClaimModeOn)
+		task := qualifyingClaimTask()
+		key := claimKeyFor(task)
+		harness.client.PutStub = conflictOnCreate()
+		harness.client.ListReturns([]claim.ClaimRef{
+			listedClaimRef(key, "expired-sha", time.Now().UTC().Add(-31*time.Second)),
+		}, nil)
+		before := snapshotClaims()
+
+		Expect(harness.consume(task)).To(Succeed())
+
+		Expect(harness.spawner.SpawnJobCallCount()).To(Equal(1))
+		expectClaimDelta(before, snapshotClaims(), map[string]float64{
+			"conflict":   1,
+			"taken_over": 1,
+		})
+		Expect(harness.client.PutCallCount()).To(Equal(2))
+		_, putKey, expectedSha, cluster, _, _ := harness.client.PutArgsForCall(1)
+		Expect(putKey).To(Equal(key))
+		Expect(expectedSha).To(Equal("expired-sha"))
+		Expect(cluster).To(Equal("self"))
+	})
+
+	It("AC6: on blocks a lease inside the takeover grace", func() {
+		harness := newClaimHarness(pkg.ClaimModeOn)
+		harness.client.PutStub = conflictOnCreate()
+		harness.client.ListReturns([]claim.ClaimRef{
+			listedClaimRef(
+				claimKeyFor(qualifyingClaimTask()),
+				"grace-sha",
+				time.Now().UTC().Add(-5*time.Second),
+			),
+		}, nil)
+		before := snapshotClaims()
+
+		Expect(harness.consume(qualifyingClaimTask())).To(Succeed())
+
+		Expect(harness.spawner.SpawnJobCallCount()).To(Equal(0))
+		expectClaimDelta(before, snapshotClaims(), map[string]float64{
+			"conflict":           1,
+			"takeover_too_early": 1,
+		})
+	})
+
+	It("AC6: on blocks a lease that is still valid", func() {
+		harness := newClaimHarness(pkg.ClaimModeOn)
+		harness.client.PutStub = conflictOnCreate()
+		harness.client.ListReturns([]claim.ClaimRef{
+			listedClaimRef(
+				claimKeyFor(qualifyingClaimTask()),
+				"live-sha",
+				time.Now().UTC().Add(5*time.Minute),
+			),
+		}, nil)
+		before := snapshotClaims()
+
+		Expect(harness.consume(qualifyingClaimTask())).To(Succeed())
+
+		Expect(harness.spawner.SpawnJobCallCount()).To(Equal(0))
+		expectClaimDelta(before, snapshotClaims(), map[string]float64{
+			"conflict":           1,
+			"takeover_too_early": 1,
+		})
 	})
 
 	It("AC7(a): a foreign-cluster task makes no claim request", func() {
