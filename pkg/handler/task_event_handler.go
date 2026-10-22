@@ -251,8 +251,14 @@ type taskEventHandler struct {
 	// would release the claim just taken for the replacement.
 	spawnPendingMu  sync.Mutex
 	spawnPendingSet map[lib.TaskIdentifier]struct{}
-	redriveMu       sync.Mutex
-	redriveStreaks  map[lib.TaskIdentifier]redriveStreak
+	// claimLocks serialises, per task, the spawn path's mark+claim against a
+	// release path's check+snapshot+delete. Without it the pending check is
+	// check-then-act: a spawn could mark and take its claim between the check
+	// and the HeldClaims snapshot, and the release would delete the fresh claim.
+	claimLocksMu   sync.Mutex
+	claimLocks     map[lib.TaskIdentifier]*sync.Mutex
+	redriveMu      sync.Mutex
+	redriveStreaks map[lib.TaskIdentifier]redriveStreak
 	// spawnGens counts Jobs created by this executor per assignee, on any path.
 	// A pass cache entry read at an older generation is refetched, so a Job
 	// spawned by the Kafka consumer or the deferred loop mid-pass is never
@@ -342,6 +348,24 @@ func (h *taskEventHandler) clearSpawnPending(taskID lib.TaskIdentifier) {
 	h.spawnPendingMu.Lock()
 	defer h.spawnPendingMu.Unlock()
 	delete(h.spawnPendingSet, taskID)
+}
+
+// lockClaimRelease takes the per-task claim lock and returns its unlock. The
+// spawn path holds it across mark+claim; every release path holds it across
+// pending-check+snapshot+delete, so the two can never interleave.
+func (h *taskEventHandler) lockClaimRelease(taskID lib.TaskIdentifier) func() {
+	h.claimLocksMu.Lock()
+	if h.claimLocks == nil {
+		h.claimLocks = make(map[lib.TaskIdentifier]*sync.Mutex)
+	}
+	lock, ok := h.claimLocks[taskID]
+	if !ok {
+		lock = &sync.Mutex{}
+		h.claimLocks[taskID] = lock
+	}
+	h.claimLocksMu.Unlock()
+	lock.Lock()
+	return lock.Unlock
 }
 
 // spawnPendingFor reports whether taskID is inside the claim-then-store window.
@@ -855,7 +879,10 @@ func (h *taskEventHandler) spawnIfNeededClaimed(
 	h.markSpawnPending(task.TaskIdentifier)
 	defer h.clearSpawnPending(task.TaskIdentifier)
 
-	if !h.acquireSpawnClaim(ctx, task) {
+	unlockClaim := h.lockClaimRelease(task.TaskIdentifier)
+	acquired := h.acquireSpawnClaim(ctx, task)
+	unlockClaim()
+	if !acquired {
 		return false, nil
 	}
 
@@ -881,8 +908,10 @@ func (h *taskEventHandler) spawnClaimedJob(
 		// Create response, where the Job exists and this release drops its
 		// claim until the lease expires. The pending marker is cleared first:
 		// this is the one release that must go through.
+		unlockRelease := h.lockClaimRelease(task.TaskIdentifier)
 		h.clearSpawnPending(task.TaskIdentifier)
-		h.ReleaseTaskClaim(ctx, task.TaskIdentifier)
+		h.releaseTaskClaimLocked(ctx, task.TaskIdentifier)
+		unlockRelease()
 		return false, errors.Wrapf(
 			ctx,
 			&spawnJobError{err: err},

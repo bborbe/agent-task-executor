@@ -11,6 +11,7 @@ import (
 	"context"
 	"sync"
 	"testing"
+	"time"
 
 	lib "github.com/bborbe/agent"
 	libtime "github.com/bborbe/time"
@@ -74,5 +75,46 @@ func TestReleaseTaskClaimSkipsWhileSpawnPending(t *testing.T) {
 	h.ReleaseTaskClaim(ctx, lib.TaskIdentifier("task-1"))
 	if client.deletes != 1 {
 		t.Fatalf("released %d claim(s) after the spawn window closed, want 1", client.deletes)
+	}
+}
+
+// TestReleaseBlocksWhileASpawnHoldsTheClaimLock pins the ordering the review
+// found: the pending check and the delete must be atomic against the spawn's
+// mark+claim, so a release cannot run between them and delete a fresh claim.
+func TestReleaseBlocksWhileASpawnHoldsTheClaimLock(t *testing.T) {
+	ctx := context.Background()
+	client := &countingClaimRefClient{}
+	h := newGateHandler(pkg.ClaimModeShadow, client)
+
+	manager, err := h.leaseManager(ctx)
+	if err != nil {
+		t.Fatalf("lease manager: %v", err)
+	}
+	if _, err := manager.Claim(ctx, "claims/task/task-1", "task-1"); err != nil {
+		t.Fatalf("claim: %v", err)
+	}
+
+	// Hold exactly what a spawn holds while it takes its claim.
+	unlockClaim := h.lockClaimRelease(lib.TaskIdentifier("task-1"))
+	h.markSpawnPending(lib.TaskIdentifier("task-1"))
+
+	released := make(chan struct{})
+	go func() {
+		h.ReleaseTaskClaim(ctx, lib.TaskIdentifier("task-1"))
+		close(released)
+	}()
+
+	select {
+	case <-released:
+		t.Fatal("release ran while a spawn held the claim lock")
+	case <-time.After(100 * time.Millisecond):
+	}
+
+	unlockClaim()
+	<-released
+	h.clearSpawnPending(lib.TaskIdentifier("task-1"))
+
+	if client.deletes != 0 {
+		t.Fatalf("released %d claim(s) across the spawn window, want 0", client.deletes)
 	}
 }
