@@ -4,6 +4,7 @@ All notable changes to this project will be documented in this file.
 
 ## Unreleased
 
+- refactor: restore `pkg.ReadGitRestGatewaySecret`, which reads the git-rest gateway secret by NAME from a K8s Secret (data key `gateway-secret`) — never logged, never in env, never in the Deployment manifest. The task-view change removed it along with the git-rest client; the leased claim ref transport needs it back.
 - feat: add the `ClaimMode` type (`off` | `shadow` | `on`) and `ParseClaimMode`, which treats an unset variable as `off` and an explicitly empty or unrecognised value as an error rather than defaulting. `ClaimMode.TakesClaim` reports whether a mode needs the claim transport; it is an allow-list, so a zero-value or unparsed mode reports false and fails closed. No runtime wiring yet.
 
 ## v0.26.0
