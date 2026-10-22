@@ -6,6 +6,9 @@ All notable changes to this project will be documented in this file.
 
 - test: **the stage × cluster routing contract is pinned.** No behaviour change: a task naming a different `cluster:` is skipped, and a task with no `cluster:` is eligible on every cluster whose `stage` matches its `BRANCH` — that is already what the executor does. It is pinned now because the claims rollout depends on it and nothing tested it. A 20-entry table covers dev / prod / absent stage × no-pin / pin-self / pin-other across dev, prod and sun executors, plus the `RUN_UNTAGGED=false` rows that keep a pool member out of the untagged set while claims are off — with claims off, an untagged task eligible on two clusters is a duplicate run, so that guard stays until the assigner is retired.
 - test: **a live-broker test proves two consumer groups on one topic both receive every event.** The task event topic has one partition, so a shared group hands the whole topic to a single member; that member filters by assignee, skips what it cannot run, and commits those offsets, and the other clusters never see the events. `pkg/kafkatest` runs two groups against one single-partition topic and asserts both receive every message. Needs `KAFKA_BROKERS`; skips without one, the same way `pkg/envtest` skips without `KUBEBUILDER_ASSETS`.
+
+## v0.26.2
+
 - fix: `ReadGitRestGatewaySecret` now returns an error when the `gateway-secret` data key exists but holds an empty value. It previously returned an empty string and a nil error, which silently disabled gateway auth despite the doc promising a loud startup failure; only an unset secret name now means auth is disabled.
 
 ## v0.26.1
