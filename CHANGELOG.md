@@ -2,7 +2,7 @@
 
 All notable changes to this project will be documented in this file.
 
-## Unreleased
+## v0.29.0
 
 - feat: attempt one lease takeover on a 409 claim conflict and proceed on an expired lease
 - feat: renew a held claim while its Job runs, and retry a release an end point could not deliver, from one lease-loop entry in the service run list. `off` adds no loop.
