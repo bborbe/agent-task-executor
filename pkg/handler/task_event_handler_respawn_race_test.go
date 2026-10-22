@@ -68,6 +68,7 @@ var _ = Describe("respawned-second-success race", func() {
 			testTaskVault,
 			handler.DefaultReconcilePassTimeout,
 			handler.DefaultReconcileInterval,
+			pkg.ClaimModeOff,
 		)
 		watcher = pkg.NewJobWatcher(fake.NewClientset(), "test-ns", taskStore, fakeResultPublisher)
 	})

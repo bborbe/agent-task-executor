@@ -39,6 +39,9 @@ rebuilds the view.
 | `TASK_VAULT` | `VAULT_NAME` | Vault slug this executor owns tasks for. Must match `^[a-z][a-z0-9-]*$`. A task is owned when its stamped `vault` equals this value; a task with no stamped vault is never owned. A ready view that holds tasks but none for this vault logs `event=task_vault_mismatch` and drives nothing; a view in which every task is unstamped logs `event=task_vault_unstamped` and drives nothing. |
 | `RECONCILE_INTERVAL` | `60s` | Interval between reconcile passes. |
 | `RECONCILE_PASS_TIMEOUT` | `45s` | Deadline for one reconcile pass. |
+| `CLAIM_MODE` | `off` | Claim dispatch mode: `off` (no claim client constructed and no secret read, today's behaviour), `shadow` (claims, never blocks), `on` (a held claim is a precondition of the Job). Any other value stops the process at startup. |
+| `GITREST_URL` | — | git-rest HTTP API base URL the claim ref client writes leased claim refs through. Required when `CLAIM_MODE` is `shadow` or `on` (startup fails without it); unused in `off`. This is the claim transport only — task state is read from the in-memory task view, never from git-rest. |
+| `GITREST_GATEWAY_SECRET` | — | **NAME** of the K8s Secret carrying the git-rest gateway secret (data key `gateway-secret`), never the secret value. Read only when `CLAIM_MODE` is `shadow` or `on`; empty disables gateway auth. |
 
 ## Links
 

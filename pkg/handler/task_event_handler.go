@@ -191,6 +191,7 @@ func NewTaskEventHandler(
 	taskVault string,
 	reconcilePassTimeout time.Duration,
 	reconcileInterval time.Duration,
+	claimMode pkg.ClaimMode,
 ) TaskEventHandler {
 	return &taskEventHandler{
 		jobSpawner:           jobSpawner,
@@ -209,6 +210,7 @@ func NewTaskEventHandler(
 		taskVault:            taskVault,
 		reconcilePassTimeout: reconcilePassTimeout,
 		reconcileInterval:    reconcileInterval,
+		claimMode:            claimMode,
 		redriveStreaks:       make(map[lib.TaskIdentifier]redriveStreak),
 	}
 }
@@ -235,6 +237,7 @@ type taskEventHandler struct {
 	taskVault            string
 	reconcilePassTimeout time.Duration
 	reconcileInterval    time.Duration
+	claimMode            pkg.ClaimMode
 	redriveMu            sync.Mutex
 	redriveStreaks       map[lib.TaskIdentifier]redriveStreak
 	// spawnGens counts Jobs created by this executor per assignee, on any path.
