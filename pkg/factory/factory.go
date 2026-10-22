@@ -19,7 +19,6 @@ import (
 	"github.com/bborbe/log"
 	"github.com/bborbe/run"
 	libtime "github.com/bborbe/time"
-	"github.com/golang/glog"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/cache"
@@ -86,33 +85,11 @@ func CreateClaimLifecycleRunFuncs(manager claim.LeaseManager) []run.Func {
 // running to its natural end — the duplicate this whole mechanism exists to
 // prevent. Every rollout replaces a pod, so this is not a rare path.
 //
-// A failure is logged, never returned: git-rest being briefly unreachable at
-// boot must not crash-loop an executor that can still process tasks. The claims
-// then stay unheld until their leases lapse, which is the behaviour before this
-// step existed.
+// The retry policy and the never-fail-the-boot rule live in
+// claim.RecoverAtStartup; this factory only wires it.
 func CreateClaimRecoverFunc(manager claim.LeaseManager) run.Func {
 	return func(ctx context.Context) error {
-		const attempts = 5
-		for attempt := 1; attempt <= attempts; attempt++ {
-			err := manager.Recover(ctx)
-			if err == nil {
-				glog.Infof(
-					"claim recovery completed; claims held before this start are adopted again",
-				)
-				return nil
-			}
-			glog.Errorf("claim recovery attempt %d/%d failed: %v", attempt, attempts, err)
-			select {
-			case <-ctx.Done():
-				return nil
-			case <-time.After(time.Second):
-			}
-		}
-		glog.Errorf(
-			"claim recovery failed after %d attempts; claims held before this start stay unheld until their leases lapse",
-			attempts,
-		)
-		return nil
+		return claim.RecoverAtStartup(ctx, manager)
 	}
 }
 

@@ -8,8 +8,6 @@ import (
 	"context"
 	"testing"
 
-	"github.com/bborbe/errors"
-
 	"github.com/bborbe/agent-task-executor/pkg/claim"
 )
 
@@ -72,40 +70,5 @@ func TestCreateClaimLifecycleRunFuncs(t *testing.T) {
 	}
 	if manager.runCalls != 1 {
 		t.Fatalf("lease manager Run calls = %d, want 1", manager.runCalls)
-	}
-}
-
-// TestCreateClaimRecoverFuncNeverFailsTheBoot asserts a git-rest outage at
-// startup is logged and retried but does not crash-loop the executor: the run
-// func returns nil even when every attempt fails.
-func TestCreateClaimRecoverFuncNeverFailsTheBoot(t *testing.T) {
-	manager := &stubLeaseManager{recoverErr: errors.Errorf(context.Background(), "git-rest down")}
-
-	if err := CreateClaimRecoverFunc(manager)(context.Background()); err != nil {
-		t.Fatalf("recover run func returned %v; want nil so the executor still boots", err)
-	}
-	if manager.recoverCalls < 2 {
-		t.Fatalf(
-			"lease manager Recover calls = %d, want the retry to run more than once",
-			manager.recoverCalls,
-		)
-	}
-}
-
-// TestCreateClaimRecoverFuncStopsOnCancelledContext asserts the retry loop does
-// not outlive the service context.
-func TestCreateClaimRecoverFuncStopsOnCancelledContext(t *testing.T) {
-	manager := &stubLeaseManager{recoverErr: errors.Errorf(context.Background(), "git-rest down")}
-	ctx, cancel := context.WithCancel(context.Background())
-	cancel()
-
-	if err := CreateClaimRecoverFunc(manager)(ctx); err != nil {
-		t.Fatalf("recover run func returned %v; want nil", err)
-	}
-	if manager.recoverCalls != 1 {
-		t.Fatalf(
-			"lease manager Recover calls = %d, want 1 before the context stops the retry",
-			manager.recoverCalls,
-		)
 	}
 }
