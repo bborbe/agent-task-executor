@@ -121,7 +121,7 @@ func TestSpawnMarksPendingBeforeTakingTheClaim(t *testing.T) {
 	}
 
 	spawner := &stubJobSpawner{}
-	h := NewTaskEventHandler(
+	handler := NewTaskEventHandler(
 		spawner,
 		"prod",
 		"self",
@@ -137,7 +137,11 @@ func TestSpawnMarksPendingBeforeTakingTheClaim(t *testing.T) {
 		DefaultReconcileInterval,
 		pkg.ClaimModeShadow,
 		func() claim.ClaimRefClient { return client },
-	).(*taskEventHandler)
+	)
+	h, ok := handler.(*taskEventHandler)
+	if !ok {
+		t.Fatalf("expected *taskEventHandler, got %T", handler)
+	}
 
 	task := lib.Task{
 		TaskIdentifier: lib.TaskIdentifier("task-1"),
