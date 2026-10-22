@@ -4,6 +4,7 @@ All notable changes to this project will be documented in this file.
 
 ## Unreleased
 
+- refactor: restore `pkg.ReadGitRestGatewaySecret`, which reads the git-rest gateway secret by NAME from a K8s Secret (data key `gateway-secret`) — never logged, never in env, never in the Deployment manifest. The task-view change removed it along with the git-rest client; the leased claim ref transport needs it back.
 - feat: wire `CLAIM_MODE` into the executor. The claim ref client is built from `GITREST_URL` and the gateway secret read by NAME from K8s only in `shadow` and `on`; `off` constructs no client, reads no secret and validates no transport setting, and a claim-taking mode with no `GITREST_URL` stops the process at startup. The claim ref client keeps a git-rest transport of its own because leased claim refs are written through git-rest even though task state is now read from the in-memory task view.
 
 ## v0.26.0
