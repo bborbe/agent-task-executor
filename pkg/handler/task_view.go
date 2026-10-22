@@ -120,8 +120,9 @@ func (v *taskView) ConsumeMessage(ctx context.Context, msg *sarama.ConsumerMessa
 	v.mu.Lock()
 	switch {
 	case err == nil:
-		// A task at a terminal phase is never spawned again (see IsTerminal), and
-		// the view retains a body only so a spawn can render the task file. So the
+		// A task at a terminal phase is never spawned again — applyPhaseGate refuses
+		// it on the event path and reconcileTask refuses it on the floor — and the
+		// view retains a body only so a spawn can render the task file. So the
 		// body of a terminal task is dead weight: the skip decisions read
 		// frontmatter alone. Dropping it here is what keeps the view inside its
 		// container limit — the body is ~88% of a task's bytes, and at 15k tasks

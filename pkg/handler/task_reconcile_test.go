@@ -377,6 +377,30 @@ var _ = Describe("TaskEventHandler reconcile loop", func() {
 				"stage":    "prod",
 			},
 		}, nil),
+		// The entry above passes because human_review is absent from the default
+		// trigger set, so it never exercises the terminal guard. This one makes the
+		// Config list the terminal phase, which is the only shape that can reach a
+		// spawn: without the IsTerminal check in reconcileTask the floor would drive
+		// it, and the view — which retains no body for a terminal task — would hand
+		// the agent an empty task file.
+		Entry("phase done listed in the Config's trigger.phases (terminal)", lib.Task{
+			TaskIdentifier: "tid-a",
+			Frontmatter: lib.TaskFrontmatter{
+				"status":   "in_progress",
+				"phase":    string(domain.TaskPhaseDone),
+				"assignee": "claude",
+				"stage":    "prod",
+			},
+		}, func() {
+			fakeResolver.ResolveReturns(pkg.AgentConfiguration{
+				Assignee: "claude",
+				Image:    "my-image:latest",
+				Trigger: &agentv1.Trigger{
+					Phases:   domain.TaskPhases{domain.TaskPhaseDone},
+					Statuses: domain.TaskStatuses{domain.TaskStatusInProgress},
+				},
+			}, nil)
+		}),
 		Entry("empty assignee (assignee key absent)", lib.Task{
 			TaskIdentifier: "tid-a",
 			Frontmatter: lib.TaskFrontmatter{
