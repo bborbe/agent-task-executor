@@ -840,8 +840,7 @@ var _ = Describe("TaskEventHandler reconcile loop", func() {
 		)
 		task := parkedTask(domain.TaskPhaseExecution, "github-update-go")
 		task.Frontmatter["previous_assignee"] = "tie-break-agent"
-		fakeGitRestClient.ListReturns([]string{"24 Tasks/tid-parked.md"}, nil)
-		fakeGitRestClient.GetReturns([]byte(renderTaskFile(task)), nil)
+		fakeView.SnapshotReturns([]lib.Task{task})
 
 		Expect(h.ReconcileOnce(ctx)).To(Succeed())
 
@@ -860,8 +859,7 @@ var _ = Describe("TaskEventHandler reconcile loop", func() {
 			fakeResolver.ResolveByTaskTypeReturns(pkg.AgentConfiguration{}, pkg.ErrConfigNotFound)
 			task := parkedTask(domain.TaskPhaseExecution, "no-such-type")
 			task.Frontmatter["previous_assignee"] = "tie-break-agent"
-			fakeGitRestClient.ListReturns([]string{"24 Tasks/tid-parked.md"}, nil)
-			fakeGitRestClient.GetReturns([]byte(renderTaskFile(task)), nil)
+			fakeView.SnapshotReturns([]lib.Task{task})
 
 			Expect(h.ReconcileOnce(ctx)).To(Succeed())
 
@@ -878,8 +876,7 @@ var _ = Describe("TaskEventHandler reconcile loop", func() {
 		fakeResolver.ResolveByTaskTypeReturns(pkg.AgentConfiguration{}, pkg.ErrConfigAmbiguous)
 		task := parkedTask(domain.TaskPhaseExecution, "shared-type")
 		task.Frontmatter["previous_assignee"] = "tie-break-agent"
-		fakeGitRestClient.ListReturns([]string{"24 Tasks/tid-parked.md"}, nil)
-		fakeGitRestClient.GetReturns([]byte(renderTaskFile(task)), nil)
+		fakeView.SnapshotReturns([]lib.Task{task})
 
 		// The ambiguity propagates to reconcileOne's resolve_error skip as before:
 		// the pass still completes and nothing touches the task.
