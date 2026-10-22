@@ -173,17 +173,23 @@ func (a *application) validateClaimTransport(
 	// first claim, which is the failure this function exists to prevent.
 	parsed, err := url.Parse(a.GitRestURL)
 	if err != nil {
-		return errors.Wrapf(
-			ctx,
-			err,
-			"gitrest-url (GITREST_URL) is not a valid URL",
-		)
+		// Never echo the raw value: a malformed URL can still carry userinfo.
+		return errors.Errorf(ctx, "gitrest-url (GITREST_URL) is not a valid URL")
 	}
-	if parsed.Scheme == "" || parsed.Host == "" {
+	// Drop userinfo before the value reaches an error string or a log line.
+	parsed.User = nil
+	if parsed.Scheme != "http" && parsed.Scheme != "https" {
 		return errors.Errorf(
 			ctx,
-			"gitrest-url (GITREST_URL) must carry a scheme and a host, got %q",
-			a.GitRestURL,
+			"gitrest-url (GITREST_URL) must use http or https, got %q",
+			parsed.String(),
+		)
+	}
+	if parsed.Host == "" {
+		return errors.Errorf(
+			ctx,
+			"gitrest-url (GITREST_URL) must carry a host, got %q",
+			parsed.String(),
 		)
 	}
 	// The claim ref key is scoped by cluster and the lease manager refuses an

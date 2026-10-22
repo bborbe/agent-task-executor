@@ -5,7 +5,6 @@ All notable changes to this project will be documented in this file.
 ## Unreleased
 
 - feat: gate task dispatch on a git-rest lease claim after all existing gates (off/shadow/on; off unchanged)
-- feat: attempt one lease takeover on a 409 claim conflict and proceed on an expired lease
 
 ## v0.26.4
 

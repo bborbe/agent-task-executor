@@ -98,33 +98,39 @@ func TestValidateClaimTransport(t *testing.T) {
 		mode    pkg.ClaimMode
 		url     string
 		cluster string
-		wantErr bool
+		want    string
 	}{
-		{"off needs no url", pkg.ClaimModeOff, "", "", false},
-		{"off ignores a set url", pkg.ClaimModeOff, "http://git-rest", "self", false},
-		{"shadow requires a url", pkg.ClaimModeShadow, "", "self", true},
-		{"shadow accepts a url", pkg.ClaimModeShadow, "http://git-rest", "self", false},
-		{"on requires a url", pkg.ClaimModeOn, "", "self", true},
-		{"on accepts a url", pkg.ClaimModeOn, "http://git-rest", "self", false},
-		{"zero value needs no url", pkg.ClaimMode(""), "", "", false},
-		{"shadow rejects a url with no scheme", pkg.ClaimModeShadow, "git-rest", "self", true},
-		{"shadow rejects a url with no host", pkg.ClaimModeShadow, "http://", "self", true},
-		{"shadow requires a cluster", pkg.ClaimModeShadow, "http://git-rest", "", true},
-		{"on requires a cluster", pkg.ClaimModeOn, "http://git-rest", "", true},
+		{"off needs no url", pkg.ClaimModeOff, "", "", ""},
+		{"off ignores a set url", pkg.ClaimModeOff, "http://git-rest", "self", ""},
+		{"shadow requires a url", pkg.ClaimModeShadow, "", "self", "GITREST_URL"},
+		{"shadow accepts a url", pkg.ClaimModeShadow, "http://git-rest", "self", ""},
+		{"on requires a url", pkg.ClaimModeOn, "", "self", "GITREST_URL"},
+		{"on accepts a url", pkg.ClaimModeOn, "http://git-rest", "self", ""},
+		{"zero value needs no url", pkg.ClaimMode(""), "", "", ""},
+		{"shadow accepts https", pkg.ClaimModeShadow, "https://git-rest", "self", ""},
+		{"shadow rejects a url with no scheme", pkg.ClaimModeShadow, "git-rest", "self", "GITREST_URL"},
+		{"shadow rejects a url with no host", pkg.ClaimModeShadow, "http://", "self", "GITREST_URL"},
+		{"shadow rejects a non-http scheme", pkg.ClaimModeShadow, "ftp://git-rest", "self", "http or https"},
+		{"shadow redacts url userinfo", pkg.ClaimModeShadow, "ftp://u:s3cret@git-rest", "self", "http or https"},
+		{"shadow rejects an unparseable url", pkg.ClaimModeShadow, "http://git-rest:bad port", "self", "not a valid URL"},
+		{"shadow requires a cluster", pkg.ClaimModeShadow, "http://git-rest", "", "CLUSTER"},
+		{"on requires a cluster", pkg.ClaimModeOn, "http://git-rest", "", "CLUSTER"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			a := &application{GitRestURL: tc.url, Cluster: tc.cluster}
 			err := a.validateClaimTransport(ctx, tc.mode)
-			if tc.wantErr && err == nil {
-				t.Fatal("expected an error")
-			}
-			if !tc.wantErr && err != nil {
+			if tc.want == "" && err != nil {
 				t.Fatalf("unexpected error: %v", err)
 			}
-			if tc.wantErr &&
-				!strings.Contains(err.Error(), "GITREST_URL") &&
-				!strings.Contains(err.Error(), "CLUSTER") {
-				t.Fatalf("expected the error to name the offending setting, got %q", err.Error())
+			if tc.want != "" && err == nil {
+				t.Fatal("expected an error")
+			}
+			if tc.want != "" && !strings.Contains(err.Error(), tc.want) {
+				t.Fatalf("expected the error to contain %q, got %q", tc.want, err.Error())
+			}
+			// A URL carrying userinfo must never reach the error string.
+			if err != nil && strings.Contains(err.Error(), "s3cret") {
+				t.Fatalf("error leaked the URL userinfo: %q", err.Error())
 			}
 		})
 	}
