@@ -18,6 +18,23 @@ import (
 	"github.com/bborbe/agent-task-executor/pkg/claim"
 )
 
+// noopClaimRefClient satisfies claim.ClaimRefClient for construction tests. It
+// is defined here rather than taken from the mocks package, which imports
+// pkg/handler and so cannot be imported by an internal test of it.
+type noopClaimRefClient struct{}
+
+func (noopClaimRefClient) List(context.Context, string) ([]claim.ClaimRef, error) {
+	return nil, nil
+}
+
+func (noopClaimRefClient) Put(
+	context.Context, string, string, string, string, libtime.DateTime,
+) (string, error) {
+	return "", nil
+}
+
+func (noopClaimRefClient) Delete(context.Context, string, string) error { return nil }
+
 func TestLeaseManagerRefusesClaimModeOff(t *testing.T) {
 	ctx := context.Background()
 	h := &taskEventHandler{
@@ -68,7 +85,7 @@ func TestLeaseManagerConstructsOnce(t *testing.T) {
 		cluster:   "self",
 		claimRefClientFactory: func() claim.ClaimRefClient {
 			calls++
-			return nil
+			return noopClaimRefClient{}
 		},
 		currentDateTime: libtime.NewCurrentDateTime(),
 	}
@@ -91,13 +108,38 @@ func TestLeaseManagerConstructsOnce(t *testing.T) {
 	}
 }
 
+// TestLeaseManagerRejectsNilRefClient pins the loud failure: a factory that
+// returns nil must be refused here, because a nil client would panic on the
+// first claim instead of surfacing a configuration error.
+func TestLeaseManagerRejectsNilRefClient(t *testing.T) {
+	ctx := context.Background()
+	h := &taskEventHandler{
+		claimMode: pkg.ClaimModeShadow,
+		cluster:   "self",
+		claimRefClientFactory: func() claim.ClaimRefClient {
+			return nil
+		},
+		currentDateTime: libtime.NewCurrentDateTime(),
+	}
+	manager, err := h.leaseManager(ctx)
+	if err == nil {
+		t.Fatal("expected an error for a nil ref client")
+	}
+	if !strings.Contains(err.Error(), "nil") {
+		t.Fatalf("expected error to name nil, got %q", err.Error())
+	}
+	if manager != nil {
+		t.Fatal("expected no manager for a nil ref client")
+	}
+}
+
 func TestLeaseManagerRejectsEmptyCluster(t *testing.T) {
 	ctx := context.Background()
 	h := &taskEventHandler{
 		claimMode: pkg.ClaimModeShadow,
 		cluster:   "",
 		claimRefClientFactory: func() claim.ClaimRefClient {
-			return nil
+			return noopClaimRefClient{}
 		},
 		currentDateTime: libtime.NewCurrentDateTime(),
 	}

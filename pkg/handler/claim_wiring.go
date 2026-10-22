@@ -70,6 +70,13 @@ func (h *taskEventHandler) createLeaseManager(
 		)
 	}
 	refClient := h.claimRefClientFactory()
+	if refClient == nil {
+		return nil, errors.Errorf(
+			ctx,
+			"claim ref client factory returned nil for claim mode %q",
+			h.claimMode,
+		)
+	}
 	manager, err := claim.NewLeaseManager(
 		h.cluster,
 		refClient,

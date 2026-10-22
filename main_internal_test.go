@@ -31,9 +31,27 @@ import (
 // TestParseClaimModeFromEnv is a plain Go test rather than a Ginkgo spec: the
 // specs declared in this internal test package are not discovered by the
 // package-external suite, so behaviour that must actually run is tested here.
+// unsetClaimModeEnv removes CLAIM_MODE for one test and restores whatever value
+// the process held before, so a case cannot leak its environment into the rest
+// of the package's tests.
+func unsetClaimModeEnv(t *testing.T) {
+	t.Helper()
+	prior, present := os.LookupEnv(claimModeEnv)
+	if err := os.Unsetenv(claimModeEnv); err != nil {
+		t.Fatalf("unset %s: %v", claimModeEnv, err)
+	}
+	t.Cleanup(func() {
+		if present {
+			_ = os.Setenv(claimModeEnv, prior)
+			return
+		}
+		_ = os.Unsetenv(claimModeEnv)
+	})
+}
+
 func TestParseClaimModeFromEnv(t *testing.T) {
 	t.Run("unset variable is off", func(t *testing.T) {
-		os.Unsetenv(claimModeEnv)
+		unsetClaimModeEnv(t)
 		if _, present := os.LookupEnv(claimModeEnv); present {
 			t.Fatalf("expected %s to be unset", claimModeEnv)
 		}
@@ -47,8 +65,7 @@ func TestParseClaimModeFromEnv(t *testing.T) {
 	})
 
 	t.Run("explicitly empty variable is invalid", func(t *testing.T) {
-		os.Setenv(claimModeEnv, "")
-		t.Cleanup(func() { os.Unsetenv(claimModeEnv) })
+		t.Setenv(claimModeEnv, "")
 		_, err := parseClaimModeFromEnv(context.Background())
 		if err == nil {
 			t.Fatal("expected an error")
@@ -59,8 +76,7 @@ func TestParseClaimModeFromEnv(t *testing.T) {
 	})
 
 	t.Run("uppercase ON is invalid", func(t *testing.T) {
-		os.Setenv(claimModeEnv, "ON")
-		t.Cleanup(func() { os.Unsetenv(claimModeEnv) })
+		t.Setenv(claimModeEnv, "ON")
 		_, err := parseClaimModeFromEnv(context.Background())
 		if err == nil {
 			t.Fatal("expected an error")
