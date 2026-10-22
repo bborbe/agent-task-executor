@@ -117,6 +117,21 @@ var _ = Describe("claim release at the Job-watcher end points", func() {
 			Expect(heldTaskIDs(manager)).To(ContainElement("task-a"))
 		})
 
+		It("releases when the store entry tracks this very Job", func() {
+			harness.holdClaim("task-a")
+			task := qualifyingClaimTask()
+			task.TaskIdentifier = lib.TaskIdentifier("task-a")
+			task.Frontmatter["current_job"] = "job-a"
+			harness.taskStore.Store(lib.TaskIdentifier("task-a"), task)
+			before := snapshotClaims()
+
+			harness.watcher().
+				HandleJob(ctx, terminalJob("job-a", "task-a", succeededCondition()))
+
+			Expect(harness.client.DeleteCallCount()).To(Equal(1))
+			expectClaimDelta(before, snapshotClaims(), map[string]float64{"released": 1})
+		})
+
 		It("AC1(b) releases only the claim of the Job that failed", func() {
 			harness.holdClaim("task-a")
 			harness.holdClaim("task-b")
@@ -167,11 +182,7 @@ var _ = Describe("claim release at the Job-watcher end points", func() {
 			}
 		})
 
-		// Pending until this branch is rebased onto #105. The claim gate is
-		// spec 011 part 2 and is not on this base, so nothing takes a claim
-		// before SpawnJob runs and there is nothing for the failure path to
-		// release. The hook itself is in place; flip this to It on the rebase.
-		PIt("AC1(e) releases the claim it just took when the spawn fails", func() {
+		It("AC1(e) releases the claim it just took when the spawn fails", func() {
 			harness.spawner.SpawnJobReturns("", stderrors.New("job create failed"))
 			before := snapshotClaims()
 
@@ -309,5 +320,21 @@ var _ = Describe("claim release at the vault end points", func() {
 
 		Expect(harness.client.DeleteCallCount()).To(Equal(1))
 		expectClaimDelta(before, snapshotClaims(), map[string]float64{"released": 1})
+	})
+
+	It("does not release on a stale terminal-phase event for a newer Job", func() {
+		harness.holdClaim("task-a")
+		event := terminalPhaseTask("task-a", "human_review")
+		event.Frontmatter["current_job"] = "job-old"
+		stored := qualifyingClaimTask()
+		stored.TaskIdentifier = lib.TaskIdentifier("task-a")
+		stored.Frontmatter["current_job"] = "job-new"
+		harness.taskStore.Store(lib.TaskIdentifier("task-a"), stored)
+		before := snapshotClaims()
+
+		Expect(harness.consume(event)).To(Succeed())
+
+		Expect(harness.client.DeleteCallCount()).To(Equal(0))
+		expectClaimDelta(before, snapshotClaims(), map[string]float64{})
 	})
 })

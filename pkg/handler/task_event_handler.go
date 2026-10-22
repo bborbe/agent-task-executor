@@ -194,8 +194,11 @@ func NewTaskEventHandler(
 	reconcileInterval time.Duration,
 	claimMode pkg.ClaimMode,
 	claimRefClientFactory ClaimRefClientFactory,
+	// claimJobControl is optional so the many test call sites stay readable; a
+	// claim-taking mode without one fails loudly at lease-manager construction.
+	claimJobControl ...claim.JobControl,
 ) ClaimLifecycleEventHandler {
-	return &taskEventHandler{
+	handler := &taskEventHandler{
 		jobSpawner:            jobSpawner,
 		branch:                branch,
 		cluster:               cluster,
@@ -216,6 +219,10 @@ func NewTaskEventHandler(
 		claimRefClientFactory: claimRefClientFactory,
 		redriveStreaks:        make(map[lib.TaskIdentifier]redriveStreak),
 	}
+	if len(claimJobControl) > 0 {
+		handler.claimJobControl = claimJobControl[0]
+	}
+	return handler
 }
 
 type taskEventHandler struct {
@@ -242,11 +249,27 @@ type taskEventHandler struct {
 	reconcileInterval     time.Duration
 	claimMode             pkg.ClaimMode
 	claimRefClientFactory ClaimRefClientFactory
-	claimManagerOnce      sync.Once
-	claimManager          claim.LeaseManager
-	claimManagerErr       error
-	redriveMu             sync.Mutex
-	redriveStreaks        map[lib.TaskIdentifier]redriveStreak
+	// claimJobControl lets the lease manager's fence and restart recovery act on
+	// a Job. Nil falls back to the loud unmanaged control, so a mode that takes a
+	// claim cannot silently run without it.
+	claimJobControl  claim.JobControl
+	claimManagerOnce sync.Once
+	claimManager     claim.LeaseManager
+	claimManagerErr  error
+	// spawnPendingSet marks tasks whose spawn is between taking the claim and
+	// recording the new Job. A terminal event for the previous Job arriving in
+	// that window names the only Job the store knows, so without this marker it
+	// would release the claim just taken for the replacement.
+	spawnPendingMu  sync.Mutex
+	spawnPendingSet map[lib.TaskIdentifier]struct{}
+	// claimLocks serialises, per task, the spawn path's mark+claim against a
+	// release path's check+snapshot+delete. Without it the pending check is
+	// check-then-act: a spawn could mark and take its claim between the check
+	// and the HeldClaims snapshot, and the release would delete the fresh claim.
+	claimLocksMu   sync.Mutex
+	claimLocks     map[lib.TaskIdentifier]*sync.Mutex
+	redriveMu      sync.Mutex
+	redriveStreaks map[lib.TaskIdentifier]redriveStreak
 	// spawnGens counts Jobs created by this executor per assignee, on any path.
 	// A pass cache entry read at an older generation is refetched, so a Job
 	// spawned by the Kafka consumer or the deferred loop mid-pass is never
@@ -320,6 +343,70 @@ func (h *taskEventHandler) isJobActive(
 	return activeSet[task.TaskIdentifier], nil
 }
 
+// markSpawnPending records that taskID is between taking its claim and having a
+// Job name to record.
+func (h *taskEventHandler) markSpawnPending(taskID lib.TaskIdentifier) {
+	h.spawnPendingMu.Lock()
+	defer h.spawnPendingMu.Unlock()
+	if h.spawnPendingSet == nil {
+		h.spawnPendingSet = make(map[lib.TaskIdentifier]struct{})
+	}
+	h.spawnPendingSet[taskID] = struct{}{}
+}
+
+// clearSpawnPending ends the window opened by markSpawnPending.
+func (h *taskEventHandler) clearSpawnPending(taskID lib.TaskIdentifier) {
+	h.spawnPendingMu.Lock()
+	defer h.spawnPendingMu.Unlock()
+	delete(h.spawnPendingSet, taskID)
+}
+
+// lockClaimRelease takes the per-task claim lock and returns its unlock. The
+// spawn path holds it across mark+claim; every release path holds it across
+// pending-check+snapshot+delete, so the two can never interleave.
+func (h *taskEventHandler) lockClaimRelease(taskID lib.TaskIdentifier) func() {
+	h.claimLocksMu.Lock()
+	if h.claimLocks == nil {
+		h.claimLocks = make(map[lib.TaskIdentifier]*sync.Mutex)
+	}
+	lock, ok := h.claimLocks[taskID]
+	if !ok {
+		lock = &sync.Mutex{}
+		h.claimLocks[taskID] = lock
+	}
+	h.claimLocksMu.Unlock()
+	lock.Lock()
+	return lock.Unlock
+}
+
+// spawnPendingFor reports whether taskID is inside the claim-then-store window.
+func (h *taskEventHandler) spawnPendingFor(taskID lib.TaskIdentifier) bool {
+	h.spawnPendingMu.Lock()
+	defer h.spawnPendingMu.Unlock()
+	_, ok := h.spawnPendingSet[taskID]
+	return ok
+}
+
+// staleEventForTask reports whether the task store holds an entry that tracks a
+// DIFFERENT Job than the event carries, i.e. the event belongs to a superseded
+// job cycle and must not act on the one that is running now. An absent entry is
+// not stale: after a restart the store holds nothing and the release must still
+// happen.
+func (h *taskEventHandler) staleEventForTask(task lib.Task) bool {
+	storedJob := h.storedCurrentJob(task)
+	return storedJob != "" && storedJob != task.Frontmatter.CurrentJob()
+}
+
+// storedCurrentJob returns the store entry's current_job, or "" when the store
+// holds no entry for the task.
+func (h *taskEventHandler) storedCurrentJob(task lib.Task) string {
+	stored, ok := h.taskStore.Load(task.TaskIdentifier)
+	if !ok {
+		return ""
+	}
+	return stored.Frontmatter.CurrentJob()
+}
+
 // cleanupTerminalTask clears in-flight state when a task has reached a terminal
 // status (completed/aborted). taskStore.Delete stops the job informer from emitting
 // a spurious synthetic failure after the agent published success. removeDeferredEntry
@@ -343,15 +430,12 @@ func (h *taskEventHandler) cleanupTerminalTask(ctx context.Context, task lib.Tas
 	// same job as the terminal event — or no job at all (defensive). A stale
 	// entry kept here is cleaned when the tracked job reaches terminal via
 	// HandleJob, the same mechanism the success path already relies on.
-	if stored, ok := h.taskStore.Load(task.TaskIdentifier); ok {
-		if storedJob := stored.Frontmatter.CurrentJob(); storedJob != "" &&
-			storedJob != task.Frontmatter.CurrentJob() {
-			glog.V(3).Infof(
-				"task %s %s: stale terminal event (store current_job=%s, event current_job=%s) — keeping store entry",
-				task.TaskIdentifier, status, storedJob, task.Frontmatter.CurrentJob(),
-			)
-			return
-		}
+	if h.staleEventForTask(task) {
+		glog.V(3).Infof(
+			"task %s %s: stale terminal event (store current_job=%s, event current_job=%s) — keeping store entry",
+			task.TaskIdentifier, status, h.storedCurrentJob(task), task.Frontmatter.CurrentJob(),
+		)
+		return
 	}
 	// Release after the stale-event guard: releasing before it would drop the
 	// claim of a job that is still running under a newer current_job.
@@ -442,7 +526,13 @@ func (h *taskEventHandler) parseAndFilter(
 	phase := task.Frontmatter.Phase()
 	// terminal phases must not be spawned again — operator escalation required
 	if phase != nil && applyPhaseGate(task, *phase) {
-		h.ReleaseTaskClaim(ctx, task.TaskIdentifier)
+		// Same stale-event guard as cleanupTerminalTask: a replayed terminal-phase
+		// event for a task that was moved back to execution and re-spawned under a
+		// newer Job must not release the live claim, or a peer re-claims the key and
+		// runs the same task twice.
+		if !h.staleEventForTask(task) {
+			h.ReleaseTaskClaim(ctx, task.TaskIdentifier)
+		}
 		h.removeDeferredEntry(task.TaskIdentifier)
 		return lib.Task{}, nil, true, nil
 	}
@@ -792,15 +882,47 @@ func (h *taskEventHandler) spawnIfNeededClaimed(
 	// would hold a lease for a task a gate skips; taken later it could not prevent
 	// the duplicate it exists to prevent. Do not confuse this lease with the
 	// deferred-removal claim argument of this function.
-	if !h.acquireSpawnClaim(ctx, task) {
+	// Marked BEFORE the claim: acquireSpawnClaim stores the fresh claim, so a
+	// marker set after it would leave the window between the claim and the marker
+	// wide enough for a terminal event for the previous Job to see a
+	// current-looking store and release the claim just taken. Held until this
+	// function returns, i.e. past storeSpawnedJob.
+	h.markSpawnPending(task.TaskIdentifier)
+	defer h.clearSpawnPending(task.TaskIdentifier)
+
+	unlockClaim := h.lockClaimRelease(task.TaskIdentifier)
+	acquired := h.acquireSpawnClaim(ctx, task)
+	unlockClaim()
+	if !acquired {
 		return false, nil
 	}
 
+	return h.spawnClaimedJob(ctx, task, config)
+}
+
+// spawnClaimedJob creates the Job for a task whose claim is already held, and
+// records it. The caller holds the in-flight marker across this call — from
+// before the claim through storeSpawnedJob — because between the claim and the
+// store entry there is no Job name to compare against, so a terminal event for
+// the previous Job would otherwise look current and release the claim.
+func (h *taskEventHandler) spawnClaimedJob(
+	ctx context.Context,
+	task lib.Task,
+	config *pkg.AgentConfiguration,
+) (bool, error) {
 	jobName, err := h.jobSpawner.SpawnJob(ctx, task, *config)
 	if err != nil {
 		metrics.TaskEventsTotal.WithLabelValues("error").Inc()
 		// A claim taken for a Job that was never created must not stay held.
-		h.ReleaseTaskClaim(ctx, task.TaskIdentifier)
+		// Every SpawnJob error but one precedes the Job create, and an
+		// AlreadyExists answer is success; the accepted window is a lost
+		// Create response, where the Job exists and this release drops its
+		// claim until the lease expires. The pending marker is cleared first:
+		// this is the one release that must go through.
+		unlockRelease := h.lockClaimRelease(task.TaskIdentifier)
+		h.clearSpawnPending(task.TaskIdentifier)
+		h.releaseTaskClaimLocked(ctx, task.TaskIdentifier)
+		unlockRelease()
 		return false, errors.Wrapf(
 			ctx,
 			&spawnJobError{err: err},

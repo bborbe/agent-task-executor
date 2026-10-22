@@ -42,6 +42,7 @@ func TestLeaseManagerRefusesClaimModeOff(t *testing.T) {
 		claimRefClientFactory: func() claim.ClaimRefClient {
 			panic("factory must not be called in claim mode off")
 		},
+		claimJobControl: noopJobControl{},
 		currentDateTime: libtime.NewCurrentDateTime(),
 	}
 	manager, err := h.leaseManager(ctx)
@@ -66,6 +67,7 @@ func TestLeaseManagerRefusesUnparsedClaimMode(t *testing.T) {
 		claimRefClientFactory: func() claim.ClaimRefClient {
 			panic("factory must not be called for an unparsed claim mode")
 		},
+		claimJobControl: noopJobControl{},
 		currentDateTime: libtime.NewCurrentDateTime(),
 	}
 	manager, err := h.leaseManager(ctx)
@@ -87,6 +89,7 @@ func TestLeaseManagerConstructsOnce(t *testing.T) {
 			calls++
 			return noopClaimRefClient{}
 		},
+		claimJobControl: noopJobControl{},
 		currentDateTime: libtime.NewCurrentDateTime(),
 	}
 	first, err := h.leaseManager(ctx)
@@ -119,6 +122,7 @@ func TestLeaseManagerRejectsNilRefClient(t *testing.T) {
 		claimRefClientFactory: func() claim.ClaimRefClient {
 			return nil
 		},
+		claimJobControl: noopJobControl{},
 		currentDateTime: libtime.NewCurrentDateTime(),
 	}
 	manager, err := h.leaseManager(ctx)
@@ -141,6 +145,7 @@ func TestLeaseManagerRejectsEmptyCluster(t *testing.T) {
 		claimRefClientFactory: func() claim.ClaimRefClient {
 			return noopClaimRefClient{}
 		},
+		claimJobControl: noopJobControl{},
 		currentDateTime: libtime.NewCurrentDateTime(),
 	}
 	_, err := h.leaseManager(ctx)
@@ -152,24 +157,37 @@ func TestLeaseManagerRejectsEmptyCluster(t *testing.T) {
 	}
 }
 
-func TestUnmanagedJobControlFailsLoud(t *testing.T) {
+// TestLeaseManagerRefusesNilJobControl asserts a claim-taking mode cannot build
+// a manager without a JobControl: the fence and restart recovery must never run
+// against a control that cannot delete a Job.
+func TestLeaseManagerRefusesNilJobControl(t *testing.T) {
 	ctx := context.Background()
-	var control claim.JobControl = unmanagedJobControl{}
-
-	running, err := control.IsJobRunning(ctx, "task-1")
+	h := &taskEventHandler{
+		claimMode: pkg.ClaimModeShadow,
+		cluster:   "self",
+		claimRefClientFactory: func() claim.ClaimRefClient {
+			return noopClaimRefClient{}
+		},
+		currentDateTime: libtime.NewCurrentDateTime(),
+	}
+	manager, err := h.leaseManager(ctx)
 	if err == nil {
-		t.Fatal("expected IsJobRunning to fail")
+		t.Fatal("expected an error for a nil job control")
 	}
-	if running {
-		t.Fatal("expected IsJobRunning to report false")
+	if !strings.Contains(err.Error(), "job control") {
+		t.Fatalf("expected error to name job control, got %q", err.Error())
 	}
-	if !strings.Contains(err.Error(), "not wired") {
-		t.Fatalf("expected not-wired error, got %q", err.Error())
-	}
-
-	if err := control.DeleteJob(ctx, "task-1"); err == nil {
-		t.Fatal("expected DeleteJob to fail")
-	} else if !strings.Contains(err.Error(), "not wired") {
-		t.Fatalf("expected not-wired error, got %q", err.Error())
+	if manager != nil {
+		t.Fatal("expected no manager without a job control")
 	}
 }
+
+// noopJobControl satisfies claim.JobControl where a test only needs the manager
+// to construct.
+type noopJobControl struct{}
+
+func (noopJobControl) IsJobRunning(context.Context, string) (bool, error) {
+	return false, nil
+}
+
+func (noopJobControl) DeleteJob(context.Context, string) error { return nil }
