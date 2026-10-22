@@ -35,10 +35,24 @@ func (unmanagedJobControl) DeleteJob(ctx context.Context, taskID string) error {
 }
 
 // leaseManager returns this process's single lease manager, constructing it on
-// first use. It refuses to construct anything in claim mode off.
+// first use. Only the two claim-taking modes construct one: the condition is an
+// allow-list rather than a check for off, so a zero-value or otherwise
+// unparsed mode fails closed instead of building a manager nothing asked for.
+//
+// A construction failure is cached for the process lifetime. That is deliberate:
+// the inputs are fixed at startup (the injected factory and the cluster name),
+// so a retry would fail identically on every dispatch and only add log noise.
+// In `on` the cached error fails closed; in `shadow` it fails open, which is the
+// mode's contract.
 func (h *taskEventHandler) leaseManager(ctx context.Context) (claim.LeaseManager, error) {
-	if h.claimMode == pkg.ClaimModeOff {
-		return nil, errors.Errorf(ctx, "claim mode off: no lease manager constructed")
+	switch h.claimMode {
+	case pkg.ClaimModeShadow, pkg.ClaimModeOn:
+	default:
+		return nil, errors.Errorf(
+			ctx,
+			"claim mode %q takes no claim: no lease manager constructed",
+			h.claimMode,
+		)
 	}
 	h.claimManagerOnce.Do(func() {
 		h.claimManager, h.claimManagerErr = h.createLeaseManager(ctx)

@@ -39,6 +39,27 @@ func TestLeaseManagerRefusesClaimModeOff(t *testing.T) {
 	}
 }
 
+// TestLeaseManagerRefusesUnparsedClaimMode pins the allow-list: a zero-value
+// mode is not off, so a check for off alone would construct a manager here and
+// fail open.
+func TestLeaseManagerRefusesUnparsedClaimMode(t *testing.T) {
+	ctx := context.Background()
+	h := &taskEventHandler{
+		claimMode: "",
+		claimRefClientFactory: func() claim.ClaimRefClient {
+			panic("factory must not be called for an unparsed claim mode")
+		},
+		currentDateTime: libtime.NewCurrentDateTime(),
+	}
+	manager, err := h.leaseManager(ctx)
+	if err == nil {
+		t.Fatal("expected an error for an unparsed claim mode")
+	}
+	if manager != nil {
+		t.Fatal("expected no manager for an unparsed claim mode")
+	}
+}
+
 func TestLeaseManagerConstructsOnce(t *testing.T) {
 	ctx := context.Background()
 	calls := 0
