@@ -13,6 +13,7 @@ import (
 	"github.com/bborbe/cqrs/base"
 	cdb "github.com/bborbe/cqrs/cdb"
 	libcron "github.com/bborbe/cron"
+	"github.com/bborbe/errors"
 	libk8s "github.com/bborbe/k8s"
 	libkafka "github.com/bborbe/kafka"
 	"github.com/bborbe/log"
@@ -24,7 +25,6 @@ import (
 
 	agentv1 "github.com/bborbe/agent-task-executor/k8s/apis/agent.benjamin-borbe.de/v1"
 	pkg "github.com/bborbe/agent-task-executor/pkg"
-	"github.com/bborbe/agent-task-executor/pkg/gitrestclient"
 	"github.com/bborbe/agent-task-executor/pkg/handler"
 	"github.com/bborbe/agent-task-executor/pkg/probe"
 	"github.com/bborbe/agent-task-executor/pkg/spawner"
@@ -120,13 +120,6 @@ func CreateConfigResolver(
 	return pkg.NewConfigResolver(handler, branch, vaultName)
 }
 
-// CreateGitRestClient returns the read-only git-rest vault reader the
-// reconcile loop uses. gatewayInitiator is fixed to the executor's identity
-// for git-rest's auth-failure logging.
-func CreateGitRestClient(baseURL, gatewaySecret string) gitrestclient.GitRestClient {
-	return gitrestclient.NewGitRestClient(baseURL, gatewaySecret, "agent-task-executor")
-}
-
 // CreateConsumer wires together all components and returns a Kafka Consumer that
 // reads task events and spawns K8s Jobs for qualifying tasks, along with the
 // TaskEventHandler so callers can wire RunDeferredRespawnLoop.
@@ -150,8 +143,8 @@ func CreateConsumer(
 	jobKafkaClientCertSecret string,
 	jobKafkaCaCertSecret string,
 	jobFsGroup int64,
-	gitRestClient gitrestclient.GitRestClient,
-	taskGlob string,
+	view handler.TaskView,
+	taskVault string,
 	reconcilePassTimeout time.Duration,
 	reconcileInterval time.Duration,
 ) (libkafka.Consumer, handler.TaskEventHandler) {
@@ -177,8 +170,8 @@ func CreateConsumer(
 		resultPublisher,
 		taskStore,
 		currentDateTimeGetter,
-		gitRestClient,
-		taskGlob,
+		view,
+		taskVault,
 		reconcilePassTimeout,
 		reconcileInterval,
 	)
@@ -197,6 +190,39 @@ func CreateConsumer(
 		run.NewTrigger(),
 		logSamplerFactory,
 	), taskEventHandler
+}
+
+// CreateTaskView returns the in-memory task view and the run.Func that captures
+// the topic's high-water marks and then replays the compacted task event topic
+// from the oldest offset on every partition. The reader is a non-group simple
+// consumer: it never joins CONSUMER_GROUP and never commits offsets, so it cannot
+// steal partitions from, or move the offsets of, the live consumer.
+func CreateTaskView(
+	saramaClient sarama.Client,
+	topicPrefix base.TopicPrefix,
+	currentDateTimeGetter libtime.CurrentDateTimeGetter,
+) (handler.TaskView, run.Func) {
+	topic := lib.TaskV1SchemaID.EventTopic(topicPrefix)
+	view := handler.NewTaskView(
+		func(ctx context.Context, topic libkafka.Topic) (libkafka.PartitionOffsets, error) {
+			return libkafka.HighWaterMarks(ctx, saramaClient, topic)
+		},
+		topic,
+		currentDateTimeGetter,
+	)
+	consumer := libkafka.NewSimpleConsumer(
+		saramaClient,
+		topic,
+		libkafka.OffsetOldest,
+		view,
+		log.DefaultSamplerFactory,
+	)
+	return view, func(ctx context.Context) error {
+		if err := view.CaptureHighWaterMarks(ctx); err != nil {
+			return errors.Wrapf(ctx, err, "capture task view high-water marks")
+		}
+		return consumer.Consume(ctx)
+	}
 }
 
 // CreateHealthcheckRunner creates the healthcheck runner shared between the cron path and the

@@ -55,16 +55,16 @@ var RedriveCappedTotal = promauto.NewCounter(
 
 // ReconcilePassesTotal counts reconcile pass outcomes, labelled by result. The
 // failure reasons mirror ReconcileOnce's log events, and `ok` is counted on
-// every pass that gets past its List — so an alert can fire on a backstop that
-// never succeeds. That is the exact shape of the 2026-09 outage: the reconcile
-// loop logged `reconcile_list_failed` once a minute and no other reconcile
-// outcome was ever recorded, for months. A failure-only counter cannot express
-// it — it saturates and then looks identical to a healthy quiet fleet, which is
-// why the pass is counted on both sides of the outcome.
+// every pass that gets past the vault classification — so an alert can fire on a
+// backstop that never succeeds. That is the exact shape of the 2026-09 outage:
+// the reconcile loop logged `reconcile_list_failed` once a minute and no other
+// reconcile outcome was ever recorded, for months. A failure-only counter cannot
+// express it — it saturates and then looks identical to a healthy quiet fleet,
+// which is why the pass is counted on both sides of the outcome.
 var ReconcilePassesTotal = promauto.NewCounterVec(
 	prometheus.CounterOpts{
 		Name: "executor_reconcile_passes_total",
-		Help: "Total number of reconcile passes by outcome (ok, vault_unavailable, list_failed, aborted).",
+		Help: "Total number of reconcile passes by outcome (ok, aborted, view_not_ready, task_vault_mismatch, task_vault_unstamped).",
 	},
 	[]string{"result"},
 )
@@ -81,6 +81,24 @@ var SkippedUnknownAssigneeTotal = promauto.NewCounterVec(
 		Help: "Total number of tasks skipped because their assignee matches no agent Config CR, by assignee.",
 	},
 	[]string{"assignee"},
+)
+
+// ClaimTotal counts claim lease outcomes by result. The result set is closed;
+// keys and task ids are never label values.
+var ClaimTotal = promauto.NewCounterVec(
+	prometheus.CounterOpts{
+		Name: "executor_claim_total",
+		Help: "Total number of claim lease outcomes by result.",
+	},
+	[]string{"result"},
+)
+
+// ClaimMismatchTotal counts held-claim / running-Job mismatches, one per case.
+var ClaimMismatchTotal = promauto.NewCounter(
+	prometheus.CounterOpts{
+		Name: "executor_claim_mismatch_total",
+		Help: "Total number of held-claim / running-Job mismatches.",
+	},
 )
 
 // DeferredConcurrencyCapTotal counts tasks deferred because their assignee was
@@ -110,6 +128,13 @@ var DeferredConcurrencyCapTotal = promauto.NewCounterVec(
 	[]string{"assignee"},
 )
 
+// TaskViewSkippedTotal counts task event messages the in-memory task view
+// could not decode. A skipped message never blocks readiness.
+var TaskViewSkippedTotal = promauto.NewCounter(prometheus.CounterOpts{
+	Name: "executor_task_view_skipped_total",
+	Help: "Total number of task event messages the task view could not decode.",
+})
+
 func init() {
 	TaskEventsTotal.WithLabelValues("spawned").Add(0)
 	TaskEventsTotal.WithLabelValues("skipped_status").Add(0)
@@ -120,6 +145,7 @@ func init() {
 	TaskEventsTotal.WithLabelValues("skipped_recent_success").Add(0)
 	TaskEventsTotal.WithLabelValues("skipped_stage").Add(0)
 	TaskEventsTotal.WithLabelValues("skipped_foreign_cluster").Add(0)
+	TaskEventsTotal.WithLabelValues("skipped_foreign_vault").Add(0)
 	TaskEventsTotal.WithLabelValues("skipped_untagged").Add(0)
 	TaskEventsTotal.WithLabelValues("skipped_trigger_cap").Add(0)
 	TaskEventsTotal.WithLabelValues("error").Add(0)
@@ -135,10 +161,30 @@ func init() {
 	// "backstop never succeeds" alert never fire.
 	for _, result := range []string{
 		"ok",
-		"vault_unavailable",
-		"list_failed",
 		"aborted",
+		"view_not_ready",
+		"task_vault_mismatch",
+		"task_vault_unstamped",
 	} {
 		ReconcilePassesTotal.WithLabelValues(result).Add(0)
+	}
+	// Pre-initialise the closed claim result set so every series is visible
+	// before any claim activity.
+	for _, result := range []string{
+		"claimed",
+		"conflict",
+		"renewed",
+		"recovered",
+		"renew_failed",
+		"claim_lost",
+		"fenced",
+		"taken_over",
+		"takeover_too_early",
+		"released",
+		"already_released",
+		"adopted",
+		"error",
+	} {
+		ClaimTotal.WithLabelValues(result).Add(0)
 	}
 }
