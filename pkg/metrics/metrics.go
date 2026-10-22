@@ -83,6 +83,24 @@ var SkippedUnknownAssigneeTotal = promauto.NewCounterVec(
 	[]string{"assignee"},
 )
 
+// ClaimTotal counts claim lease outcomes by result. The result set is closed;
+// keys and task ids are never label values.
+var ClaimTotal = promauto.NewCounterVec(
+	prometheus.CounterOpts{
+		Name: "executor_claim_total",
+		Help: "Total number of claim lease outcomes by result.",
+	},
+	[]string{"result"},
+)
+
+// ClaimMismatchTotal counts held-claim / running-Job mismatches, one per case.
+var ClaimMismatchTotal = promauto.NewCounter(
+	prometheus.CounterOpts{
+		Name: "executor_claim_mismatch_total",
+		Help: "Total number of held-claim / running-Job mismatches.",
+	},
+)
+
 // DeferredConcurrencyCapTotal counts tasks deferred because their assignee was
 // already at its configured concurrency cap, labelled by that assignee. The
 // bare TaskEventsTotal{result="deferred_concurrency_cap"} counter says a
@@ -147,5 +165,24 @@ func init() {
 		"aborted",
 	} {
 		ReconcilePassesTotal.WithLabelValues(result).Add(0)
+	}
+	// Pre-initialise the closed claim result set so every series is visible
+	// before any claim activity.
+	for _, result := range []string{
+		"claimed",
+		"conflict",
+		"renewed",
+		"recovered",
+		"renew_failed",
+		"claim_lost",
+		"fenced",
+		"taken_over",
+		"takeover_too_early",
+		"released",
+		"already_released",
+		"adopted",
+		"error",
+	} {
+		ClaimTotal.WithLabelValues(result).Add(0)
 	}
 }
