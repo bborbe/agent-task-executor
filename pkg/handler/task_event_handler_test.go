@@ -1143,8 +1143,8 @@ var _ = Describe("TaskEventHandler", func() {
 					&mocks.FakeResultPublisher{},
 					pkg.NewTaskStore(),
 					libtime.NewCurrentDateTime(),
-					fakeGitRestClient,
-					"24 Tasks/*.md",
+					fakeView,
+					testTaskVault,
 					handler.DefaultReconcilePassTimeout,
 					handler.DefaultReconcileInterval,
 				)
