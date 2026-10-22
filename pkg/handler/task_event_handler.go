@@ -328,6 +328,26 @@ func (h *taskEventHandler) isJobActive(
 // otherwise clear the entry, so without this a deferred entry created during the grace
 // window fires ~300s later and respawns a job for an already-done task (the "path C"
 // respawn observed on dev 2026-07-13 for probe 095c58d7).
+// staleEventForTask reports whether the task store holds an entry that tracks a
+// DIFFERENT Job than the event carries, i.e. the event belongs to a superseded
+// job cycle and must not act on the one that is running now. An absent entry is
+// not stale: after a restart the store holds nothing and the release must still
+// happen.
+func (h *taskEventHandler) staleEventForTask(task lib.Task) bool {
+	storedJob := h.storedCurrentJob(task)
+	return storedJob != "" && storedJob != task.Frontmatter.CurrentJob()
+}
+
+// storedCurrentJob returns the store entry's current_job, or "" when the store
+// holds no entry for the task.
+func (h *taskEventHandler) storedCurrentJob(task lib.Task) string {
+	stored, ok := h.taskStore.Load(task.TaskIdentifier)
+	if !ok {
+		return ""
+	}
+	return stored.Frontmatter.CurrentJob()
+}
+
 func (h *taskEventHandler) cleanupTerminalTask(ctx context.Context, task lib.Task) {
 	status := string(task.Frontmatter.Status())
 	if status != "completed" && status != "aborted" {
@@ -343,15 +363,12 @@ func (h *taskEventHandler) cleanupTerminalTask(ctx context.Context, task lib.Tas
 	// same job as the terminal event — or no job at all (defensive). A stale
 	// entry kept here is cleaned when the tracked job reaches terminal via
 	// HandleJob, the same mechanism the success path already relies on.
-	if stored, ok := h.taskStore.Load(task.TaskIdentifier); ok {
-		if storedJob := stored.Frontmatter.CurrentJob(); storedJob != "" &&
-			storedJob != task.Frontmatter.CurrentJob() {
-			glog.V(3).Infof(
-				"task %s %s: stale terminal event (store current_job=%s, event current_job=%s) — keeping store entry",
-				task.TaskIdentifier, status, storedJob, task.Frontmatter.CurrentJob(),
-			)
-			return
-		}
+	if h.staleEventForTask(task) {
+		glog.V(3).Infof(
+			"task %s %s: stale terminal event (store current_job=%s, event current_job=%s) — keeping store entry",
+			task.TaskIdentifier, status, h.storedCurrentJob(task), task.Frontmatter.CurrentJob(),
+		)
+		return
 	}
 	// Release after the stale-event guard: releasing before it would drop the
 	// claim of a job that is still running under a newer current_job.
@@ -442,7 +459,13 @@ func (h *taskEventHandler) parseAndFilter(
 	phase := task.Frontmatter.Phase()
 	// terminal phases must not be spawned again — operator escalation required
 	if phase != nil && applyPhaseGate(task, *phase) {
-		h.ReleaseTaskClaim(ctx, task.TaskIdentifier)
+		// Same stale-event guard as cleanupTerminalTask: a replayed terminal-phase
+		// event for a task that was moved back to execution and re-spawned under a
+		// newer Job must not release the live claim, or a peer re-claims the key and
+		// runs the same task twice.
+		if !h.staleEventForTask(task) {
+			h.ReleaseTaskClaim(ctx, task.TaskIdentifier)
+		}
 		h.removeDeferredEntry(task.TaskIdentifier)
 		return lib.Task{}, nil, true, nil
 	}
@@ -800,6 +823,10 @@ func (h *taskEventHandler) spawnIfNeededClaimed(
 	if err != nil {
 		metrics.TaskEventsTotal.WithLabelValues("error").Inc()
 		// A claim taken for a Job that was never created must not stay held.
+		// Every SpawnJob error but one precedes the Job create, and an
+		// AlreadyExists answer is success; the accepted window is a lost
+		// Create response, where the Job exists and this release drops its
+		// claim until the lease expires.
 		h.ReleaseTaskClaim(ctx, task.TaskIdentifier)
 		return false, errors.Wrapf(
 			ctx,
