@@ -97,18 +97,23 @@ func TestValidateClaimTransport(t *testing.T) {
 		name    string
 		mode    pkg.ClaimMode
 		url     string
+		cluster string
 		wantErr bool
 	}{
-		{"off needs no url", pkg.ClaimModeOff, "", false},
-		{"off ignores a set url", pkg.ClaimModeOff, "http://git-rest", false},
-		{"shadow requires a url", pkg.ClaimModeShadow, "", true},
-		{"shadow accepts a url", pkg.ClaimModeShadow, "http://git-rest", false},
-		{"on requires a url", pkg.ClaimModeOn, "", true},
-		{"on accepts a url", pkg.ClaimModeOn, "http://git-rest", false},
-		{"zero value needs no url", pkg.ClaimMode(""), "", false},
+		{"off needs no url", pkg.ClaimModeOff, "", "", false},
+		{"off ignores a set url", pkg.ClaimModeOff, "http://git-rest", "self", false},
+		{"shadow requires a url", pkg.ClaimModeShadow, "", "self", true},
+		{"shadow accepts a url", pkg.ClaimModeShadow, "http://git-rest", "self", false},
+		{"on requires a url", pkg.ClaimModeOn, "", "self", true},
+		{"on accepts a url", pkg.ClaimModeOn, "http://git-rest", "self", false},
+		{"zero value needs no url", pkg.ClaimMode(""), "", "", false},
+		{"shadow rejects a url with no scheme", pkg.ClaimModeShadow, "git-rest", "self", true},
+		{"shadow rejects a url with no host", pkg.ClaimModeShadow, "http://", "self", true},
+		{"shadow requires a cluster", pkg.ClaimModeShadow, "http://git-rest", "", true},
+		{"on requires a cluster", pkg.ClaimModeOn, "http://git-rest", "", true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			a := &application{GitRestURL: tc.url}
+			a := &application{GitRestURL: tc.url, Cluster: tc.cluster}
 			err := a.validateClaimTransport(ctx, tc.mode)
 			if tc.wantErr && err == nil {
 				t.Fatal("expected an error")
@@ -116,8 +121,10 @@ func TestValidateClaimTransport(t *testing.T) {
 			if !tc.wantErr && err != nil {
 				t.Fatalf("unexpected error: %v", err)
 			}
-			if tc.wantErr && !strings.Contains(err.Error(), "GITREST_URL") {
-				t.Fatalf("expected error to name GITREST_URL, got %q", err.Error())
+			if tc.wantErr &&
+				!strings.Contains(err.Error(), "GITREST_URL") &&
+				!strings.Contains(err.Error(), "CLUSTER") {
+				t.Fatalf("expected the error to name the offending setting, got %q", err.Error())
 			}
 		})
 	}

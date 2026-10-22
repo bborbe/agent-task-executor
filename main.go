@@ -6,6 +6,7 @@ package main
 
 import (
 	"context"
+	"net/url"
 	"os"
 	"regexp"
 	"time"
@@ -165,6 +166,32 @@ func (a *application) validateClaimTransport(
 		return errors.Errorf(
 			ctx,
 			"gitrest-url (GITREST_URL) must be set when CLAIM_MODE is %q",
+			claimMode,
+		)
+	}
+	// A non-empty but malformed URL would otherwise pass startup and fail on the
+	// first claim, which is the failure this function exists to prevent.
+	parsed, err := url.Parse(a.GitRestURL)
+	if err != nil {
+		return errors.Wrapf(
+			ctx,
+			err,
+			"gitrest-url (GITREST_URL) is not a valid URL",
+		)
+	}
+	if parsed.Scheme == "" || parsed.Host == "" {
+		return errors.Errorf(
+			ctx,
+			"gitrest-url (GITREST_URL) must carry a scheme and a host, got %q",
+			a.GitRestURL,
+		)
+	}
+	// The claim ref key is scoped by cluster and the lease manager refuses an
+	// empty one, so a claim-taking mode with no CLUSTER could never take a claim.
+	if a.Cluster == "" {
+		return errors.Errorf(
+			ctx,
+			"cluster (CLUSTER) must be set when CLAIM_MODE is %q",
 			claimMode,
 		)
 	}
