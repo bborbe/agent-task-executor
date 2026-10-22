@@ -219,7 +219,7 @@ var _ = Describe("claim release at the vault end points", func() {
 	It("AC1(c) releases only the claim of the task whose status is completed", func() {
 		harness.holdClaim("task-a")
 		harness.holdClaim("task-b")
-		manager, err := harness.handler.ClaimLeaseManager(ctx)
+		manager, err := harness.eventHandler.ClaimLeaseManager(ctx)
 		Expect(err).NotTo(HaveOccurred())
 		before := snapshotClaims()
 
@@ -237,7 +237,7 @@ var _ = Describe("claim release at the vault end points", func() {
 	It("AC1(c) releases on aborted the same way", func() {
 		harness.holdClaim("task-a")
 		harness.holdClaim("task-b")
-		manager, err := harness.handler.ClaimLeaseManager(ctx)
+		manager, err := harness.eventHandler.ClaimLeaseManager(ctx)
 		Expect(err).NotTo(HaveOccurred())
 		before := snapshotClaims()
 
@@ -254,7 +254,7 @@ var _ = Describe("claim release at the vault end points", func() {
 	It("AC1(d) releases only the claim of the task whose phase is human_review", func() {
 		harness.holdClaim("task-a")
 		harness.holdClaim("task-b")
-		manager, err := harness.handler.ClaimLeaseManager(ctx)
+		manager, err := harness.eventHandler.ClaimLeaseManager(ctx)
 		Expect(err).NotTo(HaveOccurred())
 		before := snapshotClaims()
 
@@ -272,7 +272,7 @@ var _ = Describe("claim release at the vault end points", func() {
 	It("AC1(d) releases on the done phase the same way", func() {
 		harness.holdClaim("task-a")
 		harness.holdClaim("task-b")
-		manager, err := harness.handler.ClaimLeaseManager(ctx)
+		manager, err := harness.eventHandler.ClaimLeaseManager(ctx)
 		Expect(err).NotTo(HaveOccurred())
 		before := snapshotClaims()
 
@@ -288,7 +288,7 @@ var _ = Describe("claim release at the vault end points", func() {
 
 	It("AC2 leaves a failed release on the vault path to the tick", func() {
 		harness.holdClaim("task-a")
-		manager, err := harness.handler.ClaimLeaseManager(ctx)
+		manager, err := harness.eventHandler.ClaimLeaseManager(ctx)
 		Expect(err).NotTo(HaveOccurred())
 		harness.client.DeleteReturnsOnCall(0, stderrors.New("git-rest throttled"))
 		before := snapshotClaims()
