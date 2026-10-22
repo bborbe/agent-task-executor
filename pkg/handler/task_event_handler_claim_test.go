@@ -18,6 +18,10 @@ import (
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 	"github.com/prometheus/client_golang/prometheus/testutil"
+	batchv1 "k8s.io/api/batch/v1"
+	corev1 "k8s.io/api/core/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/client-go/kubernetes/fake"
 
 	"github.com/bborbe/agent-task-executor/mocks"
 	pkg "github.com/bborbe/agent-task-executor/pkg"
@@ -30,10 +34,12 @@ import (
 // the fake claim client and the number of times the ref-client factory ran, so
 // a spec can assert that a mode never constructs a claim client.
 type claimHarness struct {
-	eventHandler handler.TaskEventHandler
+	eventHandler handler.ClaimLifecycleEventHandler
 	spawner      *mocks.FakeJobSpawner
 	resolver     *mocks.FakeConfigResolver
 	client       *mocks.FakeClaimRefClient
+	taskStore    *pkg.TaskStore
+	publisher    *mocks.FakeResultPublisher
 	factoryCalls int
 }
 
@@ -54,7 +60,15 @@ func newClaimHarness(mode pkg.ClaimMode) *claimHarness {
 	resolver.ResolveReturns(pkg.AgentConfiguration{Assignee: "claude", Image: "img"}, nil)
 
 	client := new(mocks.FakeClaimRefClient)
-	h := &claimHarness{spawner: spawner, resolver: resolver, client: client}
+	publisher := new(mocks.FakeResultPublisher)
+	taskStore := pkg.NewTaskStore()
+	h := &claimHarness{
+		spawner:   spawner,
+		resolver:  resolver,
+		client:    client,
+		taskStore: taskStore,
+		publisher: publisher,
+	}
 	h.eventHandler = handler.NewTaskEventHandler(
 		spawner,
 		base.Branch("prod"),
@@ -62,8 +76,8 @@ func newClaimHarness(mode pkg.ClaimMode) *claimHarness {
 		true,
 		true,
 		resolver,
-		new(mocks.FakeResultPublisher),
-		pkg.NewTaskStore(),
+		publisher,
+		taskStore,
 		libtime.NewCurrentDateTime(),
 		new(mocks.FakeTaskView),
 		claimHarnessVault,
@@ -88,6 +102,59 @@ func (h *claimHarness) consume(task lib.Task) error {
 		context.Background(),
 		&sarama.ConsumerMessage{Value: value},
 	)
+}
+
+// holdClaim takes a claim for taskID directly through the handler's lease
+// manager, without going through the spawn path, and returns the held view.
+func (h *claimHarness) holdClaim(taskID string) claim.HeldClaim {
+	ctx := context.Background()
+	manager, err := h.eventHandler.ClaimLeaseManager(ctx)
+	Expect(err).NotTo(HaveOccurred())
+	held, err := manager.Claim(ctx, "claims/task/"+taskID, taskID)
+	Expect(err).NotTo(HaveOccurred())
+	return *held
+}
+
+// watcher returns a JobWatcher that releases through this harness's handler.
+func (h *claimHarness) watcher() pkg.JobWatcher {
+	return pkg.NewJobWatcher(
+		fake.NewClientset(),
+		"test-ns",
+		h.taskStore,
+		h.publisher,
+		h.eventHandler,
+	)
+}
+
+// terminalJob returns a Job carrying taskID and the given terminal condition.
+func terminalJob(name, taskID string, condition batchv1.JobCondition) *batchv1.Job {
+	job := &batchv1.Job{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      name,
+			Namespace: "test-ns",
+			Labels:    map[string]string{"agent.benjamin-borbe.de/task-id": taskID},
+		},
+		Status: batchv1.JobStatus{Conditions: []batchv1.JobCondition{condition}},
+	}
+	if condition.Type == batchv1.JobComplete && condition.Status == corev1.ConditionTrue {
+		now := metav1.Now()
+		job.Status.CompletionTime = &now
+	}
+	return job
+}
+
+// succeededCondition is the JobComplete condition a successful Job carries.
+func succeededCondition() batchv1.JobCondition {
+	return batchv1.JobCondition{Type: batchv1.JobComplete, Status: corev1.ConditionTrue}
+}
+
+// failedCondition is the JobFailed condition a failed Job carries.
+func failedCondition(message string) batchv1.JobCondition {
+	return batchv1.JobCondition{
+		Type:    batchv1.JobFailed,
+		Status:  corev1.ConditionTrue,
+		Message: message,
+	}
 }
 
 // claimResultLabels is the closed result set of executor_claim_total.

@@ -63,8 +63,9 @@ func CreateJobWatcher(
 	namespace libk8s.Namespace,
 	taskStore *pkg.TaskStore,
 	publisher pkg.ResultPublisher,
+	claimReleaser pkg.ClaimReleaser,
 ) pkg.JobWatcher {
-	return pkg.NewJobWatcher(kubeClient, namespace, taskStore, publisher)
+	return pkg.NewJobWatcher(kubeClient, namespace, taskStore, publisher, claimReleaser)
 }
 
 // CreateZombieSweeper creates a deadline sweeper that classifies stuck tasks as
@@ -161,7 +162,7 @@ func CreateConsumer(
 	reconcileInterval time.Duration,
 	claimMode pkg.ClaimMode,
 	claimRefClientFactory handler.ClaimRefClientFactory,
-) (libkafka.Consumer, handler.TaskEventHandler) {
+) (libkafka.Consumer, handler.ClaimLifecycleEventHandler) {
 	jobSpawner := spawner.NewJobSpawner(
 		kubeClient,
 		namespace,
