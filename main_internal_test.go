@@ -104,8 +104,8 @@ func TestValidateClaimTransport(t *testing.T) {
 		{"off ignores a set url", pkg.ClaimModeOff, "http://git-rest", "self", ""},
 		{"shadow requires a url", pkg.ClaimModeShadow, "", "self", "GITREST_URL"},
 		{"shadow accepts a url", pkg.ClaimModeShadow, "http://git-rest", "self", ""},
-		{"on requires a url", pkg.ClaimModeOn, "", "self", "GITREST_URL"},
-		{"on accepts a url", pkg.ClaimModeOn, "http://git-rest", "self", ""},
+		{"on is refused without a url", pkg.ClaimModeOn, "", "self", "not available yet"},
+		{"on is refused with a url", pkg.ClaimModeOn, "http://git-rest", "self", "not available yet"},
 		{"zero value needs no url", pkg.ClaimMode(""), "", "", ""},
 		{"shadow accepts https", pkg.ClaimModeShadow, "https://git-rest", "self", ""},
 		{"shadow rejects a url with no scheme", pkg.ClaimModeShadow, "git-rest", "self", "GITREST_URL"},
@@ -115,7 +115,7 @@ func TestValidateClaimTransport(t *testing.T) {
 		{"shadow redacts url userinfo", pkg.ClaimModeShadow, "ftp://u:s3cret@git-rest", "self", "http or https"},
 		{"shadow rejects an unparseable url", pkg.ClaimModeShadow, "http://git-rest:bad port", "self", "not a valid URL"},
 		{"shadow requires a cluster", pkg.ClaimModeShadow, "http://git-rest", "", "CLUSTER"},
-		{"on requires a cluster", pkg.ClaimModeOn, "http://git-rest", "", "CLUSTER"},
+		{"on is refused before the cluster check", pkg.ClaimModeOn, "http://git-rest", "", "not available yet"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			a := &application{GitRestURL: tc.url, Cluster: tc.cluster}
