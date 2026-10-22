@@ -15,7 +15,9 @@ import (
 // back the manager's own loop. Plain testing, not Ginkgo: this repo's Ginkgo
 // specs declared in an internal test package never run.
 type stubLeaseManager struct {
-	runCalls int
+	runCalls     int
+	recoverCalls int
+	recoverErr   error
 }
 
 func (s *stubLeaseManager) Claim(
@@ -39,24 +41,32 @@ func (s *stubLeaseManager) Run(context.Context) error {
 	return nil
 }
 
-func (s *stubLeaseManager) Recover(context.Context) error { return nil }
+func (s *stubLeaseManager) Recover(context.Context) error {
+	s.recoverCalls++
+	return s.recoverErr
+}
 
 func (s *stubLeaseManager) HeldClaims() []claim.HeldClaim { return nil }
 
 func (s *stubLeaseManager) AuditMismatch(context.Context, map[string]bool) {}
 
-// TestCreateClaimLifecycleRunFuncs asserts the factory wires exactly one run
-// func and that it is the lease manager's own loop.
+// TestCreateClaimLifecycleRunFuncs asserts the factory wires startup recovery
+// ahead of the lease manager's own loop, and that both are runnable.
 func TestCreateClaimLifecycleRunFuncs(t *testing.T) {
 	manager := &stubLeaseManager{}
 
 	runFuncs := CreateClaimLifecycleRunFuncs(manager)
 
-	if len(runFuncs) != 1 {
-		t.Fatalf("run funcs = %d, want 1", len(runFuncs))
+	if len(runFuncs) != 2 {
+		t.Fatalf("run funcs = %d, want 2 (recover, run)", len(runFuncs))
 	}
-	if err := runFuncs[0](context.Background()); err != nil {
-		t.Fatalf("run func: %v", err)
+	for i, runFunc := range runFuncs {
+		if err := runFunc(context.Background()); err != nil {
+			t.Fatalf("run func %d: %v", i, err)
+		}
+	}
+	if manager.recoverCalls != 1 {
+		t.Fatalf("lease manager Recover calls = %d, want 1", manager.recoverCalls)
 	}
 	if manager.runCalls != 1 {
 		t.Fatalf("lease manager Run calls = %d, want 1", manager.runCalls)
