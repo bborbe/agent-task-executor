@@ -2,7 +2,7 @@
 
 All notable changes to this project will be documented in this file.
 
-## Unreleased
+## v0.26.4
 
 - fix: **spawned Job names are always lowercase.** `jobNameFromTask` concatenated the raw task-id prefix, so an uppercase UUID produced `trading-backtest-agent-1AACF3FC-...`, which Kubernetes rejects because `metadata.name` must be a lowercase RFC 1123 label. The whole name is now lowercased.
 - fix: **a failed Job create in the deferred-respawn loop no longer exits the executor.** A `SpawnJob` failure is logged with the task id, counted as `agent_executor_task_events_total{result="deferred_respawn_spawn_failed"}`, and the loop continues with the next due entry; the entry is not re-parked and the reconcile floor re-drives the task. Every other deferred-loop error stays fatal.
