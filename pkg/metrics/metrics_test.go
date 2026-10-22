@@ -68,6 +68,7 @@ var _ = Describe("Metrics", func() {
 			"error",
 			"type_mismatch",
 			"deferred_claim_invalidated",
+			"deferred_respawn_spawn_failed",
 		))
 	})
 

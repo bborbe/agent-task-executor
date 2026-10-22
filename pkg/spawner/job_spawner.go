@@ -6,6 +6,7 @@ package spawner
 
 import (
 	"context"
+	"strings"
 
 	lib "github.com/bborbe/agent"
 	"github.com/bborbe/errors"
@@ -593,8 +594,12 @@ func taskTypeString(f lib.TaskFrontmatter) string {
 // taskID8 is the first 8 chars of the task UUID, included to prevent name collisions
 // between concurrent spawns of different tasks sharing the same assignee and second.
 // If assignee is empty, "agent" is used as the default prefix.
-// Job names are DNS-compliant (<=63 chars, [a-z0-9]([-a-z0-9]*[a-z0-9])?).
-// Assignees should be short lowercase strings (e.g. "claude", "backtest-agent").
+// The whole name is lowercased because task identifiers may be uppercase UUIDs
+// and Kubernetes rejects a metadata.name that is not a lowercase RFC 1123 label
+// ([a-z0-9]([-a-z0-9]*[a-z0-9])?). Job names are DNS-compliant
+// (<=63 chars, [a-z0-9]([-a-z0-9]*[a-z0-9])?).
+// Assignees should be short strings (e.g. "claude", "backtest-agent") so the
+// name stays within 63 chars.
 func jobNameFromTask(assignee string, taskID lib.TaskIdentifier, now libtime.DateTime) string {
 	if assignee == "" {
 		assignee = "agent"
@@ -603,7 +608,7 @@ func jobNameFromTask(assignee string, taskID lib.TaskIdentifier, now libtime.Dat
 	if len(id) > 8 {
 		id = id[:8]
 	}
-	return assignee + "-" + id + "-" + now.UTC().Format("20060102150405")
+	return strings.ToLower(assignee + "-" + id + "-" + now.UTC().Format("20060102150405"))
 }
 
 // buildJobEnvBuilder constructs the env var set for the spawned Job's container.
