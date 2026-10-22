@@ -155,6 +155,45 @@ var _ = Describe("TaskView", func() {
 		Expect(view.Ready()).To(BeTrue())
 	})
 
+	It("retains a body only while the task could still be spawned", func() {
+		view := newTestTaskView(libkafka.PartitionOffsets{0: 3})
+		Expect(view.CaptureHighWaterMarks(ctx)).To(Succeed())
+
+		// A live task keeps its body: a spawn renders it into the agent's task file.
+		live := lib.Task{
+			TaskIdentifier: "tid-live",
+			Frontmatter:    lib.TaskFrontmatter{"phase": "execution"},
+			Content:        "the live body",
+		}
+		Expect(view.ConsumeMessage(ctx, taskEventMessage(0, 0, "tid-live", live))).To(Succeed())
+		stored, ok := view.Get("tid-live")
+		Expect(ok).To(BeTrue())
+		Expect(stored.Content).To(Equal(lib.TaskContent("the live body")))
+
+		// A terminal task is never spawned again, so its body must not be retained —
+		// that retention is what put the view past its container limit.
+		done := lib.Task{
+			TaskIdentifier: "tid-done",
+			Frontmatter:    lib.TaskFrontmatter{"phase": "done", "status": "completed"},
+			Content:        "the finished body",
+		}
+		Expect(view.ConsumeMessage(ctx, taskEventMessage(0, 1, "tid-done", done))).To(Succeed())
+		stored, ok = view.Get("tid-done")
+		Expect(ok).To(BeTrue())
+		Expect(stored.Content).To(BeEmpty(), "a terminal task's body must not be retained")
+		Expect(
+			stored.Frontmatter["status"],
+		).To(Equal("completed"), "the frontmatter stays: skips read it")
+
+		// Reopening publishes a new event, which carries the body back.
+		reopened := done
+		reopened.Frontmatter = lib.TaskFrontmatter{"phase": "execution", "status": "in_progress"}
+		Expect(view.ConsumeMessage(ctx, taskEventMessage(0, 2, "tid-done", reopened))).To(Succeed())
+		stored, ok = view.Get("tid-done")
+		Expect(ok).To(BeTrue())
+		Expect(stored.Content).To(Equal(lib.TaskContent("the finished body")))
+	})
+
 	It("keeps applying every partition after ready", func() {
 		view := newTestTaskView(libkafka.PartitionOffsets{
 			0: 1,
@@ -221,6 +260,7 @@ var _ = Describe("TaskView", func() {
 
 		Expect(strings.Count(out, "event=task_view_ready")).To(Equal(1))
 		Expect(out).To(ContainSubstring("tasks=0"))
+		Expect(out).To(ContainSubstring("retained_bodies=0"))
 		Expect(out).To(ContainSubstring("partitions=1"))
 	})
 

@@ -120,6 +120,17 @@ func (v *taskView) ConsumeMessage(ctx context.Context, msg *sarama.ConsumerMessa
 	v.mu.Lock()
 	switch {
 	case err == nil:
+		// A task at a terminal phase is never spawned again (see IsTerminal), and
+		// the view retains a body only so a spawn can render the task file. So the
+		// body of a terminal task is dead weight: the skip decisions read
+		// frontmatter alone. Dropping it here is what keeps the view inside its
+		// container limit — the body is ~88% of a task's bytes, and at 15k tasks
+		// retaining them all puts the live heap at ~105MiB, which GOGC then doubles
+		// past a 256Mi limit and OOM-kills every cold start. A reopened task
+		// publishes a new event, which carries the body back.
+		if phase := task.Frontmatter.Phase(); phase != nil && IsTerminal(*phase) {
+			task.Content = ""
+		}
 		v.tasks[task.TaskIdentifier] = task
 	case stderrors.Is(err, errEmptyTaskEvent):
 		// Tombstone: the key names the task to remove.
@@ -172,12 +183,22 @@ func (v *taskView) evaluateReadinessLocked() bool {
 func (v *taskView) logReady() {
 	v.mu.RLock()
 	tasks := len(v.tasks)
+	// retained_bodies is the memory driver: the view's live heap is dominated by
+	// the bodies it holds, so this number next to tasks= is what tells an operator
+	// whether the retention rule is doing its job on a real vault. A value near
+	// tasks= means bodies are being kept for tasks that can never spawn.
+	retainedBodies := 0
+	for _, task := range v.tasks {
+		if task.Content != "" {
+			retainedBodies++
+		}
+	}
 	partitions := len(v.marks)
 	elapsed := time.Time(v.currentDateTimeGetter.Now()).Sub(time.Time(v.startedAt))
 	v.mu.RUnlock()
 	glog.Infof(
-		"event=task_view_ready tasks=%d partitions=%d elapsed=%s",
-		tasks, partitions, elapsed,
+		"event=task_view_ready tasks=%d retained_bodies=%d partitions=%d elapsed=%s",
+		tasks, retainedBodies, partitions, elapsed,
 	)
 }
 

@@ -4,6 +4,7 @@ All notable changes to this project will be documented in this file.
 
 ## Unreleased
 
+- fix: **the task view stops retaining a task's body once that task reaches a terminal phase.** A body is held only so a spawn can render the agent's task file, and a terminal task is never spawned again, so keeping it was pure cost: at 15,000 tasks the bodies are ~88% of the view's bytes and put the live heap near 105 MiB, which the default GC target doubles past a 256Mi container limit — v0.26.0 therefore OOM-killed every cold start at ~100 s and never reached ready on nuke dev. Retaining bodies only for tasks that can still spawn takes the same 15,000-task view to ~40 MiB. Frontmatter is always retained, since the skip decisions read it, and a reopened task publishes a new event that carries its body back, so nothing is lost.
 - fix: `ReadGitRestGatewaySecret` now returns an error when the `gateway-secret` data key exists but holds an empty value. It previously returned an empty string and a nil error, which silently disabled gateway auth despite the doc promising a loud startup failure; only an unset secret name now means auth is disabled.
 
 ## v0.26.1
