@@ -246,6 +246,28 @@ func (a *application) Run(ctx context.Context, sentryClient libsentry.Client) er
 		currentDateTimeGetter,
 	)
 
+	// The git-rest gateway secret is read by NAME from K8s (never logged, never
+	// in env) so the claim ref client can authenticate to git-rest without secret
+	// material entering the Deployment manifest (spec 005 Security). It is read
+	// only in the modes that take a claim: off builds no client, so it must not
+	// read a secret it will never use.
+	var claimRefClientFactory handler.ClaimRefClientFactory
+	if claimMode.TakesClaim() {
+		gitRestGatewaySecretValue, err := pkg.ReadGitRestGatewaySecret(
+			ctx,
+			kubeClient,
+			a.Namespace,
+			a.GitRestGatewaySecret,
+		)
+		if err != nil {
+			return errors.Wrapf(ctx, err, "read git-rest gateway secret")
+		}
+		claimRefClientFactory = factory.CreateClaimRefClientFactory(
+			a.GitRestURL,
+			gitRestGatewaySecretValue,
+		)
+	}
+
 	healthcheckRunner := factory.CreateHealthcheckRunner(
 		eventHandlerConfig,
 		syncProducer,
@@ -288,6 +310,7 @@ func (a *application) Run(ctx context.Context, sentryClient libsentry.Client) er
 		a.ReconcilePassTimeout,
 		a.ReconcileInterval,
 		claimMode,
+		claimRefClientFactory,
 	)
 
 	return service.Run(
