@@ -26,7 +26,6 @@ import (
 	agentv1 "github.com/bborbe/agent-task-executor/k8s/apis/agent.benjamin-borbe.de/v1"
 	pkg "github.com/bborbe/agent-task-executor/pkg"
 	"github.com/bborbe/agent-task-executor/pkg/claim"
-	"github.com/bborbe/agent-task-executor/pkg/gitrestclient"
 	"github.com/bborbe/agent-task-executor/pkg/handler"
 	"github.com/bborbe/agent-task-executor/pkg/probe"
 	"github.com/bborbe/agent-task-executor/pkg/spawner"
@@ -122,16 +121,9 @@ func CreateConfigResolver(
 	return pkg.NewConfigResolver(handler, branch, vaultName)
 }
 
-// CreateGitRestClient returns the read-only git-rest vault reader the
-// reconcile loop uses. gatewayInitiator is fixed to the executor's identity
-// for git-rest's auth-failure logging.
-func CreateGitRestClient(baseURL, gatewaySecret string) gitrestclient.GitRestClient {
-	return gitrestclient.NewGitRestClient(baseURL, gatewaySecret, "agent-task-executor")
-}
-
 // CreateClaimRefClientFactory returns the lazily-invoked constructor for the
-// git-rest claim ref client. The initiator is the same identity
-// CreateGitRestClient uses.
+// git-rest claim ref client. The initiator is the executor's own identity, so
+// git-rest's auth-failure logs name this component.
 func CreateClaimRefClientFactory(
 	baseURL, gatewaySecret string,
 ) handler.ClaimRefClientFactory {
@@ -163,8 +155,8 @@ func CreateConsumer(
 	jobKafkaClientCertSecret string,
 	jobKafkaCaCertSecret string,
 	jobFsGroup int64,
-	gitRestClient gitrestclient.GitRestClient,
-	taskGlob string,
+	view handler.TaskView,
+	taskVault string,
 	reconcilePassTimeout time.Duration,
 	reconcileInterval time.Duration,
 	claimMode pkg.ClaimMode,
@@ -192,8 +184,8 @@ func CreateConsumer(
 		resultPublisher,
 		taskStore,
 		currentDateTimeGetter,
-		gitRestClient,
-		taskGlob,
+		view,
+		taskVault,
 		reconcilePassTimeout,
 		reconcileInterval,
 		claimMode,

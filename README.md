@@ -23,16 +23,22 @@ A task can name the cluster that runs it with the optional `cluster:` frontmatte
 
 ## Reconcile loop configuration
 
-The reconcile loop re-derives running tasks from the vault (via git-rest) and
+The reconcile loop re-derives running tasks from the in-memory task view and
 live Jobs, so a task deferred behind `maxConcurrentJobs` whose in-memory
 deferral was lost across an executor restart resumes without a Kafka event or
-vault edit. It is configured by:
+vault edit. The view is rebuilt at startup from
+`{TOPIC_PREFIX}-agent-task-v1-event` and kept current from the same topic; the
+executor no longer reads git-rest.
+
+The view becomes ready once every partition has replayed to the high-water mark
+captured at startup. A reader failure exits the process, so the pod restart
+rebuilds the view.
 
 | Env var | Default | Meaning |
 |---|---|---|
-| `GITREST_URL` | `http://vault-obsidian-openclaw:9090` | git-rest HTTP API base URL the reconcile loop reads vault task files through. |
-| `GITREST_GATEWAY_SECRET` | empty (auth disabled) | NAME of the K8s Secret carrying the git-rest gateway secret (data key `gateway-secret`) — never the secret value. The executor reads the value from the Secret at startup and uses it only in memory. The executor's ServiceAccount must be able to `get` this Secret (chart-side Role grant). |
-| `TASK_GLOB` | empty (required) | git-rest single-level glob selecting the vault task files the reconcile loop evaluates. Required: the executor refuses to start when it is empty, because git-rest treats an empty glob as match-everything over the whole vault. |
+| `TASK_VAULT` | `VAULT_NAME` | Vault slug this executor owns tasks for. Must match `^[a-z][a-z0-9-]*$`. A task is owned when its stamped `vault` equals this value; a task with no stamped vault is never owned. A ready view that holds tasks but none for this vault logs `event=task_vault_mismatch` and drives nothing; a view in which every task is unstamped logs `event=task_vault_unstamped` and drives nothing. |
+| `RECONCILE_INTERVAL` | `60s` | Interval between reconcile passes. |
+| `RECONCILE_PASS_TIMEOUT` | `45s` | Deadline for one reconcile pass. |
 | `CLAIM_MODE` | `off` | Claim dispatch mode: `off` (no claim client constructed, today's behaviour), `shadow` (claims, never blocks), `on` (a held claim is a precondition of the Job). Any other value stops the process at startup. |
 
 ## Links

@@ -34,6 +34,10 @@ type claimHarness struct {
 	factoryCalls int
 }
 
+// claimHarnessVault is the vault slug the handler owns. The event path skips any
+// task stamped with another vault, so every fixture carries this one.
+const claimHarnessVault = "private-personal"
+
 // newClaimHarness builds a handler in the given claim mode with defaults that
 // let a qualifying task spawn exactly once.
 func newClaimHarness(mode pkg.ClaimMode) *claimHarness {
@@ -58,8 +62,8 @@ func newClaimHarness(mode pkg.ClaimMode) *claimHarness {
 		new(mocks.FakeResultPublisher),
 		pkg.NewTaskStore(),
 		libtime.NewCurrentDateTime(),
-		new(mocks.FakeGitRestClient),
-		"24 Tasks/*.md",
+		new(mocks.FakeTaskView),
+		claimHarnessVault,
 		handler.DefaultReconcilePassTimeout,
 		handler.DefaultReconcileInterval,
 		mode,
@@ -117,6 +121,7 @@ func expectClaimDelta(before, after map[string]float64, expected map[string]floa
 func qualifyingClaimTask() lib.Task {
 	return lib.Task{
 		TaskIdentifier: lib.TaskIdentifier("tid-claim-off-1"),
+		Vault:          claimHarnessVault,
 		Frontmatter: lib.TaskFrontmatter{
 			"status":   "in_progress",
 			"phase":    string(domain.TaskPhaseExecution),

@@ -37,6 +37,10 @@ func TestHandler(t *testing.T) {
 	RunSpecs(t, "Handler Suite")
 }
 
+// testTaskVault is the vault every handler in this package's tests owns. Tasks
+// delivered without a stamped vault are given this one by the build helpers.
+const testTaskVault = "openclaw"
+
 // activeJobs builds a ListActiveJobs result carrying n synthetic task IDs. Tests
 // that only care about the concurrency count use it; tests that care which task
 // is active build the map with the real identifier.
@@ -54,7 +58,7 @@ var _ = Describe("TaskEventHandler", func() {
 		fakeSpawner         *mocks.FakeJobSpawner
 		fakeResolver        *mocks.FakeConfigResolver
 		fakeResultPublisher *mocks.FakeResultPublisher
-		fakeGitRestClient   *mocks.FakeGitRestClient
+		fakeView            *mocks.FakeTaskView
 		taskStore           *pkg.TaskStore
 		currentDateTime     libtime.CurrentDateTime
 		h                   handler.TaskEventHandler
@@ -69,8 +73,10 @@ var _ = Describe("TaskEventHandler", func() {
 			nil,
 		)
 		fakeResultPublisher = &mocks.FakeResultPublisher{}
-		fakeGitRestClient = &mocks.FakeGitRestClient{}
-		fakeGitRestClient.IsReadyReturns(true, nil)
+		fakeView = &mocks.FakeTaskView{}
+		fakeView.ReadyReturns(true)
+		fakeView.SnapshotReturns(nil)
+		fakeView.GetReturns(lib.Task{}, false)
 		taskStore = pkg.NewTaskStore()
 		currentDateTime = libtime.NewCurrentDateTime()
 		h = handler.NewTaskEventHandler(
@@ -83,8 +89,8 @@ var _ = Describe("TaskEventHandler", func() {
 			fakeResultPublisher,
 			taskStore,
 			currentDateTime,
-			fakeGitRestClient,
-			"24 Tasks/*.md",
+			fakeView,
+			testTaskVault,
 			handler.DefaultReconcilePassTimeout,
 			handler.DefaultReconcileInterval,
 			pkg.ClaimModeOff,
@@ -93,6 +99,9 @@ var _ = Describe("TaskEventHandler", func() {
 	})
 
 	buildMsg := func(task lib.Task) *sarama.ConsumerMessage {
+		if task.Vault == "" {
+			task.Vault = testTaskVault
+		}
 		value, err := json.Marshal(task)
 		Expect(err).To(BeNil())
 		return &sarama.ConsumerMessage{Value: value}
@@ -1007,8 +1016,8 @@ var _ = Describe("TaskEventHandler", func() {
 					&mocks.FakeResultPublisher{},
 					pkg.NewTaskStore(),
 					libtime.NewCurrentDateTime(),
-					fakeGitRestClient,
-					"24 Tasks/*.md",
+					fakeView,
+					testTaskVault,
 					handler.DefaultReconcilePassTimeout,
 					handler.DefaultReconcileInterval,
 					pkg.ClaimModeOff,
@@ -1062,8 +1071,8 @@ var _ = Describe("TaskEventHandler", func() {
 					&mocks.FakeResultPublisher{},
 					pkg.NewTaskStore(),
 					libtime.NewCurrentDateTime(),
-					fakeGitRestClient,
-					"24 Tasks/*.md",
+					fakeView,
+					testTaskVault,
 					handler.DefaultReconcilePassTimeout,
 					handler.DefaultReconcileInterval,
 					pkg.ClaimModeOff,
@@ -1136,8 +1145,8 @@ var _ = Describe("TaskEventHandler", func() {
 					&mocks.FakeResultPublisher{},
 					pkg.NewTaskStore(),
 					libtime.NewCurrentDateTime(),
-					fakeGitRestClient,
-					"24 Tasks/*.md",
+					fakeView,
+					testTaskVault,
 					handler.DefaultReconcilePassTimeout,
 					handler.DefaultReconcileInterval,
 					pkg.ClaimModeOff,
@@ -1178,8 +1187,8 @@ var _ = Describe("TaskEventHandler", func() {
 				&mocks.FakeResultPublisher{},
 				pkg.NewTaskStore(),
 				libtime.NewCurrentDateTime(),
-				fakeGitRestClient,
-				"24 Tasks/*.md",
+				fakeView,
+				testTaskVault,
 				handler.DefaultReconcilePassTimeout,
 				handler.DefaultReconcileInterval,
 				pkg.ClaimModeOff,
@@ -1233,8 +1242,8 @@ var _ = Describe("TaskEventHandler", func() {
 				&mocks.FakeResultPublisher{},
 				pkg.NewTaskStore(),
 				libtime.NewCurrentDateTime(),
-				fakeGitRestClient,
-				"24 Tasks/*.md",
+				fakeView,
+				testTaskVault,
 				handler.DefaultReconcilePassTimeout,
 				handler.DefaultReconcileInterval,
 				pkg.ClaimModeOff,
