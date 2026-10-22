@@ -4,6 +4,7 @@ All notable changes to this project will be documented in this file.
 
 ## Unreleased
 
+- fix: **`Release` no longer drops a claim while this cluster's Job is still running.** It deleted the ref and removed the held entry with no Job check, and because the fence only iterates the held set, a release that fired while the Job ran left that Job running unclaimed and invisible to the fence — so another cluster could take the task over and run it a second time. A release now keeps the claim held, so the loop keeps renewing it, and logs `event=release_deferred_job_running`; the Job's own terminal event releases the claim as before. A release for a Job that is already gone is unchanged.
 - fix: **a `current_job` that names another cluster's Job is no longer treated as finished.** `current_job` lives in the shared vault frontmatter, so an executor can read a Job name that another cluster created, while `IsJobActive` only lists its own cluster's Jobs — "not active here" was read as "finished" and authorised the respawn. On 2026-10-22 task `94c1801c` ran on sun and nuke prod concurrently for 2 m 33 s that way. A dispatch pass now suppresses the spawn and re-defers when this executor's store still names a different Job than the frontmatter does, counting `skipped_foreign_job`. The no-store-entry case keeps the previous behaviour: nothing local distinguishes a foreign Job from a finished one there, and bounding it by the Job's deadline would withhold a legitimate respawn for up to 30 minutes.
 
 ## v0.30.1

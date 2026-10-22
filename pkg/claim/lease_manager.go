@@ -298,7 +298,26 @@ func (m *leaseManager) Release(ctx context.Context, key string) error {
 	if !ok {
 		return nil
 	}
-	err := m.refClient.Delete(ctx, key, held.sha)
+	running, err := m.jobControl.IsJobRunning(ctx, held.taskID)
+	if err != nil {
+		countClaim("error")
+		return errors.Wrapf(ctx, err, "check job running before release")
+	}
+	if running {
+		// Something upstream says this task is over, but this cluster's Job for
+		// it has not finished. Dropping the claim here would stop renewing it and
+		// stop fencing that Job — and because the fence only iterates the held
+		// set, the Job would then run on unclaimed while another cluster could
+		// legitimately take the task over. Keep the claim: the loop keeps it
+		// alive, and the Job's own terminal event releases it.
+		glog.Infof(
+			"event=release_deferred_job_running key=%s task_id=%s",
+			key,
+			held.taskID,
+		)
+		return nil
+	}
+	err = m.refClient.Delete(ctx, key, held.sha)
 	if err == nil {
 		delete(m.held, key)
 		countClaim("released")
