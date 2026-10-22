@@ -6,6 +6,7 @@ package handler
 
 import (
 	"context"
+	stderrors "errors"
 	"sort"
 	"time"
 
@@ -59,6 +60,10 @@ func sortDeferredByAdmissionPriority(replays []deferredReplay) {
 // results in a spawn (spec 037 AC #6: "recorded each time the follow-up evaluation
 // results in a spawn"); evaluations that no-op (active job already, trigger cap hit,
 // terminal phase) do not increment the metric.
+//
+// A failed Job create is logged, counted and skipped rather than returned: one
+// rejected Job must not exit the process and starve every other due entry. The
+// skipped entry is not re-parked; the reconcile floor re-drives the task.
 func (h *taskEventHandler) evalDeferredRespawns(ctx context.Context) error {
 	now := h.currentDateTime.Now().Time()
 
@@ -94,6 +99,19 @@ func (h *taskEventHandler) evalDeferredRespawns(ctx context.Context) error {
 		entry := replay.entry
 		spawned, err := h.spawnIfNeededClaimed(ctx, entry.task, &entry.config, &replay.claim)
 		if err != nil {
+			// A single failed Job create (e.g. a Job the API server rejects) must
+			// not exit the process and starve every other due entry. The entry is
+			// not re-parked; the reconcile floor re-drives the task. Every other
+			// error stays fatal.
+			var spawnErr *spawnJobError
+			if stderrors.As(err, &spawnErr) {
+				glog.Warningf(
+					"event=deferred_respawn_spawn_failed task=%s err=%v",
+					entry.task.TaskIdentifier, err,
+				)
+				metrics.TaskEventsTotal.WithLabelValues("deferred_respawn_spawn_failed").Inc()
+				continue
+			}
 			return errors.Wrapf(
 				ctx, err, "deferred respawn for task %s", entry.task.TaskIdentifier,
 			)

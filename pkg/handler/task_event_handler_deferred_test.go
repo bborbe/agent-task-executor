@@ -375,6 +375,57 @@ var _ = Describe("TaskEventHandler", func() {
 				Expect(fakeSpawner.SpawnJobCallCount()).To(Equal(1))
 			})
 
+			It("skips a deferred entry whose SpawnJob fails and spawns the next one", func() {
+				currentDateTime.SetNow(libtimetest.ParseDateTime(insideGrace))
+
+				taskA := buildGraceTask(domain.TaskPhaseExecution, 0, 3)
+				taskA.TaskIdentifier = lib.TaskIdentifier("tid-deferred-spawnfail-a")
+				taskB := buildGraceTask(domain.TaskPhaseExecution, 0, 3)
+				taskB.TaskIdentifier = lib.TaskIdentifier("tid-deferred-spawnfail-b")
+
+				err := h.ConsumeMessage(ctx, buildMsg(taskA))
+				Expect(err).To(BeNil())
+				err = h.ConsumeMessage(ctx, buildMsg(taskB))
+				Expect(err).To(BeNil())
+				Expect(fakeSpawner.SpawnJobCallCount()).To(Equal(0))
+
+				// Keyed by call index: both tasks share the same job_started_at, so
+				// either may be admitted first.
+				fakeSpawner.SpawnJobReturnsOnCall(0, "", errors.Errorf(ctx, "job name rejected"))
+				fakeSpawner.SpawnJobReturnsOnCall(1, "job-deferred-ok", nil)
+
+				beforeSpawnFailed := testutil.ToFloat64(
+					metrics.TaskEventsTotal.WithLabelValues("deferred_respawn_spawn_failed"),
+				)
+				beforeRespawn := testutil.ToFloat64(
+					metrics.TaskEventsTotal.WithLabelValues("respawn_after_grace_window"),
+				)
+
+				currentDateTime.SetNow(libtimetest.ParseDateTime(graceExpiredR))
+				err = h.EvalDeferredRespawns(ctx)
+				Expect(err).To(BeNil())
+				Expect(fakeSpawner.SpawnJobCallCount()).To(Equal(2))
+
+				_, spawnedTask0, _ := fakeSpawner.SpawnJobArgsForCall(0)
+				_, spawnedTask1, _ := fakeSpawner.SpawnJobArgsForCall(1)
+				Expect([]lib.TaskIdentifier{
+					spawnedTask0.TaskIdentifier,
+					spawnedTask1.TaskIdentifier,
+				}).To(ConsistOf(
+					lib.TaskIdentifier("tid-deferred-spawnfail-a"),
+					lib.TaskIdentifier("tid-deferred-spawnfail-b"),
+				))
+
+				afterSpawnFailed := testutil.ToFloat64(
+					metrics.TaskEventsTotal.WithLabelValues("deferred_respawn_spawn_failed"),
+				)
+				Expect(afterSpawnFailed - beforeSpawnFailed).To(Equal(float64(1)))
+				afterRespawn := testutil.ToFloat64(
+					metrics.TaskEventsTotal.WithLabelValues("respawn_after_grace_window"),
+				)
+				Expect(afterRespawn - beforeRespawn).To(Equal(float64(1)))
+			})
+
 			It("admits a never-attempted task ahead of an already-attempted one", func() {
 				// evalDeferredRespawns collects the due entries by ranging a Go map,
 				// so without a tie-break the order is randomized per tick and the same
