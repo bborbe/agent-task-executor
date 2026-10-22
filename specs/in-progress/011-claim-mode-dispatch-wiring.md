@@ -1,8 +1,9 @@
 ---
-status: prompted
+status: verifying
 approved: "2026-10-21T23:26:26Z"
 generating: "2026-10-21T23:27:32Z"
 prompted: "2026-10-21T23:38:12Z"
+verifying: "2026-10-22T00:09:28Z"
 branch: dark-factory/claim-mode-dispatch-wiring
 ---
 
