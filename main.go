@@ -286,16 +286,6 @@ func (a *application) Run(ctx context.Context, sentryClient libsentry.Client) er
 
 	resultPublisher := pkg.NewResultPublisher(syncProducer, a.TopicPrefix, currentDateTimeGetter)
 	taskStore := pkg.NewTaskStore()
-	jobWatcher := factory.CreateJobWatcher(kubeClient, a.Namespace, taskStore, resultPublisher)
-
-	zombieSweeper := factory.CreateZombieSweeper(
-		jobWatcher,
-		a.Namespace,
-		taskStore,
-		resultPublisher,
-		eventHandlerConfig,
-		currentDateTimeGetter,
-	)
 
 	// The git-rest gateway secret is read by NAME from K8s (never logged, never
 	// in env) so the claim ref client can authenticate to git-rest without secret
@@ -362,6 +352,25 @@ func (a *application) Run(ctx context.Context, sentryClient libsentry.Client) er
 		a.ReconcileInterval,
 		claimMode,
 		claimRefClientFactory,
+	)
+
+	// Built after the handler: a terminal Job releases the claim taken before it
+	// was created, so the watcher needs the handler's release handle.
+	jobWatcher := factory.CreateJobWatcher(
+		kubeClient,
+		a.Namespace,
+		taskStore,
+		resultPublisher,
+		taskEventHandler,
+	)
+
+	zombieSweeper := factory.CreateZombieSweeper(
+		jobWatcher,
+		a.Namespace,
+		taskStore,
+		resultPublisher,
+		eventHandlerConfig,
+		currentDateTimeGetter,
 	)
 
 	return service.Run(

@@ -45,7 +45,7 @@ var _ = Describe("JobWatcher", func() {
 			},
 			Content: lib.TaskContent("do the work"),
 		}
-		watcher = pkg.NewJobWatcher(fakeKubeClient, "test-ns", taskStore, fakePublisher)
+		watcher = pkg.NewJobWatcher(fakeKubeClient, "test-ns", taskStore, fakePublisher, nil)
 	})
 
 	makeJob := func(name string, taskID string, conditions ...batchv1.JobCondition) *batchv1.Job {

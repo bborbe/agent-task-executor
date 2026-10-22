@@ -194,7 +194,7 @@ func NewTaskEventHandler(
 	reconcileInterval time.Duration,
 	claimMode pkg.ClaimMode,
 	claimRefClientFactory ClaimRefClientFactory,
-) TaskEventHandler {
+) ClaimLifecycleEventHandler {
 	return &taskEventHandler{
 		jobSpawner:            jobSpawner,
 		branch:                branch,
@@ -795,6 +795,8 @@ func (h *taskEventHandler) spawnIfNeededClaimed(
 	jobName, err := h.jobSpawner.SpawnJob(ctx, task, *config)
 	if err != nil {
 		metrics.TaskEventsTotal.WithLabelValues("error").Inc()
+		// A claim taken for a Job that was never created must not stay held.
+		h.ReleaseTaskClaim(ctx, task.TaskIdentifier)
 		return false, errors.Wrapf(
 			ctx,
 			&spawnJobError{err: err},

@@ -50,21 +50,24 @@ func NewJobWatcher(
 	namespace libk8s.Namespace,
 	taskStore *TaskStore,
 	publisher ResultPublisher,
+	claimReleaser ClaimReleaser,
 ) JobWatcher {
 	return &jobWatcher{
-		kubeClient: kubeClient,
-		namespace:  namespace,
-		taskStore:  taskStore,
-		publisher:  publisher,
+		kubeClient:    kubeClient,
+		namespace:     namespace,
+		taskStore:     taskStore,
+		publisher:     publisher,
+		claimReleaser: claimReleaser,
 	}
 }
 
 type jobWatcher struct {
-	kubeClient kubernetes.Interface
-	namespace  libk8s.Namespace
-	taskStore  *TaskStore
-	publisher  ResultPublisher
-	podLister  atomic.Pointer[corev1listers.PodLister]
+	kubeClient    kubernetes.Interface
+	namespace     libk8s.Namespace
+	taskStore     *TaskStore
+	publisher     ResultPublisher
+	claimReleaser ClaimReleaser
+	podLister     atomic.Pointer[corev1listers.PodLister]
 }
 
 func (w *jobWatcher) Run(ctx context.Context) error {
@@ -138,6 +141,16 @@ func (w *jobWatcher) PodLister() corev1listers.PodLister {
 	return *lister
 }
 
+// releaseClaim releases this executor's held claim for taskID. A nil releaser
+// (claim mode off) is a no-op. ReleaseTaskClaim logs its own failures; the
+// lease loop's retryPendingReleases retries a failed delete on its next tick.
+func (w *jobWatcher) releaseClaim(ctx context.Context, taskID lib.TaskIdentifier) {
+	if w.claimReleaser == nil {
+		return
+	}
+	w.claimReleaser.ReleaseTaskClaim(ctx, taskID)
+}
+
 func (w *jobWatcher) HandleJob(ctx context.Context, job *batchv1.Job) {
 	taskIDStr, ok := job.Labels["agent.benjamin-borbe.de/task-id"]
 	if !ok || taskIDStr == "" {
@@ -148,6 +161,7 @@ func (w *jobWatcher) HandleJob(ctx context.Context, job *batchv1.Job) {
 	if IsJobFailed(job) {
 		reason := w.failureReason(job)
 		glog.V(2).Infof("job %s/%s failed (task %s): %s", job.Namespace, job.Name, taskID, reason)
+		w.releaseClaim(ctx, taskID)
 		w.handleTerminal(ctx, taskID, job, reason, true)
 		return
 	}
@@ -177,6 +191,7 @@ func (w *jobWatcher) HandleJob(ctx context.Context, job *batchv1.Job) {
 				job.Status.CompletionTime.Time,
 			)
 		}
+		w.releaseClaim(ctx, taskID)
 		if task, ok := w.taskStore.Load(taskID); ok {
 			w.handleSucceeded(ctx, taskID, task, job)
 		}
