@@ -178,18 +178,22 @@ func (a *application) validateClaimTransport(
 	}
 	// Drop userinfo before the value reaches an error string or a log line.
 	parsed.User = nil
+	// Redacted() masks the password but keeps path and query, so report only the
+	// parts that cannot carry a token.
 	if parsed.Scheme != "http" && parsed.Scheme != "https" {
 		return errors.Errorf(
 			ctx,
-			"gitrest-url (GITREST_URL) must use http or https, got %q",
-			parsed.String(),
+			"gitrest-url (GITREST_URL) must use http or https, got scheme %q",
+			parsed.Scheme,
 		)
 	}
-	if parsed.Host == "" {
+	// Hostname() is empty for a port-only authority such as "http://:9090",
+	// which Host alone would accept and the claim client could not use.
+	if parsed.Hostname() == "" {
 		return errors.Errorf(
 			ctx,
-			"gitrest-url (GITREST_URL) must carry a host, got %q",
-			parsed.String(),
+			"gitrest-url (GITREST_URL) must carry a host, got host %q",
+			parsed.Hostname(),
 		)
 	}
 	// The claim ref key is scoped by cluster and the lease manager refuses an

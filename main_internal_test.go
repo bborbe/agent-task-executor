@@ -110,6 +110,7 @@ func TestValidateClaimTransport(t *testing.T) {
 		{"shadow accepts https", pkg.ClaimModeShadow, "https://git-rest", "self", ""},
 		{"shadow rejects a url with no scheme", pkg.ClaimModeShadow, "git-rest", "self", "GITREST_URL"},
 		{"shadow rejects a url with no host", pkg.ClaimModeShadow, "http://", "self", "GITREST_URL"},
+		{"shadow rejects a port with no host", pkg.ClaimModeShadow, "http://:9090", "self", "must carry a host"},
 		{"shadow rejects a non-http scheme", pkg.ClaimModeShadow, "ftp://git-rest", "self", "http or https"},
 		{"shadow redacts url userinfo", pkg.ClaimModeShadow, "ftp://u:s3cret@git-rest", "self", "http or https"},
 		{"shadow rejects an unparseable url", pkg.ClaimModeShadow, "http://git-rest:bad port", "self", "not a valid URL"},
