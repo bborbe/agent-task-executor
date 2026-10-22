@@ -42,3 +42,17 @@ var _ = Describe("ParseClaimMode", func() {
 		Entry("boolean", "true"),
 	)
 })
+
+var _ = Describe("ClaimMode.TakesClaim", func() {
+	DescribeTable("reports whether the mode needs the claim transport",
+		func(mode pkg.ClaimMode, expected bool) {
+			Expect(mode.TakesClaim()).To(Equal(expected))
+		},
+		Entry("off takes no claim", pkg.ClaimModeOff, false),
+		Entry("shadow takes a claim", pkg.ClaimModeShadow, true),
+		Entry("on takes a claim", pkg.ClaimModeOn, true),
+		// The zero value is not off, so a check for off alone would fail open.
+		Entry("zero value takes no claim", pkg.ClaimMode(""), false),
+		Entry("unknown value takes no claim", pkg.ClaimMode("ON"), false),
+	)
+})

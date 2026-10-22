@@ -27,6 +27,20 @@ const (
 // explicitly empty value.
 var ErrClaimModeInvalid = stderrors.New("claim mode invalid")
 
+// TakesClaim reports whether this mode takes a claim, and so needs the claim
+// transport: a ref client, its git-rest URL and its gateway secret.
+//
+// It is an allow-list, not a check for off. A zero-value or otherwise unparsed
+// mode reports false, so an unrecognised mode constructs no transport and reads
+// no secret instead of failing open.
+func (m ClaimMode) TakesClaim() bool {
+	switch m {
+	case ClaimModeShadow, ClaimModeOn:
+		return true
+	}
+	return false
+}
+
 // ParseClaimMode parses the CLAIM_MODE value. present reports whether the
 // variable exists in the environment, which distinguishes an unset variable
 // (off) from an explicitly empty one (invalid).

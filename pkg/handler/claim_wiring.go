@@ -10,7 +10,6 @@ import (
 	"github.com/bborbe/errors"
 	libtime "github.com/bborbe/time"
 
-	pkg "github.com/bborbe/agent-task-executor/pkg"
 	"github.com/bborbe/agent-task-executor/pkg/claim"
 )
 
@@ -35,9 +34,9 @@ func (unmanagedJobControl) DeleteJob(ctx context.Context, taskID string) error {
 }
 
 // leaseManager returns this process's single lease manager, constructing it on
-// first use. Only the two claim-taking modes construct one: the condition is an
-// allow-list rather than a check for off, so a zero-value or otherwise
-// unparsed mode fails closed instead of building a manager nothing asked for.
+// first use. Only the two claim-taking modes construct one, so a zero-value or
+// otherwise unparsed mode fails closed instead of building a manager nothing
+// asked for.
 //
 // A construction failure is cached for the process lifetime. That is deliberate:
 // the inputs are fixed at startup (the injected factory and the cluster name),
@@ -45,9 +44,7 @@ func (unmanagedJobControl) DeleteJob(ctx context.Context, taskID string) error {
 // In `on` the cached error fails closed; in `shadow` it fails open, which is the
 // mode's contract.
 func (h *taskEventHandler) leaseManager(ctx context.Context) (claim.LeaseManager, error) {
-	switch h.claimMode {
-	case pkg.ClaimModeShadow, pkg.ClaimModeOn:
-	default:
+	if !h.claimMode.TakesClaim() {
 		return nil, errors.Errorf(
 			ctx,
 			"claim mode %q takes no claim: no lease manager constructed",

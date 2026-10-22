@@ -150,6 +150,24 @@ func (a *application) validate(ctx context.Context) error {
 	return nil
 }
 
+// validateClaimTransport checks the settings the claim transport needs, in the
+// modes that take a claim. off builds no client and reads no secret, so its
+// transport settings stay unused and unvalidated — but a claim-taking mode with
+// no git-rest URL would otherwise fail on its first dispatch instead of here.
+func (a *application) validateClaimTransport(ctx context.Context, claimMode pkg.ClaimMode) error {
+	if !claimMode.TakesClaim() {
+		return nil
+	}
+	if a.GitRestURL == "" {
+		return errors.Errorf(
+			ctx,
+			"gitrest-url (GITREST_URL) must be set when CLAIM_MODE is %q",
+			claimMode,
+		)
+	}
+	return nil
+}
+
 //nolint:funlen // Initialization sequence; wiring is linear with no branching.
 func (a *application) Run(ctx context.Context, sentryClient libsentry.Client) error {
 	if err := a.validate(ctx); err != nil {
@@ -162,6 +180,9 @@ func (a *application) Run(ctx context.Context, sentryClient libsentry.Client) er
 	claimMode, err := parseClaimModeFromEnv(ctx)
 	if err != nil {
 		return errors.Wrapf(ctx, err, "parse claim mode")
+	}
+	if err := a.validateClaimTransport(ctx, claimMode); err != nil {
+		return err
 	}
 
 	kubeConfig, err := rest.InClusterConfig()
@@ -224,20 +245,25 @@ func (a *application) Run(ctx context.Context, sentryClient libsentry.Client) er
 
 	// The git-rest gateway secret is read by NAME from K8s (never logged, never
 	// in env) so the claim ref client can authenticate to git-rest without secret
-	// material entering the Deployment manifest (spec 005 Security).
-	gitRestGatewaySecretValue, err := pkg.ReadGitRestGatewaySecret(
-		ctx,
-		kubeClient,
-		a.Namespace,
-		a.GitRestGatewaySecret,
-	)
-	if err != nil {
-		return errors.Wrapf(ctx, err, "read git-rest gateway secret")
+	// material entering the Deployment manifest (spec 005 Security). It is read
+	// only in the modes that take a claim: off builds no client, so it must not
+	// read a secret it will never use.
+	var claimRefClientFactory handler.ClaimRefClientFactory
+	if claimMode.TakesClaim() {
+		gitRestGatewaySecretValue, err := pkg.ReadGitRestGatewaySecret(
+			ctx,
+			kubeClient,
+			a.Namespace,
+			a.GitRestGatewaySecret,
+		)
+		if err != nil {
+			return errors.Wrapf(ctx, err, "read git-rest gateway secret")
+		}
+		claimRefClientFactory = factory.CreateClaimRefClientFactory(
+			a.GitRestURL,
+			gitRestGatewaySecretValue,
+		)
 	}
-	claimRefClientFactory := factory.CreateClaimRefClientFactory(
-		a.GitRestURL,
-		gitRestGatewaySecretValue,
-	)
 
 	healthcheckRunner := factory.CreateHealthcheckRunner(
 		eventHandlerConfig,
