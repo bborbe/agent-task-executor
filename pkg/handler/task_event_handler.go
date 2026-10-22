@@ -251,8 +251,8 @@ type taskEventHandler struct {
 	// would release the claim just taken for the replacement.
 	spawnPendingMu  sync.Mutex
 	spawnPendingSet map[lib.TaskIdentifier]struct{}
-	redriveMu             sync.Mutex
-	redriveStreaks        map[lib.TaskIdentifier]redriveStreak
+	redriveMu       sync.Mutex
+	redriveStreaks  map[lib.TaskIdentifier]redriveStreak
 	// spawnGens counts Jobs created by this executor per assignee, on any path.
 	// A pass cache entry read at an older generation is refetched, so a Job
 	// spawned by the Kafka consumer or the deferred loop mid-pass is never
