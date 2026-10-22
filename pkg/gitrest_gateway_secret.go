@@ -24,8 +24,10 @@ const gitRestGatewaySecretDataKey = "gateway-secret"
 // logged, never embedded in the image, and never in env (spec 005 Security;
 // the env var GITREST_GATEWAY_SECRET references the secret by NAME, matching
 // the JobKafkaClientCertSecret pattern). Returns an error when the Secret is
-// missing or lacks the gateway-secret data key, so a misconfigured deployment
-// fails loudly at startup instead of silently sending no auth header.
+// missing, lacks the gateway-secret data key, or holds an empty value there, so
+// a misconfigured deployment fails loudly at startup instead of silently
+// sending no auth header. An empty secretName is the only way to disable
+// gateway auth.
 func ReadGitRestGatewaySecret(
 	ctx context.Context,
 	kubeClient kubernetes.Interface,
@@ -46,6 +48,14 @@ func ReadGitRestGatewaySecret(
 		return "", errors.Errorf(
 			ctx,
 			"secret %q lacks data key %q",
+			secretName,
+			gitRestGatewaySecretDataKey,
+		)
+	}
+	if len(value) == 0 {
+		return "", errors.Errorf(
+			ctx,
+			"secret %q data key %q is empty; unset the secret name to disable gateway auth",
 			secretName,
 			gitRestGatewaySecretDataKey,
 		)

@@ -2,6 +2,10 @@
 
 All notable changes to this project will be documented in this file.
 
+## Unreleased
+
+- fix: `ReadGitRestGatewaySecret` now returns an error when the `gateway-secret` data key exists but holds an empty value. It previously returned an empty string and a nil error, which silently disabled gateway auth despite the doc promising a loud startup failure; only an unset secret name now means auth is disabled.
+
 ## v0.26.1
 
 - refactor: restore `pkg.ReadGitRestGatewaySecret`, which reads the git-rest gateway secret by NAME from a K8s Secret (data key `gateway-secret`) — never logged, never in env, never in the Deployment manifest. The task-view change removed it along with the git-rest client; the leased claim ref transport needs it back.
