@@ -7,6 +7,8 @@ package handler_test
 import (
 	"context"
 	"encoding/json"
+	stderrors "errors"
+	"time"
 
 	"github.com/IBM/sarama"
 	lib "github.com/bborbe/agent"
@@ -30,6 +32,7 @@ import (
 type claimHarness struct {
 	eventHandler handler.TaskEventHandler
 	spawner      *mocks.FakeJobSpawner
+	resolver     *mocks.FakeConfigResolver
 	client       *mocks.FakeClaimRefClient
 	factoryCalls int
 }
@@ -47,7 +50,7 @@ func newClaimHarness(mode pkg.ClaimMode) *claimHarness {
 	resolver.ResolveReturns(pkg.AgentConfiguration{Assignee: "claude", Image: "img"}, nil)
 
 	client := new(mocks.FakeClaimRefClient)
-	h := &claimHarness{spawner: spawner, client: client}
+	h := &claimHarness{spawner: spawner, resolver: resolver, client: client}
 	h.eventHandler = handler.NewTaskEventHandler(
 		spawner,
 		base.Branch("prod"),
@@ -126,6 +129,42 @@ func qualifyingClaimTask() lib.Task {
 	}
 }
 
+// conflictOnCreate is a Put stub that conflicts when the create is attempted
+// and returns a sha for any takeover write.
+func conflictOnCreate() func(
+	context.Context, string, string, string, string, libtime.DateTime,
+) (string, error) {
+	return func(
+		_ context.Context,
+		_ string,
+		expectedSha string,
+		_ string,
+		_ string,
+		_ libtime.DateTime,
+	) (string, error) {
+		if expectedSha == "" {
+			return "", claim.ErrLeaseConflict
+		}
+		return "new-sha", nil
+	}
+}
+
+// listedClaimRef is the single claim ref the fake lists for key.
+func listedClaimRef(key, sha string, leaseUntil time.Time) claim.ClaimRef {
+	return claim.ClaimRef{
+		Ref:        "refs/" + key,
+		Sha:        sha,
+		Cluster:    "other",
+		TaskID:     "previous-task",
+		LeaseUntil: leaseUntil.UTC().Format(time.RFC3339),
+	}
+}
+
+// claimKeyFor returns the claim key DeriveClaimKey produces for task.
+func claimKeyFor(task lib.Task) string {
+	return "claims/task/" + string(task.TaskIdentifier)
+}
+
 var _ = Describe("claim mode off", func() {
 	It("spawns one Job and constructs no claim client", func() {
 		harness := newClaimHarness(pkg.ClaimModeOff)
@@ -140,5 +179,215 @@ var _ = Describe("claim mode off", func() {
 		Expect(harness.client.DeleteCallCount()).To(Equal(0))
 		Expect(harness.client.ListCallCount()).To(Equal(0))
 		expectClaimDelta(before, after, map[string]float64{})
+	})
+})
+
+var _ = Describe("claim gate", func() {
+	It("AC5: on blocks the Job when the claim request fails", func() {
+		harness := newClaimHarness(pkg.ClaimModeOn)
+		harness.client.PutReturns("", stderrors.New("git-rest down"))
+		harness.client.ListReturns(nil, nil)
+		before := snapshotClaims()
+
+		Expect(harness.consume(qualifyingClaimTask())).To(Succeed())
+
+		after := snapshotClaims()
+		Expect(harness.spawner.SpawnJobCallCount()).To(Equal(0))
+		expectClaimDelta(before, after, map[string]float64{"error": 1})
+	})
+
+	It("AC5: shadow still spawns when the claim request fails", func() {
+		harness := newClaimHarness(pkg.ClaimModeShadow)
+		harness.client.PutReturns("", stderrors.New("git-rest down"))
+		harness.client.ListReturns(nil, nil)
+		before := snapshotClaims()
+
+		Expect(harness.consume(qualifyingClaimTask())).To(Succeed())
+
+		after := snapshotClaims()
+		Expect(harness.spawner.SpawnJobCallCount()).To(Equal(1))
+		expectClaimDelta(before, after, map[string]float64{"error": 1})
+	})
+
+	It("AC4: on spawns after a successful claim", func() {
+		harness := newClaimHarness(pkg.ClaimModeOn)
+		harness.client.PutReturns("sha-1", nil)
+		before := snapshotClaims()
+
+		Expect(harness.consume(qualifyingClaimTask())).To(Succeed())
+
+		after := snapshotClaims()
+		Expect(harness.spawner.SpawnJobCallCount()).To(Equal(1))
+		expectClaimDelta(before, after, map[string]float64{"claimed": 1})
+	})
+
+	It("AC3: shadow spawns when the lease is still live", func() {
+		harness := newClaimHarness(pkg.ClaimModeShadow)
+		harness.client.PutStub = conflictOnCreate()
+		harness.client.ListReturns([]claim.ClaimRef{
+			listedClaimRef(
+				claimKeyFor(qualifyingClaimTask()),
+				"live-sha",
+				time.Now().UTC().Add(5*time.Minute),
+			),
+		}, nil)
+		before := snapshotClaims()
+
+		Expect(harness.consume(qualifyingClaimTask())).To(Succeed())
+
+		Expect(harness.spawner.SpawnJobCallCount()).To(Equal(1))
+		expectClaimDelta(before, snapshotClaims(), map[string]float64{
+			"conflict":           1,
+			"takeover_too_early": 1,
+		})
+	})
+
+	It("AC4: on blocks the Job when the lease is still live", func() {
+		harness := newClaimHarness(pkg.ClaimModeOn)
+		harness.client.PutStub = conflictOnCreate()
+		harness.client.ListReturns([]claim.ClaimRef{
+			listedClaimRef(
+				claimKeyFor(qualifyingClaimTask()),
+				"live-sha",
+				time.Now().UTC().Add(5*time.Minute),
+			),
+		}, nil)
+		before := snapshotClaims()
+
+		Expect(harness.consume(qualifyingClaimTask())).To(Succeed())
+
+		Expect(harness.spawner.SpawnJobCallCount()).To(Equal(0))
+		expectClaimDelta(before, snapshotClaims(), map[string]float64{
+			"conflict":           1,
+			"takeover_too_early": 1,
+		})
+	})
+
+	It("AC6: on spawns after taking over an expired lease", func() {
+		harness := newClaimHarness(pkg.ClaimModeOn)
+		task := qualifyingClaimTask()
+		key := claimKeyFor(task)
+		harness.client.PutStub = conflictOnCreate()
+		harness.client.ListReturns([]claim.ClaimRef{
+			listedClaimRef(key, "expired-sha", time.Now().UTC().Add(-31*time.Second)),
+		}, nil)
+		before := snapshotClaims()
+
+		Expect(harness.consume(task)).To(Succeed())
+
+		Expect(harness.spawner.SpawnJobCallCount()).To(Equal(1))
+		expectClaimDelta(before, snapshotClaims(), map[string]float64{
+			"conflict":   1,
+			"taken_over": 1,
+		})
+		Expect(harness.client.PutCallCount()).To(Equal(2))
+		_, putKey, expectedSha, cluster, _, _ := harness.client.PutArgsForCall(1)
+		Expect(putKey).To(Equal(key))
+		Expect(expectedSha).To(Equal("expired-sha"))
+		Expect(cluster).To(Equal("self"))
+	})
+
+	It("AC6: on blocks a lease inside the takeover grace", func() {
+		harness := newClaimHarness(pkg.ClaimModeOn)
+		harness.client.PutStub = conflictOnCreate()
+		harness.client.ListReturns([]claim.ClaimRef{
+			listedClaimRef(
+				claimKeyFor(qualifyingClaimTask()),
+				"grace-sha",
+				time.Now().UTC().Add(-5*time.Second),
+			),
+		}, nil)
+		before := snapshotClaims()
+
+		Expect(harness.consume(qualifyingClaimTask())).To(Succeed())
+
+		Expect(harness.spawner.SpawnJobCallCount()).To(Equal(0))
+		expectClaimDelta(before, snapshotClaims(), map[string]float64{
+			"conflict":           1,
+			"takeover_too_early": 1,
+		})
+	})
+
+	It("AC6: on blocks a lease that is still valid", func() {
+		harness := newClaimHarness(pkg.ClaimModeOn)
+		harness.client.PutStub = conflictOnCreate()
+		harness.client.ListReturns([]claim.ClaimRef{
+			listedClaimRef(
+				claimKeyFor(qualifyingClaimTask()),
+				"live-sha",
+				time.Now().UTC().Add(5*time.Minute),
+			),
+		}, nil)
+		before := snapshotClaims()
+
+		Expect(harness.consume(qualifyingClaimTask())).To(Succeed())
+
+		Expect(harness.spawner.SpawnJobCallCount()).To(Equal(0))
+		expectClaimDelta(before, snapshotClaims(), map[string]float64{
+			"conflict":           1,
+			"takeover_too_early": 1,
+		})
+	})
+
+	It("AC7(a): a foreign-cluster task makes no claim request", func() {
+		harness := newClaimHarness(pkg.ClaimModeShadow)
+		task := qualifyingClaimTask()
+		task.Frontmatter["cluster"] = "other"
+		before := testutil.ToFloat64(
+			metrics.TaskEventsTotal.WithLabelValues("skipped_foreign_cluster"),
+		)
+
+		Expect(harness.consume(task)).To(Succeed())
+
+		after := testutil.ToFloat64(
+			metrics.TaskEventsTotal.WithLabelValues("skipped_foreign_cluster"),
+		)
+		Expect(harness.client.PutCallCount()).To(Equal(0))
+		Expect(after - before).To(Equal(float64(1)))
+	})
+
+	It("AC7(b): a task deferred at the concurrency cap makes no claim request", func() {
+		harness := newClaimHarness(pkg.ClaimModeShadow)
+		harness.resolver.ResolveReturns(
+			pkg.AgentConfiguration{
+				Assignee:          "claude",
+				Image:             "img",
+				MaxConcurrentJobs: 1,
+			},
+			nil,
+		)
+		harness.spawner.ListActiveJobsReturns(activeJobs(1), nil)
+		before := testutil.ToFloat64(
+			metrics.TaskEventsTotal.WithLabelValues("deferred_concurrency_cap"),
+		)
+
+		Expect(harness.consume(qualifyingClaimTask())).To(Succeed())
+
+		after := testutil.ToFloat64(
+			metrics.TaskEventsTotal.WithLabelValues("deferred_concurrency_cap"),
+		)
+		Expect(harness.spawner.SpawnJobCallCount()).To(Equal(0))
+		Expect(harness.client.PutCallCount()).To(Equal(0))
+		Expect(after - before).To(Equal(float64(1)))
+	})
+
+	It("AC7(c): a redrive-capped task makes no additional claim request", func() {
+		harness := newClaimHarness(pkg.ClaimModeShadow)
+		task := qualifyingClaimTask()
+		task.TaskIdentifier = lib.TaskIdentifier("tid-claim-redrive")
+
+		for i := 0; i < 3; i++ {
+			Expect(harness.consume(task)).To(Succeed())
+		}
+		Expect(harness.spawner.SpawnJobCallCount()).To(Equal(3))
+		putCallsBefore := harness.client.PutCallCount()
+		cappedBefore := testutil.ToFloat64(metrics.RedriveCappedTotal)
+
+		Expect(harness.consume(task)).To(Succeed())
+
+		Expect(harness.spawner.SpawnJobCallCount()).To(Equal(3))
+		Expect(harness.client.PutCallCount()).To(Equal(putCallsBefore))
+		Expect(testutil.ToFloat64(metrics.RedriveCappedTotal) - cappedBefore).
+			To(Equal(float64(1)))
 	})
 })

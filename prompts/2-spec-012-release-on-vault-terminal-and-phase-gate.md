@@ -68,7 +68,7 @@ if phase != nil && applyPhaseGate(task, *phase) {
 
 4. Do not change the status filter, the phase filter, the stage filter, or the assignee filter. The phase gate must still fire only after the status filter has admitted the task, so a task at a terminal phase with a non-triggering status is handled by `cleanupTerminalTask` only when its status is terminal.
 
-5. Extend `pkg/handler/task_event_handler_claim_release_test.go` (package `handler_test`, Ginkgo + Gomega) with these specs. Every counter assertion uses `snapshotClaims`/`expectClaimDelta` from the harness. Every fixture holds two claims, `task-a` and `task-b`, with `PutStub` returning `"sha-"+taskID`, and asserts the survivor.
+5. Extend `pkg/handler/task_event_handler_claim_release_test.go` (package `handler_test`, Ginkgo + Gomega) with these specs. Every counter assertion uses `snapshotClaims`/`expectClaimDelta` from the harness. Fixtures (a)–(d) hold two claims, `task-a` and `task-b`, with `PutStub` returning `"sha-"+taskID`, and assert the survivor; fixtures (e) and (f) hold only `task-a`. Set `PutStub` **before** `holdClaim`, and take `before := snapshotClaims()` **after** the holds, so the deltas are not polluted by the setup.
 
     a. **AC1(c) terminal status releases only its claim.** Mode `shadow`. `holdClaim("task-a")` and `holdClaim("task-b")`. Consume a task event for `task-a` whose frontmatter has `status: completed`. Assert: `DeleteCallCount() == 1`; `DeleteArgsForCall(0)` has key `"claims/task/task-a"` and sha `"sha-task-a"`; `expectClaimDelta(before, after, map[string]float64{"released": 1})`; `HeldClaims()` contains `task-b` and not `task-a`.
 
@@ -113,7 +113,7 @@ grep -n 'ReleaseTaskClaim(' pkg/handler/task_event_handler.go pkg/handler/claim_
 - `make precommit` exits 0.
 - `go test -race -count=1 ./...` exits 0.
 - The `cleanupTerminalTask(` grep shows the definition, the `parseAndFilter` call site, and any test call sites; all pass a context.
-- The `ReleaseTaskClaim(` grep shows the implementation in `claim_lifecycle.go` and exactly two call sites in `task_event_handler.go`: the `cleanupTerminalTask` hook and the phase-gate call site.
+- The `ReleaseTaskClaim(` grep shows the implementation in `claim_lifecycle.go` and exactly three call sites in `task_event_handler.go`: the prompt-1 failed-spawn hook in `spawnIfNeededClaimed`, the `cleanupTerminalTask` hook and the phase-gate call site.
 - `! grep -q 'ClaimTotal.WithLabelValues' pkg/handler/task_event_handler.go` exits 0 (the wiring increments nothing).
 
 Completion report (appended by dark-factory): set `"status":"success"` only when `make precommit` exits 0; otherwise `"status":"failed"`. Include the actual `make precommit` exit code in the `verification` block.

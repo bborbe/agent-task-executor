@@ -5,6 +5,8 @@ All notable changes to this project will be documented in this file.
 ## Unreleased
 
 - feat: add CLAIM_MODE (off|shadow|on, default off) and an injected claim ref client constructor; off constructs no claim client
+- feat: gate task dispatch on a git-rest lease claim after all existing gates (off/shadow/on; off unchanged)
+- feat: attempt one lease takeover on a 409 claim conflict and proceed on an expired lease
 
 ## v0.24.0
 
