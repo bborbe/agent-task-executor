@@ -136,15 +136,62 @@ func (h *taskEventHandler) acquireSpawnClaim(ctx context.Context, task lib.Task)
 // DeriveClaimKey ignores them for task types that are not repo-keyed and
 // rejects them for the ones that are.
 func claimOwnerRepo(task lib.Task) (string, string) {
-	raw, ok := task.Frontmatter.String("repo")
-	if !ok {
-		return "", ""
+	// `repo` is the documented source and wins when present.
+	if raw, ok := task.Frontmatter.String("repo"); ok {
+		if owner, repo, split := splitOwnerRepo(raw); split {
+			return owner, repo
+		}
 	}
+	// Every pr-review task the GitHub watcher creates carries `clone_url`
+	// instead of `repo` (9,779 of 9,779 in the OpenClaw vault, 2026-10-22), so
+	// without this fallback every one of them failed key derivation and, in
+	// on mode, would fail closed and never run.
+	if raw, ok := task.Frontmatter.String("clone_url"); ok {
+		if owner, repo, parsed := ownerRepoFromCloneURL(raw); parsed {
+			return owner, repo
+		}
+	}
+	return "", ""
+}
+
+// splitOwnerRepo splits "<owner>/<name>", rejecting an empty or partial value.
+func splitOwnerRepo(raw string) (string, string, bool) {
 	idx := strings.Index(raw, "/")
 	if idx <= 0 || idx == len(raw)-1 {
-		return "", ""
+		return "", "", false
 	}
-	return raw[:idx], raw[idx+1:]
+	return raw[:idx], raw[idx+1:], true
+}
+
+// ownerRepoFromCloneURL extracts owner and repo from an https, ssh:// or
+// scp-style (git@host:owner/repo) clone URL, with an optional ".git" suffix and
+// trailing slash. Anything else is rejected so the caller keeps failing loudly.
+func ownerRepoFromCloneURL(raw string) (string, string, bool) {
+	raw = strings.TrimSpace(raw)
+	raw = strings.TrimSuffix(raw, "/")
+	raw = strings.TrimSuffix(raw, ".git")
+	var path string
+	switch {
+	case strings.Contains(raw, "://"):
+		rest := raw[strings.Index(raw, "://")+3:]
+		if at := strings.Index(rest, "@"); at >= 0 {
+			rest = rest[at+1:]
+		}
+		slash := strings.Index(rest, "/")
+		if slash < 0 {
+			return "", "", false
+		}
+		path = rest[slash+1:]
+	case strings.HasPrefix(raw, "git@"):
+		colon := strings.Index(raw, ":")
+		if colon < 0 {
+			return "", "", false
+		}
+		path = raw[colon+1:]
+	default:
+		return "", "", false
+	}
+	return splitOwnerRepo(path)
 }
 
 // claimFailureDecision logs a claim failure and reports whether the spawn may
