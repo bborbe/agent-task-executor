@@ -2,6 +2,10 @@
 
 All notable changes to this project will be documented in this file.
 
+## Unreleased
+
+- fix: **a `current_job` that names another cluster's Job is no longer treated as finished.** `current_job` lives in the shared vault frontmatter, so an executor can read a Job name that another cluster created, while `IsJobActive` only lists its own cluster's Jobs — "not active here" was read as "finished" and authorised the respawn. On 2026-10-22 task `94c1801c` ran on sun and nuke prod concurrently for 2 m 33 s that way. A dispatch pass now suppresses the spawn and re-defers when this executor's store still names a different Job than the frontmatter does, counting `skipped_foreign_job`. The no-store-entry case keeps the previous behaviour: nothing local distinguishes a foreign Job from a finished one there, and bounding it by the Job's deadline would withhold a legitimate respawn for up to 30 minutes.
+
 ## v0.30.1
 
 - fix: **a repo-keyed task whose frontmatter carries `clone_url` instead of `repo` now derives its claim key.** Every pr-review task the GitHub watcher creates carries `clone_url` (9,779 of 9,779 in the OpenClaw vault on 2026-10-22) and no `repo` key, so `claimOwnerRepo` returned an empty owner and `DeriveClaimKey` rejected the task with `claim owner must not be empty`. In `shadow` that only logged; in `on` it fails closed, so no pr-review task would ever have run. The key is now derived from an https, `ssh://` or `git@host:owner/repo` clone URL (optional `.git`), `repo` still wins when both are present, and a task with neither — or an unparseable URL — still fails loudly.
