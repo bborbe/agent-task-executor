@@ -162,20 +162,6 @@ func (a *application) validateClaimTransport(
 	if !claimMode.TakesClaim() {
 		return nil
 	}
-	// No lease lifecycle ships yet: nothing releases, renews or takes over a
-	// claim, so in on mode a claim outlives its task and every later dispatch of
-	// that key stays blocked for the life of the process. Shadow proceeds on a
-	// conflict, so it cannot block a task. on is refused until the lifecycle lands.
-	if claimMode == pkg.ClaimModeOn {
-		return errors.Errorf(
-			ctx,
-			"claim-mode (CLAIM_MODE) %q is not available yet: nothing releases or renews a lease, "+
-				"so a claim would outlive its task and block later dispatches. Use %q until the "+
-				"lease lifecycle ships",
-			claimMode,
-			pkg.ClaimModeShadow,
-		)
-	}
 	if a.GitRestURL == "" {
 		return errors.Errorf(
 			ctx,
