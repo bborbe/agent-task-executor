@@ -56,3 +56,20 @@ func RecoverAtStartup(ctx context.Context, manager LeaseManager) error {
 	)
 	return nil
 }
+
+// RunClaimRecovery is RecoverAtStartup as a run-group member: it recovers once,
+// then holds until the context is cancelled.
+//
+// The hold is load-bearing, not tidiness. service.Run wraps every run func in
+// run.CancelOnFirstFinishWait, which cancels all the others as soon as ANY one
+// returns. A recovery step that returned once it had recovered therefore ends
+// the whole service a few seconds after boot — v0.30.2 did exactly that on nuke
+// dev, nuke prod and sun, exiting 0 with `claim lease tick failed: context
+// canceled` while every other component was still healthy. Recovering is a
+// startup action, not a component with a lifetime, so it waits on the same
+// context everything else waits on.
+func RunClaimRecovery(ctx context.Context, manager LeaseManager) error {
+	_ = RecoverAtStartup(ctx, manager) // never returns an error; see above
+	<-ctx.Done()
+	return nil
+}

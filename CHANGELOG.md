@@ -2,6 +2,10 @@
 
 All notable changes to this project will be documented in this file.
 
+## Unreleased
+
+- fix: **startup recovery no longer shuts the service down.** v0.30.2 ran `Recover` from a run func that returned as soon as recovery finished, and `service.Run` wraps every run func in `run.CancelOnFirstFinishWait` — it cancels all the others as soon as any one completes. The recovery step therefore cancelled the lease loop, the HTTP server and the cron a few seconds after boot: every executor on nuke dev, nuke prod and sun exited **0** with `claim lease tick failed: context canceled` followed by `application finished`, leaving the previous ReplicaSet to serve traffic. The step now recovers once and then holds until the context is cancelled, like every other run func. Two regression tests pin it — one at the claim layer, one at the factory — asserting the recover func does not return while the service context is live.
+
 ## v0.30.2
 
 - fix: **`Release` no longer drops a claim while this cluster's Job is still running.** It deleted the ref and removed the held entry with no Job check, and because the fence only iterates the held set, a release that fired while the Job ran left that Job running unclaimed and invisible to the fence — so another cluster could take the task over and run it a second time. A release now keeps the claim held, so the loop keeps renewing it, and logs `event=release_deferred_job_running`; the Job's own terminal event releases the claim as before. A release for a Job that is already gone is unchanged.

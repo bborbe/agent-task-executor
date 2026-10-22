@@ -11,6 +11,7 @@ import (
 	"context"
 	stderrors "errors"
 	"testing"
+	"time"
 )
 
 // recoverStub is a LeaseManager whose only interesting method is Recover.
@@ -84,5 +85,37 @@ func TestRecoverAtStartupStopsOnCancelledContext(t *testing.T) {
 	}
 	if manager.calls != 1 {
 		t.Fatalf("Recover calls = %d; want 1 before the context stops the retry", manager.calls)
+	}
+}
+
+// TestRunClaimRecoveryHoldsTheRunGroupOpen is the v0.30.2 regression at the
+// claim layer: service.Run cancels every other run func as soon as one returns,
+// so recovery completing must not end the run group.
+func TestRunClaimRecoveryHoldsTheRunGroupOpen(t *testing.T) {
+	manager := &recoverStub{}
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan error, 1)
+	go func() { done <- RunClaimRecovery(ctx, manager) }()
+
+	select {
+	case err := <-done:
+		t.Fatalf(
+			"RunClaimRecovery returned %v while the context was live; the service would shut down",
+			err,
+		)
+	case <-time.After(200 * time.Millisecond):
+	}
+	if manager.calls != 1 {
+		t.Fatalf("Recover calls = %d; want 1 before the hold", manager.calls)
+	}
+
+	cancel()
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatalf("RunClaimRecovery returned %v after cancel; want nil", err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("RunClaimRecovery did not return after the context was cancelled")
 	}
 }
