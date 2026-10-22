@@ -254,10 +254,10 @@ type taskEventHandler struct {
 	// claim cannot silently run without it.
 	claimJobControl  claim.JobControl
 	claimManagerOnce sync.Once
-	claimManager          claim.LeaseManager
-	claimManagerErr       error
-	redriveMu             sync.Mutex
-	redriveStreaks        map[lib.TaskIdentifier]redriveStreak
+	claimManager     claim.LeaseManager
+	claimManagerErr  error
+	redriveMu        sync.Mutex
+	redriveStreaks   map[lib.TaskIdentifier]redriveStreak
 	// spawnGens counts Jobs created by this executor per assignee, on any path.
 	// A pass cache entry read at an older generation is refetched, so a Job
 	// spawned by the Kafka consumer or the deferred loop mid-pass is never
