@@ -149,11 +149,7 @@ var _ = Describe("claim release at the Job-watcher end points", func() {
 			}
 		})
 
-		// Pending until this branch is rebased onto #105. The claim gate is
-		// spec 011 part 2 and is not on this base, so nothing takes a claim
-		// before SpawnJob runs and there is nothing for the failure path to
-		// release. The hook itself is in place; flip this to It on the rebase.
-		PIt("AC1(e) releases the claim it just took when the spawn fails", func() {
+		It("AC1(e) releases the claim it just took when the spawn fails", func() {
 			harness.spawner.SpawnJobReturns("", stderrors.New("job create failed"))
 			before := snapshotClaims()
 
@@ -201,7 +197,7 @@ var _ = Describe("claim release at the vault end points", func() {
 	It("AC1(c) releases only the claim of the task whose status is completed", func() {
 		harness.holdClaim("task-a")
 		harness.holdClaim("task-b")
-		manager, err := harness.handler.ClaimLeaseManager(ctx)
+		manager, err := harness.eventHandler.ClaimLeaseManager(ctx)
 		Expect(err).NotTo(HaveOccurred())
 		before := snapshotClaims()
 
@@ -219,7 +215,7 @@ var _ = Describe("claim release at the vault end points", func() {
 	It("AC1(c) releases on aborted the same way", func() {
 		harness.holdClaim("task-a")
 		harness.holdClaim("task-b")
-		manager, err := harness.handler.ClaimLeaseManager(ctx)
+		manager, err := harness.eventHandler.ClaimLeaseManager(ctx)
 		Expect(err).NotTo(HaveOccurred())
 		before := snapshotClaims()
 
@@ -236,7 +232,7 @@ var _ = Describe("claim release at the vault end points", func() {
 	It("AC1(d) releases only the claim of the task whose phase is human_review", func() {
 		harness.holdClaim("task-a")
 		harness.holdClaim("task-b")
-		manager, err := harness.handler.ClaimLeaseManager(ctx)
+		manager, err := harness.eventHandler.ClaimLeaseManager(ctx)
 		Expect(err).NotTo(HaveOccurred())
 		before := snapshotClaims()
 
@@ -254,7 +250,7 @@ var _ = Describe("claim release at the vault end points", func() {
 	It("AC1(d) releases on the done phase the same way", func() {
 		harness.holdClaim("task-a")
 		harness.holdClaim("task-b")
-		manager, err := harness.handler.ClaimLeaseManager(ctx)
+		manager, err := harness.eventHandler.ClaimLeaseManager(ctx)
 		Expect(err).NotTo(HaveOccurred())
 		before := snapshotClaims()
 
@@ -270,7 +266,7 @@ var _ = Describe("claim release at the vault end points", func() {
 
 	It("AC2 leaves a failed release on the vault path to the tick", func() {
 		harness.holdClaim("task-a")
-		manager, err := harness.handler.ClaimLeaseManager(ctx)
+		manager, err := harness.eventHandler.ClaimLeaseManager(ctx)
 		Expect(err).NotTo(HaveOccurred())
 		harness.client.DeleteReturnsOnCall(0, stderrors.New("git-rest throttled"))
 		before := snapshotClaims()

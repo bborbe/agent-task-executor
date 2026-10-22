@@ -68,6 +68,31 @@ func CreateJobWatcher(
 	return pkg.NewJobWatcher(kubeClient, namespace, taskStore, publisher, claimReleaser)
 }
 
+// CreateClaimLifecycleRunFuncs returns the run funcs that keep this executor's
+// leases alive: one lease-loop entry in shadow and on, and none in off, where
+// no lease manager is constructed. The loop renews held claims, fences a claim
+// whose renewals fail, and retries a release an end point could not deliver.
+func CreateClaimLifecycleRunFuncs(
+	claimMode pkg.ClaimMode,
+	claimHandler handler.ClaimLifecycleEventHandler,
+) []run.Func {
+	if !claimMode.TakesClaim() {
+		return nil
+	}
+	return []run.Func{
+		func(ctx context.Context) error {
+			manager, err := claimHandler.ClaimLeaseManager(ctx)
+			if err != nil {
+				return errors.Wrapf(ctx, err, "get claim lease manager")
+			}
+			if manager == nil {
+				return nil
+			}
+			return manager.Run(ctx)
+		},
+	}
+}
+
 // CreateZombieSweeper creates a deadline sweeper that classifies stuck tasks as
 // zombies and emits failure events via the publisher. Interval and per-task
 // deadline are sourced from the AgentConfig CRD knobs (see ConfigSpec). The
