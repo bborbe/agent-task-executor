@@ -4,6 +4,7 @@ All notable changes to this project will be documented in this file.
 
 ## Unreleased
 
+- fix: `ReadGitRestGatewaySecret` now returns an error when the `gateway-secret` data key exists but holds an empty value. It previously returned an empty string and a nil error, which silently disabled gateway auth despite the doc promising a loud startup failure; only an unset secret name now means auth is disabled.
 - feat: wire `CLAIM_MODE` into the executor. The claim ref client is built from `GITREST_URL` and the gateway secret read by NAME from K8s only in `shadow` and `on`; `off` constructs no client, reads no secret and validates no transport setting, and a claim-taking mode with no `GITREST_URL` stops the process at startup. The claim ref client keeps a git-rest transport of its own because leased claim refs are written through git-rest even though task state is now read from the in-memory task view.
 
 ## v0.26.1
