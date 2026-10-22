@@ -2,7 +2,7 @@
 
 All notable changes to this project will be documented in this file.
 
-## Unreleased
+## v0.30.3
 
 - fix: **startup recovery no longer shuts the service down.** v0.30.2 ran `Recover` from a run func that returned as soon as recovery finished, and `service.Run` wraps every run func in `run.CancelOnFirstFinishWait` — it cancels all the others as soon as any one completes. The recovery step therefore cancelled the lease loop, the HTTP server and the cron a few seconds after boot: every executor on nuke dev, nuke prod and sun exited **0** with `claim lease tick failed: context canceled` followed by `application finished`, leaving the previous ReplicaSet to serve traffic. The step now recovers once and then holds until the context is cancelled, like every other run func. Two regression tests pin it — one at the claim layer, one at the factory — asserting the recover func does not return while the service context is live.
 
