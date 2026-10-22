@@ -11,6 +11,7 @@ import (
 	"context"
 	stderrors "errors"
 	"testing"
+	stdtime "time"
 
 	lib "github.com/bborbe/agent"
 	libtime "github.com/bborbe/time"
@@ -234,6 +235,203 @@ func TestAcquireSpawnClaimOnFailsClosedOnConflict(t *testing.T) {
 	if h.acquireSpawnClaim(ctx, gateTask("", "")) {
 		t.Fatal("expected the spawn to be blocked on a lease conflict")
 	}
+}
+
+// gateClaimKey is the claim key for gateTask("", "").
+const gateClaimKey = "claims/task/tid-gate-1"
+
+// takeoverClaimRef is the listed claim the fake reports for key.
+func takeoverClaimRef(sha string, leaseUntil stdtime.Time) claim.ClaimRef {
+	return claim.ClaimRef{
+		Ref:        "refs/" + gateClaimKey,
+		Sha:        sha,
+		Cluster:    "other",
+		TaskID:     "previous-task",
+		LeaseUntil: leaseUntil.UTC().Format(stdtime.RFC3339),
+	}
+}
+
+// takeoverClient returns a client whose create conflicts and whose takeover of
+// the listed sha succeeds. Any other expected sha conflicts too, so a test can
+// assert exactly which write the takeover attempted.
+func takeoverClient(ref claim.ClaimRef) *recordingClaimRefClient {
+	return &recordingClaimRefClient{
+		put: func(
+			_ context.Context,
+			_ string,
+			expectedSha string,
+			_ string,
+			_ string,
+			_ libtime.DateTime,
+		) (string, error) {
+			if expectedSha == ref.Sha {
+				return "new-sha", nil
+			}
+			return "", claim.ErrLeaseConflict
+		},
+		list: func(context.Context, string) ([]claim.ClaimRef, error) {
+			return []claim.ClaimRef{ref}, nil
+		},
+	}
+}
+
+func TestAcquireSpawnClaimTakeoverExpired(t *testing.T) {
+	ctx := context.Background()
+	client := takeoverClient(takeoverClaimRef(
+		"expired-sha",
+		stdtime.Now().UTC().Add(-31*stdtime.Second),
+	))
+	h := newGateHandler(pkg.ClaimModeOn, client)
+	before := snapshotGateClaims()
+
+	if !h.acquireSpawnClaim(ctx, gateTask("", "")) {
+		t.Fatal("expected the spawn to proceed after an expired-lease takeover")
+	}
+	expectGateClaimDelta(t, before, snapshotGateClaims(), map[string]float64{
+		"conflict":   1,
+		"taken_over": 1,
+	})
+	if len(client.putCalls) != 2 {
+		t.Fatalf("expected two Put calls, got %d", len(client.putCalls))
+	}
+	if client.putCalls[1].expectedSha != "expired-sha" {
+		t.Errorf(
+			"takeover expected_sha = %q, want %q",
+			client.putCalls[1].expectedSha,
+			"expired-sha",
+		)
+	}
+	if client.putCalls[1].cluster != "self" {
+		t.Errorf("takeover cluster = %q, want %q", client.putCalls[1].cluster, "self")
+	}
+}
+
+func TestAcquireSpawnClaimTakeoverStillValid(t *testing.T) {
+	ctx := context.Background()
+	client := takeoverClient(takeoverClaimRef(
+		"live-sha",
+		stdtime.Now().UTC().Add(5*stdtime.Minute),
+	))
+	h := newGateHandler(pkg.ClaimModeOn, client)
+	before := snapshotGateClaims()
+
+	if h.acquireSpawnClaim(ctx, gateTask("", "")) {
+		t.Fatal("expected a live lease to block the spawn in claim mode on")
+	}
+	expectGateClaimDelta(t, before, snapshotGateClaims(), map[string]float64{
+		"conflict":           1,
+		"takeover_too_early": 1,
+	})
+	if len(client.putCalls) != 1 {
+		t.Fatalf("expected the takeover to write nothing, got %d Put calls", len(client.putCalls))
+	}
+}
+
+func TestAcquireSpawnClaimTakeoverInsideGrace(t *testing.T) {
+	ctx := context.Background()
+	client := takeoverClient(takeoverClaimRef(
+		"grace-sha",
+		stdtime.Now().UTC().Add(-5*stdtime.Second),
+	))
+	h := newGateHandler(pkg.ClaimModeOn, client)
+	before := snapshotGateClaims()
+
+	if h.acquireSpawnClaim(ctx, gateTask("", "")) {
+		t.Fatal("expected a lease inside the takeover grace to block the spawn")
+	}
+	expectGateClaimDelta(t, before, snapshotGateClaims(), map[string]float64{
+		"conflict":           1,
+		"takeover_too_early": 1,
+	})
+	if len(client.putCalls) != 1 {
+		t.Fatalf("expected the takeover to write nothing, got %d Put calls", len(client.putCalls))
+	}
+}
+
+func TestAcquireSpawnClaimTakeoverRaceLost(t *testing.T) {
+	ctx := context.Background()
+	client := &recordingClaimRefClient{
+		put: func(context.Context, string, string, string, string, libtime.DateTime) (string, error) {
+			return "", claim.ErrLeaseConflict
+		},
+		list: func(context.Context, string) ([]claim.ClaimRef, error) {
+			return []claim.ClaimRef{takeoverClaimRef(
+				"expired-sha",
+				stdtime.Now().UTC().Add(-31*stdtime.Second),
+			)}, nil
+		},
+	}
+	h := newGateHandler(pkg.ClaimModeOn, client)
+	before := snapshotGateClaims()
+
+	if h.acquireSpawnClaim(ctx, gateTask("", "")) {
+		t.Fatal("expected a lost takeover race to block the spawn")
+	}
+	expectGateClaimDelta(t, before, snapshotGateClaims(), map[string]float64{
+		"conflict": 2,
+	})
+}
+
+func TestAcquireSpawnClaimTakeoverError(t *testing.T) {
+	ctx := context.Background()
+	newClient := func() *recordingClaimRefClient {
+		return &recordingClaimRefClient{
+			put: func(
+				_ context.Context,
+				_ string,
+				expectedSha string,
+				_ string,
+				_ string,
+				_ libtime.DateTime,
+			) (string, error) {
+				if expectedSha == "" {
+					return "", claim.ErrLeaseConflict
+				}
+				return "", stderrors.New("git-rest down")
+			},
+			list: func(context.Context, string) ([]claim.ClaimRef, error) {
+				return []claim.ClaimRef{takeoverClaimRef(
+					"expired-sha",
+					stdtime.Now().UTC().Add(-31*stdtime.Second),
+				)}, nil
+			},
+		}
+	}
+	expected := map[string]float64{"conflict": 1, "error": 1}
+
+	onClient := newClient()
+	onHandler := newGateHandler(pkg.ClaimModeOn, onClient)
+	before := snapshotGateClaims()
+	if onHandler.acquireSpawnClaim(ctx, gateTask("", "")) {
+		t.Fatal("expected a takeover error to block the spawn in claim mode on")
+	}
+	expectGateClaimDelta(t, before, snapshotGateClaims(), expected)
+
+	shadowClient := newClient()
+	shadowHandler := newGateHandler(pkg.ClaimModeShadow, shadowClient)
+	before = snapshotGateClaims()
+	if !shadowHandler.acquireSpawnClaim(ctx, gateTask("", "")) {
+		t.Fatal("expected a takeover error to proceed in claim mode shadow")
+	}
+	expectGateClaimDelta(t, before, snapshotGateClaims(), expected)
+}
+
+func TestAcquireSpawnClaimTakeoverExpiredInShadow(t *testing.T) {
+	ctx := context.Background()
+	client := takeoverClient(takeoverClaimRef(
+		"expired-sha",
+		stdtime.Now().UTC().Add(-31*stdtime.Second),
+	))
+	h := newGateHandler(pkg.ClaimModeShadow, client)
+	before := snapshotGateClaims()
+
+	if !h.acquireSpawnClaim(ctx, gateTask("", "")) {
+		t.Fatal("expected the spawn to proceed after an expired-lease takeover")
+	}
+	expectGateClaimDelta(t, before, snapshotGateClaims(), map[string]float64{
+		"conflict":   1,
+		"taken_over": 1,
+	})
 }
 
 func TestAcquireSpawnClaimDeriveKeyFailure(t *testing.T) {

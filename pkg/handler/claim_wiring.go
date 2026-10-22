@@ -6,6 +6,7 @@ package handler
 
 import (
 	"context"
+	stderrors "errors"
 	"strings"
 
 	lib "github.com/bborbe/agent"
@@ -98,10 +99,22 @@ func (h *taskEventHandler) acquireSpawnClaim(ctx context.Context, task lib.Task)
 	if err != nil {
 		return h.claimFailureDecision(task, "derive_key", err)
 	}
-	if _, err := manager.Claim(ctx, key, string(task.TaskIdentifier)); err != nil {
-		return h.claimFailureDecision(task, "claim", err)
+	_, claimErr := manager.Claim(ctx, key, string(task.TaskIdentifier))
+	if claimErr == nil {
+		return true
 	}
-	return true
+	if stderrors.Is(claimErr, claim.ErrLeaseConflict) {
+		// One takeover attempt against the listed claim. A live lease (including
+		// one inside the takeover grace) and a lost compare-and-swap race both
+		// leave the key with its current owner; the claim package has already
+		// counted conflict / takeover_too_early / taken_over / error.
+		_, takeoverErr := manager.Takeover(ctx, key, string(task.TaskIdentifier))
+		if takeoverErr == nil {
+			return true
+		}
+		return h.claimFailureDecision(task, "takeover", takeoverErr)
+	}
+	return h.claimFailureDecision(task, "claim", claimErr)
 }
 
 // claimOwnerRepo reads the task's single `repo` frontmatter key, which carries

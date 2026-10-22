@@ -1,7 +1,13 @@
 ---
-status: draft
+status: completed
 spec: [011-claim-mode-dispatch-wiring]
+summary: Added a single lease-takeover attempt on a 409 claim conflict in acquireSpawnClaim, with internal and external tests for expired, live, in-grace, lost-race and generic-error cases
+execution_id: agent-task-executor-claim-wiring-exec-023-spec-011-takeover-on-conflict
+dark-factory-version: v0.198.7
 created: "2026-10-21T23:30:14Z"
+queued: "2026-10-22T00:16:34Z"
+started: "2026-10-22T00:16:35Z"
+completed: "2026-10-22T00:21:15Z"
 branch: dark-factory/claim-mode-dispatch-wiring
 ---
 
