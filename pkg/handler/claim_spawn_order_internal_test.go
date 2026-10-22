@@ -137,6 +137,7 @@ func TestSpawnMarksPendingBeforeTakingTheClaim(t *testing.T) {
 		DefaultReconcileInterval,
 		pkg.ClaimModeShadow,
 		func() claim.ClaimRefClient { return client },
+		noopJobControl{},
 	)
 	h, ok := handler.(*taskEventHandler)
 	if !ok {

@@ -191,6 +191,7 @@ func CreateConsumer(
 		reconcileInterval,
 		claimMode,
 		claimRefClientFactory,
+		handler.NewKubeJobControl(kubeClient, namespace),
 	)
 	topic := lib.TaskV1SchemaID.EventTopic(topicPrefix)
 	offsetManager := libkafka.NewSaramaOffsetManager(

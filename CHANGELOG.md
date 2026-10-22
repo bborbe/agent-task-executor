@@ -2,6 +2,10 @@
 
 All notable changes to this project will be documented in this file.
 
+## Unreleased
+
+- fix: wire a real Kubernetes `JobControl` into the claim lease manager. The fence and restart recovery previously ran against a control that refused every call, so a claim that could not renew logged an error and left its Job running unclaimed — the duplicate the claims exist to prevent.
+
 ## v0.28.0
 
 - feat: release the dispatch claim when its Job ends or its spawn fails
