@@ -83,7 +83,7 @@ var _ = Describe("JobWatcher (envtest)", func() {
 				"assignee":    "envtest-agent",
 			},
 		})
-		watcher := pkg.NewJobWatcher(kubeClient, libk8s.Namespace(ns), store, publisher)
+		watcher := pkg.NewJobWatcher(kubeClient, libk8s.Namespace(ns), store, publisher, nil)
 
 		runErrCh := make(chan error, 1)
 		go func() { runErrCh <- watcher.Run(ctx) }()
