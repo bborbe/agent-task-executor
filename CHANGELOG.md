@@ -2,7 +2,7 @@
 
 All notable changes to this project will be documented in this file.
 
-## Unreleased
+## v0.30.0
 
 - feat: allow `CLAIM_MODE=on`. The lease lifecycle now ships — release at every end point, renewal and fence from the service run list, and takeover of an expired claim — so a claim no longer outlives its task. An unset `CLAIM_MODE` remains `off`: each cluster opts in explicitly through its own config.
 
