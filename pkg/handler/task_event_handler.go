@@ -851,9 +851,19 @@ func (h *taskEventHandler) spawnIfNeededClaimed(
 		return false, nil
 	}
 
-	// Held until this function returns, i.e. past storeSpawnedJob: between the
-	// claim and the store entry there is no Job name to compare against, so a
-	// terminal event for the previous Job would look current.
+	return h.spawnClaimedJob(ctx, task, config)
+}
+
+// spawnClaimedJob creates the Job for a task whose claim is already held, and
+// records it. The in-flight marker spans the whole call — through
+// storeSpawnedJob — because between the claim and the store entry there is no
+// Job name to compare against, so a terminal event for the previous Job would
+// otherwise look current and release the claim just taken.
+func (h *taskEventHandler) spawnClaimedJob(
+	ctx context.Context,
+	task lib.Task,
+	config *pkg.AgentConfiguration,
+) (bool, error) {
 	h.markSpawnPending(task.TaskIdentifier)
 	defer h.clearSpawnPending(task.TaskIdentifier)
 
