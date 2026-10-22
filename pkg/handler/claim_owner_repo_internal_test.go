@@ -28,9 +28,11 @@ func TestClaimOwnerRepoDerivesFromCloneURL(t *testing.T) {
 		wantErr     bool
 	}{
 		{
-			name:        "clone_url https with .git",
-			frontmatter: lib.TaskFrontmatter{"clone_url": "https://github.com/bborbe/go-skeleton.git"},
-			wantKey:     "claims/repo/bborbe-go-skeleton",
+			name: "clone_url https with .git",
+			frontmatter: lib.TaskFrontmatter{
+				"clone_url": "https://github.com/bborbe/go-skeleton.git",
+			},
+			wantKey: "claims/repo/bborbe-go-skeleton",
 		},
 		{
 			name:        "clone_url https without .git",
@@ -74,7 +76,13 @@ func TestClaimOwnerRepoDerivesFromCloneURL(t *testing.T) {
 				Frontmatter:    test.frontmatter,
 			}
 			owner, repo := claimOwnerRepo(task)
-			key, err := claim.DeriveClaimKey(ctx, "pr-review", string(task.TaskIdentifier), owner, repo)
+			key, err := claim.DeriveClaimKey(
+				ctx,
+				"pr-review",
+				string(task.TaskIdentifier),
+				owner,
+				repo,
+			)
 			if test.wantErr {
 				if err == nil {
 					t.Fatalf("expected an error, got key %q", key)

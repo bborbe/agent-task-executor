@@ -19,6 +19,7 @@ import (
 	"github.com/bborbe/log"
 	"github.com/bborbe/run"
 	libtime "github.com/bborbe/time"
+	"github.com/golang/glog"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/cache"
@@ -69,12 +70,50 @@ func CreateJobWatcher(
 }
 
 // CreateClaimLifecycleRunFuncs returns the run funcs that keep the lease
-// manager's claims alive: the loop renews a held claim while its Job runs,
+// manager's claims alive: startup recovery re-adopts the claims this cluster
+// held before a restart, then the loop renews a held claim while its Job runs,
 // fences a claim whose renewals fail, and retries a release an end point could
 // not deliver. Whether a manager exists at all is decided at boot in main, so
 // this factory only wires the manager it is given.
 func CreateClaimLifecycleRunFuncs(manager claim.LeaseManager) []run.Func {
-	return []run.Func{manager.Run}
+	return []run.Func{CreateClaimRecoverFunc(manager), manager.Run}
+}
+
+// CreateClaimRecoverFunc returns the startup step that re-adopts the claims this
+// cluster held before a restart. Without it a replaced pod starts with an empty
+// held set: nothing renews and nothing fences the Jobs it was running, so their
+// leases lapse, another cluster takes the work over, and the original Job keeps
+// running to its natural end — the duplicate this whole mechanism exists to
+// prevent. Every rollout replaces a pod, so this is not a rare path.
+//
+// A failure is logged, never returned: git-rest being briefly unreachable at
+// boot must not crash-loop an executor that can still process tasks. The claims
+// then stay unheld until their leases lapse, which is the behaviour before this
+// step existed.
+func CreateClaimRecoverFunc(manager claim.LeaseManager) run.Func {
+	return func(ctx context.Context) error {
+		const attempts = 5
+		for attempt := 1; attempt <= attempts; attempt++ {
+			err := manager.Recover(ctx)
+			if err == nil {
+				glog.Infof(
+					"claim recovery completed; claims held before this start are adopted again",
+				)
+				return nil
+			}
+			glog.Errorf("claim recovery attempt %d/%d failed: %v", attempt, attempts, err)
+			select {
+			case <-ctx.Done():
+				return nil
+			case <-time.After(time.Second):
+			}
+		}
+		glog.Errorf(
+			"claim recovery failed after %d attempts; claims held before this start stay unheld until their leases lapse",
+			attempts,
+		)
+		return nil
+	}
 }
 
 // CreateZombieSweeper creates a deadline sweeper that classifies stuck tasks as

@@ -2,6 +2,10 @@
 
 All notable changes to this project will be documented in this file.
 
+## Unreleased
+
+- fix: **startup recovery now actually runs.** `LeaseManager.Recover` was implemented, tested and on the interface but had no production call site, so a restarted executor began with an empty held set: nothing renewed and nothing fenced the Jobs it had been running, their leases lapsed, and another cluster legitimately took the work over while the original Job ran on to its natural end. Every rollout replaces a pod, so this happened on every apply — on 2026-10-22 it produced a 2 m 33 s duplicate of task `94c1801c` across sun and nuke prod. The lease manager's run funcs now begin with a recovery step that re-adopts, releases or fences the claims this cluster held before the restart, retried a bounded number of times; a git-rest outage at boot is logged and never crash-loops an executor that can still process tasks.
+
 ## v0.30.1
 
 - fix: **a repo-keyed task whose frontmatter carries `clone_url` instead of `repo` now derives its claim key.** Every pr-review task the GitHub watcher creates carries `clone_url` (9,779 of 9,779 in the OpenClaw vault on 2026-10-22) and no `repo` key, so `claimOwnerRepo` returned an empty owner and `DeriveClaimKey` rejected the task with `claim owner must not be empty`. In `shadow` that only logged; in `on` it fails closed, so no pr-review task would ever have run. The key is now derived from an https, `ssh://` or `git@host:owner/repo` clone URL (optional `.git`), `repo` still wins when both are present, and a task with neither — or an unparseable URL — still fails loudly.
