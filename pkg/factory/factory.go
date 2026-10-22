@@ -19,6 +19,7 @@ import (
 	"github.com/bborbe/log"
 	"github.com/bborbe/run"
 	libtime "github.com/bborbe/time"
+	"github.com/golang/glog"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/cache"
@@ -66,6 +67,37 @@ func CreateJobWatcher(
 	claimReleaser pkg.ClaimReleaser,
 ) pkg.JobWatcher {
 	return pkg.NewJobWatcher(kubeClient, namespace, taskStore, publisher, claimReleaser)
+}
+
+// CreateClaimLifecycleRunFuncs returns the run funcs that keep this executor's
+// leases alive: one lease-loop entry in shadow and on, and none in off, where
+// no lease manager is constructed. The loop renews held claims, fences a claim
+// whose renewals fail, and retries a release an end point could not deliver.
+func CreateClaimLifecycleRunFuncs(
+	claimMode pkg.ClaimMode,
+	claimHandler handler.ClaimLifecycleEventHandler,
+) []run.Func {
+	if !claimMode.TakesClaim() {
+		return nil
+	}
+	return []run.Func{
+		func(ctx context.Context) error {
+			manager, err := claimHandler.ClaimLeaseManager(ctx)
+			if err != nil {
+				// Not fatal: a manager that cannot be built takes no claim, so
+				// there is nothing to renew and the mode's own dispatch decision
+				// (shadow proceeds, on fails closed) stays authoritative. Killing
+				// the executor here would stop every task on the cluster over a
+				// claim fault the mode already tolerates.
+				glog.Warningf("claim lease loop disabled: %v", err)
+				return nil
+			}
+			if manager == nil {
+				return nil
+			}
+			return manager.Run(ctx)
+		},
+	}
 }
 
 // CreateZombieSweeper creates a deadline sweeper that classifies stuck tasks as

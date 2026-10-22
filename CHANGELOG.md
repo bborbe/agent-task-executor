@@ -6,6 +6,7 @@ All notable changes to this project will be documented in this file.
 
 - feat: release the dispatch claim when its Job ends or its spawn fails
 - feat: release the dispatch claim when a task reaches a terminal status or phase
+- feat: renew a held claim while its Job runs, and retry a release an end point could not deliver, from one lease-loop entry in the service run list. `off` adds no loop.
 
 ## v0.27.0
 
