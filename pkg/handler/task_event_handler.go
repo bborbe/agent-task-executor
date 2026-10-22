@@ -783,6 +783,15 @@ func (h *taskEventHandler) spawnIfNeededClaimed(
 		return false, nil
 	}
 
+	// Lease claim: taken after every existing gate and immediately before the Job
+	// is created, under the per-assignee spawn lock taken above. Taken earlier it
+	// would hold a lease for a task a gate skips; taken later it could not prevent
+	// the duplicate it exists to prevent. Do not confuse this lease with the
+	// deferred-removal claim argument of this function.
+	if !h.acquireSpawnClaim(ctx, task) {
+		return false, nil
+	}
+
 	jobName, err := h.jobSpawner.SpawnJob(ctx, task, *config)
 	if err != nil {
 		metrics.TaskEventsTotal.WithLabelValues("error").Inc()

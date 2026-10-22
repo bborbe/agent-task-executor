@@ -2,6 +2,10 @@
 
 All notable changes to this project will be documented in this file.
 
+## Unreleased
+
+- feat: gate task dispatch on a git-rest lease claim after all existing gates (off/shadow/on; off unchanged). A claim-taking mode now also requires `CLUSTER` and a well-formed `GITREST_URL` (`http`/`https` with a hostname), both refused at startup rather than on the first dispatch — a deployment that set only `GITREST_URL` will fail to start until `CLUSTER` is set. `CLAIM_MODE=on` is refused outright until the lease lifecycle ships: nothing releases, renews or takes over a lease yet, so a claim would outlive its task and block every later dispatch of that key. `shadow` is unaffected, because it proceeds on a conflict.
+
 ## v0.26.4
 
 - fix: **spawned Job names are always lowercase.** `jobNameFromTask` concatenated the raw task-id prefix, so an uppercase UUID produced `trading-backtest-agent-1AACF3FC-...`, which Kubernetes rejects because `metadata.name` must be a lowercase RFC 1123 label. The whole name is now lowercased.

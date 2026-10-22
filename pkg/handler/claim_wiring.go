@@ -6,10 +6,14 @@ package handler
 
 import (
 	"context"
+	"strings"
 
+	lib "github.com/bborbe/agent"
 	"github.com/bborbe/errors"
 	libtime "github.com/bborbe/time"
+	"github.com/golang/glog"
 
+	pkg "github.com/bborbe/agent-task-executor/pkg"
 	"github.com/bborbe/agent-task-executor/pkg/claim"
 )
 
@@ -88,4 +92,66 @@ func (h *taskEventHandler) createLeaseManager(
 		return nil, errors.Wrapf(ctx, err, "create claim lease manager")
 	}
 	return manager, nil
+}
+
+// acquireSpawnClaim takes this executor's lease for the task immediately before
+// the Job is created. It reports whether the spawn may proceed. Claim failures
+// are recorded by the claim package and never returned: the next dispatch pass
+// that would have spawned this task retries.
+func (h *taskEventHandler) acquireSpawnClaim(ctx context.Context, task lib.Task) bool {
+	if h.claimMode == pkg.ClaimModeOff {
+		return true
+	}
+	manager, err := h.leaseManager(ctx)
+	if err != nil {
+		return h.claimFailureDecision(task, "lease_manager", err)
+	}
+	owner, repo := claimOwnerRepo(task)
+	key, err := claim.DeriveClaimKey(
+		ctx,
+		string(task.Frontmatter.TaskType()),
+		string(task.TaskIdentifier),
+		owner,
+		repo,
+	)
+	if err != nil {
+		return h.claimFailureDecision(task, "derive_key", err)
+	}
+	_, claimErr := manager.Claim(ctx, key, string(task.TaskIdentifier))
+	if claimErr == nil {
+		return true
+	}
+	return h.claimFailureDecision(task, "claim", claimErr)
+}
+
+// claimOwnerRepo reads the task's single `repo` frontmatter key, which carries
+// "<owner>/<name>". A missing or malformed value yields empty components;
+// DeriveClaimKey ignores them for task types that are not repo-keyed and
+// rejects them for the ones that are.
+func claimOwnerRepo(task lib.Task) (string, string) {
+	raw, ok := task.Frontmatter.String("repo")
+	if !ok {
+		return "", ""
+	}
+	idx := strings.Index(raw, "/")
+	if idx <= 0 || idx == len(raw)-1 {
+		return "", ""
+	}
+	return raw[:idx], raw[idx+1:]
+}
+
+// claimFailureDecision logs a claim failure and reports whether the spawn may
+// proceed: shadow proceeds, on fails closed. The claim package has already
+// incremented executor_claim_total for every request it made; this function
+// must not increment anything.
+func (h *taskEventHandler) claimFailureDecision(
+	task lib.Task,
+	stage string,
+	err error,
+) bool {
+	glog.Warningf(
+		"event=claim_failed stage=%s mode=%s task=%s error=%v",
+		stage, h.claimMode, task.TaskIdentifier, err,
+	)
+	return h.claimMode == pkg.ClaimModeShadow
 }

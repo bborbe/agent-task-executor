@@ -6,6 +6,7 @@ package main
 
 import (
 	"context"
+	"net/url"
 	"os"
 	"regexp"
 	"time"
@@ -161,10 +162,60 @@ func (a *application) validateClaimTransport(
 	if !claimMode.TakesClaim() {
 		return nil
 	}
+	// No lease lifecycle ships yet: nothing releases, renews or takes over a
+	// claim, so in on mode a claim outlives its task and every later dispatch of
+	// that key stays blocked for the life of the process. Shadow proceeds on a
+	// conflict, so it cannot block a task. on is refused until the lifecycle lands.
+	if claimMode == pkg.ClaimModeOn {
+		return errors.Errorf(
+			ctx,
+			"claim-mode (CLAIM_MODE) %q is not available yet: nothing releases or renews a lease, "+
+				"so a claim would outlive its task and block later dispatches. Use %q until the "+
+				"lease lifecycle ships",
+			claimMode,
+			pkg.ClaimModeShadow,
+		)
+	}
 	if a.GitRestURL == "" {
 		return errors.Errorf(
 			ctx,
 			"gitrest-url (GITREST_URL) must be set when CLAIM_MODE is %q",
+			claimMode,
+		)
+	}
+	// A non-empty but malformed URL would otherwise pass startup and fail on the
+	// first claim, which is the failure this function exists to prevent.
+	parsed, err := url.Parse(a.GitRestURL)
+	if err != nil {
+		// Never echo the raw value: a malformed URL can still carry userinfo.
+		return errors.Errorf(ctx, "gitrest-url (GITREST_URL) is not a valid URL")
+	}
+	// Drop userinfo before the value reaches an error string or a log line.
+	parsed.User = nil
+	// Redacted() masks the password but keeps path and query, so report only the
+	// parts that cannot carry a token.
+	if parsed.Scheme != "http" && parsed.Scheme != "https" {
+		return errors.Errorf(
+			ctx,
+			"gitrest-url (GITREST_URL) must use http or https, got scheme %q",
+			parsed.Scheme,
+		)
+	}
+	// Hostname() is empty for a port-only authority such as "http://:9090",
+	// which Host alone would accept and the claim client could not use.
+	if parsed.Hostname() == "" {
+		return errors.Errorf(
+			ctx,
+			"gitrest-url (GITREST_URL) must carry a host, got host %q",
+			parsed.Hostname(),
+		)
+	}
+	// The claim ref key is scoped by cluster and the lease manager refuses an
+	// empty one, so a claim-taking mode with no CLUSTER could never take a claim.
+	if a.Cluster == "" {
+		return errors.Errorf(
+			ctx,
+			"cluster (CLUSTER) must be set when CLAIM_MODE is %q",
 			claimMode,
 		)
 	}
