@@ -24,6 +24,7 @@ import (
 
 	agentv1 "github.com/bborbe/agent-task-executor/k8s/apis/agent.benjamin-borbe.de/v1"
 	pkg "github.com/bborbe/agent-task-executor/pkg"
+	"github.com/bborbe/agent-task-executor/pkg/claim"
 	"github.com/bborbe/agent-task-executor/pkg/gitrestclient"
 	"github.com/bborbe/agent-task-executor/pkg/handler"
 	"github.com/bborbe/agent-task-executor/pkg/probe"
@@ -127,6 +128,17 @@ func CreateGitRestClient(baseURL, gatewaySecret string) gitrestclient.GitRestCli
 	return gitrestclient.NewGitRestClient(baseURL, gatewaySecret, "agent-task-executor")
 }
 
+// CreateClaimRefClientFactory returns the lazily-invoked constructor for the
+// git-rest claim ref client. The initiator is the same identity
+// CreateGitRestClient uses.
+func CreateClaimRefClientFactory(
+	baseURL, gatewaySecret string,
+) handler.ClaimRefClientFactory {
+	return func() claim.ClaimRefClient {
+		return claim.NewClaimRefClient(baseURL, gatewaySecret, "agent-task-executor")
+	}
+}
+
 // CreateConsumer wires together all components and returns a Kafka Consumer that
 // reads task events and spawns K8s Jobs for qualifying tasks, along with the
 // TaskEventHandler so callers can wire RunDeferredRespawnLoop.
@@ -154,6 +166,8 @@ func CreateConsumer(
 	taskGlob string,
 	reconcilePassTimeout time.Duration,
 	reconcileInterval time.Duration,
+	claimMode pkg.ClaimMode,
+	claimRefClientFactory handler.ClaimRefClientFactory,
 ) (libkafka.Consumer, handler.TaskEventHandler) {
 	jobSpawner := spawner.NewJobSpawner(
 		kubeClient,
@@ -181,6 +195,8 @@ func CreateConsumer(
 		taskGlob,
 		reconcilePassTimeout,
 		reconcileInterval,
+		claimMode,
+		claimRefClientFactory,
 	)
 	topic := lib.TaskV1SchemaID.EventTopic(topicPrefix)
 	offsetManager := libkafka.NewSaramaOffsetManager(

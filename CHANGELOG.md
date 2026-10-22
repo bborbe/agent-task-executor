@@ -2,6 +2,10 @@
 
 All notable changes to this project will be documented in this file.
 
+## Unreleased
+
+- feat: add CLAIM_MODE (off|shadow|on, default off) and an injected claim ref client constructor; off constructs no claim client
+
 ## v0.24.0
 
 - feat: add a claim lease client library for git-rest `refs/claims` endpoints, with a compare-and-swap lease manager, fake-clock unit tests and `docs/claim-lease-protocol.md`.

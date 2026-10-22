@@ -6,11 +6,16 @@ package main
 
 import (
 	"context"
+	"os"
 	"reflect"
+	"strings"
+	"testing"
 	"time"
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
+
+	"github.com/bborbe/agent-task-executor/pkg"
 )
 
 // This file is `package main` (internal) and declares specs without a
@@ -22,6 +27,49 @@ import (
 //
 // Adding a main_suite_test.go here would be a bug, not a fix — a second
 // RunSpecs in the same binary would re-run the whole suite.
+
+// TestParseClaimModeFromEnv is a plain Go test rather than a Ginkgo spec: the
+// specs declared in this internal test package are not discovered by the
+// package-external suite, so behaviour that must actually run is tested here.
+func TestParseClaimModeFromEnv(t *testing.T) {
+	t.Run("unset variable is off", func(t *testing.T) {
+		os.Unsetenv(claimModeEnv)
+		if _, present := os.LookupEnv(claimModeEnv); present {
+			t.Fatalf("expected %s to be unset", claimModeEnv)
+		}
+		mode, err := parseClaimModeFromEnv(context.Background())
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if mode != pkg.ClaimModeOff {
+			t.Fatalf("expected %q, got %q", pkg.ClaimModeOff, mode)
+		}
+	})
+
+	t.Run("explicitly empty variable is invalid", func(t *testing.T) {
+		os.Setenv(claimModeEnv, "")
+		t.Cleanup(func() { os.Unsetenv(claimModeEnv) })
+		_, err := parseClaimModeFromEnv(context.Background())
+		if err == nil {
+			t.Fatal("expected an error")
+		}
+		if !strings.Contains(err.Error(), "off|shadow|on") {
+			t.Fatalf("expected accepted set in message, got %q", err.Error())
+		}
+	})
+
+	t.Run("uppercase ON is invalid", func(t *testing.T) {
+		os.Setenv(claimModeEnv, "ON")
+		t.Cleanup(func() { os.Unsetenv(claimModeEnv) })
+		_, err := parseClaimModeFromEnv(context.Background())
+		if err == nil {
+			t.Fatal("expected an error")
+		}
+		if !strings.Contains(err.Error(), "ON") {
+			t.Fatalf("expected rejected value in message, got %q", err.Error())
+		}
+	})
+}
 
 var _ = Describe("application struct field guards", func() {
 	Describe("VaultName field", func() {

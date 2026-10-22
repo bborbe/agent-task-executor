@@ -82,6 +82,8 @@ var _ = Describe("TaskEventHandler reconcile loop", func() {
 			"24 Tasks/*.md",
 			handler.DefaultReconcilePassTimeout,
 			handler.DefaultReconcileInterval,
+			pkg.ClaimModeOff,
+			nil,
 		)
 	})
 
@@ -131,6 +133,8 @@ var _ = Describe("TaskEventHandler reconcile loop", func() {
 			"24 Tasks/*.md",
 			handler.DefaultReconcilePassTimeout,
 			handler.DefaultReconcileInterval,
+			pkg.ClaimModeOff,
+			nil,
 		)
 		fakeGitRestClient.ListReturns([]string{"24 Tasks/tid-a.md"}, nil)
 		fakeGitRestClient.GetReturns(
@@ -1292,6 +1296,8 @@ var _ = Describe("TaskEventHandler reconcile loop", func() {
 				"24 Tasks/*.md",
 				passTimeout,
 				interval,
+				pkg.ClaimModeOff,
+				nil,
 			)
 		}
 

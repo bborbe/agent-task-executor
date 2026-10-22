@@ -112,11 +112,26 @@ var vaultSlugRegexp = regexp.MustCompile(`^[a-z][a-z0-9-]*$`)
 // is the only component that knows the glob is unset, so it refuses at startup.
 var ErrTaskGlobEmpty = stderrors.New("task-glob is empty")
 
+// claimModeEnv is the environment variable carrying the executor's claim mode.
+const claimModeEnv = "CLAIM_MODE"
+
+// parseClaimModeFromEnv reads CLAIM_MODE, distinguishing an absent variable
+// (off) from an explicitly empty one (invalid).
+func parseClaimModeFromEnv(ctx context.Context) (pkg.ClaimMode, error) {
+	value, present := os.LookupEnv(claimModeEnv)
+	return pkg.ParseClaimMode(ctx, value, present)
+}
+
 //nolint:funlen // Initialization sequence; wiring is linear with no branching.
 func (a *application) Run(ctx context.Context, sentryClient libsentry.Client) error {
 	libmetrics.NewBuildInfoMetrics().SetBuildInfo(a.BuildGitVersion, a.BuildGitCommit, a.BuildDate)
 	glog.V(1).
 		Infof("agent-task-executor started version=%s commit=%s", a.BuildGitVersion, a.BuildGitCommit)
+
+	claimMode, err := parseClaimModeFromEnv(ctx)
+	if err != nil {
+		return errors.Wrapf(ctx, err, "parse claim mode")
+	}
 
 	if a.JobTTLSecondsAfterFinished < 0 {
 		return errors.Errorf(
@@ -226,6 +241,10 @@ func (a *application) Run(ctx context.Context, sentryClient libsentry.Client) er
 		return errors.Wrapf(ctx, err, "read git-rest gateway secret")
 	}
 	gitRestClient := factory.CreateGitRestClient(a.GitRestURL, gitRestGatewaySecretValue)
+	claimRefClientFactory := factory.CreateClaimRefClientFactory(
+		a.GitRestURL,
+		gitRestGatewaySecretValue,
+	)
 
 	healthcheckRunner := factory.CreateHealthcheckRunner(
 		eventHandlerConfig,
@@ -262,6 +281,8 @@ func (a *application) Run(ctx context.Context, sentryClient libsentry.Client) er
 		a.TaskGlob,
 		a.ReconcilePassTimeout,
 		a.ReconcileInterval,
+		claimMode,
+		claimRefClientFactory,
 	)
 
 	return service.Run(
