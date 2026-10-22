@@ -2,6 +2,10 @@
 
 All notable changes to this project will be documented in this file.
 
+## Unreleased
+
+- fix: **`Release` no longer drops a claim while this cluster's Job is still running.** It deleted the ref and removed the held entry with no Job check, and because the fence only iterates the held set, a release that fired while the Job ran left that Job running unclaimed and invisible to the fence — so another cluster could take the task over and run it a second time. A release now keeps the claim held, so the loop keeps renewing it, and logs `event=release_deferred_job_running`; the Job's own terminal event releases the claim as before. A release for a Job that is already gone is unchanged.
+
 ## v0.30.1
 
 - fix: **a repo-keyed task whose frontmatter carries `clone_url` instead of `repo` now derives its claim key.** Every pr-review task the GitHub watcher creates carries `clone_url` (9,779 of 9,779 in the OpenClaw vault on 2026-10-22) and no `repo` key, so `claimOwnerRepo` returned an empty owner and `DeriveClaimKey` rejected the task with `claim owner must not be empty`. In `shadow` that only logged; in `on` it fails closed, so no pr-review task would ever have run. The key is now derived from an https, `ssh://` or `git@host:owner/repo` clone URL (optional `.git`), `repo` still wins when both are present, and a task with neither — or an unparseable URL — still fails loudly.

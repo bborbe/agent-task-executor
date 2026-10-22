@@ -66,6 +66,39 @@ var _ = Describe("LeaseManager release", func() {
 		expectClaimDelta(before, snapshotClaims(), map[string]float64{"released": 1})
 	})
 
+	It("keeps the claim held while this cluster's Job is still running", func() {
+		_, err := mgr.Claim(ctx, releaseKey, releaseTask)
+		Expect(err).NotTo(HaveOccurred())
+		job.SetRunning(map[string]bool{releaseTask: true})
+		fake.ResetRequests()
+		before := snapshotClaims()
+
+		Expect(mgr.Release(ctx, releaseKey)).To(Succeed())
+
+		Expect(requestsMatching(fake.Requests(), http.MethodDelete, releaseKey)).To(BeEmpty())
+		Expect(mgr.HeldClaims()).To(HaveLen(1))
+		expectClaimDelta(before, snapshotClaims(), map[string]float64{})
+
+		// Still held, so the loop keeps renewing it.
+		clock.SetNow(leaseTestT0.Add(2 * libtime.Minute))
+		Expect(mgr.Tick(ctx)).To(Succeed())
+		Expect(requestsMatching(fake.Requests(), http.MethodPut, releaseKey)).NotTo(BeEmpty())
+	})
+
+	It("releases once this cluster's Job is gone", func() {
+		_, err := mgr.Claim(ctx, releaseKey, releaseTask)
+		Expect(err).NotTo(HaveOccurred())
+		job.SetRunning(map[string]bool{})
+		fake.ResetRequests()
+		before := snapshotClaims()
+
+		Expect(mgr.Release(ctx, releaseKey)).To(Succeed())
+
+		Expect(requestsMatching(fake.Requests(), http.MethodDelete, releaseKey)).To(HaveLen(1))
+		Expect(mgr.HeldClaims()).To(BeEmpty())
+		expectClaimDelta(before, snapshotClaims(), map[string]float64{"released": 1})
+	})
+
 	It("treats a 409 as already released", func() {
 		_, err := mgr.Claim(ctx, releaseKey, releaseTask)
 		Expect(err).NotTo(HaveOccurred())
