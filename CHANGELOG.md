@@ -2,12 +2,15 @@
 
 All notable changes to this project will be documented in this file.
 
-## v0.25.0
+## Unreleased
 
 - feat: **the reconcile floor reads the in-memory task view instead of listing and fetching vault files, and task ownership is a `Task.Vault` comparison.** Each pass snapshots the view, classifies the snapshot against the new `TASK_VAULT` setting (defaulting to `VAULT_NAME`), and drives only the tasks stamped with this executor's vault; a pass over 15,000 tasks is an in-memory scan that completes well under a second. A not-ready view counts `view_not_ready`; a snapshot with tasks but none from this vault counts `task_vault_mismatch` and logs the vaults it saw; a snapshot in which every task is unstamped counts `task_vault_unstamped`. The same `Task.Vault == TASK_VAULT` rule gates the live event path, replacing the path-derived ownership set and counting a foreign task as `agent_executor_task_events_total{result="skipped_foreign_vault"}`, and `queued_at` is read from the view rather than git-rest. `TASK_VAULT` is validated as a vault slug at startup; `TASK_GLOB` is no longer required.
+- refactor: **remove the git-rest client, the gateway-secret reader, and the `GITREST_URL` / `GITREST_GATEWAY_SECRET` / `TASK_GLOB` settings.** The executor now reads task state only through Kafka, so the startup refusal on an empty task glob and the git-rest ServiceAccount/Secret grant are gone with them.
+
+## v0.25.0
+
 - feat: **the executor builds an in-memory task view from the compacted task event topic at startup.** The new `TaskView` replays `{TOPIC_PREFIX}-agent-task-v1-event` from the oldest offset on every partition, keeps the latest version of each task, honours tombstones, and reports readiness once every partition has caught up to the high-water mark captured at start. It reads through a non-group simple consumer, so it never joins `CONSUMER_GROUP` and never moves the live consumer's offsets; a decode failure drops the stale entry and increments `executor_task_view_skipped_total` without blocking readiness. The view is wired into `service.Run`, and a reader failure exits the process so a pod restart rebuilds it.
 - chore: bump `github.com/bborbe/agent` to v0.113.0 (task events now carry the vault name), with the transitive bumps `go mod tidy` resolved.
-- refactor: **remove the git-rest client, the gateway-secret reader, and the `GITREST_URL` / `GITREST_GATEWAY_SECRET` / `TASK_GLOB` settings.** The executor now reads task state only through Kafka, so the startup refusal on an empty task glob and the git-rest ServiceAccount/Secret grant are gone with them.
 
 ## v0.24.0
 
