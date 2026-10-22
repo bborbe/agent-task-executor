@@ -34,6 +34,18 @@ func (h *taskEventHandler) ReleaseTaskClaim(ctx context.Context, taskID lib.Task
 	if h.claimMode == pkg.ClaimModeOff {
 		return
 	}
+	// A spawn in flight for this task holds the claim for the replacement Job:
+	// the store still names the previous Job, so a terminal event arriving here
+	// is about work that has already been superseded. Skipping is the safe
+	// direction — the spawn either records its Job and keeps the claim, or fails
+	// and releases it explicitly.
+	if h.spawnPendingFor(taskID) {
+		glog.V(2).Infof(
+			"event=claim_release_skipped task=%s reason=spawn_pending",
+			taskID,
+		)
+		return
+	}
 	manager, err := h.leaseManager(ctx)
 	if err != nil {
 		glog.Warningf(

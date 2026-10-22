@@ -245,6 +245,12 @@ type taskEventHandler struct {
 	claimManagerOnce      sync.Once
 	claimManager          claim.LeaseManager
 	claimManagerErr       error
+	// spawnPendingSet marks tasks whose spawn is between taking the claim and
+	// recording the new Job. A terminal event for the previous Job arriving in
+	// that window names the only Job the store knows, so without this marker it
+	// would release the claim just taken for the replacement.
+	spawnPendingMu  sync.Mutex
+	spawnPendingSet map[lib.TaskIdentifier]struct{}
 	redriveMu             sync.Mutex
 	redriveStreaks        map[lib.TaskIdentifier]redriveStreak
 	// spawnGens counts Jobs created by this executor per assignee, on any path.
@@ -320,14 +326,32 @@ func (h *taskEventHandler) isJobActive(
 	return activeSet[task.TaskIdentifier], nil
 }
 
-// cleanupTerminalTask clears in-flight state when a task has reached a terminal
-// status (completed/aborted). taskStore.Delete stops the job informer from emitting
-// a spurious synthetic failure after the agent published success. removeDeferredEntry
-// cancels any pending grace-window respawn — the terminal event is skipped by the
-// status filter in parseAndFilter BEFORE reaching the terminal-phase gate that would
-// otherwise clear the entry, so without this a deferred entry created during the grace
-// window fires ~300s later and respawns a job for an already-done task (the "path C"
-// respawn observed on dev 2026-07-13 for probe 095c58d7).
+// markSpawnPending records that taskID is between taking its claim and having a
+// Job name to record.
+func (h *taskEventHandler) markSpawnPending(taskID lib.TaskIdentifier) {
+	h.spawnPendingMu.Lock()
+	defer h.spawnPendingMu.Unlock()
+	if h.spawnPendingSet == nil {
+		h.spawnPendingSet = make(map[lib.TaskIdentifier]struct{})
+	}
+	h.spawnPendingSet[taskID] = struct{}{}
+}
+
+// clearSpawnPending ends the window opened by markSpawnPending.
+func (h *taskEventHandler) clearSpawnPending(taskID lib.TaskIdentifier) {
+	h.spawnPendingMu.Lock()
+	defer h.spawnPendingMu.Unlock()
+	delete(h.spawnPendingSet, taskID)
+}
+
+// spawnPendingFor reports whether taskID is inside the claim-then-store window.
+func (h *taskEventHandler) spawnPendingFor(taskID lib.TaskIdentifier) bool {
+	h.spawnPendingMu.Lock()
+	defer h.spawnPendingMu.Unlock()
+	_, ok := h.spawnPendingSet[taskID]
+	return ok
+}
+
 // staleEventForTask reports whether the task store holds an entry that tracks a
 // DIFFERENT Job than the event carries, i.e. the event belongs to a superseded
 // job cycle and must not act on the one that is running now. An absent entry is
@@ -348,6 +372,14 @@ func (h *taskEventHandler) storedCurrentJob(task lib.Task) string {
 	return stored.Frontmatter.CurrentJob()
 }
 
+// cleanupTerminalTask clears in-flight state when a task has reached a terminal
+// status (completed/aborted). taskStore.Delete stops the job informer from emitting
+// a spurious synthetic failure after the agent published success. removeDeferredEntry
+// cancels any pending grace-window respawn — the terminal event is skipped by the
+// status filter in parseAndFilter BEFORE reaching the terminal-phase gate that would
+// otherwise clear the entry, so without this a deferred entry created during the grace
+// window fires ~300s later and respawns a job for an already-done task (the "path C"
+// respawn observed on dev 2026-07-13 for probe 095c58d7).
 func (h *taskEventHandler) cleanupTerminalTask(ctx context.Context, task lib.Task) {
 	status := string(task.Frontmatter.Status())
 	if status != "completed" && status != "aborted" {
@@ -819,6 +851,12 @@ func (h *taskEventHandler) spawnIfNeededClaimed(
 		return false, nil
 	}
 
+	// Held until this function returns, i.e. past storeSpawnedJob: between the
+	// claim and the store entry there is no Job name to compare against, so a
+	// terminal event for the previous Job would look current.
+	h.markSpawnPending(task.TaskIdentifier)
+	defer h.clearSpawnPending(task.TaskIdentifier)
+
 	jobName, err := h.jobSpawner.SpawnJob(ctx, task, *config)
 	if err != nil {
 		metrics.TaskEventsTotal.WithLabelValues("error").Inc()
@@ -826,7 +864,9 @@ func (h *taskEventHandler) spawnIfNeededClaimed(
 		// Every SpawnJob error but one precedes the Job create, and an
 		// AlreadyExists answer is success; the accepted window is a lost
 		// Create response, where the Job exists and this release drops its
-		// claim until the lease expires.
+		// claim until the lease expires. The pending marker is cleared first:
+		// this is the one release that must go through.
+		h.clearSpawnPending(task.TaskIdentifier)
 		h.ReleaseTaskClaim(ctx, task.TaskIdentifier)
 		return false, errors.Wrapf(
 			ctx,
