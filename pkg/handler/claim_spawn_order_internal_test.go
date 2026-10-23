@@ -14,6 +14,7 @@ import (
 
 	lib "github.com/bborbe/agent"
 	"github.com/bborbe/cqrs/base"
+	libk8s "github.com/bborbe/k8s"
 	libtime "github.com/bborbe/time"
 
 	pkg "github.com/bborbe/agent-task-executor/pkg"
@@ -33,22 +34,22 @@ func (s *stubJobSpawner) SpawnJob(
 }
 
 func (s *stubJobSpawner) IsJobActive(
-	context.Context, lib.TaskIdentifier,
+	context.Context, libk8s.Namespace, lib.TaskIdentifier,
 ) (bool, error) {
 	return false, nil
 }
 
-func (s *stubJobSpawner) CountActiveJobs(context.Context, string) (int, error) {
+func (s *stubJobSpawner) CountActiveJobs(context.Context, libk8s.Namespace, string) (int, error) {
 	return 0, nil
 }
 
 func (s *stubJobSpawner) ListActiveJobs(
-	context.Context, string,
+	context.Context, libk8s.Namespace, string,
 ) (map[lib.TaskIdentifier]bool, error) {
 	return map[lib.TaskIdentifier]bool{}, nil
 }
 
-func (s *stubJobSpawner) JobExists(context.Context, string) (bool, error) {
+func (s *stubJobSpawner) JobExists(context.Context, libk8s.Namespace, string) (bool, error) {
 	return true, nil
 }
 

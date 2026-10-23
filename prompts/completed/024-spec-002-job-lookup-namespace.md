@@ -1,7 +1,13 @@
 ---
-status: draft
+status: completed
 spec: [002-config-job-namespace]
+summary: Threaded the resolved Job namespace through all four Job lookups, handler call sites, cache key, regenerated fake, and tests.
+execution_id: agent-task-executor-job-namespace-exec-024-spec-002-job-lookup-namespace
+dark-factory-version: v0.198.7
 created: "2026-10-23T11:05:00Z"
+queued: "2026-10-23T11:28:33Z"
+started: "2026-10-23T11:28:34Z"
+completed: "2026-10-23T11:40:21Z"
 branch: dark-factory/config-job-namespace
 ---
 

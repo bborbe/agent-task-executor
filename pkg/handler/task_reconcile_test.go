@@ -16,6 +16,7 @@ import (
 	lib "github.com/bborbe/agent"
 	"github.com/bborbe/cqrs/base"
 	"github.com/bborbe/errors"
+	libk8s "github.com/bborbe/k8s"
 	libtime "github.com/bborbe/time"
 	"github.com/bborbe/vault-cli/pkg/domain"
 	. "github.com/onsi/ginkgo/v2"
@@ -490,7 +491,7 @@ var _ = Describe("TaskEventHandler reconcile loop", func() {
 		fakeSpawner.IsJobActiveReturns(false, nil)
 		running := 0
 		fakeSpawner.ListActiveJobsStub = func(
-			context.Context, string,
+			context.Context, libk8s.Namespace, string,
 		) (map[lib.TaskIdentifier]bool, error) {
 			return activeJobs(running), nil
 		}
@@ -588,6 +589,7 @@ var _ = Describe("TaskEventHandler reconcile loop", func() {
 			}
 			fakeSpawner.ListActiveJobsStub = func(
 				_ context.Context,
+				_ libk8s.Namespace,
 				_ string,
 			) (map[lib.TaskIdentifier]bool, error) {
 				time.Sleep(20 * time.Millisecond)
@@ -967,6 +969,7 @@ var _ = Describe("TaskEventHandler reconcile loop", func() {
 			var remaining time.Duration
 			fakeSpawner.ListActiveJobsStub = func(
 				listCtx context.Context,
+				_ libk8s.Namespace,
 				_ string,
 			) (map[lib.TaskIdentifier]bool, error) {
 				deadline, ok := listCtx.Deadline()
@@ -1017,6 +1020,7 @@ var _ = Describe("TaskEventHandler reconcile loop", func() {
 		}
 		fakeSpawner.ListActiveJobsStub = func(
 			_ context.Context,
+			_ libk8s.Namespace,
 			assignee string,
 		) (map[lib.TaskIdentifier]bool, error) {
 			if assignee == "codex" {
@@ -1101,6 +1105,7 @@ var _ = Describe("TaskEventHandler reconcile loop", func() {
 		}
 		fakeSpawner.ListActiveJobsStub = func(
 			_ context.Context,
+			_ libk8s.Namespace,
 			assignee string,
 		) (map[lib.TaskIdentifier]bool, error) {
 			if assignee == "codex" {
@@ -1177,7 +1182,7 @@ var _ = Describe("TaskEventHandler reconcile loop", func() {
 				},
 				nil,
 			)
-			fakeSpawner.ListActiveJobsStub = func(_ context.Context, _ string) (map[lib.TaskIdentifier]bool, error) {
+			fakeSpawner.ListActiveJobsStub = func(_ context.Context, _ libk8s.Namespace, _ string) (map[lib.TaskIdentifier]bool, error) {
 				if fakeSpawner.ListActiveJobsCallCount() == 1 {
 					// The other Job finishes while the pass is still running.
 					currentDateTime.SetNow(libtime.DateTime(start.Add(11 * time.Second)))
@@ -1203,7 +1208,7 @@ var _ = Describe("TaskEventHandler reconcile loop", func() {
 			}, nil
 		}
 		var claudeLists atomic.Int64
-		fakeSpawner.ListActiveJobsStub = func(_ context.Context, assignee string) (map[lib.TaskIdentifier]bool, error) {
+		fakeSpawner.ListActiveJobsStub = func(_ context.Context, _ libk8s.Namespace, assignee string) (map[lib.TaskIdentifier]bool, error) {
 			if assignee == "claude" {
 				claudeLists.Add(1)
 				return map[lib.TaskIdentifier]bool{"tid-x": true}, nil

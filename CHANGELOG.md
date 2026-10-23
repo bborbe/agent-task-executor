@@ -6,6 +6,7 @@ All notable changes to this project will be documented in this file.
 
 - feat: add `spec.jobNamespace` to the `Config` CRD and carry it through to `AgentConfiguration`, with `ResolveJobNamespace` defaulting an empty value to the executor's own namespace and rejecting an explicit match.
 - feat: create each spawned Job in the namespace resolved from the Config, and refuse a Config whose `jobNamespace` equals the executor's own namespace with an ERROR log and no Job.
+- feat: scope every Job lookup (`IsJobActive`, `JobExists`, `CountActiveJobs`, `ListActiveJobs`) to the namespace resolved from the Config, and key the per-pass active-Job cache by namespace and assignee, so a Job in a sandbox namespace is visible instead of triggering duplicate spawns.
 
 ## v0.30.7
 

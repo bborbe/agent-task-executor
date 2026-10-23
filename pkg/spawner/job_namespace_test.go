@@ -145,3 +145,32 @@ func TestJobPodLabels(t *testing.T) {
 		t.Fatalf("expected pod label app=agent, got %q", got)
 	}
 }
+
+func TestJobLookupsUseResolvedNamespace(t *testing.T) {
+	ctx := context.Background()
+	client, s := newSpawnerForNamespace(t, "dev")
+	namespace := libk8s.Namespace("dev-agents-sandbox")
+
+	_, _ = s.IsJobActive(ctx, namespace, lib.TaskIdentifier("abc12345"))
+	_, _ = s.JobExists(ctx, namespace, "some-job")
+	_, _ = s.CountActiveJobs(ctx, namespace, "claude")
+	_, _ = s.ListActiveJobs(ctx, namespace, "claude")
+
+	lookups := 0
+	for _, action := range client.Actions() {
+		if action.GetResource().Resource != "jobs" {
+			continue
+		}
+		verb := action.GetVerb()
+		if verb != "list" && verb != "get" {
+			continue
+		}
+		lookups++
+		if got := action.GetNamespace(); got != "dev-agents-sandbox" {
+			t.Fatalf("expected lookup in dev-agents-sandbox, got %q for %s", got, verb)
+		}
+	}
+	if lookups < 4 {
+		t.Fatalf("expected at least 4 job lookup actions, got %d", lookups)
+	}
+}

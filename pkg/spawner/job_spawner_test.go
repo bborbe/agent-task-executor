@@ -9,6 +9,7 @@ import (
 	"fmt"
 
 	lib "github.com/bborbe/agent"
+	libk8s "github.com/bborbe/k8s"
 	libtime "github.com/bborbe/time"
 	libtimetest "github.com/bborbe/time/test"
 	. "github.com/onsi/ginkgo/v2"
@@ -1141,7 +1142,11 @@ var _ = Describe("JobSpawner", func() {
 
 	Describe("IsJobActive", func() {
 		It("returns false when no jobs exist", func() {
-			active, err := jobSpawner.IsJobActive(ctx, lib.TaskIdentifier("tid-1"))
+			active, err := jobSpawner.IsJobActive(
+				ctx,
+				libk8s.Namespace("test-ns"),
+				lib.TaskIdentifier("tid-1"),
+			)
 			Expect(err).To(BeNil())
 			Expect(active).To(BeFalse())
 		})
@@ -1171,7 +1176,11 @@ var _ = Describe("JobSpawner", func() {
 				0,
 			)
 
-			active, err := jobSpawner.IsJobActive(ctx, lib.TaskIdentifier("tid-2"))
+			active, err := jobSpawner.IsJobActive(
+				ctx,
+				libk8s.Namespace("test-ns"),
+				lib.TaskIdentifier("tid-2"),
+			)
 			Expect(err).To(BeNil())
 			Expect(active).To(BeTrue())
 		})
@@ -1225,13 +1234,17 @@ var _ = Describe("JobSpawner", func() {
 				0,
 			)
 
-			count, err := jobSpawner.CountActiveJobs(ctx, "github-update-go-agent")
+			count, err := jobSpawner.CountActiveJobs(
+				ctx,
+				libk8s.Namespace("test-ns"),
+				"github-update-go-agent",
+			)
 			Expect(err).To(BeNil())
 			Expect(count).To(Equal(3))
 		})
 
 		It("CountActiveJobs returns zero for an empty assignee", func() {
-			count, err := jobSpawner.CountActiveJobs(ctx, "")
+			count, err := jobSpawner.CountActiveJobs(ctx, libk8s.Namespace("test-ns"), "")
 			Expect(err).To(BeNil())
 			Expect(count).To(Equal(0))
 		})
@@ -1271,7 +1284,11 @@ var _ = Describe("JobSpawner", func() {
 				0,
 			)
 
-			active, err := jobSpawner.IsJobActive(ctx, lib.TaskIdentifier("tid-deadline"))
+			active, err := jobSpawner.IsJobActive(
+				ctx,
+				libk8s.Namespace("test-ns"),
+				lib.TaskIdentifier("tid-deadline"),
+			)
 			Expect(err).To(BeNil())
 			Expect(active).To(BeFalse())
 		})
@@ -1301,7 +1318,11 @@ var _ = Describe("JobSpawner", func() {
 				0,
 			)
 
-			active, err := jobSpawner.IsJobActive(ctx, lib.TaskIdentifier("tid-3"))
+			active, err := jobSpawner.IsJobActive(
+				ctx,
+				libk8s.Namespace("test-ns"),
+				lib.TaskIdentifier("tid-3"),
+			)
 			Expect(err).To(BeNil())
 			Expect(active).To(BeFalse())
 		})
@@ -1332,7 +1353,11 @@ var _ = Describe("JobSpawner", func() {
 				0,
 			)
 
-			active, err := jobSpawner.IsJobActive(ctx, lib.TaskIdentifier("tid-4"))
+			active, err := jobSpawner.IsJobActive(
+				ctx,
+				libk8s.Namespace("test-ns"),
+				lib.TaskIdentifier("tid-4"),
+			)
 			Expect(err).To(BeNil())
 			Expect(active).To(BeFalse())
 		})
@@ -1360,7 +1385,11 @@ var _ = Describe("JobSpawner", func() {
 				0,
 			)
 
-			active, err := jobSpawner.IsJobActive(ctx, lib.TaskIdentifier("tid-5"))
+			active, err := jobSpawner.IsJobActive(
+				ctx,
+				libk8s.Namespace("test-ns"),
+				lib.TaskIdentifier("tid-5"),
+			)
 			Expect(err).To(BeNil())
 			Expect(active).To(BeTrue())
 		})
@@ -1385,7 +1414,11 @@ var _ = Describe("JobSpawner", func() {
 				"",
 				0,
 			)
-			active, err := jobSpawner.IsJobActive(ctx, lib.TaskIdentifier("tid-list-err"))
+			active, err := jobSpawner.IsJobActive(
+				ctx,
+				libk8s.Namespace("test-ns"),
+				lib.TaskIdentifier("tid-list-err"),
+			)
 			Expect(err).NotTo(BeNil())
 			Expect(active).To(BeFalse())
 		})
@@ -1542,7 +1575,7 @@ var _ = Describe("JobSpawner", func() {
 			_, err := jobSpawner.SpawnJob(ctx, task, config)
 			Expect(err).To(BeNil())
 
-			active, err := jobSpawner.IsJobActive(ctx, taskID)
+			active, err := jobSpawner.IsJobActive(ctx, libk8s.Namespace("test-ns"), taskID)
 			Expect(err).To(BeNil())
 			Expect(active).
 				To(BeTrue(), "IsJobActive must recognise the Job that SpawnJob just created")
@@ -1560,7 +1593,7 @@ var _ = Describe("JobSpawner", func() {
 			})
 			Expect(err).To(BeNil())
 
-			active, err := jobSpawner.IsJobActive(ctx, other)
+			active, err := jobSpawner.IsJobActive(ctx, libk8s.Namespace("test-ns"), other)
 			Expect(err).To(BeNil())
 			Expect(active).
 				To(BeFalse(), "IsJobActive must not match a different task's spawned Job")

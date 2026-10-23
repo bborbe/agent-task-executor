@@ -341,8 +341,12 @@ func (h *taskEventHandler) isJobActive(
 	task lib.Task,
 	config *pkg.AgentConfiguration,
 ) (bool, error) {
+	namespace, err := h.jobNamespaceForTask(ctx, config, task.TaskIdentifier)
+	if err != nil {
+		return false, err
+	}
 	if config == nil || config.Assignee == "" {
-		active, err := h.jobSpawner.IsJobActive(ctx, task.TaskIdentifier)
+		active, err := h.jobSpawner.IsJobActive(ctx, namespace, task.TaskIdentifier)
 		if err != nil {
 			return false, errors.Wrapf(
 				ctx,
@@ -353,7 +357,7 @@ func (h *taskEventHandler) isJobActive(
 		}
 		return active, nil
 	}
-	activeSet, err := h.activeJobsFor(ctx, config.Assignee)
+	activeSet, err := h.activeJobsFor(ctx, namespace, config.Assignee)
 	if err != nil {
 		return false, errors.Wrapf(ctx, err, "check active job for task %s", task.TaskIdentifier)
 	}
@@ -994,7 +998,12 @@ func (h *taskEventHandler) deferIfAtConcurrencyCap(
 	if config == nil || config.MaxConcurrentJobs <= 0 {
 		return false, nil
 	}
-	activeSet, err := h.activeJobsFor(ctx, config.Assignee)
+	namespace, err := h.jobNamespaceForTask(ctx, config, task.TaskIdentifier)
+	if err != nil {
+		metrics.TaskEventsTotal.WithLabelValues("error").Inc()
+		return false, err
+	}
+	activeSet, err := h.activeJobsFor(ctx, namespace, config.Assignee)
 	if err != nil {
 		metrics.TaskEventsTotal.WithLabelValues("error").Inc()
 		return false, errors.Wrapf(ctx, err, "count active jobs for assignee %s", config.Assignee)
