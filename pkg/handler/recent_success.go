@@ -48,6 +48,37 @@ func (h *taskEventHandler) recentlySucceeded(task lib.Task) bool {
 	return true
 }
 
+// recordTaskRerun counts a spawn whose task already succeeded at the phase it
+// is being spawned for, inside taskRerunWindow. That is what a re-run is: the
+// same unit of work running twice.
+//
+// Scoped by phase for the same reason recentlySucceeded is. A task that
+// succeeds at planning and is spawned again for execution has not re-run — it
+// advanced — and counting that would fire the re-run alert on every ordinary
+// task. Only a second spawn for the phase that just succeeded is a re-run.
+//
+// The series exists at 0 from the first spawn, not only after the first re-run:
+// WithLabelValues creates the child metric on miss. That is what lets the
+// absent-tier alert tell "no re-run yet" from "the metric stopped being
+// exported" — the second being the failure that alert exists to catch.
+func (h *taskEventHandler) recordTaskRerun(task lib.Task) {
+	taskType := string(task.Frontmatter.TaskType())
+	counter := metrics.TaskRerunsTotal.WithLabelValues(taskType)
+	succeeded, ok := h.taskStore.LastSucceeded(task.TaskIdentifier)
+	if !ok || succeeded.Phase != taskPhase(task) {
+		return
+	}
+	elapsed := h.currentDateTime.Now().Time().Sub(succeeded.CompletedAt)
+	if elapsed < 0 || elapsed >= taskRerunWindow {
+		return
+	}
+	counter.Inc()
+	glog.Infof(
+		"event=task_rerun task=%s task_type=%s phase=%s elapsed=%.0fs",
+		task.TaskIdentifier, taskType, succeeded.Phase, elapsed.Seconds(),
+	)
+}
+
 // taskPhase returns the task's phase as a string, or "" when absent.
 func taskPhase(task lib.Task) string {
 	if p := task.Frontmatter.Phase(); p != nil {
