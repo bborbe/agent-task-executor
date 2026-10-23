@@ -1497,6 +1497,27 @@ var _ = Describe("TaskEventHandler", func() {
 				Expect(h.EvalDeferredRespawns(ctx)).To(Succeed())
 				Expect(fakeResultPublisher.PublishQueueEntryCallCount()).To(Equal(1))
 			})
+
+			It(
+				"does not re-stamp after a failed publish, because the record is written first",
+				func() {
+					// The spec above drives EvalDeferredRespawns, whose entry already
+					// carries queued_at from the returned copy, so it passes even if the
+					// record were written after the publish. This one drives a fresh
+					// event with no queued_at anywhere, which only the
+					// record-before-publish ordering can stop from re-stamping.
+					fakeResultPublisher.PublishQueueEntryReturns(
+						errors.Errorf(ctx, "publish failed"),
+					)
+					Expect(h.ConsumeMessage(ctx, buildMsg(payload))).To(Succeed())
+					Expect(fakeResultPublisher.PublishQueueEntryCallCount()).To(Equal(1))
+
+					fakeResultPublisher.PublishQueueEntryReturns(nil)
+					currentDateTime.SetNow(libtimetest.ParseDateTime(afterRetryDelay))
+					Expect(h.ConsumeMessage(ctx, buildMsg(payload))).To(Succeed())
+					Expect(fakeResultPublisher.PublishQueueEntryCallCount()).To(Equal(1))
+				},
+			)
 		})
 
 		Describe("grace window (spec 036)", func() {

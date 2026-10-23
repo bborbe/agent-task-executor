@@ -110,6 +110,9 @@ func (h *taskEventHandler) evalDeferredRespawns(ctx context.Context) error {
 					entry.task.TaskIdentifier, err,
 				)
 				metrics.TaskEventsTotal.WithLabelValues("deferred_respawn_spawn_failed").Inc()
+				// The entry was removed during collection and no spawn replaced
+				// it, so the queued_at record must not outlive the deferral.
+				h.clearQueuedAtStampIfNotDeferred(entry.task.TaskIdentifier)
 				continue
 			}
 			return errors.Wrapf(
@@ -117,12 +120,17 @@ func (h *taskEventHandler) evalDeferredRespawns(ctx context.Context) error {
 			)
 		}
 		if !spawned {
+			// A skip branch (foreign vault, suppressed current job, active job,
+			// recently succeeded, capped redrive, trigger budget) ended the
+			// deferral without a spawn. Clear only if nothing re-parked it: a
+			// re-parked entry is still waiting and needs its record.
+			h.clearQueuedAtStampIfNotDeferred(entry.task.TaskIdentifier)
 			continue
 		}
 		// The task is no longer waiting behind the cap, so the queued_at record
 		// has served its purpose. Dropping it keeps the map bounded by the
 		// deferred working set.
-		h.clearQueuedAtStamp(entry.task.TaskIdentifier)
+		h.clearQueuedAtStampIfNotDeferred(entry.task.TaskIdentifier)
 		jobStartedAt, _ := entry.task.Frontmatter.JobStartedAt()
 		elapsed := now.Sub(jobStartedAt)
 		glog.V(1).Infof(

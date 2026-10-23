@@ -1031,6 +1031,9 @@ func (h *taskEventHandler) deferIfAtConcurrencyCap(
 	if h.claimInvalidatedLocked(claim) {
 		h.deferredMu.Unlock()
 		h.recordClaimInvalidated(task)
+		// The deferral ends here without re-parking, so the record stamped above
+		// must not outlive it.
+		h.clearQueuedAtStampIfNotDeferred(task.TaskIdentifier)
 		return true, nil
 	}
 	// A claimed replay stores only when nothing is parked: a concurrent fresh
@@ -1038,6 +1041,10 @@ func (h *taskEventHandler) deferIfAtConcurrencyCap(
 	if claim != nil {
 		if _, exists := h.deferredRespawns[task.TaskIdentifier]; exists {
 			h.deferredMu.Unlock()
+			// Nothing is parked by this call. The existing entry keeps its own
+			// stamp, so this is a no-op when the task is parked and a clear when
+			// it is not.
+			h.clearQueuedAtStampIfNotDeferred(task.TaskIdentifier)
 			return true, nil
 		}
 	}
@@ -1055,7 +1062,7 @@ func (h *taskEventHandler) deferIfAtConcurrencyCap(
 // cap. queued_at is the moment the FIRST wait began: it is written once and never
 // moved by a later re-deferral, so the field can be read as a queue-entry time.
 //
-// Three cases, in order:
+// Four cases, in order:
 //
 //   - the task already carries queued_at (a re-deferred in-memory entry) — return
 //     it unchanged and publish nothing.
@@ -1146,13 +1153,23 @@ func (h *taskEventHandler) recordQueuedAtStamp(id lib.TaskIdentifier, value stri
 	h.queuedAtStamps[id] = value
 }
 
-// clearQueuedAtStamp drops the record for id once the task is no longer deferred,
-// so the map stays bounded by the deferred working set rather than growing with
-// every task the executor has ever deferred.
-func (h *taskEventHandler) clearQueuedAtStamp(id lib.TaskIdentifier) {
+// clearQueuedAtStampIfNotDeferred drops the record for id unless the task is
+// parked in deferredRespawns, whose entry still needs it.
+//
+// This is the correct clear for every path that ends a deferral, because a
+// deferral can end in two ways: the task is re-parked (it is still waiting, so
+// the record must survive) or it is not (a skip branch, a failed spawn, an
+// evicted claim — the record must go). Clearing unconditionally would drop a
+// stamp a re-parked entry still depends on; not clearing at all leaves one
+// string behind per task that ever left the deferred state this way, and lets a
+// later, unrelated wait reuse a stale value — which admissionPriority then sorts
+// on as though the task had waited since then.
+func (h *taskEventHandler) clearQueuedAtStampIfNotDeferred(id lib.TaskIdentifier) {
 	h.deferredMu.Lock()
 	defer h.deferredMu.Unlock()
-	delete(h.queuedAtStamps, id)
+	if _, parked := h.deferredRespawns[id]; !parked {
+		delete(h.queuedAtStamps, id)
+	}
 }
 
 // taskWithFrontmatterValue returns a copy of the task whose frontmatter carries
