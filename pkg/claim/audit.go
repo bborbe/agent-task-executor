@@ -30,7 +30,14 @@ func (m *leaseManager) AuditMismatch(ctx context.Context, runningTaskIDs map[str
 			glog.Warningf("claim_mismatch case=job_without_claim task=%s", taskID)
 		}
 	}
+	// A dual claim reports two rows for one task, so count each task once: the
+	// mismatch is a property of the claim, not of the number of refs it holds.
+	counted := make(map[string]bool, len(held))
 	for _, claim := range held {
+		if counted[claim.TaskID] {
+			continue
+		}
+		counted[claim.TaskID] = true
 		if !runningTaskIDs[claim.TaskID] {
 			metrics.ClaimMismatchTotal.Inc()
 			glog.Warningf("claim_mismatch case=claim_without_job task=%s", claim.TaskID)

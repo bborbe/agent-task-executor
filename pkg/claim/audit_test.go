@@ -55,6 +55,16 @@ var _ = Describe("LeaseManager AuditMismatch", func() {
 		Expect(testutil.ToFloat64(metrics.ClaimMismatchTotal) - before).To(Equal(float64(0)))
 	})
 
+	It("counts one mismatch for a dual claim without a Job, not one per ref", func() {
+		_, err := mgr.ClaimPair(ctx, "claims/repo/bborbe-nuke", "claims/pr/bborbe-nuke-658", "t1")
+		Expect(err).NotTo(HaveOccurred())
+		Expect(mgr.HeldClaims()).To(HaveLen(2))
+
+		before := testutil.ToFloat64(metrics.ClaimMismatchTotal)
+		mgr.AuditMismatch(ctx, map[string]bool{})
+		Expect(testutil.ToFloat64(metrics.ClaimMismatchTotal) - before).To(Equal(float64(1)))
+	})
+
 	It("counts one mismatch for a running Job with no held claims", func() {
 		before := testutil.ToFloat64(metrics.ClaimMismatchTotal)
 		mgr.AuditMismatch(ctx, map[string]bool{"t3": true})
