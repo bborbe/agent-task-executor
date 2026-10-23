@@ -414,6 +414,13 @@ func (f *fakeResultPublisher) PublishRestoreAssignee(
 	return nil
 }
 
+func (f *fakeResultPublisher) PublishParkLostClaim(
+	ctx context.Context,
+	task lib.Task,
+) error {
+	return nil
+}
+
 func (f *fakeResultPublisher) PublishQueueEntry(
 	ctx context.Context,
 	task lib.Task,

@@ -151,10 +151,10 @@ func TestAcquireSpawnClaimKeysPRReviewsPerPullRequest(t *testing.T) {
 
 	body658 := "title\n\nhttps://github.com/bborbe/nuke/pull/658\n"
 	body662 := "title\n\nhttps://github.com/bborbe/nuke/pull/662\n"
-	if !h.acquireSpawnClaim(ctx, prReviewClaimTask("tid-658", body658)) {
+	if !h.acquireSpawnClaim(ctx, prReviewClaimTask("tid-658", body658), redispatchConfig()) {
 		t.Fatal("expected the first pr-review to claim")
 	}
-	if !h.acquireSpawnClaim(ctx, prReviewClaimTask("tid-662", body662)) {
+	if !h.acquireSpawnClaim(ctx, prReviewClaimTask("tid-662", body662), redispatchConfig()) {
 		t.Fatal("expected an independent pr-review to claim")
 	}
 
@@ -175,7 +175,7 @@ func TestAcquireSpawnClaimKeysPRReviewsPerPullRequest(t *testing.T) {
 
 	putsBefore := client.puts
 	before := snapshotGateClaims()
-	if h.acquireSpawnClaim(ctx, prReviewClaimTask("tid-658-third", body658)) {
+	if h.acquireSpawnClaim(ctx, prReviewClaimTask("tid-658-third", body658), redispatchConfig()) {
 		t.Fatal("expected the same pull request to block the third spawn")
 	}
 	expectGateClaimDelta(t, before, snapshotGateClaims(), map[string]float64{"conflict": 2})
@@ -206,7 +206,7 @@ func TestAcquireSpawnClaimKeysCloneURLPRReviewPerPullRequest(t *testing.T) {
 		Content: "title\n\n\nhttps://github.com/bborbe/nuke/pull/658\n" +
 			"\ncopied https://github.com/bborbe/nuke/pull/700\n",
 	}
-	if !h.acquireSpawnClaim(ctx, task) {
+	if !h.acquireSpawnClaim(ctx, task, redispatchConfig()) {
 		t.Fatal("expected the clone_url pr-review to claim")
 	}
 	if len(client.putCalls) != 1 {
@@ -234,7 +234,7 @@ func TestAcquireSpawnClaimFallsBackToRepoKey(t *testing.T) {
 			var ok bool
 			before := testutil.ToFloat64(metrics.ClaimKeyFallbackTotal)
 			out := captureGlogStderr(t, func() {
-				ok = h.acquireSpawnClaim(ctx, prReviewClaimTask(id, body))
+				ok = h.acquireSpawnClaim(ctx, prReviewClaimTask(id, body), redispatchConfig())
 			})
 			after := testutil.ToFloat64(metrics.ClaimKeyFallbackTotal)
 

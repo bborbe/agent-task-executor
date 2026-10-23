@@ -157,7 +157,7 @@ func TestAcquireSpawnClaimOffSkipsFactory(t *testing.T) {
 		claimJobControl: noopJobControl{},
 		currentDateTime: libtime.NewCurrentDateTime(),
 	}
-	if !h.acquireSpawnClaim(ctx, gateTask("", "")) {
+	if !h.acquireSpawnClaim(ctx, gateTask("", ""), redispatchConfig()) {
 		t.Fatal("expected the spawn to proceed in claim mode off")
 	}
 }
@@ -167,7 +167,7 @@ func TestAcquireSpawnClaimShadowRecordsCreate(t *testing.T) {
 	client := &recordingClaimRefClient{}
 	h := newGateHandler(pkg.ClaimModeShadow, client)
 
-	if !h.acquireSpawnClaim(ctx, gateTask("", "")) {
+	if !h.acquireSpawnClaim(ctx, gateTask("", ""), redispatchConfig()) {
 		t.Fatal("expected the spawn to proceed in claim mode shadow")
 	}
 	if len(client.putCalls) != 1 {
@@ -183,7 +183,7 @@ func TestAcquireSpawnClaimOnRecordsCreate(t *testing.T) {
 	client := &recordingClaimRefClient{}
 	h := newGateHandler(pkg.ClaimModeOn, client)
 
-	if !h.acquireSpawnClaim(ctx, gateTask("", "")) {
+	if !h.acquireSpawnClaim(ctx, gateTask("", ""), redispatchConfig()) {
 		t.Fatal("expected the spawn to proceed after a successful claim")
 	}
 	if len(client.putCalls) != 1 {
@@ -201,7 +201,7 @@ func TestAcquireSpawnClaimShadowProceedsOnError(t *testing.T) {
 	h := newGateHandler(pkg.ClaimModeShadow, client)
 	before := snapshotGateClaims()
 
-	if !h.acquireSpawnClaim(ctx, gateTask("", "")) {
+	if !h.acquireSpawnClaim(ctx, gateTask("", ""), redispatchConfig()) {
 		t.Fatal("expected the spawn to proceed in claim mode shadow")
 	}
 	after := snapshotGateClaims()
@@ -218,7 +218,7 @@ func TestAcquireSpawnClaimOnFailsClosedOnError(t *testing.T) {
 	h := newGateHandler(pkg.ClaimModeOn, client)
 	before := snapshotGateClaims()
 
-	if h.acquireSpawnClaim(ctx, gateTask("", "")) {
+	if h.acquireSpawnClaim(ctx, gateTask("", ""), redispatchConfig()) {
 		t.Fatal("expected the spawn to be blocked in claim mode on")
 	}
 	after := snapshotGateClaims()
@@ -234,7 +234,7 @@ func TestAcquireSpawnClaimOnFailsClosedOnConflict(t *testing.T) {
 	}
 	h := newGateHandler(pkg.ClaimModeOn, client)
 
-	if h.acquireSpawnClaim(ctx, gateTask("", "")) {
+	if h.acquireSpawnClaim(ctx, gateTask("", ""), redispatchConfig()) {
 		t.Fatal("expected the spawn to be blocked on a lease conflict")
 	}
 }
@@ -286,7 +286,7 @@ func TestAcquireSpawnClaimTakeoverExpired(t *testing.T) {
 	h := newGateHandler(pkg.ClaimModeOn, client)
 	before := snapshotGateClaims()
 
-	if !h.acquireSpawnClaim(ctx, gateTask("", "")) {
+	if !h.acquireSpawnClaim(ctx, gateTask("", ""), redispatchConfig()) {
 		t.Fatal("expected the spawn to proceed after an expired-lease takeover")
 	}
 	expectGateClaimDelta(t, before, snapshotGateClaims(), map[string]float64{
@@ -317,7 +317,7 @@ func TestAcquireSpawnClaimTakeoverStillValid(t *testing.T) {
 	h := newGateHandler(pkg.ClaimModeOn, client)
 	before := snapshotGateClaims()
 
-	if h.acquireSpawnClaim(ctx, gateTask("", "")) {
+	if h.acquireSpawnClaim(ctx, gateTask("", ""), redispatchConfig()) {
 		t.Fatal("expected a live lease to block the spawn in claim mode on")
 	}
 	expectGateClaimDelta(t, before, snapshotGateClaims(), map[string]float64{
@@ -338,7 +338,7 @@ func TestAcquireSpawnClaimTakeoverInsideGrace(t *testing.T) {
 	h := newGateHandler(pkg.ClaimModeOn, client)
 	before := snapshotGateClaims()
 
-	if h.acquireSpawnClaim(ctx, gateTask("", "")) {
+	if h.acquireSpawnClaim(ctx, gateTask("", ""), redispatchConfig()) {
 		t.Fatal("expected a lease inside the takeover grace to block the spawn")
 	}
 	expectGateClaimDelta(t, before, snapshotGateClaims(), map[string]float64{
@@ -366,7 +366,7 @@ func TestAcquireSpawnClaimTakeoverRaceLost(t *testing.T) {
 	h := newGateHandler(pkg.ClaimModeOn, client)
 	before := snapshotGateClaims()
 
-	if h.acquireSpawnClaim(ctx, gateTask("", "")) {
+	if h.acquireSpawnClaim(ctx, gateTask("", ""), redispatchConfig()) {
 		t.Fatal("expected a lost takeover race to block the spawn")
 	}
 	expectGateClaimDelta(t, before, snapshotGateClaims(), map[string]float64{
@@ -404,7 +404,7 @@ func TestAcquireSpawnClaimTakeoverError(t *testing.T) {
 	onClient := newClient()
 	onHandler := newGateHandler(pkg.ClaimModeOn, onClient)
 	before := snapshotGateClaims()
-	if onHandler.acquireSpawnClaim(ctx, gateTask("", "")) {
+	if onHandler.acquireSpawnClaim(ctx, gateTask("", ""), redispatchConfig()) {
 		t.Fatal("expected a takeover error to block the spawn in claim mode on")
 	}
 	expectGateClaimDelta(t, before, snapshotGateClaims(), expected)
@@ -412,7 +412,7 @@ func TestAcquireSpawnClaimTakeoverError(t *testing.T) {
 	shadowClient := newClient()
 	shadowHandler := newGateHandler(pkg.ClaimModeShadow, shadowClient)
 	before = snapshotGateClaims()
-	if !shadowHandler.acquireSpawnClaim(ctx, gateTask("", "")) {
+	if !shadowHandler.acquireSpawnClaim(ctx, gateTask("", ""), redispatchConfig()) {
 		t.Fatal("expected a takeover error to proceed in claim mode shadow")
 	}
 	expectGateClaimDelta(t, before, snapshotGateClaims(), expected)
@@ -427,7 +427,7 @@ func TestAcquireSpawnClaimTakeoverExpiredInShadow(t *testing.T) {
 	h := newGateHandler(pkg.ClaimModeShadow, client)
 	before := snapshotGateClaims()
 
-	if !h.acquireSpawnClaim(ctx, gateTask("", "")) {
+	if !h.acquireSpawnClaim(ctx, gateTask("", ""), redispatchConfig()) {
 		t.Fatal("expected the spawn to proceed after an expired-lease takeover")
 	}
 	expectGateClaimDelta(t, before, snapshotGateClaims(), map[string]float64{
@@ -444,7 +444,7 @@ func TestAcquireSpawnClaimDeriveKeyFailure(t *testing.T) {
 	client := &recordingClaimRefClient{}
 	onHandler := newGateHandler(pkg.ClaimModeOn, client)
 	before := snapshotGateClaims()
-	if onHandler.acquireSpawnClaim(ctx, task) {
+	if onHandler.acquireSpawnClaim(ctx, task, redispatchConfig()) {
 		t.Fatal("expected claim mode on to block a task with an underivable key")
 	}
 	if len(client.putCalls) != 0 {
@@ -454,7 +454,7 @@ func TestAcquireSpawnClaimDeriveKeyFailure(t *testing.T) {
 
 	shadowClient := &recordingClaimRefClient{}
 	shadowHandler := newGateHandler(pkg.ClaimModeShadow, shadowClient)
-	if !shadowHandler.acquireSpawnClaim(ctx, task) {
+	if !shadowHandler.acquireSpawnClaim(ctx, task, redispatchConfig()) {
 		t.Fatal("expected claim mode shadow to proceed on a key derivation failure")
 	}
 	if len(shadowClient.putCalls) != 0 {

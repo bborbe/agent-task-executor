@@ -153,10 +153,11 @@ type ConfigSpec struct {
 	// not set it.
 	MaxConcurrentJobs int `json:"maxConcurrentJobs,omitempty"`
 	// RerunOnLostClaim decides what happens to this agent's task after another
-	// executor takes over the claim this cluster stopped renewing. True or unset
-	// re-dispatches the task; false parks it at phase human_review for a person
-	// to decide. Pointer-typed so "unset" is distinguishable from false, and
-	// unset reads as true so every existing Config keeps re-dispatching.
+	// executor takes over the claim this cluster stopped renewing. True
+	// re-dispatches the task; false or unset parks it at phase human_review for
+	// a person to decide. Pointer-typed so "unset" is distinguishable from
+	// false, and unset reads as false so a Config that predates the field does
+	// not silently re-run work its author never opted into re-running.
 	// Independent of max_triggers and spec.retries.
 	RerunOnLostClaim *bool `json:"rerunOnLostClaim,omitempty"`
 	// Trigger declares the per-agent phase and status conditions under which the executor spawns a Job.
