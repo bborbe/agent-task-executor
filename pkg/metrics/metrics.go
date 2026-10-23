@@ -117,6 +117,23 @@ var ParkedLostClaimTotal = promauto.NewCounterVec(prometheus.CounterOpts{
 	Help: "Total number of tasks parked at human_review after a lost claim, by outcome.",
 }, []string{"result"})
 
+// TaskRerunsTotal counts spawns of a task whose previous Job succeeded inside
+// the re-run window. A re-run is a task that ran again after succeeding, which
+// is what a claim regression looks like on live data.
+//
+// Scoped to this executor's own store: a task whose first success ran on
+// another cluster is not recorded here and is not counted, so the counter
+// under-reports cross-cluster re-runs. Those stay visible through
+// ClaimTotal{result=~"taken_over|adopted"}. The Prometheus `cluster` external
+// label distinguishes the clusters that do report.
+var TaskRerunsTotal = promauto.NewCounterVec(
+	prometheus.CounterOpts{
+		Name: "executor_task_reruns_total",
+		Help: "Total number of task spawns after a success inside the re-run window.",
+	},
+	[]string{"task_type"},
+)
+
 // DeferredConcurrencyCapTotal counts tasks deferred because their assignee was
 // already at its configured concurrency cap, labelled by that assignee. The
 // bare TaskEventsTotal{result="deferred_concurrency_cap"} counter says a
