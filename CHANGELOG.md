@@ -2,6 +2,10 @@
 
 All notable changes to this project will be documented in this file.
 
+## Unreleased
+
+- fix: **a stale success no longer releases a claim inside a newer run's success hold.** The Job watcher keeps re-reporting an older Job of the same task as succeeded. That completion is already past its own window, so `ReleaseAfterSuccess` used to delete the claim the newer run's hold protects, and the peer cluster ran the task again seconds later (seen live on v0.30.7 for update-go and releaser tasks). The call now keeps a claim whose hold is still in the future, logs `event=release_kept_success_grace`, and extends a hold but never shortens it.
+
 ## v0.31.0
 
 - feat: **agent Jobs can be spawned into a separate namespace.** `ConfigSpec` gains `spec.jobNamespace`; empty (the default) keeps creating the Job in the executor's own namespace, so the deploy is a no-op until a Config sets it. A non-empty value places the Job there, and a value equal to the executor's own namespace is rejected with an ERROR log and no Job created, so no Config can author an opt-out. `IsJobActive`, `JobExists`, `CountActiveJobs` and `ListActiveJobs` all resolve the same namespace the Job was created in, so the duplicate-spawn guard and the concurrency cap keep working across namespaces, and the claim fence (`IsJobRunning`/`DeleteJob`) resolves it the same way so a claim that cannot renew still deletes its Job — resolving the task from the replayed task view rather than the spawn-time store, because startup recovery asks about Jobs the pod ran before it restarted, and recovery waits (bounded) for that view before deciding a claim. Spawned Job pods keep the unconditional `app: agent` label.
