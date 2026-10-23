@@ -338,7 +338,13 @@ func configSpecProperties() map[string]apiextensionsv1.JSONSchemaProps {
 			Type:    "string",
 			Pattern: "^[a-z0-9]([-a-z0-9]*[a-z0-9])?$",
 		},
-		"jobNamespace":    {Type: "string"},
+		// Same DNS-1123 shape as a namespace must have: without it a padded or
+		// invalid value passes admission, resolves cleanly, and fails only at
+		// Jobs(...).Create with a 422 the operator has to correlate by hand.
+		"jobNamespace": {
+			Type:    "string",
+			Pattern: "^[a-z0-9]([-a-z0-9]*[a-z0-9])?$",
+		},
 		"imagePullSecret": {Type: "string"},
 		// 0 = unlimited (see AgentConfiguration.MaxConcurrentJobs).
 		"maxConcurrentJobs": {Type: "integer", Minimum: &crdMinZero},
