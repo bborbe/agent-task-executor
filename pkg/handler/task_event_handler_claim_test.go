@@ -8,6 +8,7 @@ import (
 	"context"
 	"encoding/json"
 	stderrors "errors"
+	"strings"
 	"time"
 
 	"github.com/IBM/sarama"
@@ -254,6 +255,19 @@ func claimKeyFor(task lib.Task) string {
 	return "claims/task/" + string(task.TaskIdentifier)
 }
 
+// dispatchPutCount counts PUT calls whose key is a dispatch claim (task- or
+// repo-keyed), ignoring the redrive streak refs the handler also writes.
+func dispatchPutCount(harness *claimHarness) int {
+	count := 0
+	for i := 0; i < harness.client.PutCallCount(); i++ {
+		_, key, _, _, _, _ := harness.client.PutArgsForCall(i)
+		if strings.HasPrefix(key, "claims/task/") || strings.HasPrefix(key, "claims/repo/") {
+			count++
+		}
+	}
+	return count
+}
+
 var _ = Describe("claim mode off", func() {
 	It("spawns one Job and constructs no claim client", func() {
 		harness := newClaimHarness(pkg.ClaimModeOff)
@@ -387,7 +401,7 @@ var _ = Describe("claim gate", func() {
 			"conflict":   1,
 			"taken_over": 1,
 		})
-		Expect(harness.client.PutCallCount()).To(Equal(2))
+		Expect(dispatchPutCount(harness)).To(Equal(2))
 		_, putKey, expectedSha, cluster, _, _ := harness.client.PutArgsForCall(1)
 		Expect(putKey).To(Equal(key))
 		Expect(expectedSha).To(Equal("expired-sha"))
