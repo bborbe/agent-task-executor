@@ -1696,7 +1696,7 @@ func (h *taskEventHandler) reconcileTask(
 		return task, nil, false, nil
 	}
 	if h.stageFilter && task.Frontmatter.Stage() != string(h.branch) {
-		if taskCluster(task) == h.cluster {
+		if h.pinOutsidePool(task, task.Frontmatter.Stage()) {
 			h.logPinOutsidePool(task, task.Frontmatter.Stage())
 			metrics.TaskEventsTotal.WithLabelValues("pin_outside_pool").Inc()
 		}
@@ -1910,6 +1910,19 @@ func taskCluster(task lib.Task) string {
 	return v
 }
 
+// pinOutsidePool reports whether the task is pinned to this executor while its
+// stage sits outside this executor's pool, so it can never run here.
+//
+// The pin must be non-empty: taskCluster returns "" both for a task with no
+// cluster frontmatter and for an executor built with CLUSTER="", so a bare
+// `taskCluster(task) == h.cluster` would report every untagged stage-mismatched
+// task on an unpinned executor as a dead pin. A task with no pin is a plain
+// stage skip.
+func (h *taskEventHandler) pinOutsidePool(task lib.Task, stage string) bool {
+	c := taskCluster(task)
+	return c != "" && c == h.cluster && stage != string(h.branch)
+}
+
 // stageSkipResult decides what a stage-filter mismatch means. A task whose
 // cluster pin names this executor while its stage sits outside this executor's
 // pool can never run here, so it is reported as a dead pin rather than folded
@@ -1923,7 +1936,7 @@ func (h *taskEventHandler) stageSkipResult(
 	if !h.stageFilter || stage == string(h.branch) {
 		return "", false
 	}
-	if taskCluster(task) == h.cluster {
+	if h.pinOutsidePool(task, stage) {
 		h.logPinOutsidePool(task, stage)
 		return "pin_outside_pool", true
 	}

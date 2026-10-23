@@ -192,6 +192,29 @@ var _ = Describe("A cluster pin outside its stage pool", func() {
 			Expect(stageSkipCount()).To(Equal(beforeStage + 1))
 		})
 
+		It("does not report an untagged task on an executor with an empty CLUSTER", func() {
+			// CLUSTER is optional, and taskCluster returns "" both for a task
+			// with no pin and for an executor built without one. A bare
+			// `taskCluster(task) == h.cluster` therefore reports every untagged
+			// stage-mismatched task on an unpinned executor as a dead pin.
+			unpinned := buildHandler("", true, true)
+
+			task := routedTask(lib.TaskFrontmatter{
+				"status":   "in_progress",
+				"phase":    string(domain.TaskPhaseExecution),
+				"assignee": "claude",
+				"stage":    "dev",
+			})
+
+			beforePin := pinCount()
+			beforeStage := stageSkipCount()
+
+			Expect(unpinned.ConsumeMessage(ctx, buildMsg(task))).To(BeNil())
+
+			Expect(pinCount()).To(Equal(beforePin))
+			Expect(stageSkipCount()).To(Equal(beforeStage + 1))
+		})
+
 		It("keeps skipped_stage when the pin names a cluster other than this executor", func() {
 			// A foreign pin never reaches the stage filter (the foreign-cluster
 			// skip returns first), so this asserts the guard cannot be reached by
@@ -237,6 +260,26 @@ var _ = Describe("A cluster pin outside its stage pool", func() {
 			Expect(out).To(ContainSubstring("event=pin_outside_pool"))
 			Expect(pinCount()).To(Equal(beforePin + 1))
 			Expect(fakeSpawner.SpawnJobCallCount()).To(Equal(0))
+		})
+
+		It("does not report an untagged task", func() {
+			// The floor's pin check is a separate call site, so it needs its own
+			// assertion that an unpinned task is not a dead pin.
+			fakeView.SnapshotReturns([]lib.Task{
+				routedTask(lib.TaskFrontmatter{
+					"status":   "in_progress",
+					"phase":    string(domain.TaskPhaseExecution),
+					"assignee": "claude",
+					"stage":    "dev",
+				}),
+			})
+			fakeSpawner.IsJobActiveReturns(false, nil)
+
+			beforePin := pinCount()
+
+			Expect(h.ReconcileOnce(ctx)).To(BeNil())
+
+			Expect(pinCount()).To(Equal(beforePin))
 		})
 	})
 })
