@@ -999,7 +999,8 @@ func (m *leaseManager) HeldClaims() []HeldClaim {
 }
 
 // Recover re-adopts, releases or fences the claims this cluster held before a
-// restart. It never sends a create PUT and never touches another cluster.
+// restart. It never sends a create PUT and never touches another cluster,
+// except to write the missing partner of a per-PR-only claim it repairs.
 func (m *leaseManager) Recover(ctx context.Context) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -1008,6 +1009,7 @@ func (m *leaseManager) Recover(ctx context.Context) error {
 		countClaim("error")
 		return err
 	}
+	byTask := map[string][]ClaimRef{}
 	for _, ref := range refs {
 		// Streak refs are not claims: skip them by key before any cluster
 		// comparison, so an executor whose cluster is the streak sentinel still
@@ -1018,21 +1020,86 @@ func (m *leaseManager) Recover(ctx context.Context) error {
 		if ref.Cluster != m.cluster {
 			continue
 		}
-		m.recoverOne(ctx, ref)
+		byTask[ref.TaskID] = append(byTask[ref.TaskID], ref)
+	}
+	taskIDs := make([]string, 0, len(byTask))
+	for taskID := range byTask {
+		taskIDs = append(taskIDs, taskID)
+	}
+	sort.Strings(taskIDs)
+	for _, taskID := range taskIDs {
+		m.recoverTaskGroup(ctx, byTask[taskID])
 	}
 	return nil
 }
 
-// recoverOne applies the restart rule to one own-cluster claim.
-func (m *leaseManager) recoverOne(ctx context.Context, ref ClaimRef) {
+// recoverTaskGroup splits one task's own-cluster refs into claims. A
+// repository key and a per-PR key form one pair; any other combination is
+// processed as separate single claims in sorted key order.
+func (m *leaseManager) recoverTaskGroup(ctx context.Context, refs []ClaimRef) {
+	if len(refs) == 2 {
+		var repoRef, prRef *ClaimRef
+		for i := range refs {
+			switch key := claimKey(refs[i].Ref); {
+			case strings.HasPrefix(key, "claims/repo/"):
+				repoRef = &refs[i]
+			case strings.HasPrefix(key, "claims/pr/"):
+				prRef = &refs[i]
+			}
+		}
+		if repoRef != nil && prRef != nil {
+			m.recoverGroup(ctx, []ClaimRef{*repoRef, *prRef})
+			return
+		}
+	}
+	sorted := make([]ClaimRef, len(refs))
+	copy(sorted, refs)
+	sort.Slice(sorted, func(i, j int) bool {
+		return claimKey(sorted[i].Ref) < claimKey(sorted[j].Ref)
+	})
+	for _, ref := range sorted {
+		m.recoverGroup(ctx, []ClaimRef{ref})
+	}
+}
+
+// recoverGroup applies the restart rule to one claim, which is either a single
+// ref or the repository/per-PR pair.
+func (m *leaseManager) recoverGroup(ctx context.Context, refs []ClaimRef) {
+	primary, secondary := orderRecoverRefs(refs)
 	now := m.currentDateTime.Now()
-	key := strings.TrimPrefix(ref.Ref, "refs/")
-	leaseUntil := m.recoverLeaseUntil(now, ref)
+	leaseUntil := m.recoverLeaseUntil(now, primary)
+	if secondary != nil {
+		secondaryLease := m.recoverLeaseUntil(now, *secondary)
+		if secondaryLease.Before(leaseUntil) {
+			leaseUntil = secondaryLease
+		}
+	}
 	if fenceDue(now, leaseUntil) {
-		m.recoverFence(ctx, key, ref, leaseUntil)
+		m.recoverFenceGroup(ctx, primary, secondary, leaseUntil)
 		return
 	}
-	m.recoverAdopt(ctx, key, ref, leaseUntil, now)
+	m.recoverAdoptGroup(ctx, primary, secondary, leaseUntil, now)
+}
+
+// orderRecoverRefs returns the repository key as primary and the per-PR key as
+// secondary. A group is never passed with two refs of the same shape.
+func orderRecoverRefs(refs []ClaimRef) (ClaimRef, *ClaimRef) {
+	if len(refs) == 0 {
+		return ClaimRef{}, nil
+	}
+	if len(refs) == 1 {
+		return refs[0], nil
+	}
+	primary, secondary := refs[0], refs[1]
+	if strings.HasPrefix(claimKey(primary.Ref), "claims/pr/") {
+		primary, secondary = secondary, primary
+	}
+	return primary, &secondary
+}
+
+// claimKey returns the key of a listed ref.
+func claimKey(ref string) string {
+	return strings.TrimPrefix(ref, "refs/")
 }
 
 // recoverLeaseUntil parses the listed lease. An unparseable value is treated
@@ -1054,82 +1121,182 @@ func (m *leaseManager) recoverLeaseUntil(
 	return libtime.DateTime(parsed)
 }
 
-// recoverFence stops the Job of a claim too close to its lease end and drops
-// the ref. A failed Job deletion leaves the claim in pending deletion.
-func (m *leaseManager) recoverFence(
+// recoverFenceGroup stops the Job of a claim too close to its lease end and
+// drops both refs. A failed Job deletion leaves the whole claim in pending
+// deletion.
+func (m *leaseManager) recoverFenceGroup(
 	ctx context.Context,
-	key string,
-	ref ClaimRef,
+	primary ClaimRef,
+	secondary *ClaimRef,
 	leaseUntil libtime.DateTime,
 ) {
-	running, runErr := m.jobControl.IsJobRunning(ctx, ref.TaskID)
+	key := claimKey(primary.Ref)
+	running, runErr := m.jobControl.IsJobRunning(ctx, primary.TaskID)
 	if runErr != nil {
 		countClaim("error")
 	}
 	if running || runErr != nil {
-		if err := m.jobControl.DeleteJob(ctx, ref.TaskID); err != nil {
+		if err := m.jobControl.DeleteJob(ctx, primary.TaskID); err != nil {
 			countClaim("error")
-			countClaimFencePending(key, ref.TaskID)
-			m.held[key] = &heldClaim{
+			countClaimFencePending(key, primary.TaskID)
+			held := &heldClaim{
 				key:                 key,
-				taskID:              ref.TaskID,
-				sha:                 ref.Sha,
+				taskID:              primary.TaskID,
+				sha:                 primary.Sha,
 				leaseUntil:          leaseUntil,
-				leaseUntilStr:       ref.LeaseUntil,
+				leaseUntilStr:       primary.LeaseUntil,
 				pendingJobDeletion:  true,
 				pendingDeletionPath: "fence",
 			}
+			if secondary != nil {
+				held.secondKey = claimKey(secondary.Ref)
+				held.secondSha = secondary.Sha
+			}
+			m.held[key] = held
 			return
 		}
 	}
-	m.bestEffortDelete(ctx, key, ref.Sha)
-	countClaimRemoval(key, ref.TaskID, "fenced", ref.Sha)
+	m.bestEffortDelete(ctx, key, primary.Sha)
+	if secondary != nil {
+		m.bestEffortDelete(ctx, claimKey(secondary.Ref), secondary.Sha)
+	}
+	countClaimRemoval(key, primary.TaskID, "fenced", primary.Sha)
 }
 
-// recoverAdopt holds, releases or re-checks the claim of a Job that may still
-// be running.
-func (m *leaseManager) recoverAdopt(
+// recoverAdoptGroup holds, releases or re-checks the claim of a Job that may
+// still be running. A per-PR-only claim is repaired by writing its derived
+// per-repository partner.
+func (m *leaseManager) recoverAdoptGroup(
 	ctx context.Context,
-	key string,
-	ref ClaimRef,
+	primary ClaimRef,
+	secondary *ClaimRef,
 	leaseUntil libtime.DateTime,
 	now libtime.DateTime,
 ) {
-	running, runErr := m.jobControl.IsJobRunning(ctx, ref.TaskID)
+	running, runErr := m.jobControl.IsJobRunning(ctx, primary.TaskID)
 	if runErr != nil {
 		countClaim("error")
-		m.held[key] = &heldClaim{
-			key:               key,
-			taskID:            ref.TaskID,
-			sha:               ref.Sha,
-			leaseUntil:        leaseUntil,
-			leaseUntilStr:     ref.LeaseUntil,
-			lastRenewAt:       now,
-			renewNextTick:     true,
-			needsRunningCheck: true,
+		if secondary == nil {
+			m.repairOrAdoptSingle(ctx, primary, leaseUntil, now, true)
+			return
 		}
+		m.storeRecoveredPair(primary, *secondary, leaseUntil, primary.LeaseUntil, now, true)
 		return
 	}
 	if running {
-		m.held[key] = &heldClaim{
-			key:           key,
-			taskID:        ref.TaskID,
-			sha:           ref.Sha,
-			leaseUntil:    leaseUntil,
-			leaseUntilStr: ref.LeaseUntil,
-			lastRenewAt:   now,
-			renewNextTick: true,
+		if secondary == nil {
+			m.repairOrAdoptSingle(ctx, primary, leaseUntil, now, false)
+			return
 		}
+		m.storeRecoveredPair(primary, *secondary, leaseUntil, primary.LeaseUntil, now, false)
 		countClaim("adopted")
 		return
 	}
-	err := m.refClient.Delete(ctx, key, ref.Sha)
+	key := claimKey(primary.Ref)
+	primaryResult, err := m.deleteRef(ctx, key, primary.Sha)
+	if err != nil {
+		countClaim("error")
+		return
+	}
+	result := primaryResult
+	if secondary != nil {
+		secondaryResult, secondaryErr := m.deleteRef(
+			ctx,
+			claimKey(secondary.Ref),
+			secondary.Sha,
+		)
+		if secondaryErr != nil {
+			countClaim("error")
+			return
+		}
+		result = pairRemovalResult(primaryResult, secondaryResult)
+	}
+	countClaimRemoval(key, primary.TaskID, result, primary.Sha)
+}
+
+// storeRecoveredPair records both refs of an adopted claim.
+func (m *leaseManager) storeRecoveredPair(
+	primary ClaimRef,
+	secondary ClaimRef,
+	leaseUntil libtime.DateTime,
+	leaseUntilStr string,
+	now libtime.DateTime,
+	needsRunningCheck bool,
+) {
+	m.held[claimKey(primary.Ref)] = &heldClaim{
+		key:               claimKey(primary.Ref),
+		taskID:            primary.TaskID,
+		sha:               primary.Sha,
+		secondKey:         claimKey(secondary.Ref),
+		secondSha:         secondary.Sha,
+		leaseUntil:        leaseUntil,
+		leaseUntilStr:     leaseUntilStr,
+		lastRenewAt:       now,
+		renewNextTick:     true,
+		needsRunningCheck: needsRunningCheck,
+	}
+}
+
+// repairOrAdoptSingle adopts a single listed ref. When the ref is a per-PR key,
+// it derives and writes the per-repository partner so a half-written pair is
+// completed rather than inherited.
+func (m *leaseManager) repairOrAdoptSingle(
+	ctx context.Context,
+	primary ClaimRef,
+	leaseUntil libtime.DateTime,
+	now libtime.DateTime,
+	needsRunningCheck bool,
+) {
+	key := claimKey(primary.Ref)
+	derived, derivable := repoKeyFromPRKey(key)
+	if !derivable {
+		m.held[key] = &heldClaim{
+			key:               key,
+			taskID:            primary.TaskID,
+			sha:               primary.Sha,
+			leaseUntil:        leaseUntil,
+			leaseUntilStr:     primary.LeaseUntil,
+			lastRenewAt:       now,
+			renewNextTick:     true,
+			needsRunningCheck: needsRunningCheck,
+		}
+		if !needsRunningCheck {
+			countClaim("adopted")
+		}
+		return
+	}
+	newLease := now.Add(LeaseDuration)
+	sha, err := m.refClient.Put(ctx, derived, "", m.cluster, primary.TaskID, newLease)
 	switch {
 	case err == nil:
-		countClaimRemoval(key, ref.TaskID, "released", ref.Sha)
+		m.held[derived] = &heldClaim{
+			key:               derived,
+			taskID:            primary.TaskID,
+			sha:               sha,
+			secondKey:         key,
+			secondSha:         primary.Sha,
+			leaseUntil:        newLease,
+			leaseUntilStr:     formatLeaseUntil(newLease),
+			lastRenewAt:       now,
+			renewNextTick:     true,
+			needsRunningCheck: needsRunningCheck,
+		}
+		countClaim("adopted")
 	case errors.Is(err, ErrLeaseConflict):
-		countClaimRemoval(key, ref.TaskID, "already_released", ref.Sha)
+		// Another cluster owns the per-repository key, so the pair is not ours.
+		countClaim("conflict")
+		m.bestEffortDelete(ctx, key, primary.Sha)
 	default:
 		countClaim("error")
+		m.held[key] = &heldClaim{
+			key:               key,
+			taskID:            primary.TaskID,
+			sha:               primary.Sha,
+			leaseUntil:        leaseUntil,
+			leaseUntilStr:     primary.LeaseUntil,
+			lastRenewAt:       now,
+			renewNextTick:     true,
+			needsRunningCheck: needsRunningCheck,
+		}
 	}
 }

@@ -135,6 +135,36 @@ func pullRequestNumberFromLine(owner, repo, line string) (string, bool) {
 	return strconv.Itoa(value), true
 }
 
+// repoKeyFromPRKey returns the per-repository key for a per-pull-request key
+// of the shape claims/pr/<owner>-<repo>-<n>, where <n> is the trailing
+// all-digit segment. It returns false for any other shape, so a caller never
+// guesses a partner key.
+func repoKeyFromPRKey(key string) (string, bool) {
+	const prefix = "claims/pr/"
+	if !strings.HasPrefix(key, prefix) {
+		return "", false
+	}
+	rest := strings.TrimPrefix(key, prefix)
+	index := strings.LastIndex(rest, "-")
+	if index <= 0 || index == len(rest)-1 {
+		return "", false
+	}
+	number := rest[index+1:]
+	if len(number) > 10 {
+		return "", false
+	}
+	for i := 0; i < len(number); i++ {
+		if number[i] < '0' || number[i] > '9' {
+			return "", false
+		}
+	}
+	value, err := strconv.Atoi(number)
+	if err != nil || value < 1 {
+		return "", false
+	}
+	return "claims/repo/" + rest[:index], true
+}
+
 // validateClaimComponent rejects a value that must not appear in a claim key
 // path. It is the single validation used for owner, repo and task id.
 func validateClaimComponent(ctx context.Context, name, value string) error {

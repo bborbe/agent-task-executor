@@ -1,8 +1,13 @@
 ---
-status: approved
+status: completed
 spec: [015-dual-acquire-claim-keys]
+summary: Restart recovery now groups own-cluster refs by task, adopts/fences/releases dual claims as one pair, and repairs per-PR-only claims by deriving and writing the per-repo partner.
+execution_id: agent-task-executor-dual-acquire-exec-035-spec-015-restart-recovery
+dark-factory-version: v0.198.7
 created: "2026-10-23T19:55:00Z"
 queued: "2026-10-23T19:51:10Z"
+started: "2026-10-23T20:33:52Z"
+completed: "2026-10-23T20:41:42Z"
 branch: dark-factory/dual-acquire-claim-keys
 ---
 
