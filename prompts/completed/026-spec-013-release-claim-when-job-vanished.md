@@ -1,6 +1,6 @@
 ---
 status: completed
-spec: [011-bug-held-claim-outlives-vanished-job]
+spec: [013-bug-held-claim-outlives-vanished-job]
 summary: Added a jobless-claim release to the lease loop with a new jobless_released claim result series, protocol docs, changelog bullet and Ginkgo specs covering every branch.
 execution_id: agent-task-executor-claim-reaper-exec-022-spec-011-release-claim-when-job-vanished
 dark-factory-version: v0.198.7

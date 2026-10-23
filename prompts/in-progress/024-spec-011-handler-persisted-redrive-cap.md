@@ -1,10 +1,9 @@
 ---
-status: cancelled
+status: approved
 spec: [011-bug-redrive-streak-lost-across-clusters-and-restarts]
 created: "2026-10-23T09:27:00Z"
 queued: "2026-10-23T09:42:55Z"
 branch: dark-factory/bug-redrive-streak-lost-across-clusters-and-restarts
-cancelled: "2026-10-23T12:53:25Z"
 ---
 
 <summary>

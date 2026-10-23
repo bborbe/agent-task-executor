@@ -1,8 +1,9 @@
 ---
-status: prompted
+status: verifying
 approved: "2026-10-23T12:13:49Z"
 generating: "2026-10-23T12:23:27Z"
 prompted: "2026-10-23T12:34:07Z"
+verifying: "2026-10-23T13:07:31Z"
 branch: dark-factory/bug-pr-review-claims-serialize-per-repo
 ---
 
