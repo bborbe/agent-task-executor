@@ -57,14 +57,13 @@ func (h *taskEventHandler) recentlySucceeded(task lib.Task) bool {
 // advanced — and counting that would fire the re-run alert on every ordinary
 // task. Only a second spawn for the phase that just succeeded is a re-run.
 //
-// The series is touched at 0 on every spawn, not only on a re-run. Without that
-// touch the counter has no series until the first re-run, and the absent-tier
-// alert could not tell "no re-run yet" from "the metric stopped being
+// The series exists at 0 from the first spawn, not only after the first re-run:
+// WithLabelValues creates the child metric on miss. That is what lets the
+// absent-tier alert tell "no re-run yet" from "the metric stopped being
 // exported" — the second being the failure that alert exists to catch.
 func (h *taskEventHandler) recordTaskRerun(task lib.Task) {
 	taskType := string(task.Frontmatter.TaskType())
 	counter := metrics.TaskRerunsTotal.WithLabelValues(taskType)
-	counter.Add(0)
 	succeeded, ok := h.taskStore.LastSucceeded(task.TaskIdentifier)
 	if !ok || succeeded.Phase != taskPhase(task) {
 		return
