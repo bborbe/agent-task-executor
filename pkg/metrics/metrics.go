@@ -108,6 +108,15 @@ var ClaimKeyFallbackTotal = promauto.NewCounter(prometheus.CounterOpts{
 	Help: "Total number of pr-review claim keys that fell back to the repository key.",
 })
 
+// ParkedLostClaimTotal counts tasks parked at phase human_review after another
+// executor took over their claim, labelled by outcome. The unset default parks,
+// so an unexpected fleet-wide park must be alertable from a metric rather than
+// only visible by grepping for the log line.
+var ParkedLostClaimTotal = promauto.NewCounterVec(prometheus.CounterOpts{
+	Name: "executor_parked_lost_claim_total",
+	Help: "Total number of tasks parked at human_review after a lost claim, by outcome.",
+}, []string{"result"})
+
 // DeferredConcurrencyCapTotal counts tasks deferred because their assignee was
 // already at its configured concurrency cap, labelled by that assignee. The
 // bare TaskEventsTotal{result="deferred_concurrency_cap"} counter says a
@@ -179,6 +188,9 @@ func init() {
 		ReconcilePassesTotal.WithLabelValues(result).Add(0)
 	}
 	ClaimKeyFallbackTotal.Add(0)
+	for _, result := range []string{"parked", "failed"} {
+		ParkedLostClaimTotal.WithLabelValues(result).Add(0)
+	}
 	// Pre-initialise the closed claim result set so every series is visible
 	// before any claim activity.
 	for _, result := range []string{

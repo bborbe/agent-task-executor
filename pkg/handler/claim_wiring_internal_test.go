@@ -9,6 +9,7 @@ package handler
 
 import (
 	"context"
+	stderrors "errors"
 	"strings"
 	"testing"
 	stdtime "time"
@@ -281,12 +282,19 @@ func unsetConfig() *pkg.AgentConfiguration {
 // internal test of handler cannot import it.
 type parkRecordingPublisher struct {
 	parked []lib.TaskIdentifier
+	// failFirst makes the next failFirst park calls fail, so a test can pin the
+	// retry and the final-failure path without a second fake.
+	failFirst int
 }
 
 func (s *parkRecordingPublisher) PublishParkLostClaim(
 	_ context.Context,
 	task lib.Task,
 ) error {
+	if s.failFirst > 0 {
+		s.failFirst--
+		return stderrors.New("publish failed")
+	}
 	s.parked = append(s.parked, task.TaskIdentifier)
 	return nil
 }
@@ -429,5 +437,82 @@ func TestAcquireSpawnClaimRedispatchesOnLostClaimWhenRerunEnabled(t *testing.T) 
 	}
 	if !strings.Contains(out, acquiredLogLine) {
 		t.Errorf("stderr = %q, want it to contain %q", out, acquiredLogLine)
+	}
+}
+
+// TestAcquireSpawnClaimDoesNotParkInShadowMode pins shadow's contract: it takes
+// claims without ever blocking a dispatch. Parking there would be worse than a
+// violation — the task is written to human_review, this cluster keeps the claim,
+// and the next pass's Takeover fails against its own live lease, so
+// claimFailureDecision proceeds and a Job is created for the parked task.
+func TestAcquireSpawnClaimDoesNotParkInShadowMode(t *testing.T) {
+	ctx := context.Background()
+	h, publisher := parkOnLostClaimHandler()
+	h.claimMode = pkg.ClaimModeShadow
+
+	var ok bool
+	out := captureGlogStderr(t, func() {
+		ok = h.acquireSpawnClaim(ctx, gateTask("", ""), parkConfig())
+	})
+
+	if !ok {
+		t.Fatal("expected shadow to proceed with the spawn")
+	}
+	if len(publisher.parked) != 0 {
+		t.Fatalf("park writes = %d, want 0 in shadow mode", len(publisher.parked))
+	}
+	if strings.Contains(out, "event=parked_lost_claim") {
+		t.Errorf("stderr = %q, want no park line in shadow mode", out)
+	}
+}
+
+// TestAcquireSpawnClaimRetriesTheParkWrite pins the retry: a single failed send
+// must not be reported as a failed park, because the phase write is what stops
+// the task running again after its claim is released jobless.
+func TestAcquireSpawnClaimRetriesTheParkWrite(t *testing.T) {
+	ctx := context.Background()
+	h, publisher := parkOnLostClaimHandler()
+	publisher.failFirst = 1
+
+	var ok bool
+	out := captureGlogStderr(t, func() {
+		ok = h.acquireSpawnClaim(ctx, gateTask("", ""), parkConfig())
+	})
+
+	if ok {
+		t.Fatal("expected no Job for a non-re-runnable agent after a takeover")
+	}
+	if len(publisher.parked) != 1 {
+		t.Fatalf("park writes = %d, want 1 after one retry", len(publisher.parked))
+	}
+	if !strings.Contains(out, parkedLogLine) {
+		t.Errorf("stderr = %q, want the success line once the write lands", out)
+	}
+}
+
+// TestAcquireSpawnClaimReportsAFailedParkWrite pins the final-failure path: the
+// task is still not spawned, but the log must say the park failed rather than
+// claim it happened.
+func TestAcquireSpawnClaimReportsAFailedParkWrite(t *testing.T) {
+	ctx := context.Background()
+	h, publisher := parkOnLostClaimHandler()
+	publisher.failFirst = parkWriteAttempts
+
+	var ok bool
+	out := captureGlogStderr(t, func() {
+		ok = h.acquireSpawnClaim(ctx, gateTask("", ""), parkConfig())
+	})
+
+	if ok {
+		t.Fatal("expected no Job even when the park write never lands")
+	}
+	if len(publisher.parked) != 0 {
+		t.Fatalf("park writes = %d, want 0", len(publisher.parked))
+	}
+	if !strings.Contains(out, "event=parked_lost_claim_failed") {
+		t.Errorf("stderr = %q, want the failure line", out)
+	}
+	if strings.Contains(out, parkedLogLine) {
+		t.Errorf("stderr = %q, want no success line when the write failed", out)
 	}
 }

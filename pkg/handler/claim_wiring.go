@@ -8,6 +8,7 @@ import (
 	"context"
 	stderrors "errors"
 	"strings"
+	"time"
 
 	lib "github.com/bborbe/agent"
 	"github.com/bborbe/errors"
@@ -19,6 +20,15 @@ import (
 	"github.com/bborbe/agent-task-executor/pkg/claim"
 	"github.com/bborbe/agent-task-executor/pkg/metrics"
 )
+
+// parkWriteAttempts bounds the retries of the park's phase write. The write is
+// what stops a later jobless release from letting the task run again, so a
+// single failed send is worth retrying before it is reported as failed.
+const parkWriteAttempts = 3
+
+// parkWriteRetryDelay is the pause between park-write attempts. Short: the send
+// is a Kafka publish, and a slow retry would stall the reconcile pass.
+const parkWriteRetryDelay = 200 * time.Millisecond
 
 // ClaimRefClientFactory builds the git-rest claim ref client. It is called at
 // most once per process, and only when CLAIM_MODE is shadow or on.
@@ -144,7 +154,15 @@ func (h *taskEventHandler) acquireSpawnClaim(
 		if takeoverErr == nil {
 			// Another executor owned this task's claim and its lease had lapsed.
 			// The Config decides whether that work may run a second time here.
-			if config.LostClaimAction() == agentv1.ParkAfterLostClaim {
+			//
+			// Only `on` may park. Shadow's contract is to take claims without
+			// ever blocking a dispatch, and parking there would be worse than a
+			// violation: the task is written to human_review, this cluster keeps
+			// the claim, and the next pass's Takeover fails against its own live
+			// lease, so claimFailureDecision proceeds and a Job is created for the
+			// task that was just parked.
+			if h.claimMode == pkg.ClaimModeOn &&
+				config.LostClaimAction() == agentv1.ParkAfterLostClaim {
 				h.parkAfterLostClaim(ctx, key, task)
 				return false
 			}
@@ -220,23 +238,40 @@ func ownerRepoFromCloneURL(raw string) (string, string, bool) {
 }
 
 // parkAfterLostClaim stops a task whose claim another executor took over, when
-// its Config says the agent must not run a second time. It publishes the
-// phase write and reports nothing: the caller returns false either way, so no
-// Job is created. A failed publish is logged loudly and leaves the task where
-// it was — the safe direction is always "do not run it again", never "run it
-// because the write failed".
+// its Config says the agent must not run a second time. The caller returns false
+// either way, so no Job is created here.
+//
+// The phase write is retried, because returning false without it is not
+// fail-safe on its own: the takeover left this cluster holding the claim, and
+// releaseJoblessClaims drops a held claim whose Job has been absent for
+// JoblessGrace (300 s). A task still in a spawnable phase is then claimed fresh
+// and runs a second time — exactly what the Config forbids. The success line is
+// logged only once the write lands, so the log never reports a park that did
+// not happen; a write that never lands is logged as an error and counted.
 func (h *taskEventHandler) parkAfterLostClaim(
 	ctx context.Context,
 	key string,
 	task lib.Task,
 ) {
-	glog.Infof("event=parked_lost_claim key=%s task=%s", key, task.TaskIdentifier)
-	if err := h.resultPublisher.PublishParkLostClaim(ctx, task); err != nil {
-		glog.Warningf(
-			"event=parked_lost_claim_publish_failed key=%s task=%s error=%v",
-			key, task.TaskIdentifier, err,
-		)
+	var err error
+	for attempt := 1; attempt <= parkWriteAttempts; attempt++ {
+		if err = h.resultPublisher.PublishParkLostClaim(ctx, task); err == nil {
+			glog.Infof("event=parked_lost_claim key=%s task=%s", key, task.TaskIdentifier)
+			metrics.ParkedLostClaimTotal.WithLabelValues("parked").Inc()
+			return
+		}
+		if attempt < parkWriteAttempts {
+			select {
+			case <-ctx.Done():
+			case <-time.After(parkWriteRetryDelay):
+			}
+		}
 	}
+	glog.Errorf(
+		"event=parked_lost_claim_failed key=%s task=%s attempts=%d error=%v",
+		key, task.TaskIdentifier, parkWriteAttempts, err,
+	)
+	metrics.ParkedLostClaimTotal.WithLabelValues("failed").Inc()
 }
 
 // logClaimAcquired records one successful spawn claim, whether it was taken by
