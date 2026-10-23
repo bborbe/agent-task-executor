@@ -21,7 +21,7 @@ Under pull-based claims (claim library spec `specs/claim-lease-client-library.md
 
 ## Goal
 
-A Config can declare `spec.rerunOnLostClaim: false`, the value survives the executor's own CRD install and a Config round-trip, and a pure decision function returns "park at `human_review`" for it and "re-dispatch" for `true` or an unset field. Existing Configs, which do not set the field, keep the default `true`. The executor's runtime behaviour is unchanged.
+A Config can declare `spec.rerunOnLostClaim: false`, the value survives the executor's own CRD install and a Config round-trip, and a pure decision function returns "park at `human_review`" for it and for an unset field, and "re-dispatch" for an explicit `true`. Existing Configs, which do not set the field, therefore park: unset is the safe default. The executor's runtime behaviour is unchanged by *this* spec; the wiring change that consumes the decision is what acts on it.
 
 ## Non-goals
 
@@ -35,14 +35,14 @@ A Config can declare `spec.rerunOnLostClaim: false`, the value survives the exec
 ## Assumptions
 
 - The executor writes the Config CRD schema itself at startup; a field missing from that schema is pruned from every Config by the API server (the `configSpecSchema` comment and the existing schema guard tests in the repo).
-- The field must distinguish "unset" from `false`, so it is an optional pointer-typed boolean whose unset value reads as `true`.
+- The field must distinguish "unset" from `true`, so it is an optional pointer-typed boolean whose unset value reads as `false`.
 - `human_review` is an existing task phase value (`docs/agent-crd-specification.md`, `spec.trigger.phases`).
 
 ## Acceptance Criteria
 
 All container-executable. Each AC names how a broken implementation is caught ("Discriminates").
 
-- [ ] AC1 — **decision, both sides (SC8 of the vault task Executors Claim Agent Tasks With Leased Git Refs).** Table test of the decision function in the Config type's package. Evidence: field unset → `RedispatchAfterLostClaim`; `true` → `RedispatchAfterLostClaim`; `false` → `ParkAfterLostClaim` (park at phase `human_review`). Discriminates: a function ignoring the field returns the same outcome for all three rows and fails the `false` row (or both `true`/unset rows).
+- [ ] AC1 — **decision, both sides (SC8 of the vault task Executors Claim Agent Tasks With Leased Git Refs).** Table test of the decision function in the Config type's package. Evidence: field unset → `ParkAfterLostClaim`; `false` → `ParkAfterLostClaim`; `true` → `RedispatchAfterLostClaim`. Discriminates: a function ignoring the field returns the same outcome for all three rows and fails the `true` row (or both `false`/unset rows).
 - [ ] AC2 — **JSON round-trip and accessor.** Evidence: decoding Config spec JSON `{}` → the rerun accessor returns `true` and the field is nil; `{"rerunOnLostClaim":false}` → `false`; `{"rerunOnLostClaim":true}` → `true`; encoding a spec with the field nil produces JSON with no `rerunOnLostClaim` key (`omitempty`). Discriminates: a plain non-pointer boolean decodes `{}` as `false` and fails the first row.
 - [ ] AC3 — **schema-pruning guard.** A test over the CRD the executor installs, in the style of the existing `maxConcurrentJobs` guard, finds property `rerunOnLostClaim` of type `boolean` in the Config spec properties. Evidence: the test passes under `make test`; `grep -n 'rerunOnLostClaim' pkg/k8s_connector.go` returns ≥1 line. Discriminates: a field added to the type but not to the schema fails this test — the v0.5.0 failure.
 - [ ] AC4 — **equality.** Evidence: `Equal` returns false for two specs that differ only in `rerunOnLostClaim` (rows: nil vs `false`, `true` vs `false`) and true for nil vs nil and `false` vs `false`. Discriminates: an `Equal` that skips the field returns true for nil vs `false`, so a Config edit would not be noticed.
@@ -67,14 +67,14 @@ grep -c '^## Unreleased' CHANGELOG.md                                           
 awk '/^## /{sec=$0} /^- feat:/ && /rerunOnLostClaim/{print sec; exit}' CHANGELOG.md       # ## Unreleased
 ```
 
-No operator-executable rung: the field has no runtime effect until the wiring spec lands.
+The operator-executable rung is the wiring change that consumes the decision (`pkg/handler/claim_wiring.go` § `acquireSpawnClaim`): it parks or re-dispatches after a takeover. That rung is out of scope for this spec and is proven by the vault task "Park a Task at human_review When Its Claim Is Lost".
 
 ## Desired Behavior
 
-1. The Config spec type gains optional `rerunOnLostClaim` (pointer-typed boolean, JSON `omitempty`) with a doc comment stating: after another executor takes over this agent's expired claim, `true`/unset re-dispatches the task and `false` parks it at phase `human_review`. An accessor returns `true` when the field is unset.
+1. The Config spec type gains optional `rerunOnLostClaim` (pointer-typed boolean, JSON `omitempty`) with a doc comment stating: after another executor takes over this agent's expired claim, `false`/unset parks the task at phase `human_review` and `true` re-dispatches it. An accessor returns `false` when the field is unset.
 2. The CRD schema the executor installs declares `rerunOnLostClaim` as `boolean` in the Config spec properties, so the API server keeps the value.
 3. `Equal` compares the field by value (nil and `false` differ), and the generated deep-copy copies the pointed-to value.
-4. A pure decision function, in the same package as the Config type, maps the field to a named two-value type `LostClaimAction` with values `RedispatchAfterLostClaim` and `ParkAfterLostClaim` (park at phase `human_review`), with unset treated as `true`.
+4. A pure decision function, in the same package as the Config type, maps the field to a named two-value type `LostClaimAction` with values `RedispatchAfterLostClaim` and `ParkAfterLostClaim` (park at phase `human_review`), with unset treated as `false`.
 5. `docs/agent-crd-specification.md` lists `spec.rerunOnLostClaim` in the Fields table (default `true`, `false` parks at `human_review`, independent of `max_triggers` and `spec.retries`); `CHANGELOG.md` gains a `## Unreleased` `feat:` bullet naming `rerunOnLostClaim`.
 
 ## Constraints
@@ -88,10 +88,10 @@ No operator-executable rung: the field has no runtime effect until the wiring sp
 
 | Trigger | Expected behavior | Recovery (observable) |
 |---|---|---|
-| Field added to the type but not the installed schema | API server prunes it; every Config reads as unset (`true`) | Prevented by AC3; would show as `kubectl get config <name> -o jsonpath='{.spec.rerunOnLostClaim}'` empty after an executor restart |
+| Field added to the type but not the installed schema | API server prunes it; every Config reads as unset (`false`) | Prevented by AC3; would show as `kubectl get config <name> -o jsonpath='{.spec.rerunOnLostClaim}'` empty after an executor restart |
 | Operator sets a non-boolean value | Rejected by the API server's schema validation at apply time | `kubectl apply` error naming the field |
 | Helm chart CRD in `bborbe/agent` lacks the field | The executor's own install overwrites the stored schema on start, so the field survives; a chart-only install would prune it | Follow-up "sync rerunOnLostClaim into bborbe/agent helm/crds/config-crd.yaml"; done when `grep -n rerunOnLostClaim helm/crds/config-crd.yaml` in `bborbe/agent` returns ≥ 1 line |
-| Decision called with a nil field | Treated as `true` → re-dispatch | AC1 unset row |
+| Decision called with a nil field | Treated as `false` → park | AC1 unset row |
 
 ## Suggested Decomposition
 

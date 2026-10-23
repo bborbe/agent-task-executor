@@ -11,7 +11,10 @@ import (
 	"context"
 	"strings"
 	"testing"
+	stdtime "time"
 
+	lib "github.com/bborbe/agent"
+	base "github.com/bborbe/cqrs/base"
 	libtime "github.com/bborbe/time"
 
 	pkg "github.com/bborbe/agent-task-executor/pkg"
@@ -250,5 +253,181 @@ func TestRedriveStreakStoreSharesLeaseManagerClient(t *testing.T) {
 	}
 	if len(client.putCalls) != 1 {
 		t.Fatalf("expected one put call on the shared client, got %d", len(client.putCalls))
+	}
+}
+
+func testBoolPtr(b bool) *bool { return &b }
+
+// redispatchConfig is the explicit opt-in: a task taken over on this Config
+// runs again under the new owner.
+func redispatchConfig() *pkg.AgentConfiguration {
+	return &pkg.AgentConfiguration{RerunOnLostClaim: testBoolPtr(true)}
+}
+
+// parkConfig declares the agent must not run a second time.
+func parkConfig() *pkg.AgentConfiguration {
+	return &pkg.AgentConfiguration{RerunOnLostClaim: testBoolPtr(false)}
+}
+
+// unsetConfig leaves rerunOnLostClaim out, which parks: an unset field is the
+// safe default for a Config that predates the field.
+func unsetConfig() *pkg.AgentConfiguration {
+	return &pkg.AgentConfiguration{}
+}
+
+// parkRecordingPublisher satisfies pkg.ResultPublisher for the park branch. It
+// records the park writes and ignores every other method. It lives here rather
+// than in the mocks package because that package imports pkg/handler, so an
+// internal test of handler cannot import it.
+type parkRecordingPublisher struct {
+	parked []lib.TaskIdentifier
+}
+
+func (s *parkRecordingPublisher) PublishParkLostClaim(
+	_ context.Context,
+	task lib.Task,
+) error {
+	s.parked = append(s.parked, task.TaskIdentifier)
+	return nil
+}
+
+func (s *parkRecordingPublisher) PublishSpawnNotification(
+	context.Context, lib.Task, string,
+) error {
+	return nil
+}
+
+func (s *parkRecordingPublisher) PublishFailure(
+	context.Context, lib.Task, string, string,
+) error {
+	return nil
+}
+
+func (s *parkRecordingPublisher) PublishClearCurrentJob(
+	context.Context, lib.Task, string,
+) error {
+	return nil
+}
+
+func (s *parkRecordingPublisher) PublishIncrementTriggerCount(
+	context.Context, lib.Task,
+) error {
+	return nil
+}
+
+func (s *parkRecordingPublisher) PublishSetTriggerScope(
+	context.Context, lib.Task, string, int,
+) error {
+	return nil
+}
+
+func (s *parkRecordingPublisher) PublishTypeMismatchFailure(
+	context.Context, lib.Task, string,
+) error {
+	return nil
+}
+
+func (s *parkRecordingPublisher) PublishRestoreAssignee(
+	context.Context, lib.Task, string,
+) error {
+	return nil
+}
+
+func (s *parkRecordingPublisher) PublishQueueEntry(
+	context.Context, lib.Task, string,
+) error {
+	return nil
+}
+
+func (s *parkRecordingPublisher) PublishRaw(
+	context.Context, base.CommandOperation, interface{},
+) error {
+	return nil
+}
+
+// parkOnLostClaimHandler builds a handler whose claim client answers with an
+// expired lease, so the first Claim conflicts and Takeover succeeds.
+func parkOnLostClaimHandler() (*taskEventHandler, *parkRecordingPublisher) {
+	client := takeoverClient(takeoverClaimRef(
+		"expired-sha",
+		stdtime.Now().UTC().Add(-31*stdtime.Second),
+	))
+	h := newGateHandler(pkg.ClaimModeOn, client)
+	publisher := &parkRecordingPublisher{}
+	h.resultPublisher = publisher
+	return h, publisher
+}
+
+const parkedLogLine = "event=parked_lost_claim key=claims/task/tid-gate-1 task=tid-gate-1"
+
+// TestAcquireSpawnClaimParksOnLostClaimWhenRerunDisabled is SC1 for the
+// explicit false: a takeover parks the task at human_review and reports false,
+// which is the caller's "create no Job" signal.
+func TestAcquireSpawnClaimParksOnLostClaimWhenRerunDisabled(t *testing.T) {
+	ctx := context.Background()
+	h, publisher := parkOnLostClaimHandler()
+
+	var ok bool
+	out := captureGlogStderr(t, func() {
+		ok = h.acquireSpawnClaim(ctx, gateTask("", ""), parkConfig())
+	})
+
+	if ok {
+		t.Fatal("expected no Job for a non-re-runnable agent after a takeover")
+	}
+	if len(publisher.parked) != 1 {
+		t.Fatalf("park writes = %d, want 1", len(publisher.parked))
+	}
+	if !strings.Contains(out, parkedLogLine) {
+		t.Errorf("stderr = %q, want it to contain %q", out, parkedLogLine)
+	}
+	if strings.Contains(out, "event=claim_acquired") {
+		t.Errorf("stderr = %q, want no claim_acquired line for a parked task", out)
+	}
+}
+
+// TestAcquireSpawnClaimParksOnLostClaimWhenRerunUnset is SC1 for the unset
+// field: the flipped default parks, so a Config that predates the field does
+// not silently re-run work its author never opted into re-running.
+func TestAcquireSpawnClaimParksOnLostClaimWhenRerunUnset(t *testing.T) {
+	ctx := context.Background()
+	h, publisher := parkOnLostClaimHandler()
+
+	var ok bool
+	out := captureGlogStderr(t, func() {
+		ok = h.acquireSpawnClaim(ctx, gateTask("", ""), unsetConfig())
+	})
+
+	if ok {
+		t.Fatal("expected no Job for an unset rerunOnLostClaim after a takeover")
+	}
+	if len(publisher.parked) != 1 {
+		t.Fatalf("park writes = %d, want 1", len(publisher.parked))
+	}
+	if !strings.Contains(out, parkedLogLine) {
+		t.Errorf("stderr = %q, want it to contain %q", out, parkedLogLine)
+	}
+}
+
+// TestAcquireSpawnClaimRedispatchesOnLostClaimWhenRerunEnabled is SC2: the
+// explicit opt-in still runs the task under the new owner, so the parking
+// branch does not capture every Config.
+func TestAcquireSpawnClaimRedispatchesOnLostClaimWhenRerunEnabled(t *testing.T) {
+	ctx := context.Background()
+	h, publisher := parkOnLostClaimHandler()
+
+	var ok bool
+	out := captureGlogStderr(t, func() {
+		ok = h.acquireSpawnClaim(ctx, gateTask("", ""), redispatchConfig())
+	})
+
+	if !ok {
+		t.Fatal("expected the spawn to proceed for rerunOnLostClaim: true")
+	}
+	if len(publisher.parked) != 0 {
+		t.Fatalf("park writes = %d, want 0", len(publisher.parked))
+	}
+	if !strings.Contains(out, acquiredLogLine) {
+		t.Errorf("stderr = %q, want it to contain %q", out, acquiredLogLine)
 	}
 }

@@ -14,6 +14,7 @@ import (
 	libtime "github.com/bborbe/time"
 	"github.com/golang/glog"
 
+	agentv1 "github.com/bborbe/agent-task-executor/k8s/apis/agent.benjamin-borbe.de/v1"
 	pkg "github.com/bborbe/agent-task-executor/pkg"
 	"github.com/bborbe/agent-task-executor/pkg/claim"
 	"github.com/bborbe/agent-task-executor/pkg/metrics"
@@ -98,7 +99,11 @@ func (h *taskEventHandler) createLeaseManager(
 // the Job is created. It reports whether the spawn may proceed. Claim failures
 // are recorded by the claim package and never returned: the next dispatch pass
 // that would have spawned this task retries.
-func (h *taskEventHandler) acquireSpawnClaim(ctx context.Context, task lib.Task) bool {
+func (h *taskEventHandler) acquireSpawnClaim(
+	ctx context.Context,
+	task lib.Task,
+	config *pkg.AgentConfiguration,
+) bool {
 	if h.claimMode == pkg.ClaimModeOff {
 		return true
 	}
@@ -137,6 +142,12 @@ func (h *taskEventHandler) acquireSpawnClaim(ctx context.Context, task lib.Task)
 		// counted conflict / takeover_too_early / taken_over / error.
 		_, takeoverErr := manager.Takeover(ctx, key, string(task.TaskIdentifier))
 		if takeoverErr == nil {
+			// Another executor owned this task's claim and its lease had lapsed.
+			// The Config decides whether that work may run a second time here.
+			if config.LostClaimAction() == agentv1.ParkAfterLostClaim {
+				h.parkAfterLostClaim(ctx, key, task)
+				return false
+			}
 			logClaimAcquired(key, task.TaskIdentifier)
 			return true
 		}
@@ -206,6 +217,26 @@ func ownerRepoFromCloneURL(raw string) (string, string, bool) {
 		return "", "", false
 	}
 	return splitOwnerRepo(path)
+}
+
+// parkAfterLostClaim stops a task whose claim another executor took over, when
+// its Config says the agent must not run a second time. It publishes the
+// phase write and reports nothing: the caller returns false either way, so no
+// Job is created. A failed publish is logged loudly and leaves the task where
+// it was — the safe direction is always "do not run it again", never "run it
+// because the write failed".
+func (h *taskEventHandler) parkAfterLostClaim(
+	ctx context.Context,
+	key string,
+	task lib.Task,
+) {
+	glog.Infof("event=parked_lost_claim key=%s task=%s", key, task.TaskIdentifier)
+	if err := h.resultPublisher.PublishParkLostClaim(ctx, task); err != nil {
+		glog.Warningf(
+			"event=parked_lost_claim_publish_failed key=%s task=%s error=%v",
+			key, task.TaskIdentifier, err,
+		)
+	}
 }
 
 // logClaimAcquired records one successful spawn claim, whether it was taken by

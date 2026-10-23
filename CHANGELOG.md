@@ -2,6 +2,10 @@
 
 All notable changes to this project will be documented in this file.
 
+## Unreleased
+
+- feat: **a task whose claim is taken over is now parked at `human_review` instead of re-run when its Config says so.** `ConfigSpec.LostClaimAction()` had no production caller, so `rerunOnLostClaim: false` was inert and a lost claim re-ran the task on whichever cluster won the next claim. The takeover branch in `pkg/handler/claim_wiring.go` § `acquireSpawnClaim` now consults it: `ParkAfterLostClaim` publishes `phase: human_review` and creates no Job, logging `event=parked_lost_claim key=… task=…` so the park is attributable independently of the vault write's propagation. `RerunOnLostClaim` is carried through `AgentConfiguration` and `TaggedConfigurations` so the decision is reachable from the claim path. **The unset default flips to `false`**: a Config that leaves the field out now parks rather than re-dispatches, so the guard covers every agent that has not explicitly opted back in. `human_review` was already in the terminal-phase set, so a parked task is never re-spawned.
+
 ## v0.31.1
 
 - fix: **a stale success no longer releases a claim inside a newer run's success hold.** The Job watcher keeps re-reporting an older Job of the same task as succeeded. That completion is already past its own window, so `ReleaseAfterSuccess` used to delete the claim the newer run's hold protects, and the peer cluster ran the task again seconds later (seen live on v0.30.7 for update-go and releaser tasks). The call now keeps a claim whose hold is still in the future, logs `event=release_kept_success_grace`, and extends a hold but never shortens it.

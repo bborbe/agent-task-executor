@@ -10,7 +10,7 @@ type LostClaimAction string
 
 const (
 	// RedispatchAfterLostClaim runs the task again under the new owner. It is
-	// the outcome for true and for an unset rerunOnLostClaim.
+	// the outcome for an explicit rerunOnLostClaim: true.
 	RedispatchAfterLostClaim LostClaimAction = "redispatch"
 	// ParkAfterLostClaim stops the task and parks it at phase human_review
 	// for a person to decide, instead of running it a second time.
@@ -19,14 +19,15 @@ const (
 
 // RerunOnLostClaimEnabled reports whether a task should run again after
 // another executor takes over this agent's expired claim. An unset field
-// means true, so every Config that predates the field keeps re-dispatching.
+// means false: a Config that predates the field parks on a lost claim, which
+// is the safe default for agents whose re-run is not idempotent.
 func (s ConfigSpec) RerunOnLostClaimEnabled() bool {
-	return s.RerunOnLostClaim == nil || *s.RerunOnLostClaim
+	return s.RerunOnLostClaim != nil && *s.RerunOnLostClaim
 }
 
 // LostClaimAction maps rerunOnLostClaim to the action to take after a lost
-// claim: RedispatchAfterLostClaim for true or unset, ParkAfterLostClaim for
-// false. It is pure and is not called by any executor code yet.
+// claim: RedispatchAfterLostClaim for an explicit true, ParkAfterLostClaim for
+// false or unset.
 func (s ConfigSpec) LostClaimAction() LostClaimAction {
 	if s.RerunOnLostClaimEnabled() {
 		return RedispatchAfterLostClaim

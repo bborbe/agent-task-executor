@@ -251,6 +251,7 @@ func convert(ctx context.Context, obj agentv1.Config, branch string) (AgentConfi
 		PriorityClassName:       obj.Spec.PriorityClassName,
 		JobNamespace:            obj.Spec.JobNamespace,
 		Trigger:                 obj.Spec.Trigger,
+		RerunOnLostClaim:        obj.Spec.RerunOnLostClaim,
 		ZombieJobTimeoutSeconds: obj.Spec.ZombieJobTimeoutSeconds,
 	}, nil
 }

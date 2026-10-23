@@ -53,7 +53,7 @@ spec:
 | `spec.trigger` | no | Per-agent trigger conditions (optional nested object with `phases` and `statuses` lists). When absent or empty, defaults apply: phases `[planning, in_progress, ai_review]` and statuses `[in_progress]`. |
 | `spec.trigger.phases` | no | Task phases that allow spawning. Valid values: `todo`, `planning`, `in_progress`, `ai_review`, `human_review`, `done`. Empty or absent means default phases apply. |
 | `spec.trigger.statuses` | no | Task statuses that allow spawning. Valid values: `todo`, `in_progress`, `backlog`, `completed`, `hold`, `aborted`. Empty or absent means default statuses apply. |
-| `spec.rerunOnLostClaim` | no | Whether to run the task again after another executor takes over this agent's expired claim. Default `true`: re-dispatch the task. `false` parks it at phase `human_review` for a person to decide — use it for agents whose second run has external side effects or is expensive. Independent of `max_triggers` and `spec.retries`; unset means `true`. |
+| `spec.rerunOnLostClaim` | no | Whether to run the task again after another executor takes over this agent's expired claim. Default `false`: park the task at phase `human_review` for a person to decide. Set `true` to re-dispatch it instead — appropriate for agents whose second run is cheap and idempotent. Independent of `max_triggers` and `spec.retries`; unset means `false`. |
 
 If `spec.trigger` is omitted, or if `trigger.phases` / `trigger.statuses` are absent or empty, the executor applies its built-in defaults (phases: `planning`, `in_progress`, `ai_review`; statuses: `in_progress`). There is no way to configure a Config that triggers on nothing — an empty list is equivalent to the field being absent.
 

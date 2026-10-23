@@ -50,6 +50,18 @@ type FakeResultPublisher struct {
 	publishIncrementTriggerCountReturnsOnCall map[int]struct {
 		result1 error
 	}
+	PublishParkLostClaimStub        func(context.Context, lib.Task) error
+	publishParkLostClaimMutex       sync.RWMutex
+	publishParkLostClaimArgsForCall []struct {
+		arg1 context.Context
+		arg2 lib.Task
+	}
+	publishParkLostClaimReturns struct {
+		result1 error
+	}
+	publishParkLostClaimReturnsOnCall map[int]struct {
+		result1 error
+	}
 	PublishQueueEntryStub        func(context.Context, lib.Task, string) error
 	publishQueueEntryMutex       sync.RWMutex
 	publishQueueEntryArgsForCall []struct {
@@ -318,6 +330,68 @@ func (fake *FakeResultPublisher) PublishIncrementTriggerCountReturnsOnCall(i int
 		})
 	}
 	fake.publishIncrementTriggerCountReturnsOnCall[i] = struct {
+		result1 error
+	}{result1}
+}
+
+func (fake *FakeResultPublisher) PublishParkLostClaim(arg1 context.Context, arg2 lib.Task) error {
+	fake.publishParkLostClaimMutex.Lock()
+	ret, specificReturn := fake.publishParkLostClaimReturnsOnCall[len(fake.publishParkLostClaimArgsForCall)]
+	fake.publishParkLostClaimArgsForCall = append(fake.publishParkLostClaimArgsForCall, struct {
+		arg1 context.Context
+		arg2 lib.Task
+	}{arg1, arg2})
+	stub := fake.PublishParkLostClaimStub
+	fakeReturns := fake.publishParkLostClaimReturns
+	fake.recordInvocation("PublishParkLostClaim", []interface{}{arg1, arg2})
+	fake.publishParkLostClaimMutex.Unlock()
+	if stub != nil {
+		return stub(arg1, arg2)
+	}
+	if specificReturn {
+		return ret.result1
+	}
+	return fakeReturns.result1
+}
+
+func (fake *FakeResultPublisher) PublishParkLostClaimCallCount() int {
+	fake.publishParkLostClaimMutex.RLock()
+	defer fake.publishParkLostClaimMutex.RUnlock()
+	return len(fake.publishParkLostClaimArgsForCall)
+}
+
+func (fake *FakeResultPublisher) PublishParkLostClaimCalls(stub func(context.Context, lib.Task) error) {
+	fake.publishParkLostClaimMutex.Lock()
+	defer fake.publishParkLostClaimMutex.Unlock()
+	fake.PublishParkLostClaimStub = stub
+}
+
+func (fake *FakeResultPublisher) PublishParkLostClaimArgsForCall(i int) (context.Context, lib.Task) {
+	fake.publishParkLostClaimMutex.RLock()
+	defer fake.publishParkLostClaimMutex.RUnlock()
+	argsForCall := fake.publishParkLostClaimArgsForCall[i]
+	return argsForCall.arg1, argsForCall.arg2
+}
+
+func (fake *FakeResultPublisher) PublishParkLostClaimReturns(result1 error) {
+	fake.publishParkLostClaimMutex.Lock()
+	defer fake.publishParkLostClaimMutex.Unlock()
+	fake.PublishParkLostClaimStub = nil
+	fake.publishParkLostClaimReturns = struct {
+		result1 error
+	}{result1}
+}
+
+func (fake *FakeResultPublisher) PublishParkLostClaimReturnsOnCall(i int, result1 error) {
+	fake.publishParkLostClaimMutex.Lock()
+	defer fake.publishParkLostClaimMutex.Unlock()
+	fake.PublishParkLostClaimStub = nil
+	if fake.publishParkLostClaimReturnsOnCall == nil {
+		fake.publishParkLostClaimReturnsOnCall = make(map[int]struct {
+			result1 error
+		})
+	}
+	fake.publishParkLostClaimReturnsOnCall[i] = struct {
 		result1 error
 	}{result1}
 }
