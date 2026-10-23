@@ -1,8 +1,13 @@
 ---
-status: approved
+status: completed
 spec: [012-bug-pr-review-claims-serialize-per-repo]
+summary: Added claim acquisition/release logging via single helpers, replaced all removal counters with countClaimRemoval, documented claim-key shapes and added the changelog bullet.
+execution_id: agent-task-executor-claim-reaper-exec-024-spec-012-claim-observability-docs
+dark-factory-version: v0.198.7
 created: "2026-10-23T12:26:59Z"
 queued: "2026-10-23T12:36:11Z"
+started: "2026-10-23T12:53:10Z"
+completed: "2026-10-23T13:00:51Z"
 branch: dark-factory/bug-pr-review-claims-serialize-per-repo
 ---
 

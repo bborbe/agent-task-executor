@@ -7,6 +7,7 @@ package claim
 import (
 	"context"
 	stderrors "errors"
+	"fmt"
 	"sort"
 	"strings"
 	"sync"
@@ -149,6 +150,27 @@ type leaseManager struct {
 // countClaim increments executor_claim_total{result}.
 func countClaim(result string) {
 	metrics.ClaimTotal.WithLabelValues(result).Inc()
+}
+
+// countClaimRemoval increments executor_claim_total{result} and logs the one
+// release line for a claim this manager stops holding. Every path that counts
+// released, already_released, fenced or claim_lost calls it. The pending
+// Job-deletion retry does not: its fence was already counted and logged when
+// the deletion was first attempted.
+func countClaimRemoval(key string, taskID string, result string, sha string) {
+	metrics.ClaimTotal.WithLabelValues(result).Inc()
+	line := fmt.Sprintf(
+		"event=claim_released key=%s task=%s result=%s sha=%s",
+		key,
+		taskID,
+		result,
+		sha,
+	)
+	if result == "claim_lost" {
+		glog.Warning(line)
+		return
+	}
+	glog.Info(line)
 }
 
 // fenceAt is the instant a holder must have stopped its Job.
@@ -407,12 +429,12 @@ func (m *leaseManager) releaseLocked(ctx context.Context, key string, held *held
 	err = m.refClient.Delete(ctx, key, held.sha)
 	if err == nil {
 		delete(m.held, key)
-		countClaim("released")
+		countClaimRemoval(key, held.taskID, "released", held.sha)
 		return nil
 	}
 	if errors.Is(err, ErrLeaseConflict) {
 		delete(m.held, key)
-		countClaim("already_released")
+		countClaimRemoval(key, held.taskID, "already_released", held.sha)
 		return nil
 	}
 	held.releasePending = true
@@ -598,7 +620,7 @@ func (m *leaseManager) recoverFence(
 	if running || runErr != nil {
 		if err := m.jobControl.DeleteJob(ctx, ref.TaskID); err != nil {
 			countClaim("error")
-			countClaim("fenced")
+			countClaimRemoval(key, ref.TaskID, "fenced", ref.Sha)
 			m.held[key] = &heldClaim{
 				key:                 key,
 				taskID:              ref.TaskID,
@@ -612,7 +634,7 @@ func (m *leaseManager) recoverFence(
 		}
 	}
 	m.bestEffortDelete(ctx, key, ref.Sha)
-	countClaim("fenced")
+	countClaimRemoval(key, ref.TaskID, "fenced", ref.Sha)
 }
 
 // recoverAdopt holds, releases or re-checks the claim of a Job that may still
@@ -655,9 +677,9 @@ func (m *leaseManager) recoverAdopt(
 	err := m.refClient.Delete(ctx, key, ref.Sha)
 	switch {
 	case err == nil:
-		countClaim("released")
+		countClaimRemoval(key, ref.TaskID, "released", ref.Sha)
 	case errors.Is(err, ErrLeaseConflict):
-		countClaim("already_released")
+		countClaimRemoval(key, ref.TaskID, "already_released", ref.Sha)
 	default:
 		countClaim("error")
 	}

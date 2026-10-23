@@ -124,6 +124,7 @@ func (h *taskEventHandler) acquireSpawnClaim(ctx context.Context, task lib.Task)
 	}
 	_, claimErr := manager.Claim(ctx, key, string(task.TaskIdentifier))
 	if claimErr == nil {
+		logClaimAcquired(key, task.TaskIdentifier)
 		return true
 	}
 	if stderrors.Is(claimErr, claim.ErrLeaseConflict) {
@@ -133,6 +134,7 @@ func (h *taskEventHandler) acquireSpawnClaim(ctx context.Context, task lib.Task)
 		// counted conflict / takeover_too_early / taken_over / error.
 		_, takeoverErr := manager.Takeover(ctx, key, string(task.TaskIdentifier))
 		if takeoverErr == nil {
+			logClaimAcquired(key, task.TaskIdentifier)
 			return true
 		}
 		return h.claimFailureDecision(task, "takeover", takeoverErr)
@@ -201,6 +203,12 @@ func ownerRepoFromCloneURL(raw string) (string, string, bool) {
 		return "", "", false
 	}
 	return splitOwnerRepo(path)
+}
+
+// logClaimAcquired records one successful spawn claim, whether it was taken by
+// a fresh Claim or by a Takeover after a conflict.
+func logClaimAcquired(key string, taskID lib.TaskIdentifier) {
+	glog.Infof("event=claim_acquired key=%s task=%s", key, taskID)
 }
 
 // claimFailureDecision logs a claim failure and reports whether the spawn may

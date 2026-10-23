@@ -22,6 +22,36 @@ no knob, flag or opt-out for any of them.
 
 `fenceAt = lease_until − 60 s`. The fence fires when `now > fenceAt − 10 s`.
 
+## Claim keys
+
+Every claim lives at one of three key shapes. Owner and repo are lowercased in
+every key, and keys and task ids are never metric label values.
+
+| Key shape | Used by |
+|---|---|
+| `claims/task/<task id>` | task-id-keyed types |
+| `claims/repo/<owner>-<repo>` | `update-go`, `release`, `build-fix`, and the `pr-review` fallback |
+| `claims/pr/<owner>-<repo>-<n>` | `pr-review` with a usable PR link |
+
+A `pr-review` key is per pull request when the task body carries a standalone
+pull-request URL: the first body line that, after trimming surrounding
+whitespace, is exactly `https://github.com/<o>/<r>/pull/<n>`, where `<o>/<r>`
+matches the task repository case-insensitively, `<n>` is 1–10 digits with a
+value of at least 1, and nothing follows `<n>`.
+
+When no line qualifies, the key falls back to `claims/repo/<owner>-<repo>`. The
+fallback logs one `event=claim_key_fallback task=<id> repo=<owner>/<repo>`
+warning and increments the unlabelled `executor_claim_key_fallback_total`
+counter once.
+
+Two log lines make claims observable at runtime:
+
+- `event=claim_acquired key=<key> task=<id>` — one per successful `Claim` or
+  `Takeover`.
+- `event=claim_released key=<key> task=<id> result=<label> sha=<sha>` — one per
+  removal, with `result` one of `released`, `already_released`, `fenced` or
+  `claim_lost`. The `claim_lost` line is logged at warning level.
+
 ## Claim state machine
 
 A claim moves through these states:

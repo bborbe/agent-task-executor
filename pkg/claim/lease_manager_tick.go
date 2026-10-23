@@ -96,19 +96,19 @@ func (m *leaseManager) fenceClaim(ctx context.Context, key string, held *heldCla
 	if held.releasePending {
 		m.bestEffortDelete(ctx, key, held.sha)
 		delete(m.held, key)
-		countClaim("fenced")
+		countClaimRemoval(key, held.taskID, "fenced", held.sha)
 		return
 	}
 	if err := m.jobControl.DeleteJob(ctx, held.taskID); err != nil {
 		countClaim("error")
-		countClaim("fenced")
+		countClaimRemoval(key, held.taskID, "fenced", held.sha)
 		held.pendingJobDeletion = true
 		held.pendingDeletionPath = "fence"
 		return
 	}
 	m.bestEffortDelete(ctx, key, held.sha)
 	delete(m.held, key)
-	countClaim("fenced")
+	countClaimRemoval(key, held.taskID, "fenced", held.sha)
 }
 
 // retryPendingReleases retries the ref DELETE of claims whose release failed.
@@ -124,10 +124,10 @@ func (m *leaseManager) retryPendingReleases(ctx context.Context) {
 		switch {
 		case err == nil:
 			delete(m.held, key)
-			countClaim("released")
+			countClaimRemoval(key, held.taskID, "released", held.sha)
 		case errors.Is(err, ErrLeaseConflict):
 			delete(m.held, key)
-			countClaim("already_released")
+			countClaimRemoval(key, held.taskID, "already_released", held.sha)
 		default:
 			countClaim("error")
 		}
@@ -261,10 +261,10 @@ func (m *leaseManager) releaseAfterRunningCheck(
 	switch {
 	case err == nil:
 		delete(m.held, key)
-		countClaim("released")
+		countClaimRemoval(key, held.taskID, "released", held.sha)
 	case errors.Is(err, ErrLeaseConflict):
 		delete(m.held, key)
-		countClaim("already_released")
+		countClaimRemoval(key, held.taskID, "already_released", held.sha)
 	default:
 		countClaim("error")
 		held.releasePending = true
@@ -317,13 +317,7 @@ func (m *leaseManager) renewClaim(
 
 // claimLost deletes the Job and drops the claim without contacting git-rest.
 func (m *leaseManager) claimLost(ctx context.Context, key string, held *heldClaim) {
-	countClaim("claim_lost")
-	glog.Warningf(
-		"claim lost key=%s task_id=%s sha=%s",
-		key,
-		held.taskID,
-		held.sha,
-	)
+	countClaimRemoval(key, held.taskID, "claim_lost", held.sha)
 	if err := m.jobControl.DeleteJob(ctx, held.taskID); err != nil {
 		countClaim("error")
 		held.pendingJobDeletion = true
