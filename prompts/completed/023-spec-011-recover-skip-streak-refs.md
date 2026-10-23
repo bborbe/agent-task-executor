@@ -1,8 +1,13 @@
 ---
-status: approved
+status: completed
 spec: [011-bug-redrive-streak-lost-across-clusters-and-restarts]
+summary: Recover now skips every claims/redrive/ key by prefix before the cluster comparison, with a regression spec and a documented Streak refs section plus operator un-cap command
+execution_id: agent-task-executor-redrive-streak-exec-023-spec-011-recover-skip-streak-refs
+dark-factory-version: v0.198.7
 created: "2026-10-23T09:27:00Z"
 queued: "2026-10-23T09:42:55Z"
+started: "2026-10-23T09:48:34Z"
+completed: "2026-10-23T09:53:38Z"
 branch: dark-factory/bug-redrive-streak-lost-across-clusters-and-restarts
 ---
 
