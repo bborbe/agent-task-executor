@@ -604,12 +604,8 @@ func (h *taskEventHandler) parseAndFilter(
 	}
 
 	stage := task.Frontmatter.Stage()
-	if h.stageFilter && stage != string(h.branch) {
-		glog.V(3).Infof(
-			"skip task %s with stage %s (executor branch %s)",
-			task.TaskIdentifier, stage, h.branch,
-		)
-		return h.skipAndEvict(task, "skipped_stage")
+	if result, skip := h.stageSkipResult(task, stage); skip {
+		return h.skipAndEvict(task, result)
 	}
 
 	if task.Frontmatter.Assignee() == "" {
@@ -1700,6 +1696,10 @@ func (h *taskEventHandler) reconcileTask(
 		return task, nil, false, nil
 	}
 	if h.stageFilter && task.Frontmatter.Stage() != string(h.branch) {
+		if h.pinOutsidePool(task, task.Frontmatter.Stage()) {
+			h.logPinOutsidePool(task, task.Frontmatter.Stage())
+			metrics.TaskEventsTotal.WithLabelValues("pin_outside_pool").Inc()
+		}
 		return task, nil, false, nil
 	}
 	// A parked task (empty routing value) is eligible when its declared
@@ -1908,6 +1908,58 @@ func triggerBudgetWrite(
 func taskCluster(task lib.Task) string {
 	v, _ := task.Frontmatter["cluster"].(string)
 	return v
+}
+
+// pinOutsidePool reports whether the task is pinned to this executor while its
+// stage sits outside this executor's pool, so it can never run here.
+//
+// The pin must be non-empty: taskCluster returns "" both for a task with no
+// cluster frontmatter and for an executor built with CLUSTER="", so a bare
+// `taskCluster(task) == h.cluster` would report every untagged stage-mismatched
+// task on an unpinned executor as a dead pin. A task with no pin is a plain
+// stage skip.
+func (h *taskEventHandler) pinOutsidePool(task lib.Task, stage string) bool {
+	c := taskCluster(task)
+	return c != "" && c == h.cluster && stage != string(h.branch)
+}
+
+// stageSkipResult decides what a stage-filter mismatch means. A task whose
+// cluster pin names this executor while its stage sits outside this executor's
+// pool can never run here, so it is reported as a dead pin rather than folded
+// into the plain stage skip; a task with no cluster pin is an ordinary stage
+// skip and must not be reported. Returns skip=false when the task passes the
+// filter.
+func (h *taskEventHandler) stageSkipResult(
+	task lib.Task,
+	stage string,
+) (string, bool) {
+	if !h.stageFilter || stage == string(h.branch) {
+		return "", false
+	}
+	if h.pinOutsidePool(task, stage) {
+		h.logPinOutsidePool(task, stage)
+		return "pin_outside_pool", true
+	}
+	glog.V(3).Infof(
+		"skip task %s with stage %s (executor branch %s)",
+		task.TaskIdentifier, stage, h.branch,
+	)
+	return "skipped_stage", true
+}
+
+// logPinOutsidePool reports a task whose cluster pin names this executor while
+// its stage sits outside this executor's pool. Such a task can never run here,
+// and before this line it did so silently: the pin was neither foreign (so the
+// foreign-cluster skip did not fire) nor runnable, so nothing anywhere in the
+// fleet recorded it. Both the Kafka path and the reconcile floor call this.
+//
+// It is logged at V(2) because that is the level the deployed executors run at
+// (-v=2); the neighbouring plain stage skip is V(3) and would be invisible.
+func (h *taskEventHandler) logPinOutsidePool(task lib.Task, stage string) {
+	glog.V(2).Infof(
+		"event=pin_outside_pool task=%s cluster=%s stage=%s",
+		task.TaskIdentifier, h.cluster, stage,
+	)
 }
 
 // isForeignCluster reports whether the task names a cluster other than the one
