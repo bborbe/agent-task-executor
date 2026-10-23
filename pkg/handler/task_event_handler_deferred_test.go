@@ -1438,6 +1438,29 @@ var _ = Describe("TaskEventHandler", func() {
 				Expect(fakeResultPublisher.PublishQueueEntryCallCount()).To(Equal(1))
 			})
 
+			It(
+				"does not re-publish when a repeat event carries no queued_at and the view has none",
+				func() {
+					// The production loop: the vault write never lands (the task file
+					// was deleted, or every write fails), so neither the event payload
+					// nor the view ever carries queued_at and the same task is offered
+					// again one retry interval later. Without an executor-local record
+					// of what was already published this re-stamps on every deferral,
+					// once per concurrencyCapRetryDelay, indefinitely.
+					Expect(h.ConsumeMessage(ctx, buildMsg(payload))).To(Succeed())
+					Expect(fakeResultPublisher.PublishQueueEntryCallCount()).To(Equal(1))
+
+					currentDateTime.SetNow(libtimetest.ParseDateTime(afterRetryDelay))
+					Expect(h.ConsumeMessage(ctx, buildMsg(payload))).To(Succeed())
+					Expect(fakeResultPublisher.PublishQueueEntryCallCount()).To(Equal(1))
+
+					// A third offer is the same: the record is per task, not per pass.
+					currentDateTime.SetNow(libtimetest.ParseDateTime(afterRetryDelay))
+					Expect(h.ConsumeMessage(ctx, buildMsg(payload))).To(Succeed())
+					Expect(fakeResultPublisher.PublishQueueEntryCallCount()).To(Equal(1))
+				},
+			)
+
 			DescribeTable("queuedAtFromView miss branches still publish once",
 				func(setup func(), id lib.TaskIdentifier) {
 					setup()
@@ -1474,6 +1497,27 @@ var _ = Describe("TaskEventHandler", func() {
 				Expect(h.EvalDeferredRespawns(ctx)).To(Succeed())
 				Expect(fakeResultPublisher.PublishQueueEntryCallCount()).To(Equal(1))
 			})
+
+			It(
+				"does not re-stamp after a failed publish, because the record is written first",
+				func() {
+					// The spec above drives EvalDeferredRespawns, whose entry already
+					// carries queued_at from the returned copy, so it passes even if the
+					// record were written after the publish. This one drives a fresh
+					// event with no queued_at anywhere, which only the
+					// record-before-publish ordering can stop from re-stamping.
+					fakeResultPublisher.PublishQueueEntryReturns(
+						errors.Errorf(ctx, "publish failed"),
+					)
+					Expect(h.ConsumeMessage(ctx, buildMsg(payload))).To(Succeed())
+					Expect(fakeResultPublisher.PublishQueueEntryCallCount()).To(Equal(1))
+
+					fakeResultPublisher.PublishQueueEntryReturns(nil)
+					currentDateTime.SetNow(libtimetest.ParseDateTime(afterRetryDelay))
+					Expect(h.ConsumeMessage(ctx, buildMsg(payload))).To(Succeed())
+					Expect(fakeResultPublisher.PublishQueueEntryCallCount()).To(Equal(1))
+				},
+			)
 		})
 
 		Describe("grace window (spec 036)", func() {
