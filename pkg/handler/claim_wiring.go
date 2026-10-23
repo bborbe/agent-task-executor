@@ -260,11 +260,21 @@ func (h *taskEventHandler) parkAfterLostClaim(
 			metrics.ParkedLostClaimTotal.WithLabelValues("parked").Inc()
 			return
 		}
-		if attempt < parkWriteAttempts {
-			select {
-			case <-ctx.Done():
-			case <-time.After(parkWriteRetryDelay):
-			}
+		if attempt == parkWriteAttempts {
+			break
+		}
+		select {
+		case <-ctx.Done():
+			// Cancelled — shutdown, or the reconcile pass timeout. Stop rather
+			// than burn the remaining attempts against a dead context and then
+			// report a failure that is ours, not the broker's. Not counted as
+			// failed: the park did not fail, the pass did.
+			glog.Warningf(
+				"event=parked_lost_claim_cancelled key=%s task=%s error=%v",
+				key, task.TaskIdentifier, err,
+			)
+			return
+		case <-time.After(parkWriteRetryDelay):
 		}
 	}
 	glog.Errorf(

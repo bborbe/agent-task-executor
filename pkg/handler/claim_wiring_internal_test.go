@@ -516,3 +516,29 @@ func TestAcquireSpawnClaimReportsAFailedParkWrite(t *testing.T) {
 		t.Errorf("stderr = %q, want no success line when the write failed", out)
 	}
 }
+
+// TestAcquireSpawnClaimStopsTheParkWriteOnCancellation pins the shutdown path: a
+// cancelled pass must stop after the first failed send rather than burn the
+// remaining attempts against a dead context and then report a failure that is
+// ours, not the broker's.
+func TestAcquireSpawnClaimStopsTheParkWriteOnCancellation(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	h, publisher := parkOnLostClaimHandler()
+	publisher.failFirst = parkWriteAttempts
+
+	var ok bool
+	out := captureGlogStderr(t, func() {
+		ok = h.acquireSpawnClaim(ctx, gateTask("", ""), parkConfig())
+	})
+
+	if ok {
+		t.Fatal("expected no Job after a cancelled park attempt")
+	}
+	if strings.Contains(out, "event=parked_lost_claim_failed") {
+		t.Errorf("stderr = %q, want no failed line for a cancelled pass", out)
+	}
+	if !strings.Contains(out, "event=parked_lost_claim_cancelled") {
+		t.Errorf("stderr = %q, want the cancelled line", out)
+	}
+}
