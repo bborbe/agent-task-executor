@@ -10,6 +10,7 @@ import (
 	"time"
 
 	lib "github.com/bborbe/agent"
+	libk8s "github.com/bborbe/k8s"
 )
 
 // jobCacheKey is the context key carrying a reconcile pass's active-Job cache.
@@ -88,27 +89,29 @@ func (h *taskEventHandler) bumpSpawnGen(assignee string) {
 // how long it stays so. Callers treat the returned map as read-only.
 func (h *taskEventHandler) activeJobsFor(
 	ctx context.Context,
+	namespace libk8s.Namespace,
 	assignee string,
 ) (map[lib.TaskIdentifier]bool, error) {
 	cache := jobCacheFrom(ctx)
+	cacheKey := namespace.String() + "/" + assignee
 	gen := h.spawnGenFor(assignee)
 	now := time.Time(h.currentDateTime.Now())
 	if cache != nil {
 		cache.mu.Lock()
-		cached, ok := cache.active[assignee]
+		cached, ok := cache.active[cacheKey]
 		cache.mu.Unlock()
 		if ok && cached.gen == gen && now.Sub(cached.readAt) < jobCacheTTL {
 			return cached.active, nil
 		}
 	}
 
-	active, err := h.jobSpawner.ListActiveJobs(ctx, assignee)
+	active, err := h.jobSpawner.ListActiveJobs(ctx, namespace, assignee)
 	if err != nil {
 		return nil, err
 	}
 	if cache != nil {
 		cache.mu.Lock()
-		cache.active[assignee] = cachedActiveJobs{active: active, gen: gen, readAt: now}
+		cache.active[cacheKey] = cachedActiveJobs{active: active, gen: gen, readAt: now}
 		cache.mu.Unlock()
 	}
 	return active, nil

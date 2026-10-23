@@ -9,6 +9,7 @@ import (
 
 	lib "github.com/bborbe/agent"
 	"github.com/bborbe/errors"
+	libk8s "github.com/bborbe/k8s"
 	"github.com/golang/glog"
 
 	pkg "github.com/bborbe/agent-task-executor/pkg"
@@ -25,7 +26,12 @@ func (h *taskEventHandler) checkActiveCurrentJob(
 	config *pkg.AgentConfiguration,
 	claim *deferredClaim,
 ) (bool, error) {
-	active, err := h.jobSpawner.IsJobActive(ctx, task.TaskIdentifier)
+	namespace, err := h.jobNamespaceForTask(ctx, config, task.TaskIdentifier)
+	if err != nil {
+		metrics.TaskEventsTotal.WithLabelValues("error").Inc()
+		return false, err
+	}
+	active, err := h.jobSpawner.IsJobActive(ctx, namespace, task.TaskIdentifier)
 	if err != nil {
 		metrics.TaskEventsTotal.WithLabelValues("error").Inc()
 		return false, errors.Wrapf(
@@ -74,7 +80,7 @@ func (h *taskEventHandler) checkActiveCurrentJob(
 	// name a Job another cluster created, and this informer only sees its own
 	// cluster's Jobs. Without this guard the frontmatter's Job reads as finished
 	// and authorises a second cluster to run a task that is still running.
-	provablyFinished, err := h.jobProvablyFinished(ctx, task, currentJob)
+	provablyFinished, err := h.jobProvablyFinished(ctx, task, currentJob, namespace)
 	if err != nil {
 		return false, errors.Wrapf(ctx, err, "check whether current_job is finished")
 	}
@@ -134,12 +140,13 @@ func (h *taskEventHandler) jobProvablyFinished(
 	ctx context.Context,
 	task lib.Task,
 	currentJob string,
+	namespace libk8s.Namespace,
 ) (bool, error) {
 	stored := h.storedCurrentJob(task)
 	if stored == "" || stored == currentJob {
 		return true, nil
 	}
-	exists, err := h.jobSpawner.JobExists(ctx, stored)
+	exists, err := h.jobSpawner.JobExists(ctx, namespace, stored)
 	if err != nil {
 		// A failed read is not evidence of absence: keep suppressing, and let the
 		// next pass retry rather than risk spawning alongside a live foreign Job.

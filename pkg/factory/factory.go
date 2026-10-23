@@ -80,8 +80,11 @@ func CreateJobWatcher(
 // one of them returns — so a one-shot step that returns once its work is done
 // takes the lease loop, the HTTP server and the cron down with it. v0.30.2
 // shipped exactly that and crash-looped all three clusters with a clean exit 0.
-func CreateClaimLifecycleRunFuncs(manager claim.LeaseManager) []run.Func {
-	return []run.Func{CreateClaimRecoverFunc(manager), manager.Run}
+func CreateClaimLifecycleRunFuncs(
+	manager claim.LeaseManager,
+	viewReady func() bool,
+) []run.Func {
+	return []run.Func{CreateClaimRecoverFunc(manager, viewReady), manager.Run}
 }
 
 // CreateClaimRecoverFunc returns the startup step that re-adopts the claims this
@@ -93,9 +96,12 @@ func CreateClaimLifecycleRunFuncs(manager claim.LeaseManager) []run.Func {
 //
 // The retry policy, the never-fail-the-boot rule and the wait that keeps the run
 // group alive all live in claim.RunClaimRecovery; this factory only wires it.
-func CreateClaimRecoverFunc(manager claim.LeaseManager) run.Func {
+func CreateClaimRecoverFunc(
+	manager claim.LeaseManager,
+	viewReady func() bool,
+) run.Func {
 	return func(ctx context.Context) error {
-		return claim.RunClaimRecovery(ctx, manager)
+		return claim.RunClaimRecovery(ctx, manager, viewReady)
 	}
 }
 
@@ -208,6 +214,7 @@ func CreateConsumer(
 	)
 	taskEventHandler := handler.NewTaskEventHandler(
 		jobSpawner,
+		namespace,
 		branch,
 		cluster,
 		stageFilter,
@@ -222,7 +229,7 @@ func CreateConsumer(
 		reconcileInterval,
 		claimMode,
 		claimRefClientFactory,
-		handler.NewKubeJobControl(kubeClient, namespace),
+		handler.NewKubeJobControl(kubeClient, namespace, resolver, view),
 	)
 	topic := lib.TaskV1SchemaID.EventTopic(topicPrefix)
 	offsetManager := libkafka.NewSaramaOffsetManager(

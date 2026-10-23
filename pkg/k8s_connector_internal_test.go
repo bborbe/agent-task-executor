@@ -36,3 +36,11 @@ var _ = Describe("crdSpecEqual", func() {
 		Expect(crdSpecEqual(*changed, desired)).To(BeFalse())
 	})
 })
+
+var _ = Describe("configSpecProperties", func() {
+	It("declares jobNamespace so the API server cannot prune it", func() {
+		props := configSpecProperties()
+		Expect(props).To(HaveKey("jobNamespace"))
+		Expect(props["jobNamespace"].Type).To(Equal("string"))
+	})
+})

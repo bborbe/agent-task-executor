@@ -140,6 +140,13 @@ type ConfigSpec struct {
 	ConfigMapItems []ConfigMapItem `json:"configMapItems,omitempty"`
 	// PriorityClassName is stamped on Job PodTemplates and on a service StatefulSet pod template.
 	PriorityClassName string `json:"priorityClassName,omitempty"`
+	// JobNamespace is the namespace the executor creates this Config's Jobs in.
+	// Empty (the default) means the executor's own namespace, so every Config that
+	// does not set it behaves exactly as before. A value equal to the executor's
+	// own namespace is rejected at spawn time: a Config may never opt out of
+	// isolation by naming the executor namespace. The namespace must already exist
+	// and already hold this Config's PVCs and Secrets before the field is set.
+	JobNamespace string `json:"jobNamespace,omitempty"`
 	// MaxConcurrentJobs caps how many Jobs this agent may run at once. Spawns
 	// beyond the cap are deferred and retried, never dropped. 0 (the default)
 	// means unlimited, preserving existing behaviour for every agent that does
@@ -269,6 +276,7 @@ func (s ConfigSpec) Equal(o ConfigSpec) bool {
 		s.ConfigMapMountPath == o.ConfigMapMountPath &&
 		reflect.DeepEqual(s.ConfigMapItems, o.ConfigMapItems) &&
 		s.PriorityClassName == o.PriorityClassName &&
+		s.JobNamespace == o.JobNamespace &&
 		s.MaxConcurrentJobs == o.MaxConcurrentJobs &&
 		reflect.DeepEqual(s.RerunOnLostClaim, o.RerunOnLostClaim) &&
 		reflect.DeepEqual(s.Env, o.Env) &&

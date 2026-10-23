@@ -14,6 +14,7 @@ import (
 	lib "github.com/bborbe/agent"
 	"github.com/bborbe/cqrs/base"
 	"github.com/bborbe/errors"
+	libk8s "github.com/bborbe/k8s"
 	libtime "github.com/bborbe/time"
 	libtimetest "github.com/bborbe/time/test"
 	"github.com/bborbe/vault-cli/pkg/domain"
@@ -73,6 +74,7 @@ var _ = Describe("TaskEventHandler", func() {
 		currentDateTime = libtime.NewCurrentDateTime()
 		h = handler.NewTaskEventHandler(
 			fakeSpawner,
+			"dev",
 			base.Branch("prod"),
 			"",
 			true,
@@ -442,7 +444,7 @@ var _ = Describe("TaskEventHandler", func() {
 				)
 				running := 1 // at cap, so both events defer instead of spawning
 				fakeSpawner.ListActiveJobsStub = func(
-					context.Context, string,
+					context.Context, libk8s.Namespace, string,
 				) (map[lib.TaskIdentifier]bool, error) {
 					return activeJobs(running), nil
 				}
@@ -487,6 +489,7 @@ var _ = Describe("TaskEventHandler", func() {
 			newRoutingHandler := func(cluster string, runUntagged bool) handler.TaskEventHandler {
 				return handler.NewTaskEventHandler(
 					fakeSpawner,
+					"dev",
 					base.Branch("prod"),
 					cluster,
 					true,
@@ -517,7 +520,7 @@ var _ = Describe("TaskEventHandler", func() {
 				)
 				running := 1
 				fakeSpawner.ListActiveJobsStub = func(
-					context.Context, string,
+					context.Context, libk8s.Namespace, string,
 				) (map[lib.TaskIdentifier]bool, error) {
 					return activeJobs(running), nil
 				}
@@ -764,7 +767,7 @@ var _ = Describe("TaskEventHandler", func() {
 			// claude. The returned setter frees or fills the slot.
 			installCapSpawner := func(running *int) {
 				fakeSpawner.ListActiveJobsStub = func(
-					context.Context, string,
+					context.Context, libk8s.Namespace, string,
 				) (map[lib.TaskIdentifier]bool, error) {
 					return activeJobs(*running), nil
 				}
@@ -794,7 +797,7 @@ var _ = Describe("TaskEventHandler", func() {
 				// replay reaches isJobActive -> ListActiveJobs.
 				listStub := fakeSpawner.ListActiveJobsStub
 				fakeSpawner.ListActiveJobsStub = func(
-					ctx context.Context, assignee string,
+					ctx context.Context, namespace libk8s.Namespace, assignee string,
 				) (map[lib.TaskIdentifier]bool, error) {
 					if armed && !evicted {
 						evicted = true
@@ -805,7 +808,7 @@ var _ = Describe("TaskEventHandler", func() {
 							),
 						).To(Succeed())
 					}
-					return listStub(ctx, assignee)
+					return listStub(ctx, namespace, assignee)
 				}
 
 				currentDateTime.SetNow(libtimetest.ParseDateTime("2026-10-21T08:00:00Z"))
@@ -850,7 +853,7 @@ var _ = Describe("TaskEventHandler", func() {
 					installCapSpawner(&running)
 					listStub := fakeSpawner.ListActiveJobsStub
 					fakeSpawner.ListActiveJobsStub = func(
-						ctx context.Context, assignee string,
+						ctx context.Context, namespace libk8s.Namespace, assignee string,
 					) (map[lib.TaskIdentifier]bool, error) {
 						if armed && !evicted {
 							evicted = true
@@ -861,7 +864,7 @@ var _ = Describe("TaskEventHandler", func() {
 								),
 							).To(Succeed())
 						}
-						return listStub(ctx, assignee)
+						return listStub(ctx, namespace, assignee)
 					}
 
 					currentDateTime.SetNow(libtimetest.ParseDateTime("2026-10-21T08:00:00Z"))
@@ -907,7 +910,7 @@ var _ = Describe("TaskEventHandler", func() {
 				installCapSpawner(&running)
 				listStub := fakeSpawner.ListActiveJobsStub
 				fakeSpawner.ListActiveJobsStub = func(
-					ctx context.Context, assignee string,
+					ctx context.Context, namespace libk8s.Namespace, assignee string,
 				) (map[lib.TaskIdentifier]bool, error) {
 					if armed && !evictedOther {
 						evictedOther = true
@@ -918,7 +921,7 @@ var _ = Describe("TaskEventHandler", func() {
 							),
 						).To(Succeed())
 					}
-					return listStub(ctx, assignee)
+					return listStub(ctx, namespace, assignee)
 				}
 
 				currentDateTime.SetNow(libtimetest.ParseDateTime("2026-10-21T08:00:00Z"))
@@ -1071,7 +1074,7 @@ var _ = Describe("TaskEventHandler", func() {
 				running := 0
 				evicted := false
 				fakeSpawner.ListActiveJobsStub = func(
-					ctx context.Context, _ string,
+					ctx context.Context, _ libk8s.Namespace, _ string,
 				) (map[lib.TaskIdentifier]bool, error) {
 					if !evicted {
 						evicted = true
@@ -1109,7 +1112,7 @@ var _ = Describe("TaskEventHandler", func() {
 				running := 1
 				evicted := false
 				fakeSpawner.ListActiveJobsStub = func(
-					ctx context.Context, _ string,
+					ctx context.Context, _ libk8s.Namespace, _ string,
 				) (map[lib.TaskIdentifier]bool, error) {
 					if !evicted {
 						evicted = true
@@ -1156,7 +1159,7 @@ var _ = Describe("TaskEventHandler", func() {
 				)
 				running := 1
 				fakeSpawner.ListActiveJobsStub = func(
-					context.Context, string,
+					context.Context, libk8s.Namespace, string,
 				) (map[lib.TaskIdentifier]bool, error) {
 					return activeJobs(running), nil
 				}
@@ -1267,6 +1270,7 @@ var _ = Describe("TaskEventHandler", func() {
 
 					freshHandler := handler.NewTaskEventHandler(
 						fakeSpawner,
+						"dev",
 						base.Branch("prod"),
 						"",
 						true,
@@ -1322,6 +1326,7 @@ var _ = Describe("TaskEventHandler", func() {
 
 					freshHandler := handler.NewTaskEventHandler(
 						fakeSpawner,
+						"dev",
 						base.Branch("prod"),
 						"",
 						true,

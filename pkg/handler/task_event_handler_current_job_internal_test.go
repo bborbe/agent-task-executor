@@ -13,6 +13,7 @@ import (
 	"time"
 
 	lib "github.com/bborbe/agent"
+	libk8s "github.com/bborbe/k8s"
 	libtime "github.com/bborbe/time"
 	"github.com/prometheus/client_golang/prometheus/testutil"
 
@@ -31,24 +32,24 @@ func (inactiveSpawner) SpawnJob(
 }
 
 func (inactiveSpawner) IsJobActive(
-	context.Context, lib.TaskIdentifier,
+	context.Context, libk8s.Namespace, lib.TaskIdentifier,
 ) (bool, error) {
 	return false, nil
 }
 
-func (inactiveSpawner) CountActiveJobs(context.Context, string) (int, error) {
+func (inactiveSpawner) CountActiveJobs(context.Context, libk8s.Namespace, string) (int, error) {
 	return 0, nil
 }
 
 func (inactiveSpawner) ListActiveJobs(
-	context.Context, string,
+	context.Context, libk8s.Namespace, string,
 ) (map[lib.TaskIdentifier]bool, error) {
 	return map[lib.TaskIdentifier]bool{}, nil
 }
 
 // JobExists reports the stored Job as still present — the foreign case: the Job
 // runs somewhere this cluster cannot see, so the guard must keep suppressing.
-func (inactiveSpawner) JobExists(context.Context, string) (bool, error) {
+func (inactiveSpawner) JobExists(context.Context, libk8s.Namespace, string) (bool, error) {
 	return true, nil
 }
 
@@ -95,7 +96,10 @@ func TestJobProvablyFinishedRejectsAnotherClustersJob(t *testing.T) {
 	})
 
 	finished, err := h.jobProvablyFinished(
-		context.Background(), task, "pr-reviewer-agent-94c1801c-20261022205503",
+		context.Background(),
+		task,
+		"pr-reviewer-agent-94c1801c-20261022205503",
+		libk8s.Namespace("dev"),
 	)
 	if err != nil {
 		t.Fatalf("jobProvablyFinished returned %v; want nil", err)
@@ -113,7 +117,12 @@ func TestJobProvablyFinishedAcceptsItsOwnJob(t *testing.T) {
 	task := currentJobTask(jobName, 7*time.Minute)
 	h.taskStore.Store(task.TaskIdentifier, task)
 
-	finished, err := h.jobProvablyFinished(context.Background(), task, jobName)
+	finished, err := h.jobProvablyFinished(
+		context.Background(),
+		task,
+		jobName,
+		libk8s.Namespace("dev"),
+	)
 	if err != nil {
 		t.Fatalf("jobProvablyFinished returned %v; want nil", err)
 	}
@@ -133,7 +142,10 @@ func TestJobProvablyFinishedWithoutStoreEntryKeepsPriorBehaviour(t *testing.T) {
 	task := currentJobTask("pr-reviewer-agent-94c1801c-20261022205503", 7*time.Minute)
 
 	finished, err := h.jobProvablyFinished(
-		context.Background(), task, "pr-reviewer-agent-94c1801c-20261022205503",
+		context.Background(),
+		task,
+		"pr-reviewer-agent-94c1801c-20261022205503",
+		libk8s.Namespace("dev"),
 	)
 	if err != nil {
 		t.Fatalf("jobProvablyFinished returned %v; want nil", err)
@@ -148,7 +160,7 @@ func TestJobProvablyFinishedWithoutStoreEntryKeepsPriorBehaviour(t *testing.T) {
 // update, which is the leak the store can never clear by itself.
 type goneSpawner struct{ inactiveSpawner }
 
-func (goneSpawner) JobExists(context.Context, string) (bool, error) {
+func (goneSpawner) JobExists(context.Context, libk8s.Namespace, string) (bool, error) {
 	return false, nil
 }
 
@@ -171,7 +183,10 @@ func TestJobProvablyFinishedClearsALeakedStoreEntry(t *testing.T) {
 	})
 
 	finished, err := h.jobProvablyFinished(
-		context.Background(), task, "pr-reviewer-agent-94c1801c-20261022205503",
+		context.Background(),
+		task,
+		"pr-reviewer-agent-94c1801c-20261022205503",
+		libk8s.Namespace("dev"),
 	)
 	if err != nil {
 		t.Fatalf("jobProvablyFinished returned %v; want nil", err)
