@@ -1,8 +1,13 @@
 ---
-status: approved
+status: completed
 spec: [014-job-watcher-sandbox-namespaces]
+summary: Made JobWatcher.PodLister namespace-scoped, wired terminalPodDetail and the zombie sweeper to each Job/task's namespace with executor fallback, and added per-namespace tests.
+execution_id: agent-task-executor-job-watcher-sandbox-exec-031-spec-014-namespace-pod-lister
+dark-factory-version: v0.198.7
 created: "2026-10-23T18:45:00Z"
 queued: "2026-10-23T17:26:27Z"
+started: "2026-10-23T18:12:46Z"
+completed: "2026-10-23T18:22:18Z"
 branch: dark-factory/job-watcher-sandbox-namespaces
 ---
 

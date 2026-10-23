@@ -2,6 +2,10 @@
 
 All notable changes to this project will be documented in this file.
 
+## Unreleased
+
+- fix: **a sandbox Job is now classified from its own namespace's Pod cache.** `JobWatcher.PodLister` takes the namespace whose lister is wanted and returns nil for a namespace that is not watched or has not synced, so `terminalPodDetail` reads the Job's namespace instead of the executor's. The zombie sweeper resolves each task's namespace from the Configs it already lists — first Config whose assignee matches, falling back to the executor namespace when none matches or the Config's `jobNamespace` is unresolvable — and skips only that task while its namespace's cache is still syncing, rather than reading the executor's cache or stopping the whole tick.
+
 ## v0.32.0
 
 - feat: **the Job watcher now observes every namespace a Config places Jobs in.** It receives the Config provider and derives its watched set from the executor's own namespace plus each Config's resolved `spec.jobNamespace`, starting one Job/Pod informer pair per namespace with the existing 5-minute resync and task-id label selector. A Config whose `jobNamespace` equals the executor namespace is skipped with an ERROR and no informer; every other namespace keeps watching. Handler dispatch is gated per namespace: an event is handled only once its own namespace's cache has synced, and an unconfigured namespace is never handled. The stale-terminal re-delivery guard now asks about the Job's own namespace rather than always the executor's. Provider, informer-construction and handler-registration failures fail `Run`; list/watch failures during cache sync remain environmental.

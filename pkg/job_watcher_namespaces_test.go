@@ -14,9 +14,12 @@ import (
 
 	lib "github.com/bborbe/agent"
 	libk8s "github.com/bborbe/k8s"
+	libtime "github.com/bborbe/time"
 	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/labels"
+	k8sinformers "k8s.io/client-go/informers"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/kubernetes/fake"
 	corev1listers "k8s.io/client-go/listers/core/v1"
@@ -534,5 +537,272 @@ func TestJobWatcherAwaitsCacheSync(t *testing.T) {
 	if publisher.PublishFailureCallCount() != 1 {
 		t.Fatalf("publish failure calls = %d for synced namespace, want 1",
 			publisher.PublishFailureCallCount())
+	}
+}
+
+// namespacePodLister builds a corev1listers.PodLister backed by a fake informer
+// indexer seeded with the given pods in namespace.
+func namespacePodLister(namespace string, pods ...*corev1.Pod) corev1listers.PodLister {
+	fakeClient := fake.NewSimpleClientset()
+	informerFactory := k8sinformers.NewSharedInformerFactoryWithOptions(
+		fakeClient,
+		0,
+		k8sinformers.WithNamespace(namespace),
+	)
+	for _, pod := range pods {
+		_ = informerFactory.Core().V1().Pods().Informer().GetIndexer().Add(pod)
+	}
+	return informerFactory.Core().V1().Pods().Lister()
+}
+
+// configFor builds a Config with an assignee and jobNamespace.
+func configFor(name, assignee, jobNamespace string) agentv1.Config {
+	return agentv1.Config{
+		ObjectMeta: metav1.ObjectMeta{Name: name},
+		Spec: agentv1.ConfigSpec{
+			Assignee:     assignee,
+			JobNamespace: jobNamespace,
+		},
+	}
+}
+
+func ptrInt32(v int32) *int32 {
+	return &v
+}
+
+func runningPod(name, namespace string, taskID lib.TaskIdentifier) *corev1.Pod {
+	return &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      name,
+			Namespace: namespace,
+			Labels:    map[string]string{jobWatcherTaskIDLabel: string(taskID)},
+		},
+		Status: corev1.PodStatus{Phase: corev1.PodRunning},
+	}
+}
+
+func oomPodOwnedBy(name, namespace, jobName string) *corev1.Pod {
+	return &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      name,
+			Namespace: namespace,
+			OwnerReferences: []metav1.OwnerReference{
+				{Kind: "Job", Name: jobName},
+			},
+		},
+		Status: corev1.PodStatus{
+			Phase: corev1.PodFailed,
+			ContainerStatuses: []corev1.ContainerStatus{
+				{
+					State: corev1.ContainerState{
+						Terminated: &corev1.ContainerStateTerminated{
+							Reason:   "OOMKilled",
+							ExitCode: 137,
+						},
+					},
+				},
+			},
+		},
+	}
+}
+
+func hasPodNamed(pods []*corev1.Pod, name string) bool {
+	for _, pod := range pods {
+		if pod.Name == name {
+			return true
+		}
+	}
+	return false
+}
+
+type namespacePodListerFixture struct {
+	watcher         *jobWatcher
+	publisher       *fakeResultPublisher
+	taskStore       *TaskStore
+	taskID          lib.TaskIdentifier
+	currentDateTime libtime.CurrentDateTime
+	eventHandlerCfg EventHandlerConfig
+}
+
+// newNamespacePodListerInformer returns an informer factory that seeds ns-a
+// with the pods the per-namespace tests need and leaves ns-b unsynced.
+func newNamespacePodListerInformer(
+	taskID lib.TaskIdentifier,
+) func(kubernetes.Interface, libk8s.Namespace) (jobWatcherNamespaceInformer, error) {
+	return func(
+		_ kubernetes.Interface,
+		ns libk8s.Namespace,
+	) (jobWatcherNamespaceInformer, error) {
+		switch ns.String() {
+		case "ns-a":
+			return &fakeNamespaceInformer{
+				synced: true,
+				podLister: namespacePodLister(
+					"ns-a",
+					runningPod("pod-ns-a", "ns-a", "other-task"),
+					oomPodOwnedBy("pod-oom-a", "ns-a", "job-a"),
+					runningPod("pod-sweep", "ns-a", taskID),
+				),
+			}, nil
+		case "dev":
+			return &fakeNamespaceInformer{
+				synced:    true,
+				podLister: namespacePodLister("dev", runningPod("pod-dev", "dev", "other-task")),
+			}, nil
+		default:
+			return &fakeNamespaceInformer{synced: false}, nil
+		}
+	}
+}
+
+func newNamespacePodListerFixture(
+	t *testing.T,
+	ctx context.Context,
+) *namespacePodListerFixture {
+	t.Helper()
+	taskID := lib.TaskIdentifier("sweep-task")
+	provider := &namespaceTestProvider{}
+	provider.setItems(
+		configFor("a", "agent-a", "ns-a"),
+		configFor("b", "agent-b", "ns-b"),
+		configFor("bad", "agent-bad", "dev"),
+		configFor("dup1", "agent-dup", "ns-a"),
+		configFor("dup2", "agent-dup", "ns-b"),
+	)
+	publisher := &fakeResultPublisher{}
+	w := newNamespaceTestWatcher(t, provider, publisher)
+	w.newNamespaceInformer = newNamespacePodListerInformer(taskID)
+	if err := w.reconcileNamespaceSet(ctx); err != nil {
+		t.Fatalf("reconcile namespace set: %v", err)
+	}
+
+	startedAt, err := libtime.ParseDateTime(ctx, "2026-06-01T11:55:00Z")
+	if err != nil {
+		t.Fatalf("parse job_started_at: %v", err)
+	}
+	w.taskStore.Store(taskID, lib.Task{
+		TaskIdentifier: taskID,
+		Frontmatter: lib.TaskFrontmatter{
+			"assignee":       "agent-a",
+			"current_job":    "job-a",
+			"job_started_at": startedAt.Format(time.RFC3339),
+		},
+	})
+
+	currentDateTime := libtime.NewCurrentDateTime()
+	now, err := libtime.ParseDateTime(ctx, "2026-06-01T12:00:00Z")
+	if err != nil {
+		t.Fatalf("parse now: %v", err)
+	}
+	currentDateTime.SetNow(*now)
+	eventHandlerCfg := NewEventHandlerConfig()
+	_ = eventHandlerCfg.OnAdd(ctx, agentv1.Config{
+		ObjectMeta: metav1.ObjectMeta{Name: "sweep-cfg"},
+		Spec: agentv1.ConfigSpec{
+			Assignee:                "agent-a",
+			JobNamespace:            "ns-a",
+			ZombieJobTimeoutSeconds: ptrInt32(60),
+		},
+	})
+
+	return &namespacePodListerFixture{
+		watcher:         w,
+		publisher:       publisher,
+		taskStore:       w.taskStore,
+		taskID:          taskID,
+		currentDateTime: currentDateTime,
+		eventHandlerCfg: eventHandlerCfg,
+	}
+}
+
+func TestPodListerPerNamespace(t *testing.T) {
+	ctx := context.Background()
+	f := newNamespacePodListerFixture(t, ctx)
+
+	lister := f.watcher.PodLister("ns-a")
+	if lister == nil {
+		t.Fatalf("PodLister(ns-a) = nil, want the ns-a lister")
+	}
+	pods, err := lister.Pods("ns-a").List(labels.Everything())
+	if err != nil {
+		t.Fatalf("list ns-a pods: %v", err)
+	}
+	if !hasPodNamed(pods, "pod-ns-a") {
+		t.Fatalf("ns-a lister missing pod-ns-a")
+	}
+	if hasPodNamed(pods, "pod-dev") {
+		t.Fatalf("ns-a lister leaked the dev lister's pod-dev")
+	}
+	if lister := f.watcher.PodLister("ns-b"); lister != nil {
+		t.Fatalf("PodLister(ns-b) = non-nil, want nil for an unsynced namespace")
+	}
+
+	assertTerminalPodDetailFollowsJobNamespace(t, f.watcher)
+	assertResolveTaskNamespace(t, ctx)
+	assertSweeperUsesPerTaskLister(t, ctx, f)
+}
+
+func assertTerminalPodDetailFollowsJobNamespace(t *testing.T, w *jobWatcher) {
+	t.Helper()
+	job := &batchv1.Job{
+		ObjectMeta: metav1.ObjectMeta{Name: "job-a", Namespace: "ns-a"},
+	}
+	reason, exitCode, ok := w.terminalPodDetail(job)
+	if !ok {
+		t.Fatalf("terminalPodDetail(job-a) ok = false, want true from the ns-a lister")
+	}
+	if reason != "OOMKilled" || exitCode != 137 {
+		t.Fatalf("terminalPodDetail(job-a) = %s/%d, want OOMKilled/137", reason, exitCode)
+	}
+}
+
+func assertResolveTaskNamespace(t *testing.T, ctx context.Context) {
+	t.Helper()
+	cfgs := []agentv1.Config{
+		configFor("a", "agent-a", "ns-a"),
+		configFor("b", "agent-b", "ns-b"),
+		configFor("bad", "agent-bad", "dev"),
+		configFor("dup1", "agent-dup", "ns-a"),
+		configFor("dup2", "agent-dup", "ns-b"),
+	}
+	taskWithAssignee := func(assignee string) lib.Task {
+		return lib.Task{Frontmatter: lib.TaskFrontmatter{"assignee": assignee}}
+	}
+	if got := resolveTaskNamespace(ctx, "dev", taskWithAssignee("agent-a"), cfgs); got != "ns-a" {
+		t.Fatalf("agent-a resolves to %q, want ns-a", got)
+	}
+	if got := resolveTaskNamespace(ctx, "dev", taskWithAssignee("nobody"), cfgs); got != "dev" {
+		t.Fatalf("unknown assignee resolves to %q, want dev", got)
+	}
+	if got := resolveTaskNamespace(ctx, "dev", taskWithAssignee("agent-bad"), cfgs); got != "dev" {
+		t.Fatalf("resolution-error fallback resolves to %q, want dev", got)
+	}
+	if got := resolveTaskNamespace(ctx, "dev", taskWithAssignee("agent-dup"), cfgs); got != "ns-a" {
+		t.Fatalf("duplicate assignee resolves to %q, want the first match ns-a", got)
+	}
+}
+
+func assertSweeperUsesPerTaskLister(
+	t *testing.T,
+	ctx context.Context,
+	f *namespacePodListerFixture,
+) {
+	t.Helper()
+	sweeper := NewZombieSweeper(
+		f.watcher,
+		"dev",
+		f.taskStore,
+		f.publisher,
+		f.eventHandlerCfg,
+		f.currentDateTime,
+	)
+	if err := sweeper.SweepOnce(ctx); err != nil {
+		t.Fatalf("SweepOnce: %v", err)
+	}
+	if f.publisher.PublishFailureCallCount() != 0 {
+		t.Fatalf(
+			"published %d failures, want 0: the sweeper must read the ns-a lister, not dev's",
+			f.publisher.PublishFailureCallCount(),
+		)
 	}
 }

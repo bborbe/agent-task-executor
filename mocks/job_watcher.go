@@ -6,6 +6,7 @@ import (
 	"sync"
 
 	"github.com/bborbe/agent-task-executor/pkg"
+	"github.com/bborbe/k8s"
 	v1 "k8s.io/api/batch/v1"
 	v1a "k8s.io/api/core/v1"
 	v1b "k8s.io/client-go/listers/core/v1"
@@ -24,9 +25,10 @@ type FakeJobWatcher struct {
 		arg1 context.Context
 		arg2 *v1a.Pod
 	}
-	PodListerStub        func() v1b.PodLister
+	PodListerStub        func(k8s.Namespace) v1b.PodLister
 	podListerMutex       sync.RWMutex
 	podListerArgsForCall []struct {
+		arg1 k8s.Namespace
 	}
 	podListerReturns struct {
 		result1 v1b.PodLister
@@ -115,17 +117,18 @@ func (fake *FakeJobWatcher) HandlePodArgsForCall(i int) (context.Context, *v1a.P
 	return argsForCall.arg1, argsForCall.arg2
 }
 
-func (fake *FakeJobWatcher) PodLister() v1b.PodLister {
+func (fake *FakeJobWatcher) PodLister(arg1 k8s.Namespace) v1b.PodLister {
 	fake.podListerMutex.Lock()
 	ret, specificReturn := fake.podListerReturnsOnCall[len(fake.podListerArgsForCall)]
 	fake.podListerArgsForCall = append(fake.podListerArgsForCall, struct {
-	}{})
+		arg1 k8s.Namespace
+	}{arg1})
 	stub := fake.PodListerStub
 	fakeReturns := fake.podListerReturns
-	fake.recordInvocation("PodLister", []interface{}{})
+	fake.recordInvocation("PodLister", []interface{}{arg1})
 	fake.podListerMutex.Unlock()
 	if stub != nil {
-		return stub()
+		return stub(arg1)
 	}
 	if specificReturn {
 		return ret.result1
@@ -139,10 +142,17 @@ func (fake *FakeJobWatcher) PodListerCallCount() int {
 	return len(fake.podListerArgsForCall)
 }
 
-func (fake *FakeJobWatcher) PodListerCalls(stub func() v1b.PodLister) {
+func (fake *FakeJobWatcher) PodListerCalls(stub func(k8s.Namespace) v1b.PodLister) {
 	fake.podListerMutex.Lock()
 	defer fake.podListerMutex.Unlock()
 	fake.PodListerStub = stub
+}
+
+func (fake *FakeJobWatcher) PodListerArgsForCall(i int) k8s.Namespace {
+	fake.podListerMutex.RLock()
+	defer fake.podListerMutex.RUnlock()
+	argsForCall := fake.podListerArgsForCall[i]
+	return argsForCall.arg1
 }
 
 func (fake *FakeJobWatcher) PodListerReturns(result1 v1b.PodLister) {

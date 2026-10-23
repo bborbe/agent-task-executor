@@ -9,7 +9,6 @@ import (
 	"fmt"
 	"sort"
 	"sync"
-	"sync/atomic"
 	"time"
 
 	lib "github.com/bborbe/agent"
@@ -42,10 +41,10 @@ type JobWatcher interface {
 	// HandlePod processes a single Pod (invoked by the Pod informer event handler
 	// and by unit tests directly).
 	HandlePod(ctx context.Context, pod *corev1.Pod)
-	// PodLister returns the Pod lister backed by the shared informer cache, for
-	// use by the deadline sweeper. The returned lister is safe for concurrent
-	// read access.
-	PodLister() corev1listers.PodLister
+	// PodLister returns the Pod lister backed by namespace's informer cache, or
+	// nil when that namespace is not watched or its cache has not synced. The
+	// returned lister is safe for concurrent read access.
+	PodLister(namespace libk8s.Namespace) corev1listers.PodLister
 }
 
 // NewJobWatcher creates a JobWatcher. The executor namespace is watched
@@ -81,7 +80,6 @@ type jobWatcher struct {
 	taskStore            *TaskStore
 	publisher            ResultPublisher
 	claimReleaser        ClaimReleaser
-	podLister            atomic.Pointer[corev1listers.PodLister]
 	mu                   sync.Mutex
 	watched              map[libk8s.Namespace]bool
 	synced               map[libk8s.Namespace]bool
@@ -332,11 +330,8 @@ func (w *jobWatcher) namespaceReady(namespace libk8s.Namespace) bool {
 	return false
 }
 
-func (w *jobWatcher) PodLister() corev1listers.PodLister {
-	if lister := w.podLister.Load(); lister != nil {
-		return *lister
-	}
-	return w.podListerForNamespace(w.namespace)
+func (w *jobWatcher) PodLister(namespace libk8s.Namespace) corev1listers.PodLister {
+	return w.podListerForNamespace(namespace)
 }
 
 func (w *jobWatcher) podListerForNamespace(
@@ -876,7 +871,7 @@ func hasNonZeroTerminatedContainer(pod *corev1.Pod) bool {
 func (w *jobWatcher) terminalPodDetail(
 	job *batchv1.Job,
 ) (terminatedReason string, exitCode int32, ok bool) {
-	lister := w.PodLister()
+	lister := w.PodLister(libk8s.Namespace(job.Namespace))
 	if lister == nil {
 		return "", 0, false
 	}
