@@ -44,13 +44,11 @@ type kubeJobControl struct {
 // the executor's namespace — today's behaviour, and the only behaviour possible
 // before a Config sets jobNamespace.
 //
-// The task comes from the TaskView, never from the spawn-time TaskStore. The
-// store is empty after a restart (it is filled at spawn, pkg/task_store.go), and
-// startup recovery asks about Jobs this pod was running BEFORE it restarted —
-// exactly the tasks a store-only lookup cannot answer. Reading the store here
-// released the claims of sandboxed Jobs that were still running, so a peer could
-// claim and run the same task twice. The view replays the compacted task event
-// topic, so it answers for tasks this process never saw spawn.
+// The task comes from the TaskView, never from the spawn-time TaskStore: the
+// store is empty after a restart, and startup recovery asks about Jobs this pod
+// was running BEFORE it restarted. Reading the store released the claims of
+// sandboxed Jobs that were still running, so a peer could run the same task
+// twice. The view replays the compacted task event topic instead.
 func NewKubeJobControl(
 	kubeClient kubernetes.Interface,
 	namespace libk8s.Namespace,

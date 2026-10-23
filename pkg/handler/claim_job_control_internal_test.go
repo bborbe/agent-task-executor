@@ -171,13 +171,7 @@ func (v *fakeTaskView) ConsumeMessage(context.Context, *sarama.ConsumerMessage) 
 
 func (v *fakeTaskView) Ready() bool { return true }
 
-func (v *fakeTaskView) Snapshot() []lib.Task {
-	out := make([]lib.Task, 0, len(v.tasks))
-	for _, task := range v.tasks {
-		out = append(out, task)
-	}
-	return out
-}
+func (v *fakeTaskView) Snapshot() []lib.Task { return nil }
 
 func (v *fakeTaskView) Get(id lib.TaskIdentifier) (lib.Task, bool) {
 	task, ok := v.tasks[id]

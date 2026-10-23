@@ -23,13 +23,12 @@ const recoverStartupRetryDelay = time.Second
 // recoverStartupViewWait bounds how long recovery waits for the task view to
 // finish replaying before it decides any claim's fate.
 //
-// The wait is load-bearing for correctness, not politeness. A claim's Job may
-// live outside the executor's namespace, and the fence finds it through the
-// task's assignee — which it reads from the view. Deciding against a view that
-// has not caught up reads "no task, no Job" for a Job that is running, and
-// releases the claim: the duplicate the claims exist to prevent. A boot that
-// outlasts the bound proceeds anyway and logs it, because a view that never
-// becomes ready (Kafka down) must not stop recovery forever.
+// The wait is load-bearing for correctness. A claim's Job may live outside the
+// executor's namespace, and the fence finds it through the task's assignee —
+// read from the view. Deciding against a view that has not caught up reads "no
+// task, no Job" for a Job that is running and releases its claim: the duplicate
+// the claims exist to prevent. A boot that outlasts the bound proceeds and logs
+// it, so a view that never becomes ready (Kafka down) cannot stop recovery.
 const recoverStartupViewWait = 60 * time.Second
 
 // recoverStartupViewPollInterval is how often the readiness gate re-checks. A
