@@ -88,21 +88,27 @@ const DefaultReconcileInterval = 60 * time.Second
 // The reset is the phase. A task that moved phase has advanced and earns a fresh
 // streak; a task pinned at one phase across three consecutive spawns has not, and
 // stays capped until something moves it — an operator re-arm (which changes the
-// phase) or a restart (which empties the streak).
+// phase) or the task reaching a terminal state (which clears the streak).
 //
-// The streak is in-memory, and that is load-bearing rather than an optimisation.
-// A counter persisted in the task file is not merely redundant, it is defeated:
-// the agent pods rewrite the frontmatter from a snapshot taken at the start of
-// their run, so `trigger_scope` and `job_started_at` are clobbered back to their
-// pre-spawn values every time a Job completes (measured on the dev fixture,
-// 2026-10-14 — the file showed `trigger_scope: 'planning:'` under
-// `phase: execution`, and `job_started_at` from the task's creation). That
-// clobber is what makes `scopeChanged` true on every spawn and resets the
-// persisted `trigger_count` to 1, so any counter living in that file is reset by
-// the very loop it must count.
+// The streak is shared through `claims/redrive/<taskid>/<phase>/<n>` refs in the
+// same git-rest instance as the dispatch claims, so every cluster and every
+// restarted pod reads the same count. It is not kept in the task file: the agent
+// pods rewrite the frontmatter from a snapshot taken at the start of their run,
+// so `trigger_scope` and `job_started_at` are clobbered back to their pre-spawn
+// values every time a Job completes (measured on the dev fixture, 2026-10-14 —
+// the file showed `trigger_scope: 'planning:'` under `phase: execution`, and
+// `job_started_at` from the task's creation). That clobber is what makes
+// `scopeChanged` true on every spawn and resets the persisted `trigger_count` to
+// 1, so any counter living in that file is reset by the very loop it must count.
 //
-// The cost of in-memory: a task stuck across a restart is re-driven up to N more
-// times, not that it loops forever.
+// The in-memory map remains as a floor. A failed store read falls back to it, a
+// failed write still increments it, and a failed read never retires a task that
+// memory has not capped. Conversely, a task capped only by the shared store is
+// still refused: the cap takes the larger of the two counts.
+//
+// The explicit un-cap rule: a capped task spawns again only after an operator
+// deletes its refs under `claims/redrive/<taskid>/`, or the task moves to another
+// phase and is actually spawned there, or it reaches a terminal state.
 const maxConsecutiveRedrives = 3
 
 // DefaultReconcilePassTimeout bounds one reconcile pass so a slow or large vault
@@ -283,6 +289,10 @@ type taskEventHandler struct {
 	claimLocks     map[lib.TaskIdentifier]*sync.Mutex
 	redriveMu      sync.Mutex
 	redriveStreaks map[lib.TaskIdentifier]redriveStreak
+	// redriveStore is the shared, persisted half of the redrive streak. It is
+	// built with the lease manager from the same claim-ref client and stays nil
+	// when claim mode takes no claim.
+	redriveStore claim.RedriveStreakStore
 	// spawnGens counts Jobs created by this executor per assignee, on any path.
 	// A pass cache entry read at an older generation is refetched, so a Job
 	// spawned by the Kafka consumer or the deferred loop mid-pass is never
@@ -455,7 +465,7 @@ func (h *taskEventHandler) cleanupTerminalTask(ctx context.Context, task lib.Tas
 	h.ReleaseTaskClaim(ctx, task.TaskIdentifier)
 	h.taskStore.Delete(task.TaskIdentifier)
 	h.removeDeferredEntry(task.TaskIdentifier)
-	h.clearRedriveStreak(task.TaskIdentifier)
+	h.clearRedriveStreak(ctx, task.TaskIdentifier)
 	glog.V(3).
 		Infof("task %s %s: cleared task store + deferred respawn", task.TaskIdentifier, status)
 }
@@ -823,7 +833,7 @@ func (h *taskEventHandler) spawnIfNeededClaimed(
 
 	// The last bound, and the only one that covers every path — see
 	// maxConsecutiveRedrives.
-	if h.redriveStreakCapped(task) {
+	if h.redriveStreakCapped(ctx, task) {
 		return false, nil
 	}
 
@@ -941,7 +951,7 @@ func (h *taskEventHandler) finishSpawn(
 	)
 	metrics.TaskEventsTotal.WithLabelValues("spawned").Inc()
 	metrics.JobsSpawnedTotal.Inc()
-	h.recordRedriveSpawn(task)
+	h.recordRedriveSpawn(ctx, task)
 	return nil
 }
 
@@ -1544,7 +1554,13 @@ func (h *taskEventHandler) driveCandidate(
 	// Checked here as well as in spawnIfNeeded so the pass summary can report the
 	// skip as `capped` rather than folding it into `deferred`. Only the capped
 	// branch signals, so the two checks cannot double-count.
-	if h.redriveStreakCapped(candidate.task) {
+	//
+	// This is the in-memory pre-check only: a task capped solely by the shared
+	// store is reported as `deferred` here rather than `capped`, because the
+	// authoritative check runs in the spawn funnel below and its capped reason is
+	// deliberately not carried back. The cap still refuses and signals from that
+	// funnel, and the store read stays at one List per spawn decision.
+	if h.redriveStreakCappedInMemory(candidate.task) {
 		return reconcileOutcomeCapped
 	}
 	spawned, err := h.spawnIfNeededClaimed(
@@ -1664,85 +1680,6 @@ func (h *taskEventHandler) reconcileTask(
 		return task, nil, false, nil
 	}
 	return task, config, true, nil
-}
-
-// redriveStreak is the executor's record of consecutive spawns for one task at
-// one phase: how many, and which phase they accrued in. See maxConsecutiveRedrives
-// for why the phase is the reset and why the streak is deliberately not persisted.
-type redriveStreak struct {
-	count int
-	phase string
-}
-
-// redriveStreakCapped reports whether the executor must skip this task because it
-// has spawned it maxConsecutiveRedrives times in a row at an unchanged phase, and
-// records the skip signal when it must.
-//
-// Skipping is the whole bound. The streak is deliberately NOT cleared here, so the
-// task stays capped until something moves it — clearing on the cap would let the
-// next spawn through and make the cap a no-op.
-//
-// Logged at V(1), not V(0): a capped task repeats this line on every event and
-// every pass for as long as it stays capped, which is an expected steady state —
-// the same reason event=concurrency_cap is V(1). The metric carries the alerting
-// signal.
-//
-// The phase comparison is not redundant with recordRedriveSpawn's reset. The
-// streak is only ever rewritten AFTER a spawn succeeds, so a task that advanced
-// to a new phase still carries its old phase in the streak until that spawn
-// happens — and a count-only check would cap it before it ever could, stranding
-// exactly the task the reset exists to release.
-func (h *taskEventHandler) redriveStreakCapped(task lib.Task) bool {
-	id := task.TaskIdentifier
-	phase := taskPhaseString(task)
-	h.redriveMu.Lock()
-	streak, ok := h.redriveStreaks[id]
-	h.redriveMu.Unlock()
-	if !ok || streak.phase != phase || streak.count < maxConsecutiveRedrives {
-		return false
-	}
-	metrics.RedriveCappedTotal.Inc()
-	glog.V(1).Infof(
-		"event=redrive_capped task=%s streak=%d cap=%d phase=%q",
-		id, streak.count, maxConsecutiveRedrives, streak.phase,
-	)
-	return true
-}
-
-// taskPhaseString returns the task's phase as a string, or "" when it carries
-// none. Shared by the cap check and the streak record so the two can never
-// disagree about which phase a streak belongs to.
-func taskPhaseString(task lib.Task) string {
-	if p := task.Frontmatter.Phase(); p != nil {
-		return string(*p)
-	}
-	return ""
-}
-
-// recordRedriveSpawn extends this task's streak with the spawn that just happened,
-// resetting it when the task has moved phase since the previous one.
-//
-// Called only after SpawnJob returned successfully, so a suppressed, deferred or
-// capped spawn does not count — the streak measures spawns, not attempts.
-func (h *taskEventHandler) recordRedriveSpawn(task lib.Task) {
-	id := task.TaskIdentifier
-	phase := taskPhaseString(task)
-	h.redriveMu.Lock()
-	defer h.redriveMu.Unlock()
-	if prev, ok := h.redriveStreaks[id]; ok && prev.phase == phase {
-		h.redriveStreaks[id] = redriveStreak{count: prev.count + 1, phase: phase}
-		return
-	}
-	h.redriveStreaks[id] = redriveStreak{count: 1, phase: phase}
-}
-
-// clearRedriveStreak ends this task's streak. Called when the task reaches a
-// terminal state, where a further spawn is an operator decision rather than a
-// re-drive of the loop this cap exists to bound.
-func (h *taskEventHandler) clearRedriveStreak(id lib.TaskIdentifier) {
-	h.redriveMu.Lock()
-	defer h.redriveMu.Unlock()
-	delete(h.redriveStreaks, id)
 }
 
 // skipForeignVaultTask reports whether the spawn must be dropped because the

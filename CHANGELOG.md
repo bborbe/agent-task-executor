@@ -2,6 +2,10 @@
 
 All notable changes to this project will be documented in this file.
 
+## Unreleased
+
+- fix: **the consecutive-re-drive cap is now shared across clusters and survives a restart.** The streak lived only in each executor's memory, so two clusters driving the same task each counted their own spawns and a restarted pod started at zero — task `1788bf3c` was re-driven past the cap that way. The count is now also written to `claims/redrive/<taskid>/<phase>/<n>` refs in the same git-rest instance as the dispatch claims, and the cap refuses when the larger of the stored and in-memory counts reaches 3. A failed store read or write falls back to the in-memory floor with a warning, and claim mode `off` is unchanged: no store is built and no request is sent.
+
 ## v0.30.6
 
 - fix: **a cap-deferred task whose `queued_at` write can never land no longer re-publishes that write on every retry.** `stampQueueEntry` decided whether to publish from the event payload and the task view, and both only learn the value from a *successful* vault write. For a task whose file is gone — or whose write keeps failing — neither ever carries `queued_at`, so every deferral stamped a fresh value and published another `UpdateFrontmatterCommand`, once per `concurrencyCapRetryDelay`, indefinitely; the controller answered each with `update-frontmatter: task file not found … skipping` and moved on, so nothing bounded the loop. Measured on nukedev 2026-10-23: one command per minute for task `1AACF3FC`, whose vault file had been deleted the day before, and the same pattern for a live task (`be07bfab`) whose writes were not landing either. The executor now records the `queued_at` it published, keyed by task, and reuses that value instead of re-stamping; the record is dropped when the task leaves the deferred state, so the map stays bounded by the deferred working set. The record is executor-local by design — it is the one place the value is known without a successful write, and it survives a publish failure, which is deliberately not retried.
