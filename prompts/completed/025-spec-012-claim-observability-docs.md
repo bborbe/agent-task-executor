@@ -1,11 +1,13 @@
 ---
-status: approved
+status: completed
 spec: [012-bug-pr-review-claims-serialize-per-repo]
-execution_id: agent-task-executor-claim-reaper-exec-024-spec-012-claim-observability-docs
+summary: Verified claim acquisition/release logging, the five removal paths routed through countClaimRemoval, the claim-key docs section, the two new test files, and the changelog bullet; make test and make precommit both exit 0.
+execution_id: agent-task-executor-claim-reaper-exec-025-spec-012-claim-observability-docs
 dark-factory-version: v0.198.7
 created: "2026-10-23T12:26:59Z"
 queued: "2026-10-23T12:36:11Z"
-started: "2026-10-23T12:53:10Z"
+started: "2026-10-23T13:00:52Z"
+completed: "2026-10-23T13:07:31Z"
 branch: dark-factory/bug-pr-review-claims-serialize-per-repo
 ---
 
