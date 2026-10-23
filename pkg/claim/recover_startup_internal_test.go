@@ -83,7 +83,7 @@ func (s *recoverStub) AuditMismatch(context.Context, map[string]bool) {}
 func TestRecoverAtStartupRetriesThenSucceeds(t *testing.T) {
 	manager := newRecoverStub(2)
 
-	if err := RecoverAtStartup(context.Background(), manager); err != nil {
+	if err := RecoverAtStartup(context.Background(), manager, nil); err != nil {
 		t.Fatalf("RecoverAtStartup returned %v; want nil", err)
 	}
 	if got := manager.callCount(); got != 3 {
@@ -97,7 +97,7 @@ func TestRecoverAtStartupRetriesThenSucceeds(t *testing.T) {
 func TestRecoverAtStartupNeverFailsTheBoot(t *testing.T) {
 	manager := newRecoverStub(recoverStartupAttempts)
 
-	if err := RecoverAtStartup(context.Background(), manager); err != nil {
+	if err := RecoverAtStartup(context.Background(), manager, nil); err != nil {
 		t.Fatalf("RecoverAtStartup returned %v; want nil", err)
 	}
 	if got := manager.callCount(); got != recoverStartupAttempts {
@@ -113,7 +113,7 @@ func TestRecoverAtStartupStopsOnCancelledContext(t *testing.T) {
 	defer cancel()
 	cancel()
 
-	if err := RecoverAtStartup(ctx, manager); err != nil {
+	if err := RecoverAtStartup(ctx, manager, nil); err != nil {
 		t.Fatalf("RecoverAtStartup returned %v; want nil", err)
 	}
 	if got := manager.callCount(); got != 1 {
@@ -129,7 +129,7 @@ func TestRunClaimRecoveryHoldsTheRunGroupOpen(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	done := make(chan error, 1)
-	go func() { done <- RunClaimRecovery(ctx, manager) }()
+	go func() { done <- RunClaimRecovery(ctx, manager, nil) }()
 
 	// Synchronize on Recover having run rather than on a sleep: a fixed delay is
 	// too short under load (the counter assertion fails for a correct
@@ -164,5 +164,58 @@ func TestRunClaimRecoveryHoldsTheRunGroupOpen(t *testing.T) {
 		}
 	case <-time.After(2 * time.Second):
 		t.Fatal("RunClaimRecovery did not return after the context was cancelled")
+	}
+}
+
+// TestWaitForTaskViewBlocksUntilReady asserts startup recovery does not decide a
+// claim's fate against a view that has not replayed. The fence resolves a Job's
+// namespace through the task's assignee, so a view that has not caught up reads
+// "no task, no Job" for a Job that is still running, and recovery releases its
+// claim — the duplicate the claims exist to prevent.
+func TestWaitForTaskViewBlocksUntilReady(t *testing.T) {
+	previous := recoverStartupViewPollInterval
+	recoverStartupViewPollInterval = time.Millisecond
+	defer func() { recoverStartupViewPollInterval = previous }()
+
+	replayed := make(chan struct{})
+	done := make(chan struct{})
+	go func() {
+		waitForTaskView(context.Background(), func() bool {
+			select {
+			case <-replayed:
+				return true
+			default:
+				return false
+			}
+		})
+		close(done)
+	}()
+
+	select {
+	case <-done:
+		t.Fatal("waitForTaskView returned while the task view had not replayed")
+	case <-time.After(50 * time.Millisecond):
+	}
+
+	close(replayed)
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("waitForTaskView did not return once the view became ready")
+	}
+}
+
+// TestWaitForTaskViewWithoutView asserts a caller with no view does not wait: it
+// has no task to resolve a namespace from, so every lookup is its own namespace.
+func TestWaitForTaskViewWithoutView(t *testing.T) {
+	done := make(chan struct{})
+	go func() {
+		waitForTaskView(context.Background(), nil)
+		close(done)
+	}()
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("waitForTaskView waited with no view to wait for")
 	}
 }

@@ -96,7 +96,7 @@ func (s *stubLeaseManager) AuditMismatch(context.Context, map[string]bool) {}
 func TestCreateClaimLifecycleRunFuncs(t *testing.T) {
 	manager := newStubLeaseManager()
 
-	runFuncs := CreateClaimLifecycleRunFuncs(manager)
+	runFuncs := CreateClaimLifecycleRunFuncs(manager, nil)
 
 	if len(runFuncs) != 2 {
 		t.Fatalf("run funcs = %d, want 2 (recover, run)", len(runFuncs))
@@ -127,7 +127,7 @@ func TestCreateClaimRecoverFuncKeepsTheRunGroupOpen(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	done := make(chan error, 1)
-	go func() { done <- CreateClaimRecoverFunc(manager)(ctx) }()
+	go func() { done <- CreateClaimRecoverFunc(manager, nil)(ctx) }()
 
 	// Synchronize on Recover having run rather than on a sleep: a fixed delay is
 	// too short under load (the counter assertion fails for a correct

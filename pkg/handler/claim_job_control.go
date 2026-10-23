@@ -31,7 +31,7 @@ type kubeJobControl struct {
 	kubeClient kubernetes.Interface
 	namespace  libk8s.Namespace
 	resolver   pkg.ConfigResolver
-	taskStore  *pkg.TaskStore
+	view       TaskView
 }
 
 // NewKubeJobControl returns the JobControl the lease manager needs before a
@@ -39,21 +39,29 @@ type kubeJobControl struct {
 // keeps its Job running unclaimed, which is the duplicate the claims exist to
 // prevent.
 //
-// resolver and taskStore let the fence find a Job a Config has placed outside
-// the executor's namespace; either may be nil, in which case every lookup
-// targets the executor's namespace — today's behaviour, and the only behaviour
-// possible before a Config sets jobNamespace.
+// resolver and view let the fence find a Job a Config has placed outside the
+// executor's namespace; either may be nil, in which case every lookup targets
+// the executor's namespace — today's behaviour, and the only behaviour possible
+// before a Config sets jobNamespace.
+//
+// The task comes from the TaskView, never from the spawn-time TaskStore. The
+// store is empty after a restart (it is filled at spawn, pkg/task_store.go), and
+// startup recovery asks about Jobs this pod was running BEFORE it restarted —
+// exactly the tasks a store-only lookup cannot answer. Reading the store here
+// released the claims of sandboxed Jobs that were still running, so a peer could
+// claim and run the same task twice. The view replays the compacted task event
+// topic, so it answers for tasks this process never saw spawn.
 func NewKubeJobControl(
 	kubeClient kubernetes.Interface,
 	namespace libk8s.Namespace,
 	resolver pkg.ConfigResolver,
-	taskStore *pkg.TaskStore,
+	view TaskView,
 ) claim.JobControl {
 	return &kubeJobControl{
 		kubeClient: kubeClient,
 		namespace:  namespace,
 		resolver:   resolver,
-		taskStore:  taskStore,
+		view:       view,
 	}
 }
 
@@ -62,10 +70,10 @@ func NewKubeJobControl(
 // claim cannot be released, and before a Config sets jobNamespace that fallback
 // is also the correct answer.
 func (c *kubeJobControl) namespaceFor(ctx context.Context, taskID string) libk8s.Namespace {
-	if c.resolver == nil || c.taskStore == nil {
+	if c.resolver == nil || c.view == nil {
 		return c.namespace
 	}
-	task, ok := c.taskStore.Load(lib.TaskIdentifier(taskID))
+	task, ok := c.view.Get(lib.TaskIdentifier(taskID))
 	if !ok {
 		return c.namespace
 	}

@@ -9,9 +9,12 @@ package handler
 
 import (
 	"context"
+	stderrors "errors"
 	"testing"
 
+	"github.com/IBM/sarama"
 	lib "github.com/bborbe/agent"
+	libk8s "github.com/bborbe/k8s"
 	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -132,10 +135,65 @@ func (r staticResolver) ResolveByTaskType(
 	return r.config, nil
 }
 
+// failingResolver is a ConfigResolver that fails every lookup.
+type failingResolver struct{}
+
+func (failingResolver) Resolve(context.Context, string) (pkg.AgentConfiguration, error) {
+	return pkg.AgentConfiguration{}, stderrors.New("resolver unavailable")
+}
+
+func (failingResolver) ResolveByTaskType(
+	context.Context,
+	string,
+	string,
+) (pkg.AgentConfiguration, error) {
+	return pkg.AgentConfiguration{}, stderrors.New("resolver unavailable")
+}
+
+// fakeTaskView is a TaskView holding a fixed task set. It stands in for the
+// compacted-topic view, which is what the fence reads: the view answers for
+// tasks this process never saw spawn, so it survives the restart that empties
+// the spawn-time TaskStore.
+type fakeTaskView struct {
+	tasks map[lib.TaskIdentifier]lib.Task
+}
+
+func (v *fakeTaskView) CaptureHighWaterMarks(context.Context) error { return nil }
+
+func (v *fakeTaskView) ConsumeMessage(context.Context, *sarama.ConsumerMessage) error {
+	return nil
+}
+
+func (v *fakeTaskView) Ready() bool { return true }
+
+func (v *fakeTaskView) Snapshot() []lib.Task {
+	out := make([]lib.Task, 0, len(v.tasks))
+	for _, task := range v.tasks {
+		out = append(out, task)
+	}
+	return out
+}
+
+func (v *fakeTaskView) Get(id lib.TaskIdentifier) (lib.Task, bool) {
+	task, ok := v.tasks[id]
+	return task, ok
+}
+
+// viewWithTask returns a view holding one task assigned to claude.
+func viewWithTask(id lib.TaskIdentifier) *fakeTaskView {
+	return &fakeTaskView{tasks: map[lib.TaskIdentifier]lib.Task{
+		id: {TaskIdentifier: id, Frontmatter: lib.TaskFrontmatter{"assignee": "claude"}},
+	}}
+}
+
 // TestKubeJobControlFollowsJobNamespace pins the fence to the namespace the
 // Config put the Job in. Without it IsJobRunning reads false and DeleteJob
 // deletes nothing for a Job in the sandbox, so a claim that cannot renew leaves
 // its Job running unclaimed — the duplicate the claims exist to prevent.
+//
+// The task exists only in the view, never in the spawn-time TaskStore: that is
+// the restart shape, where recovery asks about a Job this pod was running before
+// it restarted. Reading the store there released a live sandbox Job's claim.
 func TestKubeJobControlFollowsJobNamespace(t *testing.T) {
 	ctx := context.Background()
 	const sandbox = "dev-agents-sandbox"
@@ -144,16 +202,11 @@ func TestKubeJobControlFollowsJobNamespace(t *testing.T) {
 	sandboxJob.Namespace = sandbox
 
 	client := fake.NewClientset(sandboxJob)
-	store := pkg.NewTaskStore()
-	store.Store("task-1", lib.Task{
-		TaskIdentifier: "task-1",
-		Frontmatter:    lib.TaskFrontmatter{"assignee": "claude"},
-	})
 	control := NewKubeJobControl(
 		client,
 		"test-ns",
 		staticResolver{config: pkg.AgentConfiguration{Assignee: "claude", JobNamespace: sandbox}},
-		store,
+		viewWithTask("task-1"),
 	)
 
 	running, err := control.IsJobRunning(ctx, "task-1")
@@ -173,5 +226,80 @@ func TestKubeJobControlFollowsJobNamespace(t *testing.T) {
 	}
 	if len(remaining.Items) != 0 {
 		t.Fatalf("expected the sandbox Job to be deleted, got %v", remaining.Items)
+	}
+}
+
+// TestKubeJobControlNamespaceFallbacks pins every path that cannot name a
+// namespace to the executor's own. The fallback must stay explicit and tested:
+// it is fail-safe for releasing a claim (the fence never blocks a release) and
+// fail-open for duplicate prevention, so a change that widens it silently is a
+// correctness regression, not a refactor.
+func TestKubeJobControlNamespaceFallbacks(t *testing.T) {
+	const sandbox = "dev-agents-sandbox"
+
+	tests := []struct {
+		name     string
+		resolver pkg.ConfigResolver
+		view     TaskView
+		want     libk8s.Namespace
+	}{
+		{
+			name:     "no resolver falls back to the executor namespace",
+			resolver: nil,
+			view:     viewWithTask("task-1"),
+			want:     "test-ns",
+		},
+		{
+			name:     "no view falls back to the executor namespace",
+			resolver: staticResolver{config: pkg.AgentConfiguration{JobNamespace: sandbox}},
+			view:     nil,
+			want:     "test-ns",
+		},
+		{
+			name:     "an unknown task falls back to the executor namespace",
+			resolver: staticResolver{config: pkg.AgentConfiguration{JobNamespace: sandbox}},
+			view:     viewWithTask("task-other"),
+			want:     "test-ns",
+		},
+		{
+			name:     "a resolver error falls back to the executor namespace",
+			resolver: failingResolver{},
+			view:     viewWithTask("task-1"),
+			want:     "test-ns",
+		},
+		{
+			name:     "an empty jobNamespace falls back to the executor namespace",
+			resolver: staticResolver{config: pkg.AgentConfiguration{}},
+			view:     viewWithTask("task-1"),
+			want:     "test-ns",
+		},
+		{
+			name:     "a jobNamespace equal to the executor namespace is rejected",
+			resolver: staticResolver{config: pkg.AgentConfiguration{JobNamespace: "test-ns"}},
+			view:     viewWithTask("task-1"),
+			want:     "test-ns",
+		},
+		{
+			name:     "a configured jobNamespace is used",
+			resolver: staticResolver{config: pkg.AgentConfiguration{JobNamespace: sandbox}},
+			view:     viewWithTask("task-1"),
+			want:     sandbox,
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			control := &kubeJobControl{
+				kubeClient: fake.NewClientset(),
+				namespace:  "test-ns",
+				resolver:   test.resolver,
+				view:       test.view,
+			}
+
+			got := control.namespaceFor(context.Background(), "task-1")
+			if got != test.want {
+				t.Fatalf("namespaceFor = %q, want %q", got, test.want)
+			}
+		})
 	}
 }
