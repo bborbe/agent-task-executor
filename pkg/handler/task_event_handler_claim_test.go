@@ -72,6 +72,11 @@ func newClaimHarness(mode pkg.ClaimMode) *claimHarness {
 	client := new(mocks.FakeClaimRefClient)
 	publisher := new(mocks.FakeResultPublisher)
 	taskStore := pkg.NewTaskStore()
+	// The event path refuses to spawn until the task view has replayed (a cold
+	// pod's first events are a stale backlog), so these specs model a view that
+	// is ready. Without this every one of them sees zero spawns.
+	view := new(mocks.FakeTaskView)
+	view.ReadyReturns(true)
 	h := &claimHarness{
 		spawner:   spawner,
 		resolver:  resolver,
@@ -89,7 +94,7 @@ func newClaimHarness(mode pkg.ClaimMode) *claimHarness {
 		publisher,
 		taskStore,
 		libtime.NewCurrentDateTime(),
-		new(mocks.FakeTaskView),
+		view,
 		claimHarnessVault,
 		handler.DefaultReconcilePassTimeout,
 		handler.DefaultReconcileInterval,

@@ -100,6 +100,25 @@ func (s *TaskStore) Delete(id lib.TaskIdentifier) {
 	delete(s.tasks, id)
 }
 
+// DeleteIfCurrentJob removes the entry only while it still names jobName, and
+// reports whether it did.
+//
+// A caller that decides an entry is stale has read it, done I/O (a cluster
+// lookup), and only then deletes. In that window a spawn can store a NEW entry
+// for a new Job; an unconditional delete would drop it, leaving that Job
+// unclaimed and invisible to the release path — the duplicate this whole
+// mechanism exists to prevent. Comparing the Job name closes that window.
+func (s *TaskStore) DeleteIfCurrentJob(id lib.TaskIdentifier, jobName string) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	task, ok := s.tasks[id]
+	if !ok || task.Frontmatter.CurrentJob() != jobName {
+		return false
+	}
+	delete(s.tasks, id)
+	return true
+}
+
 // Snapshot returns a shallow copy of the current task map for read-only iteration.
 // Safe to call concurrently with Store/Delete; the returned map is owned by the caller.
 func (s *TaskStore) Snapshot() map[lib.TaskIdentifier]lib.Task {

@@ -6,6 +6,7 @@ package pkg
 
 import (
 	"context"
+	"time"
 
 	lib "github.com/bborbe/agent"
 )
@@ -15,4 +16,13 @@ import (
 // a terminal Job can release the claim taken before the Job was created.
 type ClaimReleaser interface {
 	ReleaseTaskClaim(ctx context.Context, taskID lib.TaskIdentifier)
+	// ReleaseTaskClaimAfterSuccess holds the claim until SuccessGracePeriod has
+	// elapsed since completedAt, then releases it. A failed Job must call
+	// ReleaseTaskClaim instead: a retry belongs to this cluster and delaying its
+	// claim release would only delay the retry.
+	ReleaseTaskClaimAfterSuccess(
+		ctx context.Context,
+		taskID lib.TaskIdentifier,
+		completedAt time.Time,
+	)
 }

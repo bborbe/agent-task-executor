@@ -76,13 +76,14 @@ var _ = Describe("claim release at the Job-watcher end points", func() {
 			harness.watcher().
 				HandleJob(ctx, terminalJob("job-a", "task-a", succeededCondition()))
 
-			Expect(harness.client.DeleteCallCount()).To(Equal(1))
-			_, key, sha := harness.client.DeleteArgsForCall(0)
-			Expect(key).To(Equal("claims/task/task-a"))
-			Expect(sha).To(Equal(shaPut("task-a")))
-			expectClaimDelta(before, snapshotClaims(), map[string]float64{"released": 1})
+			// A succeeded Job no longer deletes its claim: it is held for
+			// claim.SuccessGracePeriod, so a peer cannot claim the task while the
+			// result is still on its way to the vault. The release that follows the
+			// window is pinned by TestReleaseAfterSuccessHoldsTheClaimAgainstAPeer.
+			Expect(harness.client.DeleteCallCount()).To(Equal(0))
+			expectClaimDelta(before, snapshotClaims(), map[string]float64{})
 			Expect(heldTaskIDs(manager)).To(ContainElement("task-b"))
-			Expect(heldTaskIDs(manager)).NotTo(ContainElement("task-a"))
+			Expect(heldTaskIDs(manager)).To(ContainElement("task-a"))
 		})
 
 		It("AC1(a) releases on success even when the task store holds no entry", func() {
@@ -92,11 +93,8 @@ var _ = Describe("claim release at the Job-watcher end points", func() {
 			harness.watcher().
 				HandleJob(ctx, terminalJob("job-a", "task-a", succeededCondition()))
 
-			Expect(harness.client.DeleteCallCount()).To(Equal(1))
-			_, key, sha := harness.client.DeleteArgsForCall(0)
-			Expect(key).To(Equal("claims/task/task-a"))
-			Expect(sha).To(Equal(shaPut("task-a")))
-			expectClaimDelta(before, snapshotClaims(), map[string]float64{"released": 1})
+			Expect(harness.client.DeleteCallCount()).To(Equal(0))
+			expectClaimDelta(before, snapshotClaims(), map[string]float64{})
 		})
 
 		It("does not release the claim of a newer Job on a stale terminal event", func() {
@@ -128,8 +126,8 @@ var _ = Describe("claim release at the Job-watcher end points", func() {
 			harness.watcher().
 				HandleJob(ctx, terminalJob("job-a", "task-a", succeededCondition()))
 
-			Expect(harness.client.DeleteCallCount()).To(Equal(1))
-			expectClaimDelta(before, snapshotClaims(), map[string]float64{"released": 1})
+			Expect(harness.client.DeleteCallCount()).To(Equal(0))
+			expectClaimDelta(before, snapshotClaims(), map[string]float64{})
 		})
 
 		It("AC1(b) releases only the claim of the Job that failed", func() {
@@ -157,8 +155,10 @@ var _ = Describe("claim release at the Job-watcher end points", func() {
 			harness.client.DeleteReturnsOnCall(0, stderrors.New("git-rest throttled"))
 			before := snapshotClaims()
 
+			// A FAILED Job still releases at once — only a success holds — so this
+			// stays the spec for "a release that failed is retried on the next tick".
 			harness.watcher().
-				HandleJob(ctx, terminalJob("job-a", "task-a", succeededCondition()))
+				HandleJob(ctx, terminalJob("job-a", "task-a", failedCondition("OOMKilled")))
 
 			Expect(harness.client.DeleteCallCount()).To(Equal(1))
 			expectClaimDelta(before, snapshotClaims(), map[string]float64{"error": 1})

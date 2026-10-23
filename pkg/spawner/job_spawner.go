@@ -64,6 +64,12 @@ type JobSpawner interface {
 	// over ~70 eligible tasks consumed its whole budget in client-go's default
 	// 5 QPS rate limiter before reaching the spawn.
 	ListActiveJobs(ctx context.Context, assignee string) (map[lib.TaskIdentifier]bool, error)
+	// JobExists reports whether a Job with this name still exists in this
+	// cluster's namespace. It answers the question IsJobActive cannot: a Job that
+	// finished and was garbage-collected is gone from here, while one another
+	// cluster created was never here at all. The spawn guard uses it to tell a
+	// live foreign Job from a stale entry in this executor's own store.
+	JobExists(ctx context.Context, jobName string) (bool, error)
 }
 
 // NewJobSpawner creates a new JobSpawner backed by the K8s batch/v1 API.
@@ -226,6 +232,28 @@ func (s *jobSpawner) IsJobActive(
 		return true, nil
 	}
 	return false, nil
+}
+
+// JobExists reports whether the named Job still exists in this namespace.
+//
+// A Get rather than a list, because the caller already knows the name, and it
+// runs only for a task whose frontmatter names a Job this cluster does not
+// consider active — a rare, transient state. NotFound is a plain false; any
+// other error is returned so the caller can keep suppressing rather than risk
+// spawning a duplicate on a failed read.
+func (s *jobSpawner) JobExists(ctx context.Context, jobName string) (bool, error) {
+	if jobName == "" {
+		return false, nil
+	}
+	_, err := s.kubeClient.BatchV1().Jobs(s.namespace.String()).
+		Get(ctx, jobName, metav1.GetOptions{})
+	if err == nil {
+		return true, nil
+	}
+	if k8serrors.IsNotFound(err) {
+		return false, nil
+	}
+	return false, errors.Wrapf(ctx, err, "get job %s", jobName)
 }
 
 // CountActiveJobs returns how many non-terminal Jobs are running for the assignee.

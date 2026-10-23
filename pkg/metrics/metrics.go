@@ -146,6 +146,7 @@ func init() {
 	TaskEventsTotal.WithLabelValues("skipped_stage").Add(0)
 	TaskEventsTotal.WithLabelValues("skipped_foreign_cluster").Add(0)
 	TaskEventsTotal.WithLabelValues("skipped_foreign_vault").Add(0)
+	TaskEventsTotal.WithLabelValues("skipped_view_not_ready").Add(0)
 	TaskEventsTotal.WithLabelValues("skipped_untagged").Add(0)
 	TaskEventsTotal.WithLabelValues("skipped_trigger_cap").Add(0)
 	TaskEventsTotal.WithLabelValues("error").Add(0)

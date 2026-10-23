@@ -155,17 +155,66 @@ func (w *jobWatcher) releaseClaim(
 	taskID lib.TaskIdentifier,
 	jobName string,
 ) {
-	if w.claimReleaser == nil {
+	if !w.claimReleaseAllowed(taskID, jobName) {
 		return
+	}
+	w.claimReleaser.ReleaseTaskClaim(ctx, taskID)
+}
+
+// releaseClaimAfterSuccess holds the claim for the success grace window rather
+// than deleting it, so a peer cluster cannot claim the task while this cluster's
+// result is still on its way to the vault. See ReleaseTaskClaimAfterSuccess.
+func (w *jobWatcher) releaseClaimAfterSuccess(
+	ctx context.Context,
+	taskID lib.TaskIdentifier,
+	jobName string,
+	completedAt time.Time,
+) {
+	if !w.claimReleaseAllowed(taskID, jobName) {
+		return
+	}
+	w.claimReleaser.ReleaseTaskClaimAfterSuccess(ctx, taskID, completedAt)
+}
+
+// releaseSucceededJobClaim releases the claim of a succeeded Job, holding it for
+// the success grace window instead of deleting it.
+//
+// A succeeded Job is not yet a finished task: the agent published its result, but
+// the vault learns about it on the controller's own cycle, and until it does a
+// peer cluster still reads the task as eligible with no record that it just ran.
+// Holding the claim across that gap makes the peer's Claim fail rather than
+// running the task a second time. CompletionTime is what the hold is measured
+// from; a Complete Job always has one, and without it the safe fallback is the
+// immediate release rather than an invented timestamp.
+func (w *jobWatcher) releaseSucceededJobClaim(
+	ctx context.Context,
+	taskID lib.TaskIdentifier,
+	job *batchv1.Job,
+) {
+	if job.Status.CompletionTime == nil {
+		w.releaseClaim(ctx, taskID, job.Name)
+		return
+	}
+	w.releaseClaimAfterSuccess(ctx, taskID, job.Name, job.Status.CompletionTime.Time)
+}
+
+// claimReleaseAllowed reports whether this Job's terminal event may release the
+// task's claim at all, and logs why when it may not.
+func (w *jobWatcher) claimReleaseAllowed(
+	taskID lib.TaskIdentifier,
+	jobName string,
+) bool {
+	if w.claimReleaser == nil {
+		return false
 	}
 	if task, ok := w.taskStore.Load(taskID); ok && !w.tracksJob(task, jobName) {
 		glog.V(2).Infof(
 			"skip claim release for task %s: job %s superseded by %s",
 			taskID, jobName, task.Frontmatter.CurrentJob(),
 		)
-		return
+		return false
 	}
-	w.claimReleaser.ReleaseTaskClaim(ctx, taskID)
+	return true
 }
 
 func (w *jobWatcher) HandleJob(ctx context.Context, job *batchv1.Job) {
@@ -208,7 +257,7 @@ func (w *jobWatcher) HandleJob(ctx context.Context, job *batchv1.Job) {
 				job.Status.CompletionTime.Time,
 			)
 		}
-		w.releaseClaim(ctx, taskID, job.Name)
+		w.releaseSucceededJobClaim(ctx, taskID, job)
 		if task, ok := w.taskStore.Load(taskID); ok {
 			w.handleSucceeded(ctx, taskID, task, job)
 		}

@@ -39,6 +39,20 @@ type FakeJobSpawner struct {
 		result1 bool
 		result2 error
 	}
+	JobExistsStub        func(context.Context, string) (bool, error)
+	jobExistsMutex       sync.RWMutex
+	jobExistsArgsForCall []struct {
+		arg1 context.Context
+		arg2 string
+	}
+	jobExistsReturns struct {
+		result1 bool
+		result2 error
+	}
+	jobExistsReturnsOnCall map[int]struct {
+		result1 bool
+		result2 error
+	}
 	ListActiveJobsStub        func(context.Context, string) (map[lib.TaskIdentifier]bool, error)
 	listActiveJobsMutex       sync.RWMutex
 	listActiveJobsArgsForCall []struct {
@@ -197,6 +211,71 @@ func (fake *FakeJobSpawner) IsJobActiveReturnsOnCall(i int, result1 bool, result
 		})
 	}
 	fake.isJobActiveReturnsOnCall[i] = struct {
+		result1 bool
+		result2 error
+	}{result1, result2}
+}
+
+func (fake *FakeJobSpawner) JobExists(arg1 context.Context, arg2 string) (bool, error) {
+	fake.jobExistsMutex.Lock()
+	ret, specificReturn := fake.jobExistsReturnsOnCall[len(fake.jobExistsArgsForCall)]
+	fake.jobExistsArgsForCall = append(fake.jobExistsArgsForCall, struct {
+		arg1 context.Context
+		arg2 string
+	}{arg1, arg2})
+	stub := fake.JobExistsStub
+	fakeReturns := fake.jobExistsReturns
+	fake.recordInvocation("JobExists", []interface{}{arg1, arg2})
+	fake.jobExistsMutex.Unlock()
+	if stub != nil {
+		return stub(arg1, arg2)
+	}
+	if specificReturn {
+		return ret.result1, ret.result2
+	}
+	return fakeReturns.result1, fakeReturns.result2
+}
+
+func (fake *FakeJobSpawner) JobExistsCallCount() int {
+	fake.jobExistsMutex.RLock()
+	defer fake.jobExistsMutex.RUnlock()
+	return len(fake.jobExistsArgsForCall)
+}
+
+func (fake *FakeJobSpawner) JobExistsCalls(stub func(context.Context, string) (bool, error)) {
+	fake.jobExistsMutex.Lock()
+	defer fake.jobExistsMutex.Unlock()
+	fake.JobExistsStub = stub
+}
+
+func (fake *FakeJobSpawner) JobExistsArgsForCall(i int) (context.Context, string) {
+	fake.jobExistsMutex.RLock()
+	defer fake.jobExistsMutex.RUnlock()
+	argsForCall := fake.jobExistsArgsForCall[i]
+	return argsForCall.arg1, argsForCall.arg2
+}
+
+func (fake *FakeJobSpawner) JobExistsReturns(result1 bool, result2 error) {
+	fake.jobExistsMutex.Lock()
+	defer fake.jobExistsMutex.Unlock()
+	fake.JobExistsStub = nil
+	fake.jobExistsReturns = struct {
+		result1 bool
+		result2 error
+	}{result1, result2}
+}
+
+func (fake *FakeJobSpawner) JobExistsReturnsOnCall(i int, result1 bool, result2 error) {
+	fake.jobExistsMutex.Lock()
+	defer fake.jobExistsMutex.Unlock()
+	fake.JobExistsStub = nil
+	if fake.jobExistsReturnsOnCall == nil {
+		fake.jobExistsReturnsOnCall = make(map[int]struct {
+			result1 bool
+			result2 error
+		})
+	}
+	fake.jobExistsReturnsOnCall[i] = struct {
 		result1 bool
 		result2 error
 	}{result1, result2}

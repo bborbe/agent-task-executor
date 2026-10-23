@@ -62,6 +62,11 @@ type TakeoverResult struct {
 type LeaseManager interface {
 	Claim(ctx context.Context, key string, taskID string) (*HeldClaim, error)
 	Release(ctx context.Context, key string) error
+	// ReleaseAfterSuccess releases the claim like Release, but not before
+	// SuccessGracePeriod has elapsed since completedAt. Until then the claim
+	// stays held and keeps being renewed, so a peer cluster's Claim gets a 409
+	// instead of a task another cluster has already run.
+	ReleaseAfterSuccess(ctx context.Context, key string, completedAt libtime.DateTime) error
 	Takeover(ctx context.Context, key string, taskID string) (*TakeoverResult, error)
 	Tick(ctx context.Context) error
 	Run(ctx context.Context) error
@@ -113,6 +118,10 @@ type heldClaim struct {
 	pendingDeletionPath string
 	releasePending      bool
 	needsRunningCheck   bool
+	// holdUntil is set by ReleaseAfterSuccess: the claim stays held, and keeps
+	// being renewed, until this instant, so a peer cannot take the task over in
+	// the window between a Job succeeding and its result reaching the vault.
+	holdUntil libtime.DateTime
 }
 
 type leaseManager struct {
@@ -298,6 +307,57 @@ func (m *leaseManager) Release(ctx context.Context, key string) error {
 	if !ok {
 		return nil
 	}
+	return m.releaseLocked(ctx, key, held)
+}
+
+// ReleaseAfterSuccess is Release, but it refuses to let go until
+// SuccessGracePeriod has elapsed since completedAt.
+//
+// The gap it covers: a succeeded Job means the agent published its result, but
+// the vault learns about it on the controller's own cycle. In that gap a peer
+// cluster still reads the task as eligible and has no record that it just ran —
+// the spawn path's success record is per-pod memory, so a peer that starts cold
+// has never heard of it. The claim is the only artefact both clusters share, so
+// holding it is what makes the peer's Claim fail (409) instead of running the
+// task a second time.
+//
+// The hold is bounded on both sides. It never outlives the grace window: once
+// holdUntil passes, the next Tick releases it through releaseExpiredHolds. And
+// it cannot outlive the lease — a held claim keeps being renewed, so a renewal
+// failure fences it exactly as for any other held claim.
+func (m *leaseManager) ReleaseAfterSuccess(
+	ctx context.Context,
+	key string,
+	completedAt libtime.DateTime,
+) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	held, ok := m.held[key]
+	if !ok {
+		return nil
+	}
+	now := m.currentDateTime.Now().Time()
+	holdUntil := completedAt.Time().Add(SuccessGracePeriod)
+	if holdUntil.After(now.Add(SuccessGracePeriod)) {
+		// A completion stamped in the future — clock skew between the API server
+		// and this pod — must not stretch the hold. Cap it at one window from now.
+		holdUntil = now.Add(SuccessGracePeriod)
+	}
+	if now.Before(holdUntil) {
+		held.holdUntil = libtime.DateTime(holdUntil)
+		glog.Infof(
+			"event=release_deferred_success_grace key=%s task_id=%s hold_until=%s",
+			key,
+			held.taskID,
+			holdUntil.UTC().Format(stdtime.RFC3339),
+		)
+		return nil
+	}
+	return m.releaseLocked(ctx, key, held)
+}
+
+// releaseLocked deletes one held claim's ref. The caller holds m.mu.
+func (m *leaseManager) releaseLocked(ctx context.Context, key string, held *heldClaim) error {
 	running, err := m.jobControl.IsJobRunning(ctx, held.taskID)
 	if err != nil {
 		countClaim("error")

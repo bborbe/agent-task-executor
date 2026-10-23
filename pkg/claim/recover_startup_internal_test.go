@@ -13,6 +13,8 @@ import (
 	"sync"
 	"testing"
 	"time"
+
+	libtime "github.com/bborbe/time"
 )
 
 // recoverStub is a LeaseManager whose only interesting method is Recover.
@@ -45,6 +47,12 @@ func (s *recoverStub) Claim(context.Context, string, string) (*HeldClaim, error)
 }
 
 func (s *recoverStub) Release(context.Context, string) error { return nil }
+
+func (s *recoverStub) ReleaseAfterSuccess(
+	context.Context, string, libtime.DateTime,
+) error {
+	return nil
+}
 
 func (s *recoverStub) Takeover(context.Context, string, string) (*TakeoverResult, error) {
 	return nil, nil
