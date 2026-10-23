@@ -164,6 +164,10 @@ var _ = Describe("A cluster pin outside its stage pool", func() {
 
 			Expect(out).To(ContainSubstring("event=pin_outside_pool"))
 			Expect(out).To(ContainSubstring("pin-canary-1"))
+			// The cluster and stage are the diagnostic payload that makes a dead
+			// pin actionable; without them the line names no pin to go and fix.
+			Expect(out).To(ContainSubstring("cluster=sun"))
+			Expect(out).To(ContainSubstring("stage=dev"))
 			Expect(pinCount()).To(Equal(beforePin + 1))
 			// The report replaces skipped_stage for this branch: the metric's
 			// `result` label carries one outcome per event, so a second
@@ -215,10 +219,10 @@ var _ = Describe("A cluster pin outside its stage pool", func() {
 			Expect(stageSkipCount()).To(Equal(beforeStage + 1))
 		})
 
-		It("keeps skipped_stage when the pin names a cluster other than this executor", func() {
-			// A foreign pin never reaches the stage filter (the foreign-cluster
-			// skip returns first), so this asserts the guard cannot be reached by
-			// that route either.
+		It("does not report a pin naming a cluster other than this executor", func() {
+			// A foreign pin never reaches the stage filter — skipForeignCluster
+			// returns first and counts skipped_foreign_cluster — so this asserts
+			// the pin report cannot be reached by that route.
 			task := routedTask(lib.TaskFrontmatter{
 				"status":   "in_progress",
 				"phase":    string(domain.TaskPhaseExecution),
@@ -228,10 +232,16 @@ var _ = Describe("A cluster pin outside its stage pool", func() {
 			})
 
 			beforePin := pinCount()
+			beforeForeign := testutil.ToFloat64(
+				metrics.TaskEventsTotal.WithLabelValues("skipped_foreign_cluster"),
+			)
 
 			Expect(h.ConsumeMessage(ctx, buildMsg(task))).To(BeNil())
 
 			Expect(pinCount()).To(Equal(beforePin))
+			Expect(testutil.ToFloat64(
+				metrics.TaskEventsTotal.WithLabelValues("skipped_foreign_cluster"),
+			)).To(Equal(beforeForeign + 1))
 		})
 	})
 
@@ -258,6 +268,8 @@ var _ = Describe("A cluster pin outside its stage pool", func() {
 			})
 
 			Expect(out).To(ContainSubstring("event=pin_outside_pool"))
+			Expect(out).To(ContainSubstring("cluster=sun"))
+			Expect(out).To(ContainSubstring("stage=dev"))
 			Expect(pinCount()).To(Equal(beforePin + 1))
 			Expect(fakeSpawner.SpawnJobCallCount()).To(Equal(0))
 		})
