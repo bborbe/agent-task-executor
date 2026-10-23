@@ -2,6 +2,10 @@
 
 All notable changes to this project will be documented in this file.
 
+## Unreleased
+
+- fix: **a `current_job` that names another cluster's Job is no longer treated as finished.** `current_job` lives in the shared vault frontmatter, so an executor can read a Job name that another cluster created, while `IsJobActive` only lists its own cluster's Jobs — "not active here" was read as "finished" and authorised the respawn. On 2026-10-22 task `94c1801c` ran on sun and nuke prod concurrently for 2 m 33 s that way. A dispatch pass now suppresses the spawn and re-defers when this executor's store still names a different Job than the frontmatter does, counting `skipped_foreign_job`. The no-store-entry case keeps the previous behaviour: nothing local distinguishes a foreign Job from a finished one there, and bounding it by the Job's deadline would withhold a legitimate respawn for up to 30 minutes.
+
 ## v0.30.3
 
 - fix: **startup recovery no longer shuts the service down.** v0.30.2 ran `Recover` from a run func that returned as soon as recovery finished, and `service.Run` wraps every run func in `run.CancelOnFirstFinishWait` — it cancels all the others as soon as any one completes. The recovery step therefore cancelled the lease loop, the HTTP server and the cron a few seconds after boot: every executor on nuke dev, nuke prod and sun exited **0** with `claim lease tick failed: context canceled` followed by `application finished`, leaving the previous ReplicaSet to serve traffic. The step now recovers once and then holds until the context is cancelled, like every other run func. Two regression tests pin it — one at the claim layer, one at the factory — asserting the recover func does not return while the service context is live.
