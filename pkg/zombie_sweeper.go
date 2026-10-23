@@ -40,10 +40,11 @@ type ZombieSweeper interface {
 }
 
 // NewZombieSweeper creates a ZombieSweeper. The JobWatcher is held by reference
-// (not its lister) because the lister is only populated after JobWatcher.Run
-// completes its cache sync; service.Run starts all components concurrently, so
-// extracting the lister at wiring time would capture nil. SweepOnce resolves
-// the lister lazily on every tick and skips the tick if it is not yet ready.
+// (not its lister) because a namespace's lister is only populated after that
+// namespace's cache syncs; service.Run starts all components concurrently, so
+// extracting a lister at wiring time would capture nil. SweepOnce resolves each
+// task's lister from the namespace its Job lives in and skips only that task
+// when the namespace's cache is not yet ready.
 func NewZombieSweeper(
 	jobWatcher JobWatcher,
 	namespace libk8s.Namespace,
@@ -115,15 +116,6 @@ func (s *zombieSweeper) Run(ctx context.Context) error {
 }
 
 func (s *zombieSweeper) SweepOnce(ctx context.Context) error {
-	// Resolve the Pod lister lazily — JobWatcher.Run populates it only after
-	// the informer cache has synced, and service.Run starts all components
-	// concurrently. If the lister is not yet available, skip this tick rather
-	// than publishing spurious failures.
-	lister := s.jobWatcher.PodLister()
-	if lister == nil {
-		glog.V(2).Infof("sweep skipped: pod lister not yet synced")
-		return nil
-	}
 	snapshot := s.taskStore.Snapshot()
 	now := s.currentDateTime.Now().Time()
 	// Fetch configs ONCE per tick — used by taskDeadline() for every task in
@@ -151,7 +143,16 @@ func (s *zombieSweeper) SweepOnce(ctx context.Context) error {
 		if elapsed < deadline {
 			continue
 		}
-		reason := s.classify(lister, taskID, now)
+		namespace := resolveTaskNamespace(ctx, s.namespace, task, cfgs)
+		lister := s.jobWatcher.PodLister(namespace)
+		if lister == nil {
+			glog.V(2).Infof(
+				"zombie sweeper: task %s namespace %s pod lister not synced; skipping",
+				taskID, namespace,
+			)
+			continue
+		}
+		reason := s.classify(lister, namespace, taskID, now)
 		if reason == "" {
 			continue
 		}
@@ -168,6 +169,36 @@ func (s *zombieSweeper) SweepOnce(ctx context.Context) error {
 		)
 	}
 	return nil
+}
+
+// resolveTaskNamespace returns the namespace the task's Job lives in. It uses
+// the first Config whose assignee matches the task, preserving the existing
+// tie-break when several Configs share an assignee. A task whose assignee
+// matches no Config, or whose matching Config has an unresolvable
+// jobNamespace, falls back to the executor namespace — today's behaviour.
+func resolveTaskNamespace(
+	ctx context.Context,
+	executorNamespace libk8s.Namespace,
+	task lib.Task,
+	cfgs []agentv1.Config,
+) libk8s.Namespace {
+	assignee := task.Frontmatter.Assignee().String()
+	for _, cfg := range cfgs {
+		if cfg.Spec.Assignee != assignee {
+			continue
+		}
+		namespace, err := ResolveJobNamespace(ctx, executorNamespace, cfg.Spec.JobNamespace)
+		if err != nil {
+			glog.Errorf(
+				"zombie sweeper: config %s: %v; falling back to executor namespace",
+				cfg.Name,
+				err,
+			)
+			return executorNamespace
+		}
+		return namespace
+	}
+	return executorNamespace
 }
 
 func (s *zombieSweeper) taskDeadline(task lib.Task, cfgs []agentv1.Config) time.Duration {
@@ -201,13 +232,14 @@ func (s *zombieSweeper) resolveSweeperInterval(ctx context.Context) (time.Durati
 // we MUST NOT issue API LIST calls here.
 func (s *zombieSweeper) classify(
 	lister corev1listers.PodLister,
+	namespace libk8s.Namespace,
 	taskID lib.TaskIdentifier,
 	now time.Time,
 ) ZombieReason {
 	selector := labels.SelectorFromSet(labels.Set{
 		"agent.benjamin-borbe.de/task-id": string(taskID),
 	})
-	pods, err := lister.Pods(s.namespace.String()).List(selector)
+	pods, err := lister.Pods(namespace.String()).List(selector)
 	if err != nil {
 		glog.Errorf("zombie sweeper: lister pods for task %s: %v", taskID, err)
 		return ""

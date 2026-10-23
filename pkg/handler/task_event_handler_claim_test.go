@@ -148,6 +148,7 @@ func (h *claimHarness) watcher() pkg.JobWatcher {
 	return pkg.NewJobWatcher(
 		fake.NewClientset(),
 		"test-ns",
+		pkg.NewEventHandlerConfig(),
 		h.taskStore,
 		h.publisher,
 		h.eventHandler,
