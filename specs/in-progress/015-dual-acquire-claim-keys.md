@@ -1,8 +1,9 @@
 ---
-status: prompted
+status: verifying
 approved: "2026-10-23T19:15:49Z"
 generating: "2026-10-23T19:18:10Z"
 prompted: "2026-10-23T19:41:09Z"
+verifying: "2026-10-23T20:48:50Z"
 branch: dark-factory/dual-acquire-claim-keys
 ---
 
