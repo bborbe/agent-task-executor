@@ -93,6 +93,43 @@ equals its own name. For each entry:
 - A failed running check keeps the claim held and renewed, and the check is
   re-asked at every tick until it answers.
 - A claim of another cluster is never touched.
+- Keys under `claims/redrive/` are skipped before the cluster comparison, so a
+  streak ref is never adopted, renewed, fenced or released regardless of its
+  `cluster` value.
+
+## Streak refs
+
+A streak ref records how many consecutive times a task has been spawned at one
+phase. It lives in the same git-rest ref store as claims but is not a claim, and
+no lease-manager path treats it as one.
+
+- Key shape: `claims/redrive/<taskid>/<phase>/<n>`, where `n` is an integer
+  greater than or equal to 1. A task with no phase uses the phase component
+  `none`.
+- `cluster` is always the sentinel `redrive-streak`. It must never equal a real
+  executor cluster name.
+- `lease_until` is create time + 24 h. It is informational only: nothing renews
+  it and nothing expires a streak ref.
+- No lease-manager path acts on a streak ref. Restart recovery is the only path
+  that lists the whole `claims/` prefix, and it skips `claims/redrive/` keys
+  explicitly; renew, fence, takeover, release and audit act only on the
+  `claims/task/` and `claims/repo/` keys the executor derives itself, so they
+  never reach a streak ref. A streak ref therefore never triggers a fence and
+  never stops a task's Job.
+- The count is the number of consecutive spawns at one phase. Recording a spawn
+  at a new phase resets the streak by deleting the old phase's refs.
+- To remove a task's stored streak, an operator deletes its streak refs
+  through git-rest: list them with
+  `GET /api/v1/refs?prefix=claims/redrive/<taskid>` and delete each entry with
+  `DELETE /api/v1/refs/claims/redrive/<taskid>/<phase>/<n>?expected_sha=<sha>`.
+- Nothing reaps streak refs on its own. A task whose refs are never cleared —
+  its file deleted, or a clear whose deletes failed (logged as
+  `event=redrive_streak_write_failed`) — leaves them behind. They are inert only
+  while no executor drives that task id: refs are keyed by task id alone, so a
+  task reassigned to another vault, or re-opened after a failed clear, inherits
+  the same stored count. Remove them with the list-and-delete
+  above; `GET /api/v1/refs?prefix=claims/redrive` lists every remaining streak
+  ref.
 
 ## Lost-response recovery
 
