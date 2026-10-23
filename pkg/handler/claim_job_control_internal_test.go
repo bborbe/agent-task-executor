@@ -11,10 +11,13 @@ import (
 	"context"
 	"testing"
 
+	lib "github.com/bborbe/agent"
 	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes/fake"
+
+	pkg "github.com/bborbe/agent-task-executor/pkg"
 )
 
 // testJob returns a Job carrying taskID's label with the given conditions.
@@ -75,7 +78,7 @@ func TestKubeJobControlIsJobRunning(t *testing.T) {
 				}
 			}
 
-			got, err := NewKubeJobControl(client, "test-ns").IsJobRunning(ctx, "task-1")
+			got, err := NewKubeJobControl(client, "test-ns", nil, nil).IsJobRunning(ctx, "task-1")
 			if err != nil {
 				t.Fatalf("IsJobRunning: %v", err)
 			}
@@ -93,7 +96,7 @@ func TestKubeJobControlDeleteJob(t *testing.T) {
 		testJob("job-2", "task-1"),
 		testJob("job-3", "task-2"),
 	)
-	control := NewKubeJobControl(client, "test-ns")
+	control := NewKubeJobControl(client, "test-ns", nil, nil)
 
 	if err := control.DeleteJob(ctx, "task-1"); err != nil {
 		t.Fatalf("DeleteJob: %v", err)
@@ -111,5 +114,64 @@ func TestKubeJobControlDeleteJob(t *testing.T) {
 	// Job that is already gone.
 	if err := control.DeleteJob(ctx, "task-absent"); err != nil {
 		t.Fatalf("DeleteJob for an absent task: %v", err)
+	}
+}
+
+// staticResolver is a ConfigResolver that answers every lookup with one Config.
+type staticResolver struct{ config pkg.AgentConfiguration }
+
+func (r staticResolver) Resolve(context.Context, string) (pkg.AgentConfiguration, error) {
+	return r.config, nil
+}
+
+func (r staticResolver) ResolveByTaskType(
+	context.Context,
+	string,
+	string,
+) (pkg.AgentConfiguration, error) {
+	return r.config, nil
+}
+
+// TestKubeJobControlFollowsJobNamespace pins the fence to the namespace the
+// Config put the Job in. Without it IsJobRunning reads false and DeleteJob
+// deletes nothing for a Job in the sandbox, so a claim that cannot renew leaves
+// its Job running unclaimed — the duplicate the claims exist to prevent.
+func TestKubeJobControlFollowsJobNamespace(t *testing.T) {
+	ctx := context.Background()
+	const sandbox = "dev-agents-sandbox"
+
+	sandboxJob := testJob("job-1", "task-1")
+	sandboxJob.Namespace = sandbox
+
+	client := fake.NewClientset(sandboxJob)
+	store := pkg.NewTaskStore()
+	store.Store("task-1", lib.Task{
+		TaskIdentifier: "task-1",
+		Frontmatter:    lib.TaskFrontmatter{"assignee": "claude"},
+	})
+	control := NewKubeJobControl(
+		client,
+		"test-ns",
+		staticResolver{config: pkg.AgentConfiguration{Assignee: "claude", JobNamespace: sandbox}},
+		store,
+	)
+
+	running, err := control.IsJobRunning(ctx, "task-1")
+	if err != nil {
+		t.Fatalf("IsJobRunning: %v", err)
+	}
+	if !running {
+		t.Fatal("IsJobRunning = false for a Job in the sandbox namespace")
+	}
+
+	if err := control.DeleteJob(ctx, "task-1"); err != nil {
+		t.Fatalf("DeleteJob: %v", err)
+	}
+	remaining, err := client.BatchV1().Jobs(sandbox).List(ctx, metav1.ListOptions{})
+	if err != nil {
+		t.Fatalf("list jobs: %v", err)
+	}
+	if len(remaining.Items) != 0 {
+		t.Fatalf("expected the sandbox Job to be deleted, got %v", remaining.Items)
 	}
 }
