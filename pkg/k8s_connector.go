@@ -73,6 +73,12 @@ type k8sConnector struct {
 // (openclaw/personal/trading) installs this same object on start.
 const crdName = "configs.agent.benjamin-borbe.de"
 
+// crdDNS1123Label is the DNS-1123 label shape Kubernetes requires of a
+// namespace name. jobNamespace is used verbatim as a target namespace, so an
+// unvalidated value would pass admission, resolve cleanly, and fail only at
+// Jobs(...).Create with a 422 the operator has to correlate by hand.
+const crdDNS1123Label = "^[a-z0-9]([-a-z0-9]*[a-z0-9])?$"
+
 // SetupCustomResourceDefinition installs or updates the Config CRD on the cluster.
 func (c *k8sConnector) SetupCustomResourceDefinition(ctx context.Context) error {
 	clientset, err := c.crdBuilder(c.config)
@@ -334,17 +340,8 @@ func configSpecProperties() map[string]apiextensionsv1.JSONSchemaProps {
 		"configMapName":      {Type: "string"},
 		"configMapMountPath": {Type: "string"},
 		"configMapItems":     configMapItemsSchema(),
-		"priorityClassName": {
-			Type:    "string",
-			Pattern: "^[a-z0-9]([-a-z0-9]*[a-z0-9])?$",
-		},
-		// Same DNS-1123 shape as a namespace must have: without it a padded or
-		// invalid value passes admission, resolves cleanly, and fails only at
-		// Jobs(...).Create with a 422 the operator has to correlate by hand.
-		"jobNamespace": {
-			Type:    "string",
-			Pattern: "^[a-z0-9]([-a-z0-9]*[a-z0-9])?$",
-		},
+		"priorityClassName": {Type: "string", Pattern: crdDNS1123Label},
+		"jobNamespace":    {Type: "string", Pattern: crdDNS1123Label},
 		"imagePullSecret": {Type: "string"},
 		// 0 = unlimited (see AgentConfiguration.MaxConcurrentJobs).
 		"maxConcurrentJobs": {Type: "integer", Minimum: &crdMinZero},
