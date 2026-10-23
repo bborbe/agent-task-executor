@@ -74,6 +74,12 @@ func CreateJobWatcher(
 // fences a claim whose renewals fail, and retries a release an end point could
 // not deliver. Whether a manager exists at all is decided at boot in main, so
 // this factory only wires the manager it is given.
+//
+// Every func returned here MUST block until ctx is done. service.Run wraps them
+// in run.CancelOnFirstFinishWait, which cancels the whole service as soon as any
+// one of them returns — so a one-shot step that returns once its work is done
+// takes the lease loop, the HTTP server and the cron down with it. v0.30.2
+// shipped exactly that and crash-looped all three clusters with a clean exit 0.
 func CreateClaimLifecycleRunFuncs(manager claim.LeaseManager) []run.Func {
 	return []run.Func{CreateClaimRecoverFunc(manager), manager.Run}
 }
@@ -85,11 +91,11 @@ func CreateClaimLifecycleRunFuncs(manager claim.LeaseManager) []run.Func {
 // running to its natural end — the duplicate this whole mechanism exists to
 // prevent. Every rollout replaces a pod, so this is not a rare path.
 //
-// The retry policy and the never-fail-the-boot rule live in
-// claim.RecoverAtStartup; this factory only wires it.
+// The retry policy, the never-fail-the-boot rule and the wait that keeps the run
+// group alive all live in claim.RunClaimRecovery; this factory only wires it.
 func CreateClaimRecoverFunc(manager claim.LeaseManager) run.Func {
 	return func(ctx context.Context) error {
-		return claim.RecoverAtStartup(ctx, manager)
+		return claim.RunClaimRecovery(ctx, manager)
 	}
 }
 
