@@ -1,8 +1,13 @@
 ---
-status: approved
+status: completed
 spec: [011-bug-redrive-streak-lost-across-clusters-and-restarts]
+summary: Wired the persisted redrive streak into the task event handler via the shared claim-ref client, added cross-instance/restart/fail-safe specs and the changelog entry.
+execution_id: agent-task-executor-redrive-streak-exec-024-spec-011-handler-persisted-redrive-cap
+dark-factory-version: v0.198.7
 created: "2026-10-23T09:27:00Z"
 queued: "2026-10-23T09:42:55Z"
+started: "2026-10-23T09:53:39Z"
+completed: "2026-10-23T10:01:26Z"
 branch: dark-factory/bug-redrive-streak-lost-across-clusters-and-restarts
 ---
 

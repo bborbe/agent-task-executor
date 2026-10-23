@@ -1,8 +1,9 @@
 ---
-status: prompted
+status: verifying
 approved: "2026-10-23T09:20:26Z"
 generating: "2026-10-23T09:22:53Z"
 prompted: "2026-10-23T09:37:49Z"
+verifying: "2026-10-23T10:01:26Z"
 branch: dark-factory/bug-redrive-streak-lost-across-clusters-and-restarts
 ---
 
@@ -87,7 +88,7 @@ The cap is documented as "the only [bound] that covers every path". Its accepted
 - [ ] **AC12** CHANGELOG carries the fix under Unreleased — evidence: `awk '/^## Unreleased/{f=1;next} /^## /{f=0} f' CHANGELOG.md | grep -c 1788bf3c` returns ≥1.
 - [ ] **AC13** **Post-Deploy (Rung-2):** on nuke dev, the restart leg of the repro is the discriminating check (pre-fix 5 spawns, post-fix 3): a fresh task forced to fail at one phase, with `rollout restart` after its 2nd Job ended, is spawned exactly 3 times and then capped, with no further spawn within 10 min of the 3rd Job ending — evidence: the `spawned job for task <id>` log lines (glog V(2)) counted on the pre-restart pod (captured before the restart) plus the post-restart pod sum to exactly 3; the post-restart pod logs ≥1 `event=redrive_capped task=<id> streak=3 cap=3` line (primary, task-specific evidence); and `executor_redrive_capped_total` on the post-restart pod is ≥1 higher than its baseline read right after the restart (secondary — counters reset on restart and are not task-specific).
     - `deploy_check:` `kubectlnukedev -n dev get deploy/agent-task-executor-personal -o jsonpath='{.spec.template.spec.containers[0].image}' | awk -F: '{print $NF}'`
-    - `deploy_target:` `v0.30.7`
+    - `deploy_target:` `v0.30.8`
 
 No new scenario: the cross-instance behaviour is reachable with two handler instances over a shared fake transport (AC7); the live run is the bug-workflow replay (AC13), not a scenario.
 
@@ -103,7 +104,7 @@ No new scenario: the cross-instance behaviour is reachable with two handler inst
 
 ### Operator-executable (runs on the host after PR merge and release, spec verification ladder)
 
-1. Deploy v0.30.7 to nuke dev; confirm the image tag with the `deploy_check:` above. Confirm claim mode and log level on the running Deployment: `kubectlnukedev -n dev get deploy/agent-task-executor-personal -o jsonpath='{.spec.template.spec.containers[0].env[?(@.name=="CLAIM_MODE")].value} {.spec.template.spec.containers[0].args}'` prints `on` and an arg `-v=2` or higher (V(2) is needed for the spawn line, V(1) for the cap line; `-v=2` as of 2026-10-23).
+1. Deploy v0.30.8 to nuke dev; confirm the image tag with the `deploy_check:` above. Confirm claim mode and log level on the running Deployment: `kubectlnukedev -n dev get deploy/agent-task-executor-personal -o jsonpath='{.spec.template.spec.containers[0].env[?(@.name=="CLAIM_MODE")].value} {.spec.template.spec.containers[0].args}'` prints `on` and an arg `-v=2` or higher (V(2) is needed for the spawn line, V(1) for the cap line; `-v=2` as of 2026-10-23).
 2. (After the restart in step 4, on the new pod) read the cap counter baseline: `kubectlnukedev -n dev get --raw "/api/v1/namespaces/dev/pods/<executor-pod>:9090/proxy/metrics" | grep '^executor_redrive_capped_total'`.
 3. Create a **fresh** dev task in the personal vault whose agent fails deterministically at one phase (no `ref`, no `max_triggers`).
 4. After the 2nd Job ends, save `kubectlnukedev -n dev logs deploy/agent-task-executor-personal | grep -c 'spawned job for task <id>'` (expect 2), then run `kubectlnukedev -n dev rollout restart deploy/agent-task-executor-personal`.

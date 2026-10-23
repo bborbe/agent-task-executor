@@ -191,3 +191,64 @@ func (noopJobControl) IsJobRunning(context.Context, string) (bool, error) {
 }
 
 func (noopJobControl) DeleteJob(context.Context, string) error { return nil }
+
+// TestRedriveStreakStoreSharesLeaseManagerClient pins that the streak store and
+// the lease manager are built from one claim-ref client instance, inside the
+// existing one-time construction.
+func TestRedriveStreakStoreSharesLeaseManagerClient(t *testing.T) {
+	ctx := context.Background()
+	calls := 0
+	client := &recordingClaimRefClient{}
+	h := &taskEventHandler{
+		claimMode: pkg.ClaimModeShadow,
+		cluster:   "self",
+		claimRefClientFactory: func() claim.ClaimRefClient {
+			calls++
+			return client
+		},
+		claimJobControl: noopJobControl{},
+		currentDateTime: libtime.NewCurrentDateTime(),
+	}
+
+	store, err := h.redriveStreakStore(ctx)
+	if err != nil {
+		t.Fatalf("unexpected store error: %v", err)
+	}
+	manager, err := h.ClaimLeaseManager(ctx)
+	if err != nil {
+		t.Fatalf("unexpected manager error: %v", err)
+	}
+	storeAgain, err := h.redriveStreakStore(ctx)
+	if err != nil {
+		t.Fatalf("unexpected store error on second call: %v", err)
+	}
+	managerAgain, err := h.ClaimLeaseManager(ctx)
+	if err != nil {
+		t.Fatalf("unexpected manager error on second call: %v", err)
+	}
+	if calls != 1 {
+		t.Fatalf("expected the factory to be called once, got %d", calls)
+	}
+	if store == nil || manager == nil {
+		t.Fatal("expected both the store and the manager to be constructed")
+	}
+	if store != storeAgain {
+		t.Fatal("expected the same store instance")
+	}
+	if manager != managerAgain {
+		t.Fatal("expected the same manager instance")
+	}
+
+	if _, err := store.Count(ctx, "tid-ac10", "execution"); err != nil {
+		t.Fatalf("unexpected store count error: %v", err)
+	}
+	if _, err := manager.Claim(ctx, "claims/task/tid-ac10", "tid-ac10"); err != nil {
+		t.Fatalf("unexpected claim error: %v", err)
+	}
+	if len(client.listCalls) != 1 {
+		t.Fatalf("expected one list call on the shared client, got %d", len(client.listCalls))
+	}
+	if len(client.putCalls) != 1 {
+		t.Fatalf("expected one put call on the shared client, got %d", len(client.putCalls))
+	}
+}

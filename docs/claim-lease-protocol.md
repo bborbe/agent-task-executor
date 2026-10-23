@@ -124,6 +124,16 @@ no lease-manager path treats it as one.
   the same stored count. Remove them with the list-and-delete
   above; `GET /api/v1/refs?prefix=claims/redrive` lists every remaining streak
   ref.
+- The executor clears a task's streak refs when it handles the task's terminal
+  state, and deletes the old phase's refs when it records a spawn at a new
+  phase.
+- The executor's cap is the larger of the stored count and its own in-memory
+  count at the task's current phase. Deleting the refs therefore un-caps a task
+  everywhere except on an executor that has itself counted 3 spawns at that
+  phase, which stays capped until it restarts or the task moves phase.
+- A task capped by the shared streak but not by this executor's memory is
+  reported as `deferred`, not `capped`, in the reconcile pass summary;
+  `executor_redrive_capped_total` counts every cap regardless.
 
 ## Lost-response recovery
 
