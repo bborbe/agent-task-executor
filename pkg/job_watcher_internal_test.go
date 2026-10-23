@@ -10,13 +10,13 @@ import (
 
 	lib "github.com/bborbe/agent"
 	"github.com/bborbe/cqrs/base"
+	libk8s "github.com/bborbe/k8s"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/labels"
-	k8sinformers "k8s.io/client-go/informers"
 	"k8s.io/client-go/kubernetes/fake"
 	corev1listers "k8s.io/client-go/listers/core/v1"
 )
@@ -44,7 +44,14 @@ var _ = Describe("jobWatcher backoff-limit pod detail", func() {
 			},
 			Content: lib.TaskContent("do the work"),
 		}
-		watcher = NewJobWatcher(fake.NewSimpleClientset(), "test-ns", taskStore, fakePublisher, nil)
+		watcher = NewJobWatcher(
+			fake.NewSimpleClientset(),
+			"test-ns",
+			NewEventHandlerConfig(),
+			taskStore,
+			fakePublisher,
+			nil,
+		)
 	})
 
 	makeJob := func(name string, taskID string, conditions ...batchv1.JobCondition) *batchv1.Job {
@@ -211,10 +218,7 @@ var _ = Describe("jobWatcher backoff-limit pod detail", func() {
 		It("publishes the bare pod_crash_no_stdout when the pod lister lookup fails", func() {
 			taskStore.Store(testTaskID, testTask)
 			job := makeJob("job-listererr", string(testTaskID), backoffCondition())
-			jw, ok := watcher.(*jobWatcher)
-			Expect(ok).To(BeTrue())
-			var lister corev1listers.PodLister = errorPodLister{}
-			jw.podLister.Store(&lister)
+			setPodListerOverride(watcher, "test-ns", errorPodLister{})
 
 			watcher.HandleJob(ctx, job)
 
@@ -258,32 +262,43 @@ var _ = Describe("jobWatcher backoff-limit pod detail", func() {
 	})
 })
 
-// newTestPodLister builds a corev1listers.PodLister backed by a fake informer
-// indexer seeded with the given pods, mirroring the pattern in
-// zombie_sweeper_test.go.
-func newTestPodLister(pods ...*corev1.Pod) corev1listers.PodLister {
-	fakeClient := fake.NewSimpleClientset()
-	informerFactory := k8sinformers.NewSharedInformerFactoryWithOptions(
-		fakeClient,
-		0,
-		k8sinformers.WithNamespace("test-ns"),
-	)
-	for _, pod := range pods {
-		_ = informerFactory.Core().V1().Pods().Informer().GetIndexer().Add(pod)
-	}
-	return informerFactory.Core().V1().Pods().Lister()
+// setPodLister inserts a synced fake informer for "test-ns" seeded with the
+// given pods (Run is never called in tests, so PodLister would otherwise
+// return nil).
+func setPodLister(w JobWatcher, pods ...*corev1.Pod) {
+	setPodListerForNamespace(w, "test-ns", pods...)
 }
 
-// setPodLister stores the given pods into the watcher's pod lister without
-// running the informer (Run is never called in tests, so PodLister would
-// otherwise return nil).
-func setPodLister(w JobWatcher, pods ...*corev1.Pod) {
-	lister := newTestPodLister(pods...)
+func setPodListerForNamespace(w JobWatcher, namespace string, pods ...*corev1.Pod) {
 	jw, ok := w.(*jobWatcher)
 	if !ok {
-		panic("setPodLister: watcher is not a *jobWatcher")
+		panic("setPodListerForNamespace: watcher is not a *jobWatcher")
 	}
-	jw.podLister.Store(&lister)
+	jw.mu.Lock()
+	defer jw.mu.Unlock()
+	jw.watched[libk8s.Namespace(namespace)] = true
+	jw.synced[libk8s.Namespace(namespace)] = true
+	jw.informers[libk8s.Namespace(namespace)] = &fakeNamespaceInformer{
+		synced:    true,
+		podLister: namespacePodLister(namespace, pods...),
+	}
+}
+
+// setPodListerOverride inserts a synced fake informer for namespace whose
+// lister is the supplied one, so a test can exercise a failing lister.
+func setPodListerOverride(w JobWatcher, namespace string, lister corev1listers.PodLister) {
+	jw, ok := w.(*jobWatcher)
+	if !ok {
+		panic("setPodListerOverride: watcher is not a *jobWatcher")
+	}
+	jw.mu.Lock()
+	defer jw.mu.Unlock()
+	jw.watched[libk8s.Namespace(namespace)] = true
+	jw.synced[libk8s.Namespace(namespace)] = true
+	jw.informers[libk8s.Namespace(namespace)] = &fakeNamespaceInformer{
+		synced:    true,
+		podLister: lister,
+	}
 }
 
 // errorPodLister is a corev1listers.PodLister stub whose namespace List fails,

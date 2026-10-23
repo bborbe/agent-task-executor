@@ -75,6 +75,7 @@ var _ = Describe("respawned-second-success race", func() {
 		watcher = pkg.NewJobWatcher(
 			fake.NewClientset(),
 			"test-ns",
+			pkg.NewEventHandlerConfig(),
 			taskStore,
 			fakeResultPublisher,
 			nil,
