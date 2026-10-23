@@ -88,6 +88,9 @@ func (h *taskEventHandler) createLeaseManager(
 	if err != nil {
 		return nil, errors.Wrapf(ctx, err, "create claim lease manager")
 	}
+	// Assigned only after the manager constructed, so a failed construction
+	// leaves the field nil rather than half-wiring the handler.
+	h.redriveStore = claim.NewRedriveStreakStore(refClient, h.currentDateTime)
 	return manager, nil
 }
 
