@@ -46,6 +46,12 @@ func (inactiveSpawner) ListActiveJobs(
 	return map[lib.TaskIdentifier]bool{}, nil
 }
 
+// JobExists reports the stored Job as still present — the foreign case: the Job
+// runs somewhere this cluster cannot see, so the guard must keep suppressing.
+func (inactiveSpawner) JobExists(context.Context, string) (bool, error) {
+	return true, nil
+}
+
 // currentJobTask is a task whose frontmatter names jobName, started startedAgo
 // before now.
 func currentJobTask(jobName string, startedAgo time.Duration) lib.Task {
@@ -88,7 +94,13 @@ func TestJobProvablyFinishedRejectsAnotherClustersJob(t *testing.T) {
 		},
 	})
 
-	if h.jobProvablyFinished(task, "pr-reviewer-agent-94c1801c-20261022205503") {
+	finished, err := h.jobProvablyFinished(
+		context.Background(), task, "pr-reviewer-agent-94c1801c-20261022205503",
+	)
+	if err != nil {
+		t.Fatalf("jobProvablyFinished returned %v; want nil", err)
+	}
+	if finished {
 		t.Fatal("provably finished = true for a Job this executor did not spawn; want false")
 	}
 }
@@ -101,7 +113,11 @@ func TestJobProvablyFinishedAcceptsItsOwnJob(t *testing.T) {
 	task := currentJobTask(jobName, 7*time.Minute)
 	h.taskStore.Store(task.TaskIdentifier, task)
 
-	if !h.jobProvablyFinished(task, jobName) {
+	finished, err := h.jobProvablyFinished(context.Background(), task, jobName)
+	if err != nil {
+		t.Fatalf("jobProvablyFinished returned %v; want nil", err)
+	}
+	if !finished {
 		t.Fatal("provably finished = false for a Job this executor spawned and saw end; want true")
 	}
 }
@@ -116,8 +132,57 @@ func TestJobProvablyFinishedWithoutStoreEntryKeepsPriorBehaviour(t *testing.T) {
 	h := newCurrentJobHandler()
 	task := currentJobTask("pr-reviewer-agent-94c1801c-20261022205503", 7*time.Minute)
 
-	if !h.jobProvablyFinished(task, "pr-reviewer-agent-94c1801c-20261022205503") {
+	finished, err := h.jobProvablyFinished(
+		context.Background(), task, "pr-reviewer-agent-94c1801c-20261022205503",
+	)
+	if err != nil {
+		t.Fatalf("jobProvablyFinished returned %v; want nil", err)
+	}
+	if !finished {
 		t.Fatal("provably finished = false with an empty store; want true (prior behaviour)")
+	}
+}
+
+// goneSpawner reports every named Job as absent from this cluster: the Job
+// finished and was garbage-collected before the informer observed a terminal
+// update, which is the leak the store can never clear by itself.
+type goneSpawner struct{ inactiveSpawner }
+
+func (goneSpawner) JobExists(context.Context, string) (bool, error) {
+	return false, nil
+}
+
+// TestJobProvablyFinishedClearsALeakedStoreEntry is the convergence guard. The
+// store entry is only cleared by the job informer processing a terminal event,
+// and the informer registers no DeleteFunc, so a Job GC'd before that event was
+// seen leaves an entry nothing removes. Without the self-heal the task is
+// suppressed on every pass, forever — silent, and indistinguishable from an idle
+// agent. With it, the cluster's own answer (the Job is gone) drops the entry and
+// the task respawns.
+func TestJobProvablyFinishedClearsALeakedStoreEntry(t *testing.T) {
+	h := newCurrentJobHandler()
+	h.jobSpawner = goneSpawner{}
+	task := currentJobTask("pr-reviewer-agent-94c1801c-20261022205503", 7*time.Minute)
+	h.taskStore.Store(task.TaskIdentifier, lib.Task{
+		TaskIdentifier: task.TaskIdentifier,
+		Frontmatter: lib.TaskFrontmatter{
+			"current_job": "pr-reviewer-agent-94c1801c-20261022202004",
+		},
+	})
+
+	finished, err := h.jobProvablyFinished(
+		context.Background(), task, "pr-reviewer-agent-94c1801c-20261022205503",
+	)
+	if err != nil {
+		t.Fatalf("jobProvablyFinished returned %v; want nil", err)
+	}
+	if !finished {
+		t.Fatal(
+			"provably finished = false for a leaked store entry; want true so the task respawns",
+		)
+	}
+	if _, ok := h.taskStore.Load(task.TaskIdentifier); ok {
+		t.Fatal("store entry still present after the stale-Job clear; want it dropped")
 	}
 }
 

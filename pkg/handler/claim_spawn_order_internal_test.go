@@ -48,6 +48,10 @@ func (s *stubJobSpawner) ListActiveJobs(
 	return map[lib.TaskIdentifier]bool{}, nil
 }
 
+func (s *stubJobSpawner) JobExists(context.Context, string) (bool, error) {
+	return true, nil
+}
+
 // stubResultPublisher satisfies pkg.ResultPublisher for the spawn path, which
 // publishes a spawn notification once the Job exists.
 type stubResultPublisher struct{}
