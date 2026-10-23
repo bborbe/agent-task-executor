@@ -116,16 +116,17 @@ no lease-manager path treats it as one.
   them with `GET /api/v1/refs?prefix=claims/redrive/<taskid>` and delete each
   entry with
   `DELETE /api/v1/refs/claims/redrive/<taskid>/<phase>/<n>?expected_sha=<sha>`.
-- Streak refs are cleared only when the executor handles the task's terminal
-  state (or records a spawn at a new phase). A task that disappears without
-  that — its file deleted, reassigned to another vault, or a clear whose
-  deletes failed (logged as `event=redrive_streak_write_failed`) — leaves its
-  refs behind; nothing reaps them. They are inert (a vanished task is never
-  spawned), and the same list-and-delete above removes them;
-  `GET /api/v1/refs?prefix=claims/redrive` lists every remaining streak ref.
-- A task capped by the shared streak but not by this executor's memory is
-  reported as `deferred`, not `capped`, in the reconcile pass summary;
-  `executor_redrive_capped_total` counts every cap regardless.
+  The executor's cap is the larger of the stored count and its own in-memory
+  count, so an executor that has itself counted 3 spawns at the phase stays
+  capped after the refs are gone until it restarts or the task moves phase.
+- Nothing reaps streak refs on its own. A task whose refs are never cleared —
+  its file deleted, or a clear whose deletes failed (logged as
+  `event=redrive_streak_write_failed`) — leaves them behind. They are inert only
+  while no executor drives that task id: refs are keyed by task id alone, so a
+  task reassigned to another vault, or re-opened after a failed clear, inherits
+  the same count and can be capped by it. Remove them with the list-and-delete
+  above; `GET /api/v1/refs?prefix=claims/redrive` lists every remaining streak
+  ref.
 
 ## Lost-response recovery
 
