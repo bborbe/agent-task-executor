@@ -19,7 +19,7 @@ A task can name the cluster that runs it with the optional `cluster:` frontmatte
 - `CLUSTER`: the cluster this executor runs in. A task whose `cluster` names a different cluster is skipped, logged as `skip task <id>: foreign cluster <name>`, and counted as `agent_executor_task_events_total{result="skipped_foreign_cluster"}`. A task without `cluster:` runs as before. Every filter skip — including a foreign-cluster event — drops any respawn still pending for that task from an earlier deferral.
 - `CONSUMER_GROUP`: the Kafka consumer group (default `agent-task-executor`). Each cluster must use its own group, e.g. `agent-task-executor-sun`, so that every cluster receives every task event. Keep an existing cluster on its current group, because a new group starts from the oldest retained offset and re-reads the topic.
 
-- `STAGE_FILTER` (default `true`): skip tasks whose `stage` frontmatter (default `prod`) differs from `BRANCH`. Set it to `false` on a cluster whose controller already scopes tasks by cluster (sun), so tasks there need no `stage` field.
+- `STAGE_FILTER` (default `true`): skip tasks whose `stage` frontmatter (default `prod`) differs from `BRANCH`. A task whose `cluster` names this executor while its `stage` sits outside this executor's pool can never run here: it is logged as `event=pin_outside_pool` and counted as `agent_executor_task_events_total{result="pin_outside_pool"}` instead of `skipped_stage`, so a dead pin surfaces instead of stalling invisibly. A task with no `cluster` is a plain stage skip and keeps counting as `skipped_stage`. Keep this `true` on every pool member, sun included — a cluster that sets it to `false` runs tasks of every stage rather than filtering them.
 
 ## Reconcile loop configuration
 
