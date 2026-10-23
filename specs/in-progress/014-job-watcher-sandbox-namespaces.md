@@ -1,8 +1,9 @@
 ---
-status: prompted
+status: verifying
 approved: "2026-10-23T16:32:53Z"
 generating: "2026-10-23T16:38:33Z"
 prompted: "2026-10-23T16:52:07Z"
+verifying: "2026-10-23T18:27:36Z"
 branch: dark-factory/job-watcher-sandbox-namespaces
 ---
 
