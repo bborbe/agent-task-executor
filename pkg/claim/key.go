@@ -49,40 +49,43 @@ func DeriveClaimKey(
 	return "claims/task/" + taskID, nil
 }
 
-// DeriveClaimKeyWithBody maps a task to the claim key it uses. It behaves like
-// DeriveClaimKey, except that a pr-review task whose body carries the task
-// repository's own pull-request URL is keyed per pull request. The second
-// return value reports that a pr-review task fell back to the repository key;
-// it is meaningful only when the error is nil.
-func DeriveClaimKeyWithBody(
+// DeriveClaimKeysWithBody maps a task to the claim refs it uses. The first
+// return value is the primary key and is always written first. The second is
+// the secondary key and is empty when the two derivations are equal. The
+// third reports that a pr-review task fell back to the repository key; it is
+// meaningful only when the error is nil.
+func DeriveClaimKeysWithBody(
 	ctx context.Context,
 	taskType string,
 	taskID string,
 	owner string,
 	repo string,
 	body string,
-) (string, bool, error) {
+) (string, string, bool, error) {
 	if taskType != "pr-review" {
-		key, err := DeriveClaimKey(ctx, taskType, taskID, owner, repo)
-		return key, false, err
+		primary, err := DeriveClaimKey(ctx, taskType, taskID, owner, repo)
+		return primary, "", false, err
 	}
 	owner = strings.ToLower(owner)
 	repo = strings.ToLower(repo)
 	number, found := pullRequestNumberFromBody(owner, repo, body)
 	if found {
 		if err := validateClaimComponent(ctx, "owner", owner); err != nil {
-			return "", false, errors.Wrapf(ctx, err, "derive pr claim key")
+			return "", "", false, errors.Wrapf(ctx, err, "derive pr claim key")
 		}
 		if err := validateClaimComponent(ctx, "repo", repo); err != nil {
-			return "", false, errors.Wrapf(ctx, err, "derive pr claim key")
+			return "", "", false, errors.Wrapf(ctx, err, "derive pr claim key")
 		}
 		if err := validateClaimComponent(ctx, "pull request number", number); err != nil {
-			return "", false, errors.Wrapf(ctx, err, "derive pr claim key")
+			return "", "", false, errors.Wrapf(ctx, err, "derive pr claim key")
 		}
-		return "claims/pr/" + owner + "-" + repo + "-" + number, false, nil
+		return "claims/repo/" + owner + "-" + repo,
+			"claims/pr/" + owner + "-" + repo + "-" + number,
+			false,
+			nil
 	}
-	key, err := DeriveClaimKey(ctx, taskType, taskID, owner, repo)
-	return key, true, err
+	primary, err := DeriveClaimKey(ctx, taskType, taskID, owner, repo)
+	return primary, "", true, err
 }
 
 // pullRequestNumberFromBody returns the first standalone pull-request URL in

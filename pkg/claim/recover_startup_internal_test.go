@@ -46,6 +46,12 @@ func (s *recoverStub) Claim(context.Context, string, string) (*HeldClaim, error)
 	return nil, nil
 }
 
+func (s *recoverStub) ClaimPair(
+	context.Context, string, string, string,
+) (*HeldClaim, error) {
+	return nil, nil
+}
+
 func (s *recoverStub) Release(context.Context, string) error { return nil }
 
 func (s *recoverStub) ReleaseAfterSuccess(
@@ -55,6 +61,12 @@ func (s *recoverStub) ReleaseAfterSuccess(
 }
 
 func (s *recoverStub) Takeover(context.Context, string, string) (*TakeoverResult, error) {
+	return nil, nil
+}
+
+func (s *recoverStub) TakeoverPair(
+	context.Context, string, string, string,
+) (*TakeoverResult, error) {
 	return nil, nil
 }
 

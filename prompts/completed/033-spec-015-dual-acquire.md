@@ -1,7 +1,13 @@
 ---
-status: draft
+status: completed
 spec: [015-dual-acquire-claim-keys]
+summary: Added dual claim-key derivation and pair acquisition (ClaimPair/TakeoverPair) so mixed-scheme clusters cannot spawn the same repo-keyed task twice, with handler wiring, tests, and changelog.
+execution_id: agent-task-executor-dual-acquire-exec-033-spec-015-dual-acquire
+dark-factory-version: v0.198.7
 created: "2026-10-23T19:25:00Z"
+queued: "2026-10-23T19:51:10Z"
+started: "2026-10-23T19:51:12Z"
+completed: "2026-10-23T20:08:40Z"
 branch: dark-factory/dual-acquire-claim-keys
 ---
 

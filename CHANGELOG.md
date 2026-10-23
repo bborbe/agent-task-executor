@@ -2,6 +2,10 @@
 
 All notable changes to this project will be documented in this file.
 
+## Unreleased
+
+- feat: **a repo-keyed claim now acquires both the per-repo and the per-PR ref, so a mixed fleet cannot spawn the same task twice.** `DeriveClaimKeysWithBody` returns the per-repo key as primary and, for a `pr-review` task whose body carries a standalone pull-request URL, the per-PR key as secondary; tasks whose two derivations are equal keep the single-ref path byte-for-byte. `LeaseManager.ClaimPair` writes the primary first and the secondary second, releases the primary and returns `ErrLeaseConflict` when the secondary conflicts, and displaces a secondary ref left behind by an expired predecessor. `TakeoverPair` extends the same pair handling to takeover, and a successful dual acquire logs `event=claim_dual_acquired` while a secondary conflict logs `event=claim_dual_conflict`. During the dual-write rollout, reviews of different pull requests in one repository serialize on the shared per-repo primary.
+
 ## v0.33.0
 
 - feat: **the Job watcher now observes every Config's sandbox namespace.** The watcher derives its watched set from the executor namespace plus every distinct `spec.jobNamespace` its Configs name, starts one Job/Pod informer pair per namespace, and re-resolves the set every 60 seconds so a Config flip is picked up without an executor restart. A terminal-failed Job in a sandbox namespace now produces the same synthetic failure and store cleanup as one in the executor namespace. A namespace no Config names is never watched, no informer is stopped for a namespace a Config stops naming, and no new RBAC is requested.

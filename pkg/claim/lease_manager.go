@@ -67,6 +67,17 @@ type TakeoverResult struct {
 // LeaseManager owns this executor's claims for one cluster name.
 type LeaseManager interface {
 	Claim(ctx context.Context, key string, taskID string) (*HeldClaim, error)
+	// ClaimPair creates both refs of a claim. The primary is written first; the
+	// secondary is written only when it is non-empty. The claim is held only
+	// when every write succeeded, or when a failed primary write was read back
+	// as this manager's own. A secondary conflict releases the primary and
+	// returns ErrLeaseConflict.
+	ClaimPair(
+		ctx context.Context,
+		primary string,
+		secondary string,
+		taskID string,
+	) (*HeldClaim, error)
 	Release(ctx context.Context, key string) error
 	// ReleaseAfterSuccess releases the claim like Release, but not before
 	// SuccessGracePeriod has elapsed since completedAt. Until then the claim
@@ -74,6 +85,14 @@ type LeaseManager interface {
 	// instead of a task another cluster has already run.
 	ReleaseAfterSuccess(ctx context.Context, key string, completedAt libtime.DateTime) error
 	Takeover(ctx context.Context, key string, taskID string) (*TakeoverResult, error)
+	// TakeoverPair is Takeover over both refs of a claim. An empty secondary
+	// behaves exactly like Takeover.
+	TakeoverPair(
+		ctx context.Context,
+		primary string,
+		secondary string,
+		taskID string,
+	) (*TakeoverResult, error)
 	Tick(ctx context.Context) error
 	Run(ctx context.Context) error
 	Recover(ctx context.Context) error
@@ -113,11 +132,16 @@ func NewLeaseManager(
 
 // heldClaim is the manager's internal state for one held claim.
 type heldClaim struct {
-	key                 string
-	taskID              string
-	sha                 string
-	leaseUntil          libtime.DateTime
-	leaseUntilStr       string
+	key           string
+	taskID        string
+	sha           string
+	leaseUntil    libtime.DateTime
+	leaseUntilStr string
+	// secondKey and secondSha are the secondary ref of a dual claim. They are
+	// empty when the derivation produced one key. The pair is one claim: a
+	// release, fence or lost path acts on both refs together.
+	secondKey           string
+	secondSha           string
 	lastRenewAt         libtime.DateTime
 	renewNextTick       bool
 	pendingJobDeletion  bool
@@ -279,37 +303,135 @@ func (m *leaseManager) Claim(
 	key string,
 	taskID string,
 ) (*HeldClaim, error) {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	return m.claimLocked(ctx, key, taskID)
+	return m.ClaimPair(ctx, key, "", taskID)
 }
 
-// claimLocked is Claim without taking the lock.
-func (m *leaseManager) claimLocked(
+// ClaimPair creates the claim at primary and, when secondary is non-empty, the
+// claim at secondary too.
+func (m *leaseManager) ClaimPair(
 	ctx context.Context,
-	key string,
+	primary string,
+	secondary string,
 	taskID string,
 ) (*HeldClaim, error) {
-	if _, ok := m.held[key]; ok {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.claimPairLocked(ctx, primary, secondary, taskID)
+}
+
+// findHeld returns the held claim that owns key, whether key is its primary or
+// its secondary. The caller must hold m.mu.
+func (m *leaseManager) findHeld(key string) (*heldClaim, bool) {
+	if held, ok := m.held[key]; ok {
+		return held, true
+	}
+	for _, held := range m.held {
+		if held.secondKey == key {
+			return held, true
+		}
+	}
+	return nil, false
+}
+
+// claimPairLocked is ClaimPair without taking the lock.
+func (m *leaseManager) claimPairLocked(
+	ctx context.Context,
+	primary string,
+	secondary string,
+	taskID string,
+) (*HeldClaim, error) {
+	if held, ok := m.findHeld(primary); ok {
+		glog.V(3).Infof("claim pair: key %s already held by task %s", primary, held.taskID)
 		countClaim("conflict")
 		return nil, ErrLeaseConflict
+	}
+	if secondary != "" {
+		if _, ok := m.findHeld(secondary); ok {
+			countClaim("conflict")
+			return nil, ErrLeaseConflict
+		}
 	}
 	now := m.currentDateTime.Now()
 	leaseUntil := now.Add(LeaseDuration)
 	leaseUntilStr := formatLeaseUntil(leaseUntil)
+	primarySha, recovered, err := m.createPrimary(ctx, primary, taskID, leaseUntil, leaseUntilStr)
+	if err != nil {
+		return nil, err
+	}
+	if secondary == "" {
+		held := m.storeClaim(
+			primary,
+			"",
+			taskID,
+			primarySha,
+			"",
+			leaseUntil,
+			leaseUntilStr,
+			now,
+		)
+		countClaimCreated(recovered)
+		return held, nil
+	}
+	secondarySha, err := m.refClient.Put(ctx, secondary, "", m.cluster, taskID, leaseUntil)
+	if err == nil {
+		held := m.storeClaim(
+			primary,
+			secondary,
+			taskID,
+			primarySha,
+			secondarySha,
+			leaseUntil,
+			leaseUntilStr,
+			now,
+		)
+		logDualAcquired(primary, secondary, taskID)
+		countClaimCreated(recovered)
+		return held, nil
+	}
+	if !errors.Is(err, ErrLeaseConflict) {
+		_ = m.refClient.Delete(ctx, primary, primarySha)
+		countClaim("error")
+		return nil, err
+	}
+	if held, ok := m.displaceSecondary(
+		ctx,
+		primary,
+		secondary,
+		taskID,
+		primarySha,
+		leaseUntil,
+		leaseUntilStr,
+		now,
+	); ok {
+		return held, nil
+	}
+	_ = m.refClient.Delete(ctx, primary, primarySha)
+	logDualConflict(secondary, taskID)
+	countClaim("conflict")
+	return nil, err
+}
+
+// createPrimary writes the primary ref and reports whether the write was
+// recovered by reading it back. It counts the conflict or error itself.
+func (m *leaseManager) createPrimary(
+	ctx context.Context,
+	key string,
+	taskID string,
+	leaseUntil libtime.DateTime,
+	leaseUntilStr string,
+) (string, bool, error) {
 	sha, err := m.refClient.Put(ctx, key, "", m.cluster, taskID, leaseUntil)
 	if err == nil {
-		countClaim("claimed")
-		return m.storeClaim(key, taskID, sha, leaseUntil, leaseUntilStr, now), nil
+		return sha, false, nil
 	}
 	if errors.Is(err, ErrLeaseConflict) {
 		countClaim("conflict")
-		return nil, err
+		return "", false, err
 	}
 	ref, readErr := m.readBack(ctx, key)
 	if readErr != nil {
 		countClaim("error")
-		return nil, errors.Wrapf(
+		return "", false, errors.Wrapf(
 			ctx,
 			readErr,
 			"claim %s: read back after create failed (%v)",
@@ -318,32 +440,101 @@ func (m *leaseManager) claimLocked(
 		)
 	}
 	if m.ownTriple(ref, taskID, leaseUntilStr) {
-		held := m.storeClaim(key, taskID, ref.Sha, leaseUntil, leaseUntilStr, now)
-		countClaim("recovered")
-		return held, nil
+		return ref.Sha, true, nil
 	}
 	countClaim("error")
-	return nil, err
+	return "", false, err
+}
+
+// displaceSecondary replaces a secondary ref left behind by a crashed or
+// claim-lost predecessor once its lease has expired. It reports whether the
+// pair is now held and counts taken_over on success.
+func (m *leaseManager) displaceSecondary(
+	ctx context.Context,
+	primary string,
+	secondary string,
+	taskID string,
+	primarySha string,
+	leaseUntil libtime.DateTime,
+	leaseUntilStr string,
+	now libtime.DateTime,
+) (*HeldClaim, bool) {
+	listed, readErr := m.readBack(ctx, secondary)
+	if readErr != nil || listed == nil {
+		return nil, false
+	}
+	parsed, parseErr := stdtime.Parse(stdtime.RFC3339, listed.LeaseUntil)
+	if parseErr != nil {
+		return nil, false
+	}
+	if now.Before(libtime.DateTime(parsed).Add(TakeoverGrace)) {
+		return nil, false
+	}
+	sha, err := m.refClient.Put(ctx, secondary, listed.Sha, m.cluster, taskID, leaseUntil)
+	if err != nil {
+		return nil, false
+	}
+	held := m.storeClaim(
+		primary,
+		secondary,
+		taskID,
+		primarySha,
+		sha,
+		leaseUntil,
+		leaseUntilStr,
+		now,
+	)
+	logDualAcquired(primary, secondary, taskID)
+	countClaim("taken_over")
+	return held, true
+}
+
+// countClaimCreated counts a fresh claim or one recovered from a read-back.
+func countClaimCreated(recovered bool) {
+	if recovered {
+		countClaim("recovered")
+		return
+	}
+	countClaim("claimed")
 }
 
 // storeClaim records a held claim and returns its public view.
 func (m *leaseManager) storeClaim(
-	key string,
+	primaryKey string,
+	secondaryKey string,
 	taskID string,
-	sha string,
+	primarySha string,
+	secondarySha string,
 	leaseUntil libtime.DateTime,
 	leaseUntilStr string,
 	now libtime.DateTime,
 ) *HeldClaim {
-	m.held[key] = &heldClaim{
-		key:           key,
+	m.held[primaryKey] = &heldClaim{
+		key:           primaryKey,
 		taskID:        taskID,
-		sha:           sha,
+		sha:           primarySha,
+		secondKey:     secondaryKey,
+		secondSha:     secondarySha,
 		leaseUntil:    leaseUntil,
 		leaseUntilStr: leaseUntilStr,
 		lastRenewAt:   now,
 	}
-	return &HeldClaim{Key: key, TaskID: taskID, Sha: sha, LeaseUntil: leaseUntil}
+	return &HeldClaim{
+		Key:        primaryKey,
+		TaskID:     taskID,
+		Sha:        primarySha,
+		LeaseUntil: leaseUntil,
+	}
+}
+
+// logDualAcquired records one successful dual acquire.
+func logDualAcquired(primary, secondary, taskID string) {
+	glog.Infof("event=claim_dual_acquired key=%s second=%s task=%s", primary, secondary, taskID)
+}
+
+// logDualConflict records one secondary conflict that released the primary.
+func logDualConflict(secondary, taskID string) {
+	glog.Warningf("event=claim_dual_conflict key=%s task=%s", secondary, taskID)
 }
 
 // Release deletes the held claim. A 409 means already released and is nil.
@@ -475,19 +666,36 @@ func (m *leaseManager) Takeover(
 	key string,
 	taskID string,
 ) (*TakeoverResult, error) {
+	return m.TakeoverPair(ctx, key, "", taskID)
+}
+
+// TakeoverPair replaces an expired claim pair with one for taskID. An empty
+// secondary takes the single-key path unchanged.
+func (m *leaseManager) TakeoverPair(
+	ctx context.Context,
+	primary string,
+	secondary string,
+	taskID string,
+) (*TakeoverResult, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	if _, ok := m.held[key]; ok {
+	if _, ok := m.findHeld(primary); ok {
 		countClaim("conflict")
 		return nil, ErrLeaseConflict
 	}
-	ref, err := m.readBack(ctx, key)
+	if secondary != "" {
+		if _, ok := m.findHeld(secondary); ok {
+			countClaim("conflict")
+			return nil, ErrLeaseConflict
+		}
+	}
+	primaryRef, err := m.readBack(ctx, primary)
 	if err != nil {
 		countClaim("error")
 		return nil, err
 	}
-	if ref == nil {
-		held, claimErr := m.claimLocked(ctx, key, taskID)
+	if primaryRef == nil {
+		held, claimErr := m.claimPairLocked(ctx, primary, secondary, taskID)
 		if claimErr != nil {
 			return nil, claimErr
 		}
@@ -499,7 +707,166 @@ func (m *leaseManager) Takeover(
 			PreviousTaskID: "",
 		}, nil
 	}
-	return m.takeoverExpired(ctx, key, taskID, ref)
+	if secondary == "" {
+		return m.takeoverExpired(ctx, primary, taskID, primaryRef)
+	}
+	return m.takeoverPairExpired(ctx, primary, secondary, taskID, primaryRef)
+}
+
+// takeoverPairExpired replaces both refs of an expired pair.
+func (m *leaseManager) takeoverPairExpired(
+	ctx context.Context,
+	primary string,
+	secondary string,
+	taskID string,
+	primaryRef *ClaimRef,
+) (*TakeoverResult, error) {
+	now := m.currentDateTime.Now()
+	secondaryRef, err := m.takeoverSecondaryRef(ctx, secondary, now)
+	if err != nil {
+		return nil, err
+	}
+	if err := m.checkPrimaryTakeoverAllowed(now, primaryRef); err != nil {
+		return nil, err
+	}
+	newLease := now.Add(LeaseDuration)
+	newLeaseStr := formatLeaseUntil(newLease)
+	primarySha, err := m.takeoverPrimary(ctx, primary, taskID, primaryRef, newLease, newLeaseStr)
+	if err != nil {
+		return nil, err
+	}
+	secondarySha, err := m.takeoverSecondary(
+		ctx,
+		primary,
+		secondary,
+		taskID,
+		secondaryRef,
+		primarySha,
+		newLease,
+	)
+	if err != nil {
+		return nil, err
+	}
+	m.storeClaim(
+		primary,
+		secondary,
+		taskID,
+		primarySha,
+		secondarySha,
+		newLease,
+		newLeaseStr,
+		now,
+	)
+	logDualAcquired(primary, secondary, taskID)
+	countClaim("taken_over")
+	return &TakeoverResult{
+		Key:            primary,
+		TaskID:         taskID,
+		Sha:            primarySha,
+		LeaseUntil:     newLease,
+		PreviousTaskID: primaryRef.TaskID,
+	}, nil
+}
+
+// takeoverSecondaryRef reads the secondary ref and refuses a takeover while
+// its lease is still live. A missing ref, or one whose lease cannot be parsed,
+// does not block.
+func (m *leaseManager) takeoverSecondaryRef(
+	ctx context.Context,
+	secondary string,
+	now libtime.DateTime,
+) (*ClaimRef, error) {
+	ref, err := m.readBack(ctx, secondary)
+	if err != nil {
+		countClaim("error")
+		return nil, err
+	}
+	if ref == nil {
+		return nil, nil
+	}
+	parsed, parseErr := stdtime.Parse(stdtime.RFC3339, ref.LeaseUntil)
+	if parseErr == nil && now.Before(libtime.DateTime(parsed).Add(TakeoverGrace)) {
+		countClaim("takeover_too_early")
+		return nil, ErrLeaseNotExpired
+	}
+	return ref, nil
+}
+
+// checkPrimaryTakeoverAllowed refuses a takeover while the primary lease is
+// live or its lease_until cannot be parsed.
+func (m *leaseManager) checkPrimaryTakeoverAllowed(
+	now libtime.DateTime,
+	ref *ClaimRef,
+) error {
+	parsed, parseErr := stdtime.Parse(stdtime.RFC3339, ref.LeaseUntil)
+	if parseErr != nil {
+		countClaim("takeover_too_early")
+		glog.Warningf(
+			"claim takeover: unparseable lease_until ref=%s value=%q",
+			ref.Ref,
+			ref.LeaseUntil,
+		)
+		return ErrLeaseNotExpired
+	}
+	if now.Before(libtime.DateTime(parsed).Add(TakeoverGrace)) {
+		countClaim("takeover_too_early")
+		return ErrLeaseNotExpired
+	}
+	return nil
+}
+
+// takeoverPrimary replaces the primary ref with one CAS write and returns the
+// new sha.
+func (m *leaseManager) takeoverPrimary(
+	ctx context.Context,
+	primary string,
+	taskID string,
+	primaryRef *ClaimRef,
+	newLease libtime.DateTime,
+	newLeaseStr string,
+) (string, error) {
+	sha, err := m.refClient.Put(ctx, primary, primaryRef.Sha, m.cluster, taskID, newLease)
+	if err == nil {
+		return sha, nil
+	}
+	if errors.Is(err, ErrLeaseConflict) {
+		countClaim("conflict")
+		return "", err
+	}
+	listed, readErr := m.readBack(ctx, primary)
+	if readErr != nil || !m.ownTriple(listed, taskID, newLeaseStr) {
+		countClaim("error")
+		return "", err
+	}
+	return listed.Sha, nil
+}
+
+// takeoverSecondary replaces the secondary ref. A failed write releases the
+// primary again so the pair is never half-held.
+func (m *leaseManager) takeoverSecondary(
+	ctx context.Context,
+	primary string,
+	secondary string,
+	taskID string,
+	secondaryRef *ClaimRef,
+	primarySha string,
+	newLease libtime.DateTime,
+) (string, error) {
+	expectedSha := ""
+	if secondaryRef != nil {
+		expectedSha = secondaryRef.Sha
+	}
+	sha, err := m.refClient.Put(ctx, secondary, expectedSha, m.cluster, taskID, newLease)
+	if err == nil {
+		return sha, nil
+	}
+	_ = m.refClient.Delete(ctx, primary, primarySha)
+	if errors.Is(err, ErrLeaseConflict) {
+		countClaim("conflict")
+	} else {
+		countClaim("error")
+	}
+	return "", err
 }
 
 // takeoverExpired replaces the expired claim in ref.
@@ -529,7 +896,7 @@ func (m *leaseManager) takeoverExpired(
 	newLeaseStr := formatLeaseUntil(newLease)
 	sha, err := m.refClient.Put(ctx, key, ref.Sha, m.cluster, taskID, newLease)
 	if err == nil {
-		m.storeClaim(key, taskID, sha, newLease, newLeaseStr, now)
+		m.storeClaim(key, "", taskID, sha, "", newLease, newLeaseStr, now)
 		countClaim("taken_over")
 		return &TakeoverResult{
 			Key:            key,
@@ -548,7 +915,7 @@ func (m *leaseManager) takeoverExpired(
 		countClaim("error")
 		return nil, err
 	}
-	m.storeClaim(key, taskID, listed.Sha, newLease, newLeaseStr, now)
+	m.storeClaim(key, "", taskID, listed.Sha, "", newLease, newLeaseStr, now)
 	countClaim("recovered")
 	return &TakeoverResult{
 		Key:            key,
@@ -571,6 +938,14 @@ func (m *leaseManager) HeldClaims() []HeldClaim {
 			Sha:        held.sha,
 			LeaseUntil: held.leaseUntil,
 		})
+		if held.secondKey != "" {
+			result = append(result, HeldClaim{
+				Key:        held.secondKey,
+				TaskID:     held.taskID,
+				Sha:        held.secondSha,
+				LeaseUntil: held.leaseUntil,
+			})
+		}
 	}
 	sort.Slice(result, func(i, j int) bool { return result[i].Key < result[j].Key })
 	return result

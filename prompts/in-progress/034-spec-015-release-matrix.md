@@ -1,7 +1,8 @@
 ---
-status: draft
+status: approved
 spec: [015-dual-acquire-claim-keys]
 created: "2026-10-23T19:40:00Z"
+queued: "2026-10-23T19:51:10Z"
 branch: dark-factory/dual-acquire-claim-keys
 ---
 
