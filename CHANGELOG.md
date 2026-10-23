@@ -2,7 +2,7 @@
 
 All notable changes to this project will be documented in this file.
 
-## Unreleased
+## v0.32.0
 
 - feat: **the Job watcher now observes every namespace a Config places Jobs in.** It receives the Config provider and derives its watched set from the executor's own namespace plus each Config's resolved `spec.jobNamespace`, starting one Job/Pod informer pair per namespace with the existing 5-minute resync and task-id label selector. A Config whose `jobNamespace` equals the executor namespace is skipped with an ERROR and no informer; every other namespace keeps watching. Handler dispatch is gated per namespace: an event is handled only once its own namespace's cache has synced, and an unconfigured namespace is never handled. The stale-terminal re-delivery guard now asks about the Job's own namespace rather than always the executor's. Provider, informer-construction and handler-registration failures fail `Run`; list/watch failures during cache sync remain environmental.
 - feat: **the Job watcher now re-derives its watched namespace set every 60 seconds.** After the startup resolution, `Run` ticks on a package-level interval, re-lists the Configs, and starts informers only for namespaces not already watched, so a Config flip that names a new `jobNamespace` is picked up without an executor restart. A Config provider failure on a tick is logged at ERROR and retried on the next tick; a wiring failure while starting a new namespace's informers still fails `Run`. A namespace removed from the Config set keeps its informer until process exit.
