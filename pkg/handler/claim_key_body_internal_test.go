@@ -156,7 +156,7 @@ func TestAcquireSpawnClaimKeysPRReviewsPerPullRequest(t *testing.T) {
 
 	body658 := "title\n\nhttps://github.com/bborbe/nuke/pull/658\n"
 	body662 := "title\n\nhttps://github.com/bborbe/nuke/pull/662\n"
-	if !h.acquireSpawnClaim(ctx, prReviewClaimTask("tid-658", body658)) {
+	if !h.acquireSpawnClaim(ctx, prReviewClaimTask("tid-658", body658), redispatchConfig()) {
 		t.Fatal("expected the first pr-review to claim the pair")
 	}
 
@@ -177,7 +177,12 @@ func TestAcquireSpawnClaimKeysPRReviewsPerPullRequest(t *testing.T) {
 
 	putsBefore := client.puts
 	before := snapshotGateClaims()
-	if h.acquireSpawnClaim(ctx, prReviewClaimTask("tid-662", body662)) {
+	// The dual write takes the shared per-repo ref for every repo-keyed task, so a
+	// different pull request of the same repo is blocked for as long as the dual
+	// write exists. That is the accepted cost of the migration (spec 015 Non-goals):
+	// it restores the per-repo serialisation that per-PR keying removed, and dropping
+	// the dual write in a later release restores the concurrency.
+	if h.acquireSpawnClaim(ctx, prReviewClaimTask("tid-662", body662), redispatchConfig()) {
 		t.Fatal("expected the shared per-repo primary to block a different pull request")
 	}
 	expectGateClaimDelta(t, before, snapshotGateClaims(), map[string]float64{"conflict": 2})
@@ -211,7 +216,7 @@ func TestAcquireSpawnClaimKeysCloneURLPRReviewPerPullRequest(t *testing.T) {
 		Content: "title\n\n\nhttps://github.com/bborbe/nuke/pull/658\n" +
 			"\ncopied https://github.com/bborbe/nuke/pull/700\n",
 	}
-	if !h.acquireSpawnClaim(ctx, task) {
+	if !h.acquireSpawnClaim(ctx, task, redispatchConfig()) {
 		t.Fatal("expected the clone_url pr-review to claim")
 	}
 	if len(client.putCalls) != 2 {
@@ -250,7 +255,7 @@ func TestAcquireSpawnClaimFallsBackToRepoKey(t *testing.T) {
 			var ok bool
 			before := testutil.ToFloat64(metrics.ClaimKeyFallbackTotal)
 			out := captureGlogStderr(t, func() {
-				ok = h.acquireSpawnClaim(ctx, prReviewClaimTask(id, body))
+				ok = h.acquireSpawnClaim(ctx, prReviewClaimTask(id, body), redispatchConfig())
 			})
 			after := testutil.ToFloat64(metrics.ClaimKeyFallbackTotal)
 

@@ -58,6 +58,9 @@ func (noopClaimJobControl) DeleteJob(context.Context, string) error { return nil
 // task stamped with another vault, so every fixture carries this one.
 const claimHarnessVault = "private-personal"
 
+// claimBoolPtr returns a pointer to b, for the optional rerunOnLostClaim field.
+func claimBoolPtr(b bool) *bool { return &b }
+
 // newClaimHarness builds a handler in the given claim mode with defaults that
 // let a qualifying task spawn exactly once.
 func newClaimHarness(mode pkg.ClaimMode) *claimHarness {
@@ -68,7 +71,14 @@ func newClaimHarness(mode pkg.ClaimMode) *claimHarness {
 	spawner.CountActiveJobsReturns(0, nil)
 
 	resolver := new(mocks.FakeConfigResolver)
-	resolver.ResolveReturns(pkg.AgentConfiguration{Assignee: "claude", Image: "img"}, nil)
+	// Explicit opt-in: the harness models an agent that may run a second time
+	// after a lost claim. An unset field now parks, so leaving it out here would
+	// turn every takeover spec into a park spec.
+	resolver.ResolveReturns(pkg.AgentConfiguration{
+		Assignee:         "claude",
+		Image:            "img",
+		RerunOnLostClaim: claimBoolPtr(true),
+	}, nil)
 
 	client := new(mocks.FakeClaimRefClient)
 	publisher := new(mocks.FakeResultPublisher)
@@ -407,6 +417,35 @@ var _ = Describe("claim gate", func() {
 		Expect(putKey).To(Equal(key))
 		Expect(expectedSha).To(Equal("expired-sha"))
 		Expect(cluster).To(Equal("self"))
+	})
+
+	It("AC6: parks instead of spawning when rerunOnLostClaim is false", func() {
+		harness := newClaimHarness(pkg.ClaimModeOn)
+		harness.resolver.ResolveReturns(pkg.AgentConfiguration{
+			Assignee:         "claude",
+			Image:            "img",
+			RerunOnLostClaim: claimBoolPtr(false),
+		}, nil)
+		task := qualifyingClaimTask()
+		key := claimKeyFor(task)
+		harness.client.PutStub = conflictOnCreate()
+		harness.client.ListReturns([]claim.ClaimRef{
+			listedClaimRef(key, "expired-sha", time.Now().UTC().Add(-31*time.Second)),
+		}, nil)
+		before := snapshotClaims()
+
+		Expect(harness.consume(task)).To(Succeed())
+
+		// The takeover succeeded, but the Config forbids a second run: no Job is
+		// created, and the task is parked at human_review instead.
+		Expect(harness.spawner.SpawnJobCallCount()).To(Equal(0))
+		Expect(harness.publisher.PublishParkLostClaimCallCount()).To(Equal(1))
+		_, parkedTask := harness.publisher.PublishParkLostClaimArgsForCall(0)
+		Expect(parkedTask.TaskIdentifier).To(Equal(task.TaskIdentifier))
+		expectClaimDelta(before, snapshotClaims(), map[string]float64{
+			"conflict":   1,
+			"taken_over": 1,
+		})
 	})
 
 	It("AC6: on blocks a lease inside the takeover grace", func() {

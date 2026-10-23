@@ -8,16 +8,27 @@ import (
 	"context"
 	stderrors "errors"
 	"strings"
+	"time"
 
 	lib "github.com/bborbe/agent"
 	"github.com/bborbe/errors"
 	libtime "github.com/bborbe/time"
 	"github.com/golang/glog"
 
+	agentv1 "github.com/bborbe/agent-task-executor/k8s/apis/agent.benjamin-borbe.de/v1"
 	pkg "github.com/bborbe/agent-task-executor/pkg"
 	"github.com/bborbe/agent-task-executor/pkg/claim"
 	"github.com/bborbe/agent-task-executor/pkg/metrics"
 )
+
+// parkWriteAttempts bounds the retries of the park's phase write. The write is
+// what stops a later jobless release from letting the task run again, so a
+// single failed send is worth retrying before it is reported as failed.
+const parkWriteAttempts = 3
+
+// parkWriteRetryDelay is the pause between park-write attempts. Short: the send
+// is a Kafka publish, and a slow retry would stall the reconcile pass.
+const parkWriteRetryDelay = 200 * time.Millisecond
 
 // ClaimRefClientFactory builds the git-rest claim ref client. It is called at
 // most once per process, and only when CLAIM_MODE is shadow or on.
@@ -98,7 +109,11 @@ func (h *taskEventHandler) createLeaseManager(
 // the Job is created. It reports whether the spawn may proceed. Claim failures
 // are recorded by the claim package and never returned: the next dispatch pass
 // that would have spawned this task retries.
-func (h *taskEventHandler) acquireSpawnClaim(ctx context.Context, task lib.Task) bool {
+func (h *taskEventHandler) acquireSpawnClaim(
+	ctx context.Context,
+	task lib.Task,
+	config *pkg.AgentConfiguration,
+) bool {
 	if h.claimMode == pkg.ClaimModeOff {
 		return true
 	}
@@ -142,6 +157,20 @@ func (h *taskEventHandler) acquireSpawnClaim(ctx context.Context, task lib.Task)
 			string(task.TaskIdentifier),
 		)
 		if takeoverErr == nil {
+			// Another executor owned this task's claim and its lease had lapsed.
+			// The Config decides whether that work may run a second time here.
+			//
+			// Only `on` may park. Shadow's contract is to take claims without
+			// ever blocking a dispatch, and parking there would be worse than a
+			// violation: the task is written to human_review, this cluster keeps
+			// the claim, and the next pass's Takeover fails against its own live
+			// lease, so claimFailureDecision proceeds and a Job is created for the
+			// task that was just parked.
+			if h.claimMode == pkg.ClaimModeOn &&
+				config.LostClaimAction() == agentv1.ParkAfterLostClaim {
+				h.parkAfterLostClaim(ctx, primary, task)
+				return false
+			}
 			logClaimAcquired(primary, task.TaskIdentifier)
 			return true
 		}
@@ -211,6 +240,53 @@ func ownerRepoFromCloneURL(raw string) (string, string, bool) {
 		return "", "", false
 	}
 	return splitOwnerRepo(path)
+}
+
+// parkAfterLostClaim stops a task whose claim another executor took over, when
+// its Config says the agent must not run a second time. The caller returns false
+// either way, so no Job is created here.
+//
+// The phase write is retried, because returning false without it is not
+// fail-safe on its own: the takeover left this cluster holding the claim, and
+// releaseJoblessClaims drops a held claim whose Job has been absent for
+// JoblessGrace (300 s). A task still in a spawnable phase is then claimed fresh
+// and runs a second time — exactly what the Config forbids. The success line is
+// logged only once the write lands, so the log never reports a park that did
+// not happen; a write that never lands is logged as an error and counted.
+func (h *taskEventHandler) parkAfterLostClaim(
+	ctx context.Context,
+	key string,
+	task lib.Task,
+) {
+	var err error
+	for attempt := 1; attempt <= parkWriteAttempts; attempt++ {
+		if err = h.resultPublisher.PublishParkLostClaim(ctx, task); err == nil {
+			glog.Infof("event=parked_lost_claim key=%s task=%s", key, task.TaskIdentifier)
+			metrics.ParkedLostClaimTotal.WithLabelValues("parked").Inc()
+			return
+		}
+		if attempt == parkWriteAttempts {
+			break
+		}
+		select {
+		case <-ctx.Done():
+			// Cancelled — shutdown, or the reconcile pass timeout. Stop rather
+			// than burn the remaining attempts against a dead context and then
+			// report a failure that is ours, not the broker's. Not counted as
+			// failed: the park did not fail, the pass did.
+			glog.Warningf(
+				"event=parked_lost_claim_cancelled key=%s task=%s error=%v",
+				key, task.TaskIdentifier, err,
+			)
+			return
+		case <-time.After(parkWriteRetryDelay):
+		}
+	}
+	glog.Errorf(
+		"event=parked_lost_claim_failed key=%s task=%s attempts=%d error=%v",
+		key, task.TaskIdentifier, parkWriteAttempts, err,
+	)
+	metrics.ParkedLostClaimTotal.WithLabelValues("failed").Inc()
 }
 
 // logClaimAcquired records one successful spawn claim, whether it was taken by

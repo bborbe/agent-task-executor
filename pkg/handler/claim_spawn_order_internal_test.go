@@ -103,6 +103,10 @@ func (stubResultPublisher) PublishRestoreAssignee(
 	return nil
 }
 
+func (stubResultPublisher) PublishParkLostClaim(context.Context, lib.Task) error {
+	return nil
+}
+
 func (stubResultPublisher) PublishRaw(
 	context.Context, base.CommandOperation, interface{},
 ) error {

@@ -19,6 +19,7 @@ import (
 	libkafka "github.com/bborbe/kafka"
 	"github.com/bborbe/log"
 	libtime "github.com/bborbe/time"
+	"github.com/bborbe/vault-cli/pkg/domain"
 	"github.com/golang/glog"
 )
 
@@ -87,6 +88,12 @@ type ResultPublisher interface {
 	// the normal spawn path already consumes. Writes the "assignee" key and
 	// nothing else.
 	PublishRestoreAssignee(ctx context.Context, task lib.Task, assignee string) error
+	// PublishParkLostClaim writes phase "human_review" onto a task whose claim
+	// another executor took over and whose Config says not to re-run it. Writes
+	// the "phase" key and nothing else: status, assignee and the counters stay
+	// as they are. human_review is already in the executor's terminal-phase set,
+	// so a parked task is never re-spawned and needs no second guard.
+	PublishParkLostClaim(ctx context.Context, task lib.Task) error
 	// PublishQueueEntry records when a task first started waiting behind the
 	// concurrency cap. It publishes queued_at and touches no other key.
 	PublishQueueEntry(ctx context.Context, task lib.Task, queuedAt string) error
@@ -394,6 +401,21 @@ func (p *resultPublisher) PublishRestoreAssignee(
 		TargetVault:    targetVaultFromTask(task),
 		Updates: lib.TaskFrontmatter{
 			"assignee": assignee,
+		},
+	}
+	return p.publishRaw(ctx, taskcmd.UpdateFrontmatterCommandOperation, cmd)
+}
+
+// PublishParkLostClaim writes phase "human_review" and nothing else.
+func (p *resultPublisher) PublishParkLostClaim(
+	ctx context.Context,
+	task lib.Task,
+) error {
+	cmd := taskcmd.UpdateFrontmatterCommand{
+		TaskIdentifier: task.TaskIdentifier,
+		TargetVault:    targetVaultFromTask(task),
+		Updates: lib.TaskFrontmatter{
+			"phase": string(domain.TaskPhaseHumanReview),
 		},
 	}
 	return p.publishRaw(ctx, taskcmd.UpdateFrontmatterCommandOperation, cmd)
