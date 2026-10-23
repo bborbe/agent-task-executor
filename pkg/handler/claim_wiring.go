@@ -16,6 +16,7 @@ import (
 
 	pkg "github.com/bborbe/agent-task-executor/pkg"
 	"github.com/bborbe/agent-task-executor/pkg/claim"
+	"github.com/bborbe/agent-task-executor/pkg/metrics"
 )
 
 // ClaimRefClientFactory builds the git-rest claim ref client. It is called at
@@ -106,18 +107,27 @@ func (h *taskEventHandler) acquireSpawnClaim(ctx context.Context, task lib.Task)
 		return h.claimFailureDecision(task, "lease_manager", err)
 	}
 	owner, repo := claimOwnerRepo(task)
-	key, err := claim.DeriveClaimKey(
+	key, fallback, err := claim.DeriveClaimKeyWithBody(
 		ctx,
 		string(task.Frontmatter.TaskType()),
 		string(task.TaskIdentifier),
 		owner,
 		repo,
+		string(task.Content),
 	)
 	if err != nil {
 		return h.claimFailureDecision(task, "derive_key", err)
 	}
+	if fallback {
+		metrics.ClaimKeyFallbackTotal.Inc()
+		glog.Warningf(
+			"event=claim_key_fallback task=%s repo=%s/%s",
+			task.TaskIdentifier, owner, repo,
+		)
+	}
 	_, claimErr := manager.Claim(ctx, key, string(task.TaskIdentifier))
 	if claimErr == nil {
+		logClaimAcquired(key, task.TaskIdentifier)
 		return true
 	}
 	if stderrors.Is(claimErr, claim.ErrLeaseConflict) {
@@ -127,6 +137,7 @@ func (h *taskEventHandler) acquireSpawnClaim(ctx context.Context, task lib.Task)
 		// counted conflict / takeover_too_early / taken_over / error.
 		_, takeoverErr := manager.Takeover(ctx, key, string(task.TaskIdentifier))
 		if takeoverErr == nil {
+			logClaimAcquired(key, task.TaskIdentifier)
 			return true
 		}
 		return h.claimFailureDecision(task, "takeover", takeoverErr)
@@ -195,6 +206,12 @@ func ownerRepoFromCloneURL(raw string) (string, string, bool) {
 		return "", "", false
 	}
 	return splitOwnerRepo(path)
+}
+
+// logClaimAcquired records one successful spawn claim, whether it was taken by
+// a fresh Claim or by a Takeover after a conflict.
+func logClaimAcquired(key string, taskID lib.TaskIdentifier) {
+	glog.Infof("event=claim_acquired key=%s task=%s", key, taskID)
 }
 
 // claimFailureDecision logs a claim failure and reports whether the spawn may

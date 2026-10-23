@@ -101,6 +101,13 @@ var ClaimMismatchTotal = promauto.NewCounter(
 	},
 )
 
+// ClaimKeyFallbackTotal counts pr-review tasks whose body carried no usable
+// pull-request URL, so their claim fell back to the repository key.
+var ClaimKeyFallbackTotal = promauto.NewCounter(prometheus.CounterOpts{
+	Name: "executor_claim_key_fallback_total",
+	Help: "Total number of pr-review claim keys that fell back to the repository key.",
+})
+
 // DeferredConcurrencyCapTotal counts tasks deferred because their assignee was
 // already at its configured concurrency cap, labelled by that assignee. The
 // bare TaskEventsTotal{result="deferred_concurrency_cap"} counter says a
@@ -171,6 +178,7 @@ func init() {
 	} {
 		ReconcilePassesTotal.WithLabelValues(result).Add(0)
 	}
+	ClaimKeyFallbackTotal.Add(0)
 	// Pre-initialise the closed claim result set so every series is visible
 	// before any claim activity.
 	for _, result := range []string{
@@ -187,6 +195,7 @@ func init() {
 		"already_released",
 		"adopted",
 		"error",
+		"jobless_released",
 	} {
 		ClaimTotal.WithLabelValues(result).Add(0)
 	}
