@@ -45,10 +45,36 @@ fallback logs one `event=claim_key_fallback task=<id> repo=<owner>/<repo>`
 warning and increments the unlabelled `executor_claim_key_fallback_total`
 counter once.
 
+### Dual acquire
+
+A repo-keyed claim is written as a pair of refs. The per-repository key is the
+primary and is written first; for a `pr-review` task whose body carries a usable
+standalone pull-request URL, the per-pull-request key is the secondary and is
+written second. This dual acquire is what stops a mixed fleet from spawning the
+same task twice. The claim is held only when both writes succeed: a secondary
+conflict releases the primary again and no Job is created, so the task is
+treated as claimed elsewhere.
+
+The two keys collapse to one ref when the two derivations are equal — every
+task-id-keyed type, and a `pr-review` task with no usable pull-request URL. That
+path is unchanged and writes a single ref.
+
+While the fleet is mixed, some executors writing the pair and some writing one
+ref, reviews of different pull requests in one repository serialize on the
+shared per-repository key. That serialization ends when the dual write is
+removed in a later release.
+
+Both keys pass `validateClaimComponent`, so a hostile body cannot inject a path
+segment into either ref.
+
 These log lines make claims observable at runtime:
 
 - `event=claim_acquired key=<key> task=<id>` — one per successful `Claim` or
   `Takeover`.
+- `event=claim_dual_acquired key=<primary> second=<secondary> task=<id>` — info,
+  one per successful dual acquire.
+- `event=claim_dual_conflict key=<secondary> task=<id>` — warning, one per
+  secondary write that returned `409`.
 - `event=claim_released key=<key> task=<id> result=<label> sha=<sha>` — one per
   removal, with `result` one of `released`, `already_released`, `fenced` or
   `claim_lost`. The `claim_lost` line is logged at warning level.
@@ -92,6 +118,10 @@ claimed → held → renewed / recovered / lost / fenced / released
   stays held and later ticks retry the delete instead of renewing, until the
   fence point.
 
+A claim's refs are held and released as a unit: a claim is not held while only
+one of its refs is held, and a release that removes one ref but not the other
+stays pending-release.
+
 `executor_claim_total{result}` counts every outcome above; all 14 result series
 are pre-initialised to 0. Keys and task ids are never label values.
 
@@ -109,6 +139,11 @@ A fenced claim is never renewed. If the Job deletion fails, the claim enters the
 pending-deletion state and the deletion is retried every tick until it succeeds;
 then the best-effort ref `DELETE` runs and the claim is dropped.
 
+A fenced dual claim deletes the pair — both the per-repository and the
+per-pull-request refs — best-effort, after deleting the Job once. A failed Job
+deletion keeps both refs in pending deletion; the retry deletes them together
+once the Job is gone.
+
 ## Takeover
 
 A claim is takeable only at or after `lease_until + 30 s`. Before that, or when
@@ -119,16 +154,30 @@ racing takers wins; the loser gets `ErrLeaseConflict` and sends no further
 request. A takeover of an absent key falls back to a create with an empty
 `expected_sha`.
 
+A takeover must win the pair: a live secondary refuses the takeover before any
+write, and a secondary conflict after the primary was taken releases the primary
+again so the pair is never half-held.
+
 ## Restart recovery
 
 On start the manager lists `claims/` and keeps only entries whose `cluster`
-equals its own name. For each entry:
+equals its own name. The listed refs are grouped by task id, so a repository key
+and a per-pull-request key belonging to the same task are recovered together.
+For each group:
 
 - A claim inside the fence window (`now > lease_until − 70 s`) is fenced: the
   task's Job is deleted if it is running, then one best-effort `DELETE` with the
   listed sha is sent and the claim is not adopted.
-- A running Job's claim is re-adopted at its listed sha and `lease_until` with no
-  create; ticks renew it from there.
+- A running Job's pair is re-adopted as one claim with both refs at their listed
+  shas and the earlier of their two `lease_until` values, with no create; ticks
+  renew it from there.
+- A per-pull-request-only claim is repaired by deriving its per-repository
+  partner and writing it, so a crash between the two acquire writes does not
+  leave the pair half-owned. A conflict on that write releases the per-PR ref;
+  a write failure keeps the per-PR ref renewed and fenced.
+- A per-repository-only claim is adopted as a single claim, because a repository
+  key carries neither the task type nor the pull-request number, so its per-PR
+  partner is not derivable.
 - A finished Job's claim is released with the listed sha.
 - A failed running check keeps the claim held and renewed, and the check is
   re-asked at every tick until it answers.

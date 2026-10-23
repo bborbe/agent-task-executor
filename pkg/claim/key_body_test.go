@@ -13,16 +13,16 @@ import (
 	"github.com/bborbe/agent-task-executor/pkg/claim"
 )
 
-var _ = Describe("DeriveClaimKeyWithBody", func() {
+var _ = Describe("DeriveClaimKeysWithBody", func() {
 	DescribeTable(
-		"maps a task and its body to its claim key",
+		"maps a task and its body to its claim keys",
 		func(
 			taskType, taskID, owner, repo, body string,
-			wantKey string,
+			wantPrimary, wantSecondary string,
 			wantFallback bool,
 			wantErr bool,
 		) {
-			key, fallback, err := claim.DeriveClaimKeyWithBody(
+			primary, secondary, fallback, err := claim.DeriveClaimKeysWithBody(
 				context.Background(),
 				taskType,
 				taskID,
@@ -32,15 +32,18 @@ var _ = Describe("DeriveClaimKeyWithBody", func() {
 			)
 			if wantErr {
 				Expect(err).To(HaveOccurred())
-				Expect(key).To(BeEmpty())
+				Expect(primary).To(BeEmpty())
+				Expect(secondary).To(BeEmpty())
 				Expect(fallback).To(Equal(wantFallback))
 				return
 			}
 			Expect(err).NotTo(HaveOccurred())
-			Expect(key).To(Equal(wantKey))
+			Expect(primary).To(Equal(wantPrimary))
+			Expect(secondary).To(Equal(wantSecondary))
 			Expect(fallback).To(Equal(wantFallback))
 		},
-		// A standalone pull-request URL keys the task per pull request.
+		// A standalone pull-request URL keys the task per pull request. The
+		// per-repo key stays primary and the per-PR key is the secondary.
 		Entry(
 			"standalone pull-request URL",
 			"pr-review",
@@ -48,6 +51,7 @@ var _ = Describe("DeriveClaimKeyWithBody", func() {
 			"bborbe",
 			"nuke",
 			"https://github.com/bborbe/nuke/pull/658",
+			"claims/repo/bborbe-nuke",
 			"claims/pr/bborbe-nuke-658",
 			false,
 			false,
@@ -60,6 +64,7 @@ var _ = Describe("DeriveClaimKeyWithBody", func() {
 			"nuke",
 			"title\n\n\nhttps://github.com/bborbe/nuke/pull/658\n"+
 				"copied description\nhttps://github.com/bborbe/nuke/pull/700\n",
+			"claims/repo/bborbe-nuke",
 			"claims/pr/bborbe-nuke-658",
 			false,
 			false,
@@ -72,6 +77,7 @@ var _ = Describe("DeriveClaimKeyWithBody", func() {
 			"nuke",
 			"https://github.com/other/repo/pull/1\n"+
 				"https://github.com/bborbe/nuke/pull/658\n",
+			"claims/repo/bborbe-nuke",
 			"claims/pr/bborbe-nuke-658",
 			false,
 			false,
@@ -83,6 +89,7 @@ var _ = Describe("DeriveClaimKeyWithBody", func() {
 			"BBorbe",
 			"Nuke",
 			"https://github.com/BBorbe/Nuke/pull/658",
+			"claims/repo/bborbe-nuke",
 			"claims/pr/bborbe-nuke-658",
 			false,
 			false,
@@ -94,6 +101,7 @@ var _ = Describe("DeriveClaimKeyWithBody", func() {
 			"bborbe",
 			"nuke",
 			"   https://github.com/bborbe/nuke/pull/658  ",
+			"claims/repo/bborbe-nuke",
 			"claims/pr/bborbe-nuke-658",
 			false,
 			false,
@@ -105,11 +113,12 @@ var _ = Describe("DeriveClaimKeyWithBody", func() {
 			"bborbe",
 			"nuke",
 			"https://github.com/bborbe/nuke/pull/0658",
+			"claims/repo/bborbe-nuke",
 			"claims/pr/bborbe-nuke-658",
 			false,
 			false,
 		),
-		// Anything else falls back to the repository key.
+		// Anything else falls back to the repository key, with no secondary.
 		Entry(
 			"URL in the middle of a line",
 			"pr-review",
@@ -118,6 +127,7 @@ var _ = Describe("DeriveClaimKeyWithBody", func() {
 			"nuke",
 			"see https://github.com/bborbe/nuke/pull/700 for context",
 			"claims/repo/bborbe-nuke",
+			"",
 			true,
 			false,
 		),
@@ -129,6 +139,7 @@ var _ = Describe("DeriveClaimKeyWithBody", func() {
 			"nuke",
 			"https://github.com/bborbe/nuke/pull/0",
 			"claims/repo/bborbe-nuke",
+			"",
 			true,
 			false,
 		),
@@ -140,6 +151,7 @@ var _ = Describe("DeriveClaimKeyWithBody", func() {
 			"nuke",
 			"https://github.com/bborbe/nuke/pull/12345678901",
 			"claims/repo/bborbe-nuke",
+			"",
 			true,
 			false,
 		),
@@ -151,6 +163,7 @@ var _ = Describe("DeriveClaimKeyWithBody", func() {
 			"nuke",
 			"https://github.com/bborbe/nuke/pull/658/files",
 			"claims/repo/bborbe-nuke",
+			"",
 			true,
 			false,
 		),
@@ -162,6 +175,7 @@ var _ = Describe("DeriveClaimKeyWithBody", func() {
 			"nuke",
 			"https://github.com/bborbe/nuke/pull/658/",
 			"claims/repo/bborbe-nuke",
+			"",
 			true,
 			false,
 		),
@@ -174,6 +188,7 @@ var _ = Describe("DeriveClaimKeyWithBody", func() {
 			"nuke",
 			"https://github.com/bborbe/nuke/pull/658",
 			"claims/repo/bborbe-nuke",
+			"",
 			false,
 			false,
 		),
@@ -185,6 +200,7 @@ var _ = Describe("DeriveClaimKeyWithBody", func() {
 			"nuke",
 			"https://github.com/bborbe/nuke/pull/658",
 			"claims/repo/bborbe-nuke",
+			"",
 			false,
 			false,
 		),
@@ -196,6 +212,7 @@ var _ = Describe("DeriveClaimKeyWithBody", func() {
 			"nuke",
 			"https://github.com/bborbe/nuke/pull/658",
 			"claims/repo/bborbe-nuke",
+			"",
 			false,
 			false,
 		),
@@ -207,6 +224,7 @@ var _ = Describe("DeriveClaimKeyWithBody", func() {
 			"nuke",
 			"https://github.com/bborbe/nuke/pull/658",
 			"claims/task/abc123",
+			"",
 			false,
 			false,
 		),
@@ -218,6 +236,7 @@ var _ = Describe("DeriveClaimKeyWithBody", func() {
 			"",
 			"nuke",
 			"https://github.com/bborbe/nuke/pull/658",
+			"",
 			"",
 			true,
 			true,
@@ -232,13 +251,14 @@ var _ = Describe("DeriveClaimKeyWithBody", func() {
 			"nuke",
 			"https://github.com/bad..owner/nuke/pull/1",
 			"",
+			"",
 			false,
 			true,
 		),
 	)
 
 	It("wraps a per-PR validation error with its origin", func() {
-		_, _, err := claim.DeriveClaimKeyWithBody(
+		_, _, _, err := claim.DeriveClaimKeysWithBody(
 			context.Background(),
 			"pr-review",
 			"abc123",

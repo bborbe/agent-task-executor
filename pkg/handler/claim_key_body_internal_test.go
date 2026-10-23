@@ -144,6 +144,11 @@ func prReviewClaimTask(id, body string) lib.Task {
 	}
 }
 
+// TestAcquireSpawnClaimKeysPRReviewsPerPullRequest covers the dual-write era:
+// the per-repo key is always primary, so different pull requests in one
+// repository serialise on it for as long as both refs are written. The first
+// task holds both refs; a second pull request in the same repository is
+// refused because the shared per-repo primary is already held.
 func TestAcquireSpawnClaimKeysPRReviewsPerPullRequest(t *testing.T) {
 	ctx := context.Background()
 	client := &casClaimRefClient{refs: map[string]claim.ClaimRef{}}
@@ -152,10 +157,7 @@ func TestAcquireSpawnClaimKeysPRReviewsPerPullRequest(t *testing.T) {
 	body658 := "title\n\nhttps://github.com/bborbe/nuke/pull/658\n"
 	body662 := "title\n\nhttps://github.com/bborbe/nuke/pull/662\n"
 	if !h.acquireSpawnClaim(ctx, prReviewClaimTask("tid-658", body658), redispatchConfig()) {
-		t.Fatal("expected the first pr-review to claim")
-	}
-	if !h.acquireSpawnClaim(ctx, prReviewClaimTask("tid-662", body662), redispatchConfig()) {
-		t.Fatal("expected an independent pr-review to claim")
+		t.Fatal("expected the first pr-review to claim the pair")
 	}
 
 	manager, err := h.ClaimLeaseManager(ctx)
@@ -164,28 +166,36 @@ func TestAcquireSpawnClaimKeysPRReviewsPerPullRequest(t *testing.T) {
 	}
 	held := manager.HeldClaims()
 	if len(held) != 2 {
-		t.Fatalf("expected two held claims, got %d: %+v", len(held), held)
+		t.Fatalf("expected two held claims (the pair), got %d: %+v", len(held), held)
 	}
 	if held[0].Key != "claims/pr/bborbe-nuke-658" || held[0].TaskID != "tid-658" {
 		t.Errorf("first held claim = %+v, want pr/658 owned by tid-658", held[0])
 	}
-	if held[1].Key != "claims/pr/bborbe-nuke-662" || held[1].TaskID != "tid-662" {
-		t.Errorf("second held claim = %+v, want pr/662 owned by tid-662", held[1])
+	if held[1].Key != "claims/repo/bborbe-nuke" || held[1].TaskID != "tid-658" {
+		t.Errorf("second held claim = %+v, want repo/bborbe-nuke owned by tid-658", held[1])
 	}
 
 	putsBefore := client.puts
 	before := snapshotGateClaims()
-	if h.acquireSpawnClaim(ctx, prReviewClaimTask("tid-658-third", body658), redispatchConfig()) {
-		t.Fatal("expected the same pull request to block the third spawn")
+	// The dual write takes the shared per-repo ref for every repo-keyed task, so a
+	// different pull request of the same repo is blocked for as long as the dual
+	// write exists. That is the accepted cost of the migration (spec 015 Non-goals):
+	// it restores the per-repo serialisation that per-PR keying removed, and dropping
+	// the dual write in a later release restores the concurrency.
+	if h.acquireSpawnClaim(ctx, prReviewClaimTask("tid-662", body662), redispatchConfig()) {
+		t.Fatal("expected the shared per-repo primary to block a different pull request")
 	}
 	expectGateClaimDelta(t, before, snapshotGateClaims(), map[string]float64{"conflict": 2})
 
 	held = manager.HeldClaims()
 	if len(held) != 2 {
-		t.Fatalf("expected the refusal to leave two held claims, got %d", len(held))
+		t.Fatalf("expected the refusal to leave the pair held, got %d", len(held))
 	}
 	if held[0].Key != "claims/pr/bborbe-nuke-658" || held[0].TaskID != "tid-658" {
 		t.Errorf("held claim after refusal = %+v, want pr/658 owned by tid-658", held[0])
+	}
+	if held[1].Key != "claims/repo/bborbe-nuke" || held[1].TaskID != "tid-658" {
+		t.Errorf("held claim after refusal = %+v, want repo owned by tid-658", held[1])
 	}
 	if client.puts != putsBefore {
 		t.Errorf("expected no Put on the refusal, got %d", client.puts-putsBefore)
@@ -209,11 +219,22 @@ func TestAcquireSpawnClaimKeysCloneURLPRReviewPerPullRequest(t *testing.T) {
 	if !h.acquireSpawnClaim(ctx, task, redispatchConfig()) {
 		t.Fatal("expected the clone_url pr-review to claim")
 	}
-	if len(client.putCalls) != 1 {
-		t.Fatalf("expected one Put, got %d", len(client.putCalls))
+	if len(client.putCalls) != 2 {
+		t.Fatalf("expected two Puts (per-repo then per-PR), got %d", len(client.putCalls))
 	}
-	if client.putCalls[0].key != "claims/pr/bborbe-nuke-658" {
-		t.Errorf("claim key = %q, want %q", client.putCalls[0].key, "claims/pr/bborbe-nuke-658")
+	if client.putCalls[0].key != "claims/repo/bborbe-nuke" {
+		t.Errorf(
+			"primary claim key = %q, want %q",
+			client.putCalls[0].key,
+			"claims/repo/bborbe-nuke",
+		)
+	}
+	if client.putCalls[1].key != "claims/pr/bborbe-nuke-658" {
+		t.Errorf(
+			"secondary claim key = %q, want %q",
+			client.putCalls[1].key,
+			"claims/pr/bborbe-nuke-658",
+		)
 	}
 }
 

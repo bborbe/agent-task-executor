@@ -54,6 +54,12 @@ func (s *stubLeaseManager) Claim(
 	return nil, nil
 }
 
+func (s *stubLeaseManager) ClaimPair(
+	context.Context, string, string, string,
+) (*claim.HeldClaim, error) {
+	return nil, nil
+}
+
 func (s *stubLeaseManager) Release(context.Context, string) error { return nil }
 
 func (s *stubLeaseManager) ReleaseAfterSuccess(
@@ -64,6 +70,12 @@ func (s *stubLeaseManager) ReleaseAfterSuccess(
 
 func (s *stubLeaseManager) Takeover(
 	context.Context, string, string,
+) (*claim.TakeoverResult, error) {
+	return nil, nil
+}
+
+func (s *stubLeaseManager) TakeoverPair(
+	context.Context, string, string, string,
 ) (*claim.TakeoverResult, error) {
 	return nil, nil
 }

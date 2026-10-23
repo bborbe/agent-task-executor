@@ -122,7 +122,7 @@ func (h *taskEventHandler) acquireSpawnClaim(
 		return h.claimFailureDecision(task, "lease_manager", err)
 	}
 	owner, repo := claimOwnerRepo(task)
-	key, fallback, err := claim.DeriveClaimKeyWithBody(
+	primary, secondary, fallback, err := claim.DeriveClaimKeysWithBody(
 		ctx,
 		string(task.Frontmatter.TaskType()),
 		string(task.TaskIdentifier),
@@ -140,9 +140,9 @@ func (h *taskEventHandler) acquireSpawnClaim(
 			task.TaskIdentifier, owner, repo,
 		)
 	}
-	_, claimErr := manager.Claim(ctx, key, string(task.TaskIdentifier))
+	_, claimErr := manager.ClaimPair(ctx, primary, secondary, string(task.TaskIdentifier))
 	if claimErr == nil {
-		logClaimAcquired(key, task.TaskIdentifier)
+		logClaimAcquired(primary, task.TaskIdentifier)
 		return true
 	}
 	if stderrors.Is(claimErr, claim.ErrLeaseConflict) {
@@ -150,7 +150,12 @@ func (h *taskEventHandler) acquireSpawnClaim(
 		// one inside the takeover grace) and a lost compare-and-swap race both
 		// leave the key with its current owner; the claim package has already
 		// counted conflict / takeover_too_early / taken_over / error.
-		_, takeoverErr := manager.Takeover(ctx, key, string(task.TaskIdentifier))
+		_, takeoverErr := manager.TakeoverPair(
+			ctx,
+			primary,
+			secondary,
+			string(task.TaskIdentifier),
+		)
 		if takeoverErr == nil {
 			// Another executor owned this task's claim and its lease had lapsed.
 			// The Config decides whether that work may run a second time here.
@@ -163,10 +168,10 @@ func (h *taskEventHandler) acquireSpawnClaim(
 			// task that was just parked.
 			if h.claimMode == pkg.ClaimModeOn &&
 				config.LostClaimAction() == agentv1.ParkAfterLostClaim {
-				h.parkAfterLostClaim(ctx, key, task)
+				h.parkAfterLostClaim(ctx, primary, task)
 				return false
 			}
-			logClaimAcquired(key, task.TaskIdentifier)
+			logClaimAcquired(primary, task.TaskIdentifier)
 			return true
 		}
 		return h.claimFailureDecision(task, "takeover", takeoverErr)
