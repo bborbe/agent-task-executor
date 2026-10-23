@@ -19,6 +19,7 @@ import (
 	lib "github.com/bborbe/agent"
 	"github.com/bborbe/cqrs/base"
 	"github.com/bborbe/errors"
+	libk8s "github.com/bborbe/k8s"
 	libtime "github.com/bborbe/time"
 	"github.com/bborbe/vault-cli/pkg/domain"
 	. "github.com/onsi/ginkgo/v2"
@@ -37,6 +38,10 @@ func TestHandler(t *testing.T) {
 	RunSpecs(t, "Handler Suite")
 }
 
+// testTaskVault is the vault every handler in this package's tests owns. Tasks
+// delivered without a stamped vault are given this one by the build helpers.
+const testTaskVault = "openclaw"
+
 // activeJobs builds a ListActiveJobs result carrying n synthetic task IDs. Tests
 // that only care about the concurrency count use it; tests that care which task
 // is active build the map with the real identifier.
@@ -54,7 +59,7 @@ var _ = Describe("TaskEventHandler", func() {
 		fakeSpawner         *mocks.FakeJobSpawner
 		fakeResolver        *mocks.FakeConfigResolver
 		fakeResultPublisher *mocks.FakeResultPublisher
-		fakeGitRestClient   *mocks.FakeGitRestClient
+		fakeView            *mocks.FakeTaskView
 		taskStore           *pkg.TaskStore
 		currentDateTime     libtime.CurrentDateTime
 		h                   handler.TaskEventHandler
@@ -69,25 +74,36 @@ var _ = Describe("TaskEventHandler", func() {
 			nil,
 		)
 		fakeResultPublisher = &mocks.FakeResultPublisher{}
-		fakeGitRestClient = &mocks.FakeGitRestClient{}
-		fakeGitRestClient.IsReadyReturns(true, nil)
+		fakeView = &mocks.FakeTaskView{}
+		fakeView.ReadyReturns(true)
+		fakeView.SnapshotReturns(nil)
+		fakeView.GetReturns(lib.Task{}, false)
 		taskStore = pkg.NewTaskStore()
 		currentDateTime = libtime.NewCurrentDateTime()
 		h = handler.NewTaskEventHandler(
 			fakeSpawner,
+			"dev",
 			base.Branch("prod"),
 			"",
+			true,
 			true,
 			fakeResolver,
 			fakeResultPublisher,
 			taskStore,
 			currentDateTime,
-			fakeGitRestClient,
-			"24 Tasks/*.md",
+			fakeView,
+			testTaskVault,
+			handler.DefaultReconcilePassTimeout,
+			handler.DefaultReconcileInterval,
+			pkg.ClaimModeOff,
+			nil,
 		)
 	})
 
 	buildMsg := func(task lib.Task) *sarama.ConsumerMessage {
+		if task.Vault == "" {
+			task.Vault = testTaskVault
+		}
 		value, err := json.Marshal(task)
 		Expect(err).To(BeNil())
 		return &sarama.ConsumerMessage{Value: value}
@@ -350,6 +366,7 @@ var _ = Describe("TaskEventHandler", func() {
 			)
 			fakeSpawner.ListActiveJobsStub = func(
 				_ context.Context,
+				_ libk8s.Namespace,
 				_ string,
 			) (map[lib.TaskIdentifier]bool, error) {
 				// Widen the count→spawn window deliberately. The real race is a
@@ -994,15 +1011,21 @@ var _ = Describe("TaskEventHandler", func() {
 				)
 				clusterHandler = handler.NewTaskEventHandler(
 					clusterSpawner,
+					"dev",
 					base.Branch("prod"),
 					"nukedev",
+					true,
 					true,
 					clusterResolver,
 					&mocks.FakeResultPublisher{},
 					pkg.NewTaskStore(),
 					libtime.NewCurrentDateTime(),
-					fakeGitRestClient,
-					"24 Tasks/*.md",
+					fakeView,
+					testTaskVault,
+					handler.DefaultReconcilePassTimeout,
+					handler.DefaultReconcileInterval,
+					pkg.ClaimModeOff,
+					nil,
 				)
 			})
 			buildClusterTask := func(cluster string) lib.Task {
@@ -1038,6 +1061,74 @@ var _ = Describe("TaskEventHandler", func() {
 			})
 		})
 
+		Context("untagged tasks disabled", func() {
+			var untaggedSpawner *mocks.FakeJobSpawner
+			var untaggedResolver *mocks.FakeConfigResolver
+			newHandler := func(runUntagged bool) handler.TaskEventHandler {
+				return handler.NewTaskEventHandler(
+					untaggedSpawner,
+					"dev",
+					base.Branch("prod"),
+					"sun",
+					true,
+					runUntagged,
+					untaggedResolver,
+					&mocks.FakeResultPublisher{},
+					pkg.NewTaskStore(),
+					libtime.NewCurrentDateTime(),
+					fakeView,
+					testTaskVault,
+					handler.DefaultReconcilePassTimeout,
+					handler.DefaultReconcileInterval,
+					pkg.ClaimModeOff,
+					nil,
+				)
+			}
+			buildTask := func(cluster string) lib.Task {
+				frontmatter := lib.TaskFrontmatter{
+					"status":   "in_progress",
+					"phase":    string(domain.TaskPhaseExecution),
+					"assignee": "claude",
+					"stage":    "prod",
+				}
+				if cluster != "" {
+					frontmatter["cluster"] = cluster
+				}
+				return lib.Task{
+					TaskIdentifier: lib.TaskIdentifier("tid-untagged-" + cluster),
+					Frontmatter:    frontmatter,
+				}
+			}
+			BeforeEach(func() {
+				untaggedSpawner = new(mocks.FakeJobSpawner)
+				untaggedSpawner.IsJobActiveReturns(false, nil)
+				untaggedResolver = &mocks.FakeConfigResolver{}
+				untaggedResolver.ResolveReturns(
+					pkg.AgentConfiguration{Assignee: "claude", Image: "my-image:latest"},
+					nil,
+				)
+			})
+			It(
+				"skips an untagged task on a CLUSTER=sun executor without resolving its Config",
+				func() {
+					err := newHandler(false).ConsumeMessage(ctx, buildMsg(buildTask("")))
+					Expect(err).To(BeNil())
+					Expect(untaggedSpawner.SpawnJobCallCount()).To(Equal(0))
+					Expect(untaggedResolver.ResolveCallCount()).To(Equal(0))
+				},
+			)
+			It("still spawns a task naming this executor's cluster", func() {
+				err := newHandler(false).ConsumeMessage(ctx, buildMsg(buildTask("sun")))
+				Expect(err).To(BeNil())
+				Expect(untaggedSpawner.SpawnJobCallCount()).To(Equal(1))
+			})
+			It("spawns an untagged task with the default RUN_UNTAGGED=true", func() {
+				err := newHandler(true).ConsumeMessage(ctx, buildMsg(buildTask("")))
+				Expect(err).To(BeNil())
+				Expect(untaggedSpawner.SpawnJobCallCount()).To(Equal(1))
+			})
+		})
+
 		Context("stage filter disabled", func() {
 			var stageSpawner *mocks.FakeJobSpawner
 			var stageHandler handler.TaskEventHandler
@@ -1051,15 +1142,21 @@ var _ = Describe("TaskEventHandler", func() {
 				)
 				stageHandler = handler.NewTaskEventHandler(
 					stageSpawner,
+					"dev",
 					base.Branch("dev"),
 					"sun",
 					false,
+					true,
 					stageResolver,
 					&mocks.FakeResultPublisher{},
 					pkg.NewTaskStore(),
 					libtime.NewCurrentDateTime(),
-					fakeGitRestClient,
-					"24 Tasks/*.md",
+					fakeView,
+					testTaskVault,
+					handler.DefaultReconcilePassTimeout,
+					handler.DefaultReconcileInterval,
+					pkg.ClaimModeOff,
+					nil,
 				)
 			})
 			It("spawns a cluster task without a stage field on a dev-branch executor", func() {
@@ -1088,15 +1185,21 @@ var _ = Describe("TaskEventHandler", func() {
 			)
 			localHandler := handler.NewTaskEventHandler(
 				localSpawner,
+				"dev",
 				base.Branch("dev"),
 				"",
+				true,
 				true,
 				localResolver,
 				&mocks.FakeResultPublisher{},
 				pkg.NewTaskStore(),
 				libtime.NewCurrentDateTime(),
-				fakeGitRestClient,
-				"24 Tasks/*.md",
+				fakeView,
+				testTaskVault,
+				handler.DefaultReconcilePassTimeout,
+				handler.DefaultReconcileInterval,
+				pkg.ClaimModeOff,
+				nil,
 			)
 			task := lib.Task{
 				TaskIdentifier: lib.TaskIdentifier("tid-stage-3"),
@@ -1138,15 +1241,21 @@ var _ = Describe("TaskEventHandler", func() {
 			)
 			localHandler := handler.NewTaskEventHandler(
 				localSpawner,
+				"dev",
 				base.Branch("dev"),
 				"",
+				true,
 				true,
 				localResolver,
 				&mocks.FakeResultPublisher{},
 				pkg.NewTaskStore(),
 				libtime.NewCurrentDateTime(),
-				fakeGitRestClient,
-				"24 Tasks/*.md",
+				fakeView,
+				testTaskVault,
+				handler.DefaultReconcilePassTimeout,
+				handler.DefaultReconcileInterval,
+				pkg.ClaimModeOff,
+				nil,
 			)
 			task := lib.Task{
 				TaskIdentifier: lib.TaskIdentifier("tid-stage-4"),

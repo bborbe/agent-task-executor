@@ -14,6 +14,7 @@ import (
 	lib "github.com/bborbe/agent"
 	"github.com/bborbe/cqrs/base"
 	"github.com/bborbe/errors"
+	libk8s "github.com/bborbe/k8s"
 	libtime "github.com/bborbe/time"
 	libtimetest "github.com/bborbe/time/test"
 	"github.com/bborbe/vault-cli/pkg/domain"
@@ -28,13 +29,29 @@ import (
 	"github.com/bborbe/agent-task-executor/pkg/metrics"
 )
 
+// buildQueueTask is the minimal eligible task the admission-ordering specs defer
+// behind the concurrency cap. It carries no current_job, so spawnIfNeeded takes
+// the cap path rather than the grace-window path.
+func buildQueueTask(id lib.TaskIdentifier, jobStartedAt string) lib.Task {
+	fm := lib.TaskFrontmatter{
+		"status":   "in_progress",
+		"phase":    string(domain.TaskPhasePlanning),
+		"assignee": "claude",
+		"stage":    "prod",
+	}
+	if jobStartedAt != "" {
+		fm["job_started_at"] = jobStartedAt
+	}
+	return lib.Task{TaskIdentifier: id, Vault: testTaskVault, Frontmatter: fm}
+}
+
 var _ = Describe("TaskEventHandler", func() {
 	var (
 		ctx                 context.Context
 		fakeSpawner         *mocks.FakeJobSpawner
 		fakeResolver        *mocks.FakeConfigResolver
 		fakeResultPublisher *mocks.FakeResultPublisher
-		fakeGitRestClient   *mocks.FakeGitRestClient
+		fakeView            *mocks.FakeTaskView
 		taskStore           *pkg.TaskStore
 		currentDateTime     libtime.CurrentDateTime
 		h                   handler.TaskEventHandler
@@ -49,25 +66,36 @@ var _ = Describe("TaskEventHandler", func() {
 			nil,
 		)
 		fakeResultPublisher = &mocks.FakeResultPublisher{}
-		fakeGitRestClient = &mocks.FakeGitRestClient{}
-		fakeGitRestClient.IsReadyReturns(true, nil)
+		fakeView = &mocks.FakeTaskView{}
+		fakeView.ReadyReturns(true)
+		fakeView.SnapshotReturns(nil)
+		fakeView.GetReturns(lib.Task{}, false)
 		taskStore = pkg.NewTaskStore()
 		currentDateTime = libtime.NewCurrentDateTime()
 		h = handler.NewTaskEventHandler(
 			fakeSpawner,
+			"dev",
 			base.Branch("prod"),
 			"",
+			true,
 			true,
 			fakeResolver,
 			fakeResultPublisher,
 			taskStore,
 			currentDateTime,
-			fakeGitRestClient,
-			"24 Tasks/*.md",
+			fakeView,
+			testTaskVault,
+			handler.DefaultReconcilePassTimeout,
+			handler.DefaultReconcileInterval,
+			pkg.ClaimModeOff,
+			nil,
 		)
 	})
 
 	buildMsg := func(task lib.Task) *sarama.ConsumerMessage {
+		if task.Vault == "" {
+			task.Vault = testTaskVault
+		}
 		value, err := json.Marshal(task)
 		Expect(err).To(BeNil())
 		return &sarama.ConsumerMessage{Value: value}
@@ -277,6 +305,7 @@ var _ = Describe("TaskEventHandler", func() {
 			buildGraceTask := func(phase domain.TaskPhase, triggerCount, maxTriggers int) lib.Task {
 				return lib.Task{
 					TaskIdentifier: lib.TaskIdentifier("tid-deferred-037"),
+					Vault:          testTaskVault,
 					Frontmatter: lib.TaskFrontmatter{
 						"status": "in_progress",
 						"phase":  string(phase),
@@ -346,6 +375,817 @@ var _ = Describe("TaskEventHandler", func() {
 				err = h.EvalDeferredRespawns(ctx)
 				Expect(err).To(BeNil())
 				Expect(fakeSpawner.SpawnJobCallCount()).To(Equal(1))
+			})
+
+			It("skips a deferred entry whose SpawnJob fails and spawns the next one", func() {
+				currentDateTime.SetNow(libtimetest.ParseDateTime(insideGrace))
+
+				taskA := buildGraceTask(domain.TaskPhaseExecution, 0, 3)
+				taskA.TaskIdentifier = lib.TaskIdentifier("tid-deferred-spawnfail-a")
+				taskB := buildGraceTask(domain.TaskPhaseExecution, 0, 3)
+				taskB.TaskIdentifier = lib.TaskIdentifier("tid-deferred-spawnfail-b")
+
+				err := h.ConsumeMessage(ctx, buildMsg(taskA))
+				Expect(err).To(BeNil())
+				err = h.ConsumeMessage(ctx, buildMsg(taskB))
+				Expect(err).To(BeNil())
+				Expect(fakeSpawner.SpawnJobCallCount()).To(Equal(0))
+
+				// Keyed by call index: both tasks share the same job_started_at, so
+				// either may be admitted first.
+				fakeSpawner.SpawnJobReturnsOnCall(0, "", errors.Errorf(ctx, "job name rejected"))
+				fakeSpawner.SpawnJobReturnsOnCall(1, "job-deferred-ok", nil)
+
+				beforeSpawnFailed := testutil.ToFloat64(
+					metrics.TaskEventsTotal.WithLabelValues("deferred_respawn_spawn_failed"),
+				)
+				beforeRespawn := testutil.ToFloat64(
+					metrics.TaskEventsTotal.WithLabelValues("respawn_after_grace_window"),
+				)
+
+				currentDateTime.SetNow(libtimetest.ParseDateTime(graceExpiredR))
+				err = h.EvalDeferredRespawns(ctx)
+				Expect(err).To(BeNil())
+				Expect(fakeSpawner.SpawnJobCallCount()).To(Equal(2))
+
+				_, spawnedTask0, _ := fakeSpawner.SpawnJobArgsForCall(0)
+				_, spawnedTask1, _ := fakeSpawner.SpawnJobArgsForCall(1)
+				Expect([]lib.TaskIdentifier{
+					spawnedTask0.TaskIdentifier,
+					spawnedTask1.TaskIdentifier,
+				}).To(ConsistOf(
+					lib.TaskIdentifier("tid-deferred-spawnfail-a"),
+					lib.TaskIdentifier("tid-deferred-spawnfail-b"),
+				))
+
+				afterSpawnFailed := testutil.ToFloat64(
+					metrics.TaskEventsTotal.WithLabelValues("deferred_respawn_spawn_failed"),
+				)
+				Expect(afterSpawnFailed - beforeSpawnFailed).To(Equal(float64(1)))
+				afterRespawn := testutil.ToFloat64(
+					metrics.TaskEventsTotal.WithLabelValues("respawn_after_grace_window"),
+				)
+				Expect(afterRespawn - beforeRespawn).To(Equal(float64(1)))
+			})
+
+			It("admits a never-attempted task ahead of an already-attempted one", func() {
+				// evalDeferredRespawns collects the due entries by ranging a Go map,
+				// so without a tie-break the order is randomized per tick and the same
+				// task ids recur in the concurrency_cap log for hours while others are
+				// dispatched (prod, 2026-10-21). A task that has never been attempted
+				// must win the freed slot over one that has already had a turn.
+				fakeResolver.ResolveReturns(
+					pkg.AgentConfiguration{
+						Assignee:          "claude",
+						Image:             "my-image:latest",
+						MaxConcurrentJobs: 1,
+					},
+					nil,
+				)
+				running := 1 // at cap, so both events defer instead of spawning
+				fakeSpawner.ListActiveJobsStub = func(
+					context.Context, libk8s.Namespace, string,
+				) (map[lib.TaskIdentifier]bool, error) {
+					return activeJobs(running), nil
+				}
+				fakeSpawner.SpawnJobStub = func(
+					context.Context, lib.Task, pkg.AgentConfiguration,
+				) (string, error) {
+					running = 1
+					return "job-admitted", nil
+				}
+
+				currentDateTime.SetNow(libtimetest.ParseDateTime("2026-10-21T08:00:00Z"))
+				attempted := buildQueueTask("tid-attempted", "2026-10-21T07:00:00Z")
+				fresh := buildQueueTask("tid-fresh", "")
+				Expect(h.ConsumeMessage(ctx, buildMsg(attempted))).To(BeNil())
+				Expect(h.ConsumeMessage(ctx, buildMsg(fresh))).To(BeNil())
+				Expect(fakeSpawner.SpawnJobCallCount()).To(Equal(0))
+
+				// The slot frees and both deferred entries come due in the same tick.
+				running = 0
+				currentDateTime.SetNow(libtimetest.ParseDateTime("2026-10-21T08:01:30Z"))
+				Expect(h.EvalDeferredRespawns(ctx)).To(Succeed())
+
+				Expect(fakeSpawner.SpawnJobCallCount()).To(Equal(1))
+				_, spawnedTask, _ := fakeSpawner.SpawnJobArgsForCall(0)
+				Expect(spawnedTask.TaskIdentifier).To(Equal(lib.TaskIdentifier("tid-fresh")))
+			})
+
+			// buildRoutingTask is the minimal eligible task the cluster-routing specs
+			// defer; cluster is written only when non-empty so the same helper builds
+			// the untagged and the tagged variants.
+			buildRoutingTask := func(id lib.TaskIdentifier, cluster string) lib.Task {
+				task := buildQueueTask(id, "")
+				if cluster != "" {
+					task.Frontmatter["cluster"] = cluster
+				}
+				return task
+			}
+
+			// newRoutingHandler builds a handler for the given cluster/runUntagged
+			// pair, sharing the suite's fakes and clock so the deferred map is driven
+			// through the real ConsumeMessage -> EvalDeferredRespawns path.
+			newRoutingHandler := func(cluster string, runUntagged bool) handler.TaskEventHandler {
+				return handler.NewTaskEventHandler(
+					fakeSpawner,
+					"dev",
+					base.Branch("prod"),
+					cluster,
+					true,
+					runUntagged,
+					fakeResolver,
+					fakeResultPublisher,
+					pkg.NewTaskStore(),
+					currentDateTime,
+					fakeView,
+					testTaskVault,
+					handler.DefaultReconcilePassTimeout,
+					handler.DefaultReconcileInterval,
+					pkg.ClaimModeOff,
+					nil,
+				)
+			}
+
+			// setupCapDeferral installs a single-slot cap with one job already in
+			// flight and returns a setter the specs use to free the slot.
+			setupCapDeferral := func() func(int) {
+				fakeResolver.ResolveReturns(
+					pkg.AgentConfiguration{
+						Assignee:          "claude",
+						Image:             "my-image:latest",
+						MaxConcurrentJobs: 1,
+					},
+					nil,
+				)
+				running := 1
+				fakeSpawner.ListActiveJobsStub = func(
+					context.Context, libk8s.Namespace, string,
+				) (map[lib.TaskIdentifier]bool, error) {
+					return activeJobs(running), nil
+				}
+				fakeSpawner.SpawnJobStub = func(
+					context.Context, lib.Task, pkg.AgentConfiguration,
+				) (string, error) {
+					running = 1
+					return "job-routed", nil
+				}
+				return func(n int) { running = n }
+			}
+
+			// foreignRetaggedTask is the view snapshot of tid-retagged after the
+			// retag to cluster sun; the reconcile pass must read it as foreign.
+			foreignRetaggedTask := lib.Task{
+				TaskIdentifier: lib.TaskIdentifier("tid-retagged"),
+				Vault:          testTaskVault,
+				Frontmatter: lib.TaskFrontmatter{
+					"status":   "in_progress",
+					"phase":    string(domain.TaskPhasePlanning),
+					"assignee": "claude",
+					"stage":    "prod",
+					"cluster":  "sun",
+				},
+			}
+
+			It(
+				"does not spawn a deferred task that a later event retagged to another cluster",
+				func() {
+					// Regression for prod 2026-10-21: a task deferred at the cap while
+					// untagged was retagged cluster: sun, yet the parked copy still held
+					// the pre-retag snapshot and spawned on nukeprod once a slot freed.
+					setRunning := setupCapDeferral()
+					routingHandler := newRoutingHandler("nukeprod", true)
+
+					currentDateTime.SetNow(libtimetest.ParseDateTime("2026-10-21T08:00:00Z"))
+					Expect(
+						routingHandler.ConsumeMessage(
+							ctx,
+							buildMsg(buildRoutingTask("tid-retagged", "")),
+						),
+					).
+						To(Succeed())
+					Expect(fakeSpawner.SpawnJobCallCount()).To(Equal(0))
+
+					Expect(
+						routingHandler.ConsumeMessage(
+							ctx,
+							buildMsg(buildRoutingTask("tid-retagged", "sun")),
+						),
+					).
+						To(Succeed())
+					Expect(fakeSpawner.SpawnJobCallCount()).To(Equal(0))
+
+					setRunning(0)
+					currentDateTime.SetNow(libtimetest.ParseDateTime("2026-10-21T08:01:30Z"))
+					Expect(routingHandler.EvalDeferredRespawns(ctx)).To(Succeed())
+					currentDateTime.SetNow(libtimetest.ParseDateTime("2026-10-21T08:02:30Z"))
+					Expect(routingHandler.EvalDeferredRespawns(ctx)).To(Succeed())
+
+					Expect(fakeSpawner.SpawnJobCallCount()).To(Equal(0))
+				},
+			)
+
+			It("spawns a deferred task exactly once when no later event retags it", func() {
+				// Positive control: proves the regression spec above cannot pass
+				// vacuously because the deferred path was never exercised.
+				setRunning := setupCapDeferral()
+				routingHandler := newRoutingHandler("nukeprod", true)
+
+				currentDateTime.SetNow(libtimetest.ParseDateTime("2026-10-21T08:00:00Z"))
+				Expect(
+					routingHandler.ConsumeMessage(
+						ctx,
+						buildMsg(buildRoutingTask("tid-not-retagged", "")),
+					),
+				).
+					To(Succeed())
+				Expect(fakeSpawner.SpawnJobCallCount()).To(Equal(0))
+
+				setRunning(0)
+				currentDateTime.SetNow(libtimetest.ParseDateTime("2026-10-21T08:01:30Z"))
+				Expect(routingHandler.EvalDeferredRespawns(ctx)).To(Succeed())
+
+				Expect(fakeSpawner.SpawnJobCallCount()).To(Equal(1))
+				_, spawnedTask, _ := fakeSpawner.SpawnJobArgsForCall(0)
+				Expect(spawnedTask.TaskIdentifier).To(Equal(lib.TaskIdentifier("tid-not-retagged")))
+			})
+
+			It("drops a deferred entry when a reconcile pass reads the task as foreign", func() {
+				// Backstop: a reconcile-driven cap deferral can store the pre-retag
+				// snapshot after the Kafka retag event was already consumed.
+				setRunning := setupCapDeferral()
+
+				currentDateTime.SetNow(libtimetest.ParseDateTime("2026-10-21T08:00:00Z"))
+				Expect(h.ConsumeMessage(ctx, buildMsg(buildRoutingTask("tid-retagged", "")))).
+					To(Succeed())
+				Expect(fakeSpawner.SpawnJobCallCount()).To(Equal(0))
+
+				fakeView.SnapshotReturns([]lib.Task{foreignRetaggedTask})
+				Expect(h.ReconcileOnce(ctx)).To(Succeed())
+
+				setRunning(0)
+				currentDateTime.SetNow(libtimetest.ParseDateTime("2026-10-21T08:01:30Z"))
+				Expect(h.EvalDeferredRespawns(ctx)).To(Succeed())
+
+				Expect(fakeSpawner.SpawnJobCallCount()).To(Equal(0))
+			})
+
+			// Each row parks the task at the cap, then delivers a second event that
+			// trips exactly one parseAndFilter skip. Once the slot frees, the parked
+			// snapshot must be gone: a skip that leaves it behind spawns the pre-skip
+			// task on a cluster the task no longer names.
+			DescribeTable("a parseAndFilter skip evicts the parked deferred entry",
+				func(mutate func(lib.Task) lib.Task, reconfigure func()) {
+					setRunning := setupCapDeferral()
+					routingHandler := newRoutingHandler("nukeprod", true)
+
+					currentDateTime.SetNow(libtimetest.ParseDateTime("2026-10-21T08:00:00Z"))
+					Expect(
+						routingHandler.ConsumeMessage(
+							ctx,
+							buildMsg(buildRoutingTask("tid-skip", "")),
+						),
+					).To(Succeed())
+					Expect(fakeSpawner.SpawnJobCallCount()).To(Equal(0))
+
+					if reconfigure != nil {
+						reconfigure()
+					}
+					Expect(
+						routingHandler.ConsumeMessage(
+							ctx,
+							buildMsg(mutate(buildRoutingTask("tid-skip", ""))),
+						),
+					).To(Succeed())
+
+					setRunning(0)
+					currentDateTime.SetNow(libtimetest.ParseDateTime("2026-10-21T08:01:30Z"))
+					Expect(routingHandler.EvalDeferredRespawns(ctx)).To(Succeed())
+
+					Expect(fakeSpawner.SpawnJobCallCount()).To(Equal(0))
+				},
+				Entry("skipped_status", func(task lib.Task) lib.Task {
+					task.Frontmatter["status"] = "hold"
+					return task
+				}, nil),
+				Entry("skipped_phase", func(task lib.Task) lib.Task {
+					task.Frontmatter["phase"] = string(domain.TaskPhaseTodo)
+					return task
+				}, nil),
+				Entry("skipped_stage", func(task lib.Task) lib.Task {
+					task.Frontmatter["stage"] = "dev"
+					return task
+				}, nil),
+				Entry("skipped_assignee", func(task lib.Task) lib.Task {
+					delete(task.Frontmatter, "assignee")
+					return task
+				}, nil),
+				Entry("type_mismatch", func(task lib.Task) lib.Task {
+					task.Frontmatter["task_type"] = "backtest"
+					return task
+				}, func() {
+					fakeResolver.ResolveReturns(
+						pkg.AgentConfiguration{
+							Assignee:          "claude",
+							Image:             "my-image:latest",
+							MaxConcurrentJobs: 1,
+							TaskTypes:         []string{"other"},
+						},
+						nil,
+					)
+				}),
+			)
+
+			It("spawns the parked task when the second event trips no skip", func() {
+				// Positive control: the skip table above only means something if an
+				// eligible second event really does leave the parked entry spawnable.
+				setRunning := setupCapDeferral()
+				routingHandler := newRoutingHandler("nukeprod", true)
+
+				currentDateTime.SetNow(libtimetest.ParseDateTime("2026-10-21T08:00:00Z"))
+				Expect(
+					routingHandler.ConsumeMessage(
+						ctx,
+						buildMsg(buildRoutingTask("tid-control", "")),
+					),
+				).To(Succeed())
+				Expect(fakeSpawner.SpawnJobCallCount()).To(Equal(0))
+
+				Expect(
+					routingHandler.ConsumeMessage(
+						ctx,
+						buildMsg(buildRoutingTask("tid-control", "")),
+					),
+				).To(Succeed())
+
+				setRunning(0)
+				currentDateTime.SetNow(libtimetest.ParseDateTime("2026-10-21T08:01:30Z"))
+				Expect(routingHandler.EvalDeferredRespawns(ctx)).To(Succeed())
+
+				Expect(fakeSpawner.SpawnJobCallCount()).To(Equal(1))
+			})
+
+			It(
+				"does not spawn a deferred task whose later event drops its cluster tag "+
+					"on a cluster that refuses untagged tasks",
+				func() {
+					setRunning := setupCapDeferral()
+					routingHandler := newRoutingHandler("nukeprod", false)
+
+					currentDateTime.SetNow(libtimetest.ParseDateTime("2026-10-21T08:00:00Z"))
+					tagged := buildRoutingTask("tid-untagged", "nukeprod")
+					Expect(routingHandler.ConsumeMessage(ctx, buildMsg(tagged))).To(Succeed())
+					Expect(fakeSpawner.SpawnJobCallCount()).To(Equal(0))
+
+					untagged := buildRoutingTask("tid-untagged", "")
+					Expect(routingHandler.ConsumeMessage(ctx, buildMsg(untagged))).To(Succeed())
+
+					setRunning(0)
+					currentDateTime.SetNow(libtimetest.ParseDateTime("2026-10-21T08:01:30Z"))
+					Expect(routingHandler.EvalDeferredRespawns(ctx)).To(Succeed())
+
+					Expect(fakeSpawner.SpawnJobCallCount()).To(Equal(0))
+				},
+			)
+
+			// capConfig is the single-slot configuration every claim spec parks a
+			// task behind.
+			capConfig := pkg.AgentConfiguration{
+				Assignee:          "claude",
+				Image:             "my-image:latest",
+				MaxConcurrentJobs: 1,
+			}
+
+			// claimInvalidatedCount reads the claim-invalidation counter.
+			claimInvalidatedCount := func() float64 {
+				return testutil.ToFloat64(
+					metrics.TaskEventsTotal.WithLabelValues("deferred_claim_invalidated"),
+				)
+			}
+
+			// installCapSpawner makes the spawner report `running` active jobs for
+			// claude. The returned setter frees or fills the slot.
+			installCapSpawner := func(running *int) {
+				fakeSpawner.ListActiveJobsStub = func(
+					context.Context, libk8s.Namespace, string,
+				) (map[lib.TaskIdentifier]bool, error) {
+					return activeJobs(*running), nil
+				}
+				fakeSpawner.SpawnJobStub = func(
+					context.Context, lib.Task, pkg.AgentConfiguration,
+				) (string, error) {
+					*running = 1
+					return "job-claim", nil
+				}
+			}
+
+			It("does not spawn or re-defer a replay whose entry was evicted mid-replay", func() {
+				// This spec fails on the pre-fix code. There, evalDeferredRespawns
+				// deleted the entry and released deferredMu, then spawned the stale
+				// snapshot: the retag eviction below found nothing to remove and the
+				// pre-retag task ran on nukeprod. The eviction is forced into that
+				// exact gap by the ListActiveJobs stub, which runs inside
+				// spawnIfNeeded after the collection and before the claim re-check.
+				fakeResolver.ResolveReturns(capConfig, nil)
+				routingHandler := newRoutingHandler("nukeprod", true)
+
+				running := 1
+				armed := false
+				evicted := false
+				installCapSpawner(&running)
+				// Not IsJobActiveStub: buildQueueTask carries no current_job, so the
+				// replay reaches isJobActive -> ListActiveJobs.
+				listStub := fakeSpawner.ListActiveJobsStub
+				fakeSpawner.ListActiveJobsStub = func(
+					ctx context.Context, namespace libk8s.Namespace, assignee string,
+				) (map[lib.TaskIdentifier]bool, error) {
+					if armed && !evicted {
+						evicted = true
+						Expect(
+							routingHandler.ConsumeMessage(
+								ctx,
+								buildMsg(buildRoutingTask("tid-replay", "sun")),
+							),
+						).To(Succeed())
+					}
+					return listStub(ctx, namespace, assignee)
+				}
+
+				currentDateTime.SetNow(libtimetest.ParseDateTime("2026-10-21T08:00:00Z"))
+				Expect(
+					routingHandler.ConsumeMessage(
+						ctx,
+						buildMsg(buildRoutingTask("tid-replay", "")),
+					),
+				).To(Succeed())
+				Expect(fakeSpawner.SpawnJobCallCount()).To(Equal(0))
+
+				running = 0
+				armed = true
+				before := claimInvalidatedCount()
+				currentDateTime.SetNow(libtimetest.ParseDateTime("2026-10-21T08:01:30Z"))
+				Expect(routingHandler.EvalDeferredRespawns(ctx)).To(Succeed())
+
+				Expect(evicted).To(BeTrue())
+				Expect(fakeSpawner.SpawnJobCallCount()).To(Equal(0))
+				Expect(claimInvalidatedCount() - before).To(Equal(float64(1)))
+
+				// No re-deferral: a second tick past the retry delay spawns nothing.
+				currentDateTime.SetNow(libtimetest.ParseDateTime("2026-10-21T08:02:30Z"))
+				Expect(routingHandler.EvalDeferredRespawns(ctx)).To(Succeed())
+				Expect(fakeSpawner.SpawnJobCallCount()).To(Equal(0))
+			})
+
+			It(
+				"does not re-defer a replay whose entry was evicted while the agent stays at cap",
+				func() {
+					// This spec fails on the pre-fix code: the replay reached the cap
+					// branch and re-parked the stale snapshot, then spawned it once the
+					// slot freed. Keeping the agent at the cap during the replay tick is
+					// what forces that store; without it the spec also passes on the old
+					// code.
+					fakeResolver.ResolveReturns(capConfig, nil)
+					routingHandler := newRoutingHandler("nukeprod", true)
+
+					running := 1
+					armed := false
+					evicted := false
+					installCapSpawner(&running)
+					listStub := fakeSpawner.ListActiveJobsStub
+					fakeSpawner.ListActiveJobsStub = func(
+						ctx context.Context, namespace libk8s.Namespace, assignee string,
+					) (map[lib.TaskIdentifier]bool, error) {
+						if armed && !evicted {
+							evicted = true
+							Expect(
+								routingHandler.ConsumeMessage(
+									ctx,
+									buildMsg(buildRoutingTask("tid-replay-cap", "sun")),
+								),
+							).To(Succeed())
+						}
+						return listStub(ctx, namespace, assignee)
+					}
+
+					currentDateTime.SetNow(libtimetest.ParseDateTime("2026-10-21T08:00:00Z"))
+					Expect(
+						routingHandler.ConsumeMessage(
+							ctx,
+							buildMsg(buildRoutingTask("tid-replay-cap", "")),
+						),
+					).To(Succeed())
+					Expect(fakeSpawner.SpawnJobCallCount()).To(Equal(0))
+
+					armed = true
+					before := claimInvalidatedCount()
+					currentDateTime.SetNow(libtimetest.ParseDateTime("2026-10-21T08:01:30Z"))
+					Expect(routingHandler.EvalDeferredRespawns(ctx)).To(Succeed())
+
+					Expect(evicted).To(BeTrue())
+					Expect(fakeSpawner.SpawnJobCallCount()).To(Equal(0))
+					Expect(claimInvalidatedCount() - before).To(Equal(float64(1)))
+
+					// Free the slot and tick twice past the retry delay: the evicted
+					// snapshot must not have been re-parked.
+					running = 0
+					currentDateTime.SetNow(libtimetest.ParseDateTime("2026-10-21T08:02:30Z"))
+					Expect(routingHandler.EvalDeferredRespawns(ctx)).To(Succeed())
+					currentDateTime.SetNow(libtimetest.ParseDateTime("2026-10-21T08:03:30Z"))
+					Expect(routingHandler.EvalDeferredRespawns(ctx)).To(Succeed())
+					Expect(fakeSpawner.SpawnJobCallCount()).To(Equal(0))
+				},
+			)
+
+			It("spawns an un-evicted replay exactly once", func() {
+				// Positive control: the eviction in the two specs above targets a
+				// different task id, so the replay's claim stays valid and it spawns
+				// exactly once. Proves those specs are not passing because the replay
+				// path was never exercised.
+				fakeResolver.ResolveReturns(capConfig, nil)
+				routingHandler := newRoutingHandler("nukeprod", true)
+
+				running := 1
+				armed := false
+				evictedOther := false
+				installCapSpawner(&running)
+				listStub := fakeSpawner.ListActiveJobsStub
+				fakeSpawner.ListActiveJobsStub = func(
+					ctx context.Context, namespace libk8s.Namespace, assignee string,
+				) (map[lib.TaskIdentifier]bool, error) {
+					if armed && !evictedOther {
+						evictedOther = true
+						Expect(
+							routingHandler.ConsumeMessage(
+								ctx,
+								buildMsg(buildRoutingTask("tid-other", "sun")),
+							),
+						).To(Succeed())
+					}
+					return listStub(ctx, namespace, assignee)
+				}
+
+				currentDateTime.SetNow(libtimetest.ParseDateTime("2026-10-21T08:00:00Z"))
+				Expect(
+					routingHandler.ConsumeMessage(
+						ctx,
+						buildMsg(buildRoutingTask("tid-replay-control", "")),
+					),
+				).To(Succeed())
+				Expect(fakeSpawner.SpawnJobCallCount()).To(Equal(0))
+
+				running = 0
+				armed = true
+				currentDateTime.SetNow(libtimetest.ParseDateTime("2026-10-21T08:01:30Z"))
+				Expect(routingHandler.EvalDeferredRespawns(ctx)).To(Succeed())
+
+				Expect(evictedOther).To(BeTrue())
+				Expect(fakeSpawner.SpawnJobCallCount()).To(Equal(1))
+				_, spawnedTask, _ := fakeSpawner.SpawnJobArgsForCall(0)
+				Expect(spawnedTask.TaskIdentifier).
+					To(Equal(lib.TaskIdentifier("tid-replay-control")))
+			})
+
+			DescribeTable("every filter skip drops a parked deferred entry",
+				func(first, second lib.Task, configure func()) {
+					fakeResolver.ResolveReturns(capConfig, nil)
+					if configure != nil {
+						configure()
+					}
+					routingHandler := newRoutingHandler("nukeprod", true)
+					running := 1
+					installCapSpawner(&running)
+
+					currentDateTime.SetNow(libtimetest.ParseDateTime("2026-10-21T08:00:00Z"))
+					beforeCap := testutil.ToFloat64(
+						metrics.TaskEventsTotal.WithLabelValues("deferred_concurrency_cap"),
+					)
+					Expect(routingHandler.ConsumeMessage(ctx, buildMsg(first))).To(Succeed())
+					// The first event must actually have parked the task, otherwise
+					// the second event's eviction would be vacuous.
+					Expect(fakeSpawner.SpawnJobCallCount()).To(Equal(0))
+					Expect(
+						testutil.ToFloat64(
+							metrics.TaskEventsTotal.WithLabelValues("deferred_concurrency_cap"),
+						) - beforeCap,
+					).To(Equal(float64(1)))
+
+					Expect(routingHandler.ConsumeMessage(ctx, buildMsg(second))).To(Succeed())
+
+					running = 0
+					currentDateTime.SetNow(libtimetest.ParseDateTime("2026-10-21T08:01:30Z"))
+					Expect(routingHandler.EvalDeferredRespawns(ctx)).To(Succeed())
+					Expect(fakeSpawner.SpawnJobCallCount()).To(Equal(0))
+				},
+				Entry("type mismatch",
+					func() lib.Task {
+						t := buildQueueTask("tid-skip-type", "")
+						t.Frontmatter["task_type"] = "x"
+						return t
+					}(),
+					func() lib.Task {
+						t := buildQueueTask("tid-skip-type", "")
+						t.Frontmatter["task_type"] = "y"
+						return t
+					}(),
+					func() {
+						cfg := capConfig
+						cfg.TaskType = "x"
+						fakeResolver.ResolveReturns(cfg, nil)
+					},
+				),
+				Entry("status",
+					buildQueueTask("tid-skip-status", ""),
+					func() lib.Task {
+						t := buildQueueTask("tid-skip-status", "")
+						t.Frontmatter["status"] = "hold"
+						return t
+					}(),
+					nil,
+				),
+				Entry("non-trigger phase",
+					buildQueueTask("tid-skip-phase", ""),
+					func() lib.Task {
+						t := buildQueueTask("tid-skip-phase", "")
+						t.Frontmatter["phase"] = string(domain.TaskPhaseTodo)
+						return t
+					}(),
+					nil,
+				),
+				Entry("stage",
+					buildQueueTask("tid-skip-stage", ""),
+					func() lib.Task {
+						t := buildQueueTask("tid-skip-stage", "")
+						t.Frontmatter["stage"] = "dev"
+						return t
+					}(),
+					nil,
+				),
+				Entry("empty assignee",
+					buildQueueTask("tid-skip-assignee", ""),
+					func() lib.Task {
+						t := buildQueueTask("tid-skip-assignee", "")
+						t.Frontmatter["assignee"] = ""
+						return t
+					}(),
+					nil,
+				),
+				Entry("resolveConfig skip",
+					buildQueueTask("tid-skip-unknown", ""),
+					func() lib.Task {
+						t := buildQueueTask("tid-skip-unknown", "")
+						t.Frontmatter["assignee"] = "unknown-agent-skip"
+						return t
+					}(),
+					func() {
+						fakeResolver.ResolveStub = func(
+							_ context.Context, assignee string,
+						) (pkg.AgentConfiguration, error) {
+							if assignee == "unknown-agent-skip" {
+								return pkg.AgentConfiguration{}, pkg.ErrConfigNotFound
+							}
+							return capConfig, nil
+						}
+					},
+				),
+				Entry("foreign cluster",
+					buildQueueTask("tid-skip-cluster", ""),
+					buildRoutingTask("tid-skip-cluster", "sun"),
+					nil,
+				),
+				Entry("terminal phase",
+					buildQueueTask("tid-skip-terminal", ""),
+					func() lib.Task {
+						t := buildQueueTask("tid-skip-terminal", "")
+						t.Frontmatter["phase"] = string(domain.TaskPhaseHumanReview)
+						return t
+					}(),
+					nil,
+				),
+			)
+
+			It("does not spawn a reconcile drive whose entry was evicted mid-drive", func() {
+				// Fails on the pre-fix code: gather captures the candidate, the retag
+				// eviction between gather and drive found nothing to remove, and the
+				// drive spawned the stale snapshot. The first ListActiveJobs call in
+				// a pass is the drive's isJobActive (gather makes none), so the stub
+				// lands the eviction exactly in that gap.
+				fakeResolver.ResolveReturns(capConfig, nil)
+				routingHandler := newRoutingHandler("nukeprod", true)
+				running := 0
+				evicted := false
+				fakeSpawner.ListActiveJobsStub = func(
+					ctx context.Context, _ libk8s.Namespace, _ string,
+				) (map[lib.TaskIdentifier]bool, error) {
+					if !evicted {
+						evicted = true
+						Expect(
+							routingHandler.ConsumeMessage(
+								ctx,
+								buildMsg(buildRoutingTask("tid-reconcile", "sun")),
+							),
+						).To(Succeed())
+					}
+					return activeJobs(running), nil
+				}
+				fakeSpawner.SpawnJobStub = func(
+					context.Context, lib.Task, pkg.AgentConfiguration,
+				) (string, error) {
+					return "job-reconcile", nil
+				}
+				fakeView.SnapshotReturns([]lib.Task{buildQueueTask("tid-reconcile", "")})
+
+				before := claimInvalidatedCount()
+				currentDateTime.SetNow(libtimetest.ParseDateTime("2026-10-21T08:00:00Z"))
+				Expect(routingHandler.ReconcileOnce(ctx)).To(Succeed())
+
+				Expect(evicted).To(BeTrue())
+				Expect(fakeSpawner.SpawnJobCallCount()).To(Equal(0))
+				Expect(claimInvalidatedCount() - before).To(Equal(float64(1)))
+			})
+
+			It("does not re-defer a reconcile drive evicted while the agent stays at cap", func() {
+				// Fails on the pre-fix code: the drive re-parked the reconcile snapshot
+				// at the cap, then spawned it after the slot freed. Keeping the agent at
+				// the cap forces the store.
+				fakeResolver.ResolveReturns(capConfig, nil)
+				routingHandler := newRoutingHandler("nukeprod", true)
+				running := 1
+				evicted := false
+				fakeSpawner.ListActiveJobsStub = func(
+					ctx context.Context, _ libk8s.Namespace, _ string,
+				) (map[lib.TaskIdentifier]bool, error) {
+					if !evicted {
+						evicted = true
+						Expect(
+							routingHandler.ConsumeMessage(
+								ctx,
+								buildMsg(buildRoutingTask("tid-reconcile", "sun")),
+							),
+						).To(Succeed())
+					}
+					return activeJobs(running), nil
+				}
+				fakeSpawner.SpawnJobStub = func(
+					context.Context, lib.Task, pkg.AgentConfiguration,
+				) (string, error) {
+					return "job-reconcile", nil
+				}
+				fakeView.SnapshotReturns([]lib.Task{buildQueueTask("tid-reconcile", "")})
+
+				before := claimInvalidatedCount()
+				currentDateTime.SetNow(libtimetest.ParseDateTime("2026-10-21T08:00:00Z"))
+				Expect(routingHandler.ReconcileOnce(ctx)).To(Succeed())
+				Expect(evicted).To(BeTrue())
+				Expect(fakeSpawner.SpawnJobCallCount()).To(Equal(0))
+				Expect(claimInvalidatedCount() - before).To(Equal(float64(1)))
+
+				running = 0
+				currentDateTime.SetNow(libtimetest.ParseDateTime("2026-10-21T08:01:30Z"))
+				Expect(routingHandler.EvalDeferredRespawns(ctx)).To(Succeed())
+				Expect(fakeSpawner.SpawnJobCallCount()).To(Equal(0))
+			})
+
+			It("orders already-attempted tasks by queue-entry time, not last attempt", func() {
+				// queued_at is when the FIRST wait began, so it is the fair key among
+				// tasks that have all had a turn. job_started_at is deliberately
+				// inverted here: this spec fails if the comparator falls back to it.
+				fakeResolver.ResolveReturns(
+					pkg.AgentConfiguration{
+						Assignee:          "claude",
+						Image:             "my-image:latest",
+						MaxConcurrentJobs: 1,
+					},
+					nil,
+				)
+				running := 1
+				fakeSpawner.ListActiveJobsStub = func(
+					context.Context, libk8s.Namespace, string,
+				) (map[lib.TaskIdentifier]bool, error) {
+					return activeJobs(running), nil
+				}
+				fakeSpawner.SpawnJobStub = func(
+					context.Context, lib.Task, pkg.AgentConfiguration,
+				) (string, error) {
+					running = 1
+					return "job-admitted", nil
+				}
+
+				currentDateTime.SetNow(libtimetest.ParseDateTime("2026-10-21T08:00:00Z"))
+				early := buildQueueTask("tid-early", "2026-10-21T07:55:00Z")
+				early.Frontmatter["queued_at"] = "2026-10-21T06:00:00Z"
+				late := buildQueueTask("tid-late", "2026-10-21T06:30:00Z")
+				late.Frontmatter["queued_at"] = "2026-10-21T07:00:00Z"
+				Expect(h.ConsumeMessage(ctx, buildMsg(late))).To(BeNil())
+				Expect(h.ConsumeMessage(ctx, buildMsg(early))).To(BeNil())
+				Expect(fakeSpawner.SpawnJobCallCount()).To(Equal(0))
+
+				running = 0
+				currentDateTime.SetNow(libtimetest.ParseDateTime("2026-10-21T08:01:30Z"))
+				Expect(h.EvalDeferredRespawns(ctx)).To(Succeed())
+
+				Expect(fakeSpawner.SpawnJobCallCount()).To(Equal(1))
+				_, spawnedTask, _ := fakeSpawner.SpawnJobArgsForCall(0)
+				Expect(spawnedTask.TaskIdentifier).To(Equal(lib.TaskIdentifier("tid-early")))
 			})
 
 			It(
@@ -430,15 +1270,21 @@ var _ = Describe("TaskEventHandler", func() {
 
 					freshHandler := handler.NewTaskEventHandler(
 						fakeSpawner,
+						"dev",
 						base.Branch("prod"),
 						"",
+						true,
 						true,
 						fakeResolver,
 						fakeResultPublisher,
 						restartStore,
 						currentDateTime,
-						fakeGitRestClient,
-						"24 Tasks/*.md",
+						fakeView,
+						testTaskVault,
+						handler.DefaultReconcilePassTimeout,
+						handler.DefaultReconcileInterval,
+						pkg.ClaimModeOff,
+						nil,
 					)
 
 					// Clock is past grace expiry — simulating the executor coming back up
@@ -480,15 +1326,21 @@ var _ = Describe("TaskEventHandler", func() {
 
 					freshHandler := handler.NewTaskEventHandler(
 						fakeSpawner,
+						"dev",
 						base.Branch("prod"),
 						"",
+						true,
 						true,
 						fakeResolver,
 						fakeResultPublisher,
 						restartStore,
 						currentDateTime,
-						fakeGitRestClient,
-						"24 Tasks/*.md",
+						fakeView,
+						testTaskVault,
+						handler.DefaultReconcilePassTimeout,
+						handler.DefaultReconcileInterval,
+						pkg.ClaimModeOff,
+						nil,
 					)
 
 					currentDateTime.SetNow(libtimetest.ParseDateTime(graceExpiredR))
@@ -614,28 +1466,6 @@ var _ = Describe("TaskEventHandler", func() {
 				afterRetryDelay = "2026-05-17T09:35:01Z"
 			)
 
-			// A full frontmatter-delimited document is required: parseTaskFile
-			// rejects a bare YAML fragment, and without a parsed identifier
-			// recordPathID never runs.
-			queuedTaskFile := "---\n" +
-				"task_identifier: tid-queued\n" +
-				"status: in_progress\n" +
-				"phase: execution\n" +
-				"assignee: claude\n" +
-				"stage: prod\n" +
-				"queued_at: \"2026-05-17T09:34:00Z\"\n" +
-				"---\nbody\n"
-			// Ineligible on the reconcile floor (status/phase outside the trigger
-			// set) so the pass records the path but drives nothing — the only
-			// queued_at publish in these rows must come from ConsumeMessage.
-			ineligibleTaskFile := "---\n" +
-				"task_identifier: tid-queued\n" +
-				"status: done\n" +
-				"phase: done\n" +
-				"assignee: claude\n" +
-				"stage: prod\n" +
-				"---\nbody\n"
-
 			var payload lib.Task
 
 			BeforeEach(func() {
@@ -675,10 +1505,14 @@ var _ = Describe("TaskEventHandler", func() {
 				Expect(queuedAt).To(Equal("2026-05-17T09:34:00Z"))
 			})
 
-			It("does not publish when the vault already carries queued_at", func() {
-				fakeGitRestClient.ListReturns([]string{"24 Tasks/tid-queued.md"}, nil)
-				fakeGitRestClient.GetReturns([]byte(queuedTaskFile), nil)
-				Expect(h.ReconcileOnce(ctx)).To(Succeed())
+			It("does not publish when the view already carries queued_at", func() {
+				fakeView.GetReturns(lib.Task{
+					TaskIdentifier: lib.TaskIdentifier("tid-queued"),
+					Vault:          testTaskVault,
+					Frontmatter: lib.TaskFrontmatter{
+						"queued_at": queuedAtValue,
+					},
+				}, true)
 
 				before := testutil.ToFloat64(
 					metrics.DeferredConcurrencyCapTotal.WithLabelValues("claude"),
@@ -704,7 +1538,30 @@ var _ = Describe("TaskEventHandler", func() {
 				Expect(fakeResultPublisher.PublishQueueEntryCallCount()).To(Equal(1))
 			})
 
-			DescribeTable("queuedAtFromVault failure branches still publish once",
+			It(
+				"does not re-publish when a repeat event carries no queued_at and the view has none",
+				func() {
+					// The production loop: the vault write never lands (the task file
+					// was deleted, or every write fails), so neither the event payload
+					// nor the view ever carries queued_at and the same task is offered
+					// again one retry interval later. Without an executor-local record
+					// of what was already published this re-stamps on every deferral,
+					// once per concurrencyCapRetryDelay, indefinitely.
+					Expect(h.ConsumeMessage(ctx, buildMsg(payload))).To(Succeed())
+					Expect(fakeResultPublisher.PublishQueueEntryCallCount()).To(Equal(1))
+
+					currentDateTime.SetNow(libtimetest.ParseDateTime(afterRetryDelay))
+					Expect(h.ConsumeMessage(ctx, buildMsg(payload))).To(Succeed())
+					Expect(fakeResultPublisher.PublishQueueEntryCallCount()).To(Equal(1))
+
+					// A third offer is the same: the record is per task, not per pass.
+					currentDateTime.SetNow(libtimetest.ParseDateTime(afterRetryDelay))
+					Expect(h.ConsumeMessage(ctx, buildMsg(payload))).To(Succeed())
+					Expect(fakeResultPublisher.PublishQueueEntryCallCount()).To(Equal(1))
+				},
+			)
+
+			DescribeTable("queuedAtFromView miss branches still publish once",
 				func(setup func(), id lib.TaskIdentifier) {
 					setup()
 					task := payload
@@ -713,26 +1570,17 @@ var _ = Describe("TaskEventHandler", func() {
 					Expect(fakeResultPublisher.PublishQueueEntryCallCount()).To(Equal(1))
 				},
 				Entry(
-					"unknown id with empty pathIDs",
+					"unknown id",
 					func() {},
 					lib.TaskIdentifier("tid-unknown"),
 				),
 				Entry(
-					"vault read fails after the path was recorded",
+					"view task carries no queued_at",
 					func() {
-						fakeGitRestClient.ListReturns([]string{"24 Tasks/tid-queued.md"}, nil)
-						fakeGitRestClient.GetReturnsOnCall(0, []byte(ineligibleTaskFile), nil)
-						fakeGitRestClient.GetReturns(nil, errors.Errorf(ctx, "read failed"))
-						Expect(h.ReconcileOnce(ctx)).To(Succeed())
-					},
-					lib.TaskIdentifier("tid-queued"),
-				),
-				Entry(
-					"reconciled file has no queued_at",
-					func() {
-						fakeGitRestClient.ListReturns([]string{"24 Tasks/tid-queued.md"}, nil)
-						fakeGitRestClient.GetReturns([]byte(ineligibleTaskFile), nil)
-						Expect(h.ReconcileOnce(ctx)).To(Succeed())
+						fakeView.GetReturns(lib.Task{
+							TaskIdentifier: lib.TaskIdentifier("tid-queued"),
+							Vault:          testTaskVault,
+						}, true)
 					},
 					lib.TaskIdentifier("tid-queued"),
 				),
@@ -749,6 +1597,27 @@ var _ = Describe("TaskEventHandler", func() {
 				Expect(h.EvalDeferredRespawns(ctx)).To(Succeed())
 				Expect(fakeResultPublisher.PublishQueueEntryCallCount()).To(Equal(1))
 			})
+
+			It(
+				"does not re-stamp after a failed publish, because the record is written first",
+				func() {
+					// The spec above drives EvalDeferredRespawns, whose entry already
+					// carries queued_at from the returned copy, so it passes even if the
+					// record were written after the publish. This one drives a fresh
+					// event with no queued_at anywhere, which only the
+					// record-before-publish ordering can stop from re-stamping.
+					fakeResultPublisher.PublishQueueEntryReturns(
+						errors.Errorf(ctx, "publish failed"),
+					)
+					Expect(h.ConsumeMessage(ctx, buildMsg(payload))).To(Succeed())
+					Expect(fakeResultPublisher.PublishQueueEntryCallCount()).To(Equal(1))
+
+					fakeResultPublisher.PublishQueueEntryReturns(nil)
+					currentDateTime.SetNow(libtimetest.ParseDateTime(afterRetryDelay))
+					Expect(h.ConsumeMessage(ctx, buildMsg(payload))).To(Succeed())
+					Expect(fakeResultPublisher.PublishQueueEntryCallCount()).To(Equal(1))
+				},
+			)
 		})
 
 		Describe("grace window (spec 036)", func() {

@@ -55,16 +55,16 @@ var RedriveCappedTotal = promauto.NewCounter(
 
 // ReconcilePassesTotal counts reconcile pass outcomes, labelled by result. The
 // failure reasons mirror ReconcileOnce's log events, and `ok` is counted on
-// every pass that gets past its List — so an alert can fire on a backstop that
-// never succeeds. That is the exact shape of the 2026-09 outage: the reconcile
-// loop logged `reconcile_list_failed` once a minute and no other reconcile
-// outcome was ever recorded, for months. A failure-only counter cannot express
-// it — it saturates and then looks identical to a healthy quiet fleet, which is
-// why the pass is counted on both sides of the outcome.
+// every pass that gets past the vault classification — so an alert can fire on a
+// backstop that never succeeds. That is the exact shape of the 2026-09 outage:
+// the reconcile loop logged `reconcile_list_failed` once a minute and no other
+// reconcile outcome was ever recorded, for months. A failure-only counter cannot
+// express it — it saturates and then looks identical to a healthy quiet fleet,
+// which is why the pass is counted on both sides of the outcome.
 var ReconcilePassesTotal = promauto.NewCounterVec(
 	prometheus.CounterOpts{
 		Name: "executor_reconcile_passes_total",
-		Help: "Total number of reconcile passes by outcome (ok, vault_unavailable, list_failed, aborted).",
+		Help: "Total number of reconcile passes by outcome (ok, aborted, view_not_ready, task_vault_mismatch, task_vault_unstamped).",
 	},
 	[]string{"result"},
 )
@@ -81,6 +81,57 @@ var SkippedUnknownAssigneeTotal = promauto.NewCounterVec(
 		Help: "Total number of tasks skipped because their assignee matches no agent Config CR, by assignee.",
 	},
 	[]string{"assignee"},
+)
+
+// ClaimTotal counts claim lease outcomes by result. The result set is closed;
+// keys and task ids are never label values.
+var ClaimTotal = promauto.NewCounterVec(
+	prometheus.CounterOpts{
+		Name: "executor_claim_total",
+		Help: "Total number of claim lease outcomes by result.",
+	},
+	[]string{"result"},
+)
+
+// ClaimMismatchTotal counts held-claim / running-Job mismatches, one per case.
+var ClaimMismatchTotal = promauto.NewCounter(
+	prometheus.CounterOpts{
+		Name: "executor_claim_mismatch_total",
+		Help: "Total number of held-claim / running-Job mismatches.",
+	},
+)
+
+// ClaimKeyFallbackTotal counts pr-review tasks whose body carried no usable
+// pull-request URL, so their claim fell back to the repository key.
+var ClaimKeyFallbackTotal = promauto.NewCounter(prometheus.CounterOpts{
+	Name: "executor_claim_key_fallback_total",
+	Help: "Total number of pr-review claim keys that fell back to the repository key.",
+})
+
+// ParkedLostClaimTotal counts tasks parked at phase human_review after another
+// executor took over their claim, labelled by outcome. The unset default parks,
+// so an unexpected fleet-wide park must be alertable from a metric rather than
+// only visible by grepping for the log line.
+var ParkedLostClaimTotal = promauto.NewCounterVec(prometheus.CounterOpts{
+	Name: "executor_parked_lost_claim_total",
+	Help: "Total number of tasks parked at human_review after a lost claim, by outcome.",
+}, []string{"result"})
+
+// TaskRerunsTotal counts spawns of a task whose previous Job succeeded inside
+// the re-run window. A re-run is a task that ran again after succeeding, which
+// is what a claim regression looks like on live data.
+//
+// Scoped to this executor's own store: a task whose first success ran on
+// another cluster is not recorded here and is not counted, so the counter
+// under-reports cross-cluster re-runs. Those stay visible through
+// ClaimTotal{result=~"taken_over|adopted"}. The Prometheus `cluster` external
+// label distinguishes the clusters that do report.
+var TaskRerunsTotal = promauto.NewCounterVec(
+	prometheus.CounterOpts{
+		Name: "executor_task_reruns_total",
+		Help: "Total number of task spawns after a success inside the re-run window.",
+	},
+	[]string{"task_type"},
 )
 
 // DeferredConcurrencyCapTotal counts tasks deferred because their assignee was
@@ -110,6 +161,13 @@ var DeferredConcurrencyCapTotal = promauto.NewCounterVec(
 	[]string{"assignee"},
 )
 
+// TaskViewSkippedTotal counts task event messages the in-memory task view
+// could not decode. A skipped message never blocks readiness.
+var TaskViewSkippedTotal = promauto.NewCounter(prometheus.CounterOpts{
+	Name: "executor_task_view_skipped_total",
+	Help: "Total number of task event messages the task view could not decode.",
+})
+
 func init() {
 	TaskEventsTotal.WithLabelValues("spawned").Add(0)
 	TaskEventsTotal.WithLabelValues("skipped_status").Add(0)
@@ -117,25 +175,58 @@ func init() {
 	TaskEventsTotal.WithLabelValues("skipped_assignee").Add(0)
 	TaskEventsTotal.WithLabelValues("skipped_unknown_assignee").Add(0)
 	TaskEventsTotal.WithLabelValues("skipped_active_job").Add(0)
+	TaskEventsTotal.WithLabelValues("skipped_recent_success").Add(0)
 	TaskEventsTotal.WithLabelValues("skipped_stage").Add(0)
+	TaskEventsTotal.WithLabelValues("pin_outside_pool").Add(0)
 	TaskEventsTotal.WithLabelValues("skipped_foreign_cluster").Add(0)
+	TaskEventsTotal.WithLabelValues("skipped_foreign_vault").Add(0)
+	TaskEventsTotal.WithLabelValues("skipped_view_not_ready").Add(0)
+	TaskEventsTotal.WithLabelValues("skipped_untagged").Add(0)
 	TaskEventsTotal.WithLabelValues("skipped_trigger_cap").Add(0)
 	TaskEventsTotal.WithLabelValues("error").Add(0)
 	TaskEventsTotal.WithLabelValues("type_mismatch").Add(0)
 	TaskEventsTotal.WithLabelValues("spawn_suppressed_terminal_phase").Add(0)
 	TaskEventsTotal.WithLabelValues("unknown_phase").Add(0)
 	TaskEventsTotal.WithLabelValues("respawn_grace_window").Add(0)
+	TaskEventsTotal.WithLabelValues("skipped_foreign_job").Add(0)
 	TaskEventsTotal.WithLabelValues("respawn_after_grace_window").Add(0)
 	TaskEventsTotal.WithLabelValues("deferred_concurrency_cap").Add(0)
+	TaskEventsTotal.WithLabelValues("deferred_claim_invalidated").Add(0)
+	TaskEventsTotal.WithLabelValues("deferred_respawn_spawn_failed").Add(0)
 	// Pre-initialise every reconcile outcome so rate() sees a 0 series rather
 	// than no data — an absent series makes `rate(...)==0` skip silently and the
 	// "backstop never succeeds" alert never fire.
 	for _, result := range []string{
 		"ok",
-		"vault_unavailable",
-		"list_failed",
 		"aborted",
+		"view_not_ready",
+		"task_vault_mismatch",
+		"task_vault_unstamped",
 	} {
 		ReconcilePassesTotal.WithLabelValues(result).Add(0)
+	}
+	ClaimKeyFallbackTotal.Add(0)
+	for _, result := range []string{"parked", "failed"} {
+		ParkedLostClaimTotal.WithLabelValues(result).Add(0)
+	}
+	// Pre-initialise the closed claim result set so every series is visible
+	// before any claim activity.
+	for _, result := range []string{
+		"claimed",
+		"conflict",
+		"renewed",
+		"recovered",
+		"renew_failed",
+		"claim_lost",
+		"fenced",
+		"taken_over",
+		"takeover_too_early",
+		"released",
+		"already_released",
+		"adopted",
+		"error",
+		"jobless_released",
+	} {
+		ClaimTotal.WithLabelValues(result).Add(0)
 	}
 }

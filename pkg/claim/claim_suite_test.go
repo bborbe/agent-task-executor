@@ -2,18 +2,20 @@
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
-package gitrestclient_test
+package claim_test
 
 //go:generate go run github.com/maxbrunsfeld/counterfeiter/v6@v6.12.2 -generate
 
 import (
 	"testing"
+	"time"
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 )
 
-func TestGitRestClient(t *testing.T) {
+func TestClaim(t *testing.T) {
+	time.Local = time.UTC
 	RegisterFailHandler(Fail)
-	RunSpecs(t, "GitRestClient Suite")
+	RunSpecs(t, "Claim Suite")
 }

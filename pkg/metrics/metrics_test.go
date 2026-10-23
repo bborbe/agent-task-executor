@@ -26,6 +26,47 @@ var _ = Describe("Metrics", func() {
 		Expect(names).To(HaveKey("agent_executor_task_events_total"))
 		Expect(names).To(HaveKey("agent_executor_jobs_spawned_total"))
 		Expect(names).To(HaveKey("executor_reconcile_redriven_total"))
+		Expect(names).To(HaveKey("executor_claim_total"))
+		Expect(names).To(HaveKey("executor_claim_mismatch_total"))
+		Expect(names).To(HaveKey("executor_claim_key_fallback_total"))
+	})
+
+	It("pre-initializes the claim-key fallback counter at zero", func() {
+		mfs, err := prometheus.DefaultGatherer.Gather()
+		Expect(err).NotTo(HaveOccurred())
+
+		for _, mf := range mfs {
+			if mf.GetName() != "executor_claim_key_fallback_total" {
+				continue
+			}
+			Expect(mf.GetMetric()).To(HaveLen(1))
+			Expect(mf.GetMetric()[0].GetCounter().GetValue()).To(Equal(float64(0)))
+			return
+		}
+		Fail("executor_claim_key_fallback_total not registered")
+	})
+
+	It("pre-initializes all 14 claim result series", func() {
+		mfs, err := prometheus.DefaultGatherer.Gather()
+		Expect(err).NotTo(HaveOccurred())
+
+		labels := gatherLabels(mfs, "executor_claim_total", "result")
+		Expect(labels).To(ContainElements(
+			"claimed",
+			"conflict",
+			"renewed",
+			"recovered",
+			"renew_failed",
+			"claim_lost",
+			"fenced",
+			"taken_over",
+			"takeover_too_early",
+			"released",
+			"already_released",
+			"adopted",
+			"error",
+			"jobless_released",
+		))
 	})
 
 	It("pre-initializes all task_events_total label combinations", func() {
@@ -40,9 +81,28 @@ var _ = Describe("Metrics", func() {
 			"skipped_assignee",
 			"skipped_unknown_assignee",
 			"skipped_active_job",
+			"skipped_recent_success",
 			"error",
 			"type_mismatch",
+			"deferred_claim_invalidated",
+			"deferred_respawn_spawn_failed",
 		))
+	})
+
+	It("AC13: pre-initializes the reconcile pass outcomes and drops the git-rest ones", func() {
+		mfs, err := prometheus.DefaultGatherer.Gather()
+		Expect(err).NotTo(HaveOccurred())
+
+		labels := gatherLabels(mfs, "executor_reconcile_passes_total", "result")
+		Expect(labels).To(ContainElements(
+			"ok",
+			"aborted",
+			"view_not_ready",
+			"task_vault_mismatch",
+			"task_vault_unstamped",
+		))
+		Expect(labels).NotTo(ContainElement("vault_unavailable"))
+		Expect(labels).NotTo(ContainElement("list_failed"))
 	})
 
 	It("exposes the concurrency-cap deferral counter labelled by assignee", func() {

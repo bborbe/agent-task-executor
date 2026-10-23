@@ -151,6 +151,11 @@ func (in *ConfigSpec) DeepCopyInto(out *ConfigSpec) {
 		*out = new(int32)
 		**out = **in
 	}
+	if in.RerunOnLostClaim != nil {
+		in, out := &in.RerunOnLostClaim, &out.RerunOnLostClaim
+		*out = new(bool)
+		**out = **in
+	}
 	return
 }
 

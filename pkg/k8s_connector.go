@@ -73,6 +73,17 @@ type k8sConnector struct {
 // (openclaw/personal/trading) installs this same object on start.
 const crdName = "configs.agent.benjamin-borbe.de"
 
+// crdDNS1123Label is the DNS-1123 label shape Kubernetes requires of a
+// namespace name. jobNamespace is used verbatim as a target namespace, so an
+// unvalidated value would pass admission, resolve cleanly, and fail only at
+// Jobs(...).Create with a 422 the operator has to correlate by hand.
+const crdDNS1123Label = "^[a-z0-9]([-a-z0-9]*[a-z0-9])?$"
+
+// crdMaxNameLen is the 63-character ceiling a DNS-1123 label carries. The
+// pattern alone does not bound the length, so an over-long jobNamespace would
+// pass admission and fail later at Jobs().Create with a 422.
+var crdMaxNameLen = int64(63)
+
 // SetupCustomResourceDefinition installs or updates the Config CRD on the cluster.
 func (c *k8sConnector) SetupCustomResourceDefinition(ctx context.Context) error {
 	clientset, err := c.crdBuilder(c.config)
@@ -334,13 +345,14 @@ func configSpecProperties() map[string]apiextensionsv1.JSONSchemaProps {
 		"configMapName":      {Type: "string"},
 		"configMapMountPath": {Type: "string"},
 		"configMapItems":     configMapItemsSchema(),
-		"priorityClassName": {
-			Type:    "string",
-			Pattern: "^[a-z0-9]([-a-z0-9]*[a-z0-9])?$",
-		},
-		"imagePullSecret": {Type: "string"},
+		"priorityClassName":  {Type: "string", Pattern: crdDNS1123Label},
+		"jobNamespace":       {Type: "string", Pattern: crdDNS1123Label, MaxLength: &crdMaxNameLen},
+		"imagePullSecret":    {Type: "string"},
 		// 0 = unlimited (see AgentConfiguration.MaxConcurrentJobs).
 		"maxConcurrentJobs": {Type: "integer", Minimum: &crdMinZero},
+		// Optional; unset means false. true re-dispatches a taken-over task;
+		// false or unset parks it at human_review.
+		"rerunOnLostClaim": {Type: "boolean"},
 		// Minimums mirror the Helm chart's config-crd.yaml (10 / 30) and the
 		// admission guards in k8s/apis/agent.benjamin-borbe.de/v1/types.go.
 		"zombieSweeperIntervalSeconds": {

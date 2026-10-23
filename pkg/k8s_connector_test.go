@@ -220,6 +220,16 @@ var _ = Describe("desiredCRDSpec (via SetupCustomResourceDefinition)", func() {
 		Expect(specProps.Properties["maxConcurrentJobs"].Type).To(Equal("integer"))
 	})
 
+	It("declares rerunOnLostClaim as an optional boolean", func() {
+		// Same defect class as maxConcurrentJobs: a field added to ConfigSpec but
+		// not to this schema is pruned from every Config on the next executor
+		// start, and the failure reads as "the operator never set it".
+		crd := getCRDFromCreateAction(cs.Actions())
+		specProps := crd.Spec.Versions[0].Schema.OpenAPIV3Schema.Properties["spec"]
+		Expect(specProps.Properties).To(HaveKey("rerunOnLostClaim"))
+		Expect(specProps.Properties["rerunOnLostClaim"].Type).To(Equal("boolean"))
+	})
+
 	It("declares the zombie-sweeper fields AgentConfiguration reads from spec", func() {
 		// Same defect class as maxConcurrentJobs: zombieSweeperIntervalSeconds and
 		// zombieJobTimeoutSeconds are declared in ConfigSpec, read live by the

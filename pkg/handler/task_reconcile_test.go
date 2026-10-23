@@ -7,7 +7,7 @@ package handler_test
 import (
 	"context"
 	"encoding/json"
-	"strings"
+	"fmt"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -16,12 +16,12 @@ import (
 	lib "github.com/bborbe/agent"
 	"github.com/bborbe/cqrs/base"
 	"github.com/bborbe/errors"
+	libk8s "github.com/bborbe/k8s"
 	libtime "github.com/bborbe/time"
 	"github.com/bborbe/vault-cli/pkg/domain"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 	"github.com/prometheus/client_golang/prometheus/testutil"
-	"gopkg.in/yaml.v3"
 
 	agentv1 "github.com/bborbe/agent-task-executor/k8s/apis/agent.benjamin-borbe.de/v1"
 	"github.com/bborbe/agent-task-executor/mocks"
@@ -36,24 +36,11 @@ var _ = Describe("TaskEventHandler reconcile loop", func() {
 		fakeSpawner         *mocks.FakeJobSpawner
 		fakeResolver        *mocks.FakeConfigResolver
 		fakeResultPublisher *mocks.FakeResultPublisher
-		fakeGitRestClient   *mocks.FakeGitRestClient
+		fakeView            *mocks.FakeTaskView
 		taskStore           *pkg.TaskStore
 		currentDateTime     libtime.CurrentDateTime
 		h                   handler.TaskEventHandler
 	)
-
-	// renderTaskFile serializes a task into the vault markdown shape the
-	// reconcile loop parses (frontmatter delimited by "---", body after).
-	renderTaskFile := func(task lib.Task) string {
-		fm := make(map[string]any, len(task.Frontmatter)+1)
-		for k, v := range task.Frontmatter {
-			fm[k] = v
-		}
-		fm["task_identifier"] = string(task.TaskIdentifier)
-		out, err := yaml.Marshal(fm)
-		Expect(err).To(BeNil())
-		return "---\n" + string(out) + "---\n# Task body\n"
-	}
 
 	BeforeEach(func() {
 		ctx = context.Background()
@@ -64,31 +51,49 @@ var _ = Describe("TaskEventHandler reconcile loop", func() {
 			nil,
 		)
 		fakeResultPublisher = &mocks.FakeResultPublisher{}
-		fakeGitRestClient = &mocks.FakeGitRestClient{}
-		fakeGitRestClient.IsReadyReturns(true, nil)
+		fakeView = &mocks.FakeTaskView{}
+		fakeView.ReadyReturns(true)
+		fakeView.SnapshotReturns(nil)
+		fakeView.GetReturns(lib.Task{}, false)
 		taskStore = pkg.NewTaskStore()
 		currentDateTime = libtime.NewCurrentDateTime()
 		h = handler.NewTaskEventHandler(
 			fakeSpawner,
+			"dev",
 			base.Branch("prod"),
 			"",
+			true,
 			true,
 			fakeResolver,
 			fakeResultPublisher,
 			taskStore,
 			currentDateTime,
-			fakeGitRestClient,
-			"24 Tasks/*.md",
+			fakeView,
+			testTaskVault,
+			handler.DefaultReconcilePassTimeout,
+			handler.DefaultReconcileInterval,
+			pkg.ClaimModeOff,
+			nil,
 		)
 	})
+
+	buildMsg := func(t lib.Task) *sarama.ConsumerMessage {
+		if t.Vault == "" {
+			t.Vault = testTaskVault
+		}
+		value, err := json.Marshal(t)
+		Expect(err).To(BeNil())
+		return &sarama.ConsumerMessage{Value: value}
+	}
 
 	// eligibleTask builds a task that passes every reconcile eligibility gate:
 	// status in_progress, phase in the default trigger set, assignee set, stage
 	// matching the executor branch, no current_job key (the shape a concurrency-cap
-	// deferral leaves in the vault).
+	// deferral leaves in the vault), and stamped with this executor's vault.
 	eligibleTask := func(phase domain.TaskPhase) lib.Task {
 		return lib.Task{
 			TaskIdentifier: "tid-a",
+			Vault:          testTaskVault,
 			Frontmatter: lib.TaskFrontmatter{
 				"status":   "in_progress",
 				"phase":    string(phase),
@@ -112,12 +117,37 @@ var _ = Describe("TaskEventHandler reconcile loop", func() {
 		}
 	}
 
-	It("re-drives an eligible task from the vault (AC 1)", func() {
-		fakeGitRestClient.ListReturns([]string{"24 Tasks/tid-a.md"}, nil)
-		fakeGitRestClient.GetReturns(
-			[]byte(renderTaskFile(eligibleTask(domain.TaskPhasePlanning))),
+	It("skips an untagged task without resolving Config when RUN_UNTAGGED is off", func() {
+		untaggedResolver := &mocks.FakeConfigResolver{}
+		untaggedHandler := handler.NewTaskEventHandler(
+			fakeSpawner,
+			"dev",
+			base.Branch("prod"),
+			"sun",
+			true,
+			false,
+			untaggedResolver,
+			fakeResultPublisher,
+			taskStore,
+			currentDateTime,
+			fakeView,
+			testTaskVault,
+			handler.DefaultReconcilePassTimeout,
+			handler.DefaultReconcileInterval,
+			pkg.ClaimModeOff,
 			nil,
 		)
+		fakeView.SnapshotReturns([]lib.Task{eligibleTask(domain.TaskPhasePlanning)})
+		fakeSpawner.IsJobActiveReturns(false, nil)
+
+		err := untaggedHandler.ReconcileOnce(ctx)
+		Expect(err).To(BeNil())
+		Expect(fakeSpawner.SpawnJobCallCount()).To(Equal(0))
+		Expect(untaggedResolver.ResolveCallCount()).To(Equal(0))
+	})
+
+	It("re-drives an eligible task from the view (AC 1)", func() {
+		fakeView.SnapshotReturns([]lib.Task{eligibleTask(domain.TaskPhasePlanning)})
 		fakeSpawner.IsJobActiveReturns(false, nil)
 
 		before := testutil.ToFloat64(metrics.ReconcileRedrivenTotal)
@@ -125,6 +155,62 @@ var _ = Describe("TaskEventHandler reconcile loop", func() {
 		Expect(err).To(BeNil())
 		Expect(fakeSpawner.SpawnJobCallCount()).To(Equal(1))
 		Expect(testutil.ToFloat64(metrics.ReconcileRedrivenTotal)).To(Equal(before + 1))
+	})
+
+	Describe("a Job that already succeeded but whose result has not reached the vault", func() {
+		// Measured nuke dev 2026-10-21: task a055d019's claude-headless Job
+		// finished in ~20 s, the file still read `phase: execution` with no
+		// current_job, and every 60 s reconcile tick spawned it again.
+		var now time.Time
+
+		BeforeEach(func() {
+			now = time.Date(2026, 10, 21, 5, 56, 23, 0, time.UTC)
+			currentDateTime.SetNow(libtime.DateTime(now))
+			fakeView.SnapshotReturns([]lib.Task{eligibleTask(domain.TaskPhaseExecution)})
+		})
+
+		It("is not re-driven while the success is inside the grace window", func() {
+			taskStore.MarkSucceeded("tid-a", "execution", now.Add(-20*time.Second))
+
+			Expect(h.ReconcileOnce(ctx)).To(BeNil())
+			Expect(fakeSpawner.SpawnJobCallCount()).To(Equal(0))
+		})
+
+		It(
+			"is not re-driven when the success is stamped slightly in the future (clock skew)",
+			func() {
+				taskStore.MarkSucceeded("tid-a", "execution", now.Add(2*time.Second))
+
+				Expect(h.ReconcileOnce(ctx)).To(BeNil())
+				Expect(fakeSpawner.SpawnJobCallCount()).To(Equal(0))
+			},
+		)
+
+		It("is spawned at once when the agent advanced the task to its next phase", func() {
+			// The success was for planning; the view now reads execution, so the
+			// Job for the next phase must not wait out the grace window.
+			taskStore.MarkSucceeded("tid-a", "planning", now.Add(-20*time.Second))
+
+			Expect(h.ReconcileOnce(ctx)).To(BeNil())
+			Expect(fakeSpawner.SpawnJobCallCount()).To(Equal(1))
+		})
+
+		It("is re-driven once the grace window has passed", func() {
+			taskStore.MarkSucceeded("tid-a", "execution", now.Add(-10*time.Minute))
+
+			Expect(h.ReconcileOnce(ctx)).To(BeNil())
+			Expect(fakeSpawner.SpawnJobCallCount()).To(Equal(1))
+		})
+
+		It("still re-drives a task whose Job failed, up to the redrive cap", func() {
+			// No success is recorded for a failed Job, so the guard stays out of
+			// the way and the existing streak cap (maxConsecutiveRedrives = 3)
+			// is what stops it.
+			for range 5 {
+				Expect(h.ReconcileOnce(ctx)).To(BeNil())
+			}
+			Expect(fakeSpawner.SpawnJobCallCount()).To(Equal(3))
+		})
 	})
 
 	It(
@@ -138,11 +224,7 @@ var _ = Describe("TaskEventHandler reconcile loop", func() {
 			// asymmetry is what made the build-fix lane's ~1/min spawn loop survive a
 			// Config narrowing that should have stopped it.
 			fakeResolver.ResolveReturns(narrowedTriggerConfig(), nil)
-			fakeGitRestClient.ListReturns([]string{"24 Tasks/tid-a.md"}, nil)
-			fakeGitRestClient.GetReturns(
-				[]byte(renderTaskFile(eligibleTask(domain.TaskPhasePlanning))),
-				nil,
-			)
+			fakeView.SnapshotReturns([]lib.Task{eligibleTask(domain.TaskPhasePlanning)})
 			fakeSpawner.IsJobActiveReturns(false, nil)
 
 			err := h.ReconcileOnce(ctx)
@@ -155,11 +237,7 @@ var _ = Describe("TaskEventHandler reconcile loop", func() {
 		// The discriminating half: the narrowed Config must not stop the phases it
 		// DOES list, or the fix would trade a loop for a dead lane.
 		fakeResolver.ResolveReturns(narrowedTriggerConfig(), nil)
-		fakeGitRestClient.ListReturns([]string{"24 Tasks/tid-a.md"}, nil)
-		fakeGitRestClient.GetReturns(
-			[]byte(renderTaskFile(eligibleTask(domain.TaskPhaseExecution))),
-			nil,
-		)
+		fakeView.SnapshotReturns([]lib.Task{eligibleTask(domain.TaskPhaseExecution)})
 		fakeSpawner.IsJobActiveReturns(false, nil)
 
 		err := h.ReconcileOnce(ctx)
@@ -168,12 +246,10 @@ var _ = Describe("TaskEventHandler reconcile loop", func() {
 	})
 
 	It("recovers a deferred task after a restart with an empty task store (AC 2)", func() {
-		// Simulate the post-restart wipe: a fresh empty store, and a vault task in
+		// Simulate the post-restart wipe: a fresh empty store, and a view task in
 		// the shape deferIfAtConcurrencyCap leaves behind — status in_progress,
 		// phase execution, no current_job key — with no Kafka event driving it.
-		task := eligibleTask(domain.TaskPhaseExecution)
-		fakeGitRestClient.ListReturns([]string{"24 Tasks/tid-a.md"}, nil)
-		fakeGitRestClient.GetReturns([]byte(renderTaskFile(task)), nil)
+		fakeView.SnapshotReturns([]lib.Task{eligibleTask(domain.TaskPhaseExecution)})
 		fakeSpawner.IsJobActiveReturns(false, nil)
 
 		Expect(taskStore.Snapshot()).To(BeEmpty())
@@ -197,11 +273,7 @@ var _ = Describe("TaskEventHandler reconcile loop", func() {
 			// run-start snapshot on every completion, so trigger_scope is clobbered
 			// back, scopeChanged is true on every spawn, and trigger_count is reset
 			// to 1 each time.
-			fakeGitRestClient.ListReturns([]string{"24 Tasks/tid-a.md"}, nil)
-			fakeGitRestClient.GetReturns(
-				[]byte(renderTaskFile(eligibleTask(domain.TaskPhaseExecution))),
-				nil,
-			)
+			fakeView.SnapshotReturns([]lib.Task{eligibleTask(domain.TaskPhaseExecution)})
 			fakeSpawner.IsJobActiveReturns(false, nil)
 			fakeSpawner.SpawnJobReturns("job-1", nil)
 
@@ -222,14 +294,10 @@ var _ = Describe("TaskEventHandler reconcile loop", func() {
 		// advanced, and the executor must serve the new phase — otherwise the cap
 		// would strand a lane that legitimately progresses, which is the
 		// over-capping regression spec 006 guards.
-		fakeGitRestClient.ListReturns([]string{"24 Tasks/tid-a.md"}, nil)
 		fakeSpawner.IsJobActiveReturns(false, nil)
 		fakeSpawner.SpawnJobReturns("job-1", nil)
 
-		fakeGitRestClient.GetReturns(
-			[]byte(renderTaskFile(eligibleTask(domain.TaskPhaseExecution))),
-			nil,
-		)
+		fakeView.SnapshotReturns([]lib.Task{eligibleTask(domain.TaskPhaseExecution)})
 		for i := 0; i < 3; i++ {
 			Expect(h.ReconcileOnce(ctx)).To(Succeed())
 		}
@@ -240,10 +308,7 @@ var _ = Describe("TaskEventHandler reconcile loop", func() {
 		Expect(fakeSpawner.SpawnJobCallCount()).To(Equal(3))
 
 		// The task advances — the phase changed, so the streak starts over.
-		fakeGitRestClient.GetReturns(
-			[]byte(renderTaskFile(eligibleTask(domain.TaskPhaseAIReview))),
-			nil,
-		)
+		fakeView.SnapshotReturns([]lib.Task{eligibleTask(domain.TaskPhaseAIReview)})
 		Expect(h.ReconcileOnce(ctx)).To(Succeed())
 		Expect(fakeSpawner.SpawnJobCallCount()).To(Equal(4))
 	})
@@ -258,18 +323,8 @@ var _ = Describe("TaskEventHandler reconcile loop", func() {
 			// capped=0 on all 68 reconcile passes, and the floor responsible for
 			// only two of the four. Counting every spawn, at the one funnel all
 			// three paths share, is what makes the bound hold.
-			//
-			// NOTE: buildMsg elsewhere in this package is a Describe-scoped
-			// closure, so define a local equivalent rather than reaching for one.
-			buildMsg := func(t lib.Task) *sarama.ConsumerMessage {
-				value, err := json.Marshal(t)
-				Expect(err).To(BeNil())
-				return &sarama.ConsumerMessage{Value: value}
-			}
-
 			task := eligibleTask(domain.TaskPhaseExecution)
-			fakeGitRestClient.ListReturns([]string{"24 Tasks/tid-a.md"}, nil)
-			fakeGitRestClient.GetReturns([]byte(renderTaskFile(task)), nil)
+			fakeView.SnapshotReturns([]lib.Task{task})
 			fakeSpawner.IsJobActiveReturns(false, nil)
 			fakeSpawner.SpawnJobReturns("job-1", nil)
 
@@ -296,8 +351,8 @@ var _ = Describe("TaskEventHandler reconcile loop", func() {
 			if setup != nil {
 				setup()
 			}
-			fakeGitRestClient.ListReturns([]string{"24 Tasks/tid-a.md"}, nil)
-			fakeGitRestClient.GetReturns([]byte(renderTaskFile(task)), nil)
+			task.Vault = testTaskVault
+			fakeView.SnapshotReturns([]lib.Task{task})
 			err := h.ReconcileOnce(ctx)
 			Expect(err).To(BeNil())
 			Expect(fakeSpawner.SpawnJobCallCount()).To(Equal(0))
@@ -329,6 +384,30 @@ var _ = Describe("TaskEventHandler reconcile loop", func() {
 				"stage":    "prod",
 			},
 		}, nil),
+		// The entry above passes because human_review is absent from the default
+		// trigger set, so it never exercises the terminal guard. This one makes the
+		// Config list the terminal phase, which is the only shape that can reach a
+		// spawn: without the IsTerminal check in reconcileTask the floor would drive
+		// it, and the view — which retains no body for a terminal task — would hand
+		// the agent an empty task file.
+		Entry("phase done listed in the Config's trigger.phases (terminal)", lib.Task{
+			TaskIdentifier: "tid-a",
+			Frontmatter: lib.TaskFrontmatter{
+				"status":   "in_progress",
+				"phase":    string(domain.TaskPhaseDone),
+				"assignee": "claude",
+				"stage":    "prod",
+			},
+		}, func() {
+			fakeResolver.ResolveReturns(pkg.AgentConfiguration{
+				Assignee: "claude",
+				Image:    "my-image:latest",
+				Trigger: &agentv1.Trigger{
+					Phases:   domain.TaskPhases{domain.TaskPhaseDone},
+					Statuses: domain.TaskStatuses{domain.TaskStatusInProgress},
+				},
+			}, nil)
+		}),
 		Entry("empty assignee (assignee key absent)", lib.Task{
 			TaskIdentifier: "tid-a",
 			Frontmatter: lib.TaskFrontmatter{
@@ -380,69 +459,58 @@ var _ = Describe("TaskEventHandler reconcile loop", func() {
 			nil,
 		)
 		fakeSpawner.ListActiveJobsReturns(activeJobs(1), nil) // at cap
-		fakeGitRestClient.ListReturns([]string{"24 Tasks/tid-a.md"}, nil)
-		fakeGitRestClient.GetReturns(
-			[]byte(renderTaskFile(eligibleTask(domain.TaskPhaseExecution))),
+		fakeView.SnapshotReturns([]lib.Task{eligibleTask(domain.TaskPhaseExecution)})
+
+		err := h.ReconcileOnce(ctx)
+		Expect(err).To(BeNil())
+		Expect(fakeSpawner.SpawnJobCallCount()).To(Equal(0))
+	})
+
+	It("admits a never-attempted child ahead of an older task that already ran", func() {
+		// Prod 2026-10-21: 67 eligible children against maxConcurrentJobs 1, and
+		// both admissions in a 20-minute window were the first two files in
+		// filename order — so a child delegated today (named 20261021-…) sorted
+		// last and was never reached. The pass must admit the never-attempted
+		// child, not whichever task the snapshot happens to yield first.
+		fakeResolver.ResolveReturns(
+			pkg.AgentConfiguration{
+				Assignee:          "claude",
+				Image:             "my-image:latest",
+				MaxConcurrentJobs: 1,
+			},
 			nil,
 		)
+		older := eligibleTask(domain.TaskPhaseExecution)
+		older.TaskIdentifier = "tid-older"
+		older.Frontmatter["job_started_at"] = "2026-10-21T08:00:00Z"
+		newer := eligibleTask(domain.TaskPhasePlanning)
+		newer.TaskIdentifier = "tid-newer"
+
+		// Older first, exactly as the snapshot map may yield it.
+		fakeView.SnapshotReturns([]lib.Task{older, newer})
+		fakeSpawner.IsJobActiveReturns(false, nil)
+		running := 0
+		fakeSpawner.ListActiveJobsStub = func(
+			context.Context, libk8s.Namespace, string,
+		) (map[lib.TaskIdentifier]bool, error) {
+			return activeJobs(running), nil
+		}
+		fakeSpawner.SpawnJobStub = func(
+			context.Context, lib.Task, pkg.AgentConfiguration,
+		) (string, error) {
+			running = 1
+			return "job-newer", nil
+		}
 
 		err := h.ReconcileOnce(ctx)
 		Expect(err).To(BeNil())
-		Expect(fakeSpawner.SpawnJobCallCount()).To(Equal(0))
-	})
-
-	It("skips the pass when git-rest is not ready (failure mode)", func() {
-		fakeGitRestClient.IsReadyReturns(false, nil)
-		fakeGitRestClient.ListReturns([]string{"24 Tasks/tid-a.md"}, nil)
-
-		err := h.ReconcileOnce(ctx)
-		Expect(err).To(BeNil())
-		Expect(fakeGitRestClient.ListCallCount()).To(Equal(0))
-		Expect(fakeSpawner.SpawnJobCallCount()).To(Equal(0))
-	})
-
-	It("skips the pass when the readiness check errors (failure mode)", func() {
-		fakeGitRestClient.IsReadyReturns(false, errors.Errorf(ctx, "boom"))
-		fakeGitRestClient.ListReturns([]string{"24 Tasks/tid-a.md"}, nil)
-
-		err := h.ReconcileOnce(ctx)
-		Expect(err).To(BeNil())
-		Expect(fakeGitRestClient.ListCallCount()).To(Equal(0))
-		Expect(fakeSpawner.SpawnJobCallCount()).To(Equal(0))
-	})
-
-	It("skips the pass when List errors (failure mode)", func() {
-		fakeGitRestClient.IsReadyReturns(true, nil)
-		fakeGitRestClient.ListReturns(nil, errors.Errorf(ctx, "rate limited"))
-
-		err := h.ReconcileOnce(ctx)
-		Expect(err).To(BeNil())
-		Expect(fakeSpawner.SpawnJobCallCount()).To(Equal(0))
-	})
-
-	// SC4: a sustained reconcile failure must be alertable, not a warn line
-	// repeating once a minute forever. The backstop was dead for months because
-	// `reconcile_list_failed` was a bare glog.Warningf with no metric behind it.
-	// These three assert the pass outcome is counted, including the `ok` series —
-	// an alert on rate(ok)==0 is what catches "the backstop never succeeds",
-	// which a failure-only counter cannot express.
-	It("counts the pass as list_failed when List errors (SC4)", func() {
-		fakeGitRestClient.IsReadyReturns(true, nil)
-		fakeGitRestClient.ListReturns(nil, errors.Errorf(ctx, "rate limited"))
-
-		before := testutil.ToFloat64(metrics.ReconcilePassesTotal.WithLabelValues("list_failed"))
-		Expect(h.ReconcileOnce(ctx)).To(BeNil())
-		Expect(
-			testutil.ToFloat64(metrics.ReconcilePassesTotal.WithLabelValues("list_failed")),
-		).To(Equal(before + 1))
+		Expect(fakeSpawner.SpawnJobCallCount()).To(Equal(1))
+		_, spawnedTask, _ := fakeSpawner.SpawnJobArgsForCall(0)
+		Expect(spawnedTask.TaskIdentifier).To(Equal(lib.TaskIdentifier("tid-newer")))
 	})
 
 	It("counts the pass as ok when it completes (SC4)", func() {
-		fakeGitRestClient.ListReturns([]string{"24 Tasks/tid-a.md"}, nil)
-		fakeGitRestClient.GetReturns(
-			[]byte(renderTaskFile(eligibleTask(domain.TaskPhasePlanning))),
-			nil,
-		)
+		fakeView.SnapshotReturns([]lib.Task{eligibleTask(domain.TaskPhasePlanning)})
 		fakeSpawner.IsJobActiveReturns(false, nil)
 
 		before := testutil.ToFloat64(metrics.ReconcilePassesTotal.WithLabelValues("ok"))
@@ -452,90 +520,28 @@ var _ = Describe("TaskEventHandler reconcile loop", func() {
 		).To(Equal(before + 1))
 	})
 
-	It("counts the pass as vault_unavailable when readiness fails (SC4)", func() {
-		fakeGitRestClient.IsReadyReturns(false, errors.Errorf(ctx, "boom"))
+	It("counts an empty ready view as an ok pass with evaluated=0", func() {
+		fakeView.SnapshotReturns(nil)
 
-		before := testutil.ToFloat64(
-			metrics.ReconcilePassesTotal.WithLabelValues("vault_unavailable"),
-		)
-		Expect(h.ReconcileOnce(ctx)).To(BeNil())
+		before := testutil.ToFloat64(metrics.ReconcilePassesTotal.WithLabelValues("ok"))
+		out := captureStderr(func() {
+			Expect(h.ReconcileOnce(ctx)).To(BeNil())
+		})
 		Expect(
-			testutil.ToFloat64(metrics.ReconcilePassesTotal.WithLabelValues("vault_unavailable")),
+			testutil.ToFloat64(metrics.ReconcilePassesTotal.WithLabelValues("ok")),
 		).To(Equal(before + 1))
-	})
-
-	It("skips the file when Get errors and returns nil (failure mode)", func() {
-		fakeGitRestClient.IsReadyReturns(true, nil)
-		fakeGitRestClient.ListReturns([]string{"24 Tasks/bad.md"}, nil)
-		fakeGitRestClient.GetReturns(nil, errors.Errorf(ctx, "boom"))
-
-		err := h.ReconcileOnce(ctx)
-		Expect(err).To(BeNil())
-		Expect(fakeSpawner.SpawnJobCallCount()).To(Equal(0))
-	})
-
-	It("skips a file whose frontmatter is unparseable YAML", func() {
-		fakeGitRestClient.ListReturns([]string{"24 Tasks/bad.md"}, nil)
-		fakeGitRestClient.GetReturns([]byte("---\n[unclosed\n---\n# Task body\n"), nil)
-
-		err := h.ReconcileOnce(ctx)
-		Expect(err).To(BeNil())
-		Expect(fakeSpawner.SpawnJobCallCount()).To(Equal(0))
-	})
-
-	It("skips a file with no task_identifier", func() {
-		fakeGitRestClient.ListReturns([]string{"24 Tasks/notes.md"}, nil)
-		fakeGitRestClient.GetReturns(
-			[]byte(
-				"---\nstatus: in_progress\nphase: execution\nassignee: claude\nstage: prod\n---\n# Task body\n",
-			),
-			nil,
-		)
-
-		err := h.ReconcileOnce(ctx)
-		Expect(err).To(BeNil())
-		Expect(fakeSpawner.SpawnJobCallCount()).To(Equal(0))
-	})
-
-	It("skips a file whose frontmatter is never closed", func() {
-		fakeGitRestClient.ListReturns([]string{"24 Tasks/bad.md"}, nil)
-		fakeGitRestClient.GetReturns([]byte("---\nstatus: in_progress\n# Task body\n"), nil)
-
-		err := h.ReconcileOnce(ctx)
-		Expect(err).To(BeNil())
-		Expect(fakeSpawner.SpawnJobCallCount()).To(Equal(0))
-	})
-
-	It("parses CRLF task files and preserves the markdown body verbatim", func() {
-		fakeGitRestClient.ListReturns([]string{"24 Tasks/tid-a.md"}, nil)
-		fakeGitRestClient.GetReturns(
-			[]byte(
-				"---\r\nstatus: in_progress\r\nphase: execution\r\nassignee: claude\r\nstage: prod\r\ntask_identifier: tid-a\r\n---\r\n# Task body\r\n",
-			),
-			nil,
-		)
-		fakeSpawner.IsJobActiveReturns(false, nil)
-
-		err := h.ReconcileOnce(ctx)
-		Expect(err).To(BeNil())
-		Expect(fakeSpawner.SpawnJobCallCount()).To(Equal(1))
-		_, spawnedTask, _ := fakeSpawner.SpawnJobArgsForCall(0)
-		Expect(string(spawnedTask.Content)).To(Equal("# Task body\r\n"))
+		Expect(out).To(ContainSubstring("event=reconcile evaluated=0"))
 	})
 
 	It("runs one pass immediately at startup before any ticker fire (DB 1)", func() {
-		fakeGitRestClient.ListReturns([]string{"24 Tasks/tid-a.md"}, nil)
-		fakeGitRestClient.GetReturns(
-			[]byte(renderTaskFile(eligibleTask(domain.TaskPhaseExecution))),
-			nil,
-		)
+		fakeView.SnapshotReturns([]lib.Task{eligibleTask(domain.TaskPhaseExecution)})
 
 		shortCtx, cancel := context.WithCancel(ctx)
 		done := make(chan error, 1)
 		go func() { done <- h.RunReconcileLoop(shortCtx) }()
 		// The interval is 60s, so only the startup pass can run in this test; the
 		// startup pass runs synchronously before the ticker starts.
-		Eventually(fakeGitRestClient.ListCallCount).Should(BeNumerically(">=", 1))
+		Eventually(fakeView.SnapshotCallCount).Should(BeNumerically(">=", 1))
 		cancel()
 		Expect(<-done).To(BeNil())
 	})
@@ -543,11 +549,7 @@ var _ = Describe("TaskEventHandler reconcile loop", func() {
 	It(
 		"aborts a pass when the parent context is cancelled (DB 7 / slow-vault failure mode)",
 		func() {
-			fakeGitRestClient.ListReturns([]string{"24 Tasks/tid-a.md"}, nil)
-			fakeGitRestClient.GetReturns(
-				[]byte(renderTaskFile(eligibleTask(domain.TaskPhaseExecution))),
-				nil,
-			)
+			fakeView.SnapshotReturns([]lib.Task{eligibleTask(domain.TaskPhaseExecution)})
 
 			cancelCtx, cancel := context.WithCancel(ctx)
 			cancel()
@@ -587,6 +589,7 @@ var _ = Describe("TaskEventHandler reconcile loop", func() {
 			}
 			fakeSpawner.ListActiveJobsStub = func(
 				_ context.Context,
+				_ libk8s.Namespace,
 				_ string,
 			) (map[lib.TaskIdentifier]bool, error) {
 				time.Sleep(20 * time.Millisecond)
@@ -595,28 +598,10 @@ var _ = Describe("TaskEventHandler reconcile loop", func() {
 				}
 				return map[lib.TaskIdentifier]bool{}, nil
 			}
-			fakeGitRestClient.IsReadyReturns(true, nil)
 
-			task := lib.Task{
-				TaskIdentifier: lib.TaskIdentifier("tid-double-spawn"),
-				Frontmatter: lib.TaskFrontmatter{
-					"status":   "in_progress",
-					"phase":    string(domain.TaskPhaseExecution),
-					"assignee": "claude",
-					"stage":    "prod",
-				},
-			}
-			fakeGitRestClient.ListReturns([]string{"24 Tasks/tid-double-spawn.md"}, nil)
-			fakeGitRestClient.GetReturns([]byte(renderTaskFile(task)), nil)
-
-			// NOTE: buildMsg in task_event_handler_test.go is a Describe-scoped
-			// closure (not package-level) and is NOT visible from this file. Define a
-			// local equivalent so the regression spec is self-contained.
-			buildMsg := func(t lib.Task) *sarama.ConsumerMessage {
-				value, err := json.Marshal(t)
-				Expect(err).To(BeNil())
-				return &sarama.ConsumerMessage{Value: value}
-			}
+			task := eligibleTask(domain.TaskPhaseExecution)
+			task.TaskIdentifier = "tid-double-spawn"
+			fakeView.SnapshotReturns([]lib.Task{task})
 
 			var wg sync.WaitGroup
 			wg.Add(2)
@@ -648,6 +633,7 @@ var _ = Describe("TaskEventHandler reconcile loop", func() {
 			past := currentDateTime.Now().Time().Add(-10 * time.Minute).Format(time.RFC3339)
 			task := lib.Task{
 				TaskIdentifier: lib.TaskIdentifier("tid-seed-mf1"),
+				Vault:          testTaskVault,
 				Frontmatter: lib.TaskFrontmatter{
 					"status":         "in_progress",
 					"phase":          string(domain.TaskPhaseExecution),
@@ -683,160 +669,6 @@ var _ = Describe("TaskEventHandler reconcile loop", func() {
 		},
 	)
 
-	// ownedTask builds an eligible task with the given identifier. The reconcile
-	// pass is what teaches an instance which identifiers live in its vault.
-	ownedTask := func(id string) lib.Task {
-		return lib.Task{
-			TaskIdentifier: lib.TaskIdentifier(id),
-			Frontmatter: lib.TaskFrontmatter{
-				"status":   "in_progress",
-				"phase":    string(domain.TaskPhaseExecution),
-				"assignee": "claude",
-				"stage":    "prod",
-			},
-		}
-	}
-
-	It(
-		"does not spawn a task event for a file outside its own vault",
-		func() {
-			// A task event carries no vault — lib.Task is identifier + frontmatter +
-			// content — and the Kafka consumer group is shared across every executor
-			// deployment, so an event reaches whichever instance owns the partition
-			// rather than the instance whose vault holds the file. Measured on dev
-			// 2026-10-14: one OpenClaw fixture was spawned by three different pods
-			// (openclaw 18:19/18:33/18:48, trading 19:03/19:49, personal 19:34), each
-			// starting its own consecutive-re-drive streak at zero, so the loop
-			// produced >=7 Jobs against a cap of 3. The instance that owns the file
-			// drives it through its own floor, so skipping here drops a duplicate,
-			// not the only driver.
-			buildMsg := func(t lib.Task) *sarama.ConsumerMessage {
-				value, err := json.Marshal(t)
-				Expect(err).To(BeNil())
-				return &sarama.ConsumerMessage{Value: value}
-			}
-			fakeGitRestClient.ListReturns([]string{"24 Tasks/tid-mine.md"}, nil)
-			fakeGitRestClient.GetReturns(
-				[]byte(renderTaskFile(ownedTask("tid-mine"))),
-				nil,
-			)
-			fakeSpawner.IsJobActiveReturns(false, nil)
-
-			// The pass spawns the one task it owns and publishes that as the set.
-			Expect(h.ReconcileOnce(ctx)).To(BeNil())
-			Expect(fakeSpawner.SpawnJobCallCount()).To(Equal(1))
-
-			Expect(h.ConsumeMessage(ctx, buildMsg(ownedTask("tid-foreign")))).To(Succeed())
-			Expect(fakeSpawner.SpawnJobCallCount()).To(Equal(1))
-		},
-	)
-
-	It(
-		"owns a task filed after the last completed pass even when later passes abort",
-		func() {
-			// Measured on prod 2026-10-20: the OpenClaw vault outgrew one pass's
-			// budget (~14.9k files), every pass after 13:14Z aborted, ownership froze
-			// at that pass, and each pr-review task filed afterwards was skipped as
-			// foreign. New paths are visited first and owned without waiting for the
-			// pass to complete.
-			buildMsg := func(t lib.Task) *sarama.ConsumerMessage {
-				value, err := json.Marshal(t)
-				Expect(err).To(BeNil())
-				return &sarama.ConsumerMessage{Value: value}
-			}
-			fakeGitRestClient.ListReturns([]string{"tasks/old-a.md", "tasks/old-b.md"}, nil)
-			fakeGitRestClient.GetStub = func(_ context.Context, relPath string) ([]byte, error) {
-				return []byte(
-					renderTaskFile(
-						ownedTask(
-							"tid-" + strings.TrimSuffix(
-								strings.TrimPrefix(relPath, "tasks/"),
-								".md",
-							),
-						),
-					),
-				), nil
-			}
-			fakeSpawner.IsJobActiveReturns(true, nil)
-			Expect(h.ReconcileOnce(ctx)).To(BeNil())
-
-			passCtx, cancelPass := context.WithCancel(ctx)
-			defer cancelPass()
-			fakeGitRestClient.ListReturns(
-				[]string{"tasks/old-a.md", "tasks/old-b.md", "tasks/new.md"},
-				nil,
-			)
-			var visited []string
-			fakeGitRestClient.GetStub = func(_ context.Context, relPath string) ([]byte, error) {
-				visited = append(visited, relPath)
-				if relPath == "tasks/old-a.md" {
-					cancelPass() // budget runs out mid-pass
-				}
-				return []byte(
-					renderTaskFile(
-						ownedTask(
-							"tid-" + strings.TrimSuffix(
-								strings.TrimPrefix(relPath, "tasks/"),
-								".md",
-							),
-						),
-					),
-				), nil
-			}
-			Expect(h.ReconcileOnce(passCtx)).To(BeNil())
-			Expect(visited).To(HaveLen(2))
-			Expect(visited[0]).To(Equal("tasks/new.md"))
-
-			fakeSpawner.IsJobActiveReturns(false, nil)
-			before := fakeSpawner.SpawnJobCallCount()
-			Expect(h.ConsumeMessage(ctx, buildMsg(ownedTask("tid-new")))).To(Succeed())
-			Expect(fakeSpawner.SpawnJobCallCount()).To(Equal(before + 1))
-		},
-	)
-
-	It(
-		"still spawns a task event for a file inside its own vault",
-		func() {
-			buildMsg := func(t lib.Task) *sarama.ConsumerMessage {
-				value, err := json.Marshal(t)
-				Expect(err).To(BeNil())
-				return &sarama.ConsumerMessage{Value: value}
-			}
-			fakeGitRestClient.ListReturns([]string{"24 Tasks/tid-mine.md"}, nil)
-			fakeGitRestClient.GetReturns(
-				[]byte(renderTaskFile(ownedTask("tid-mine"))),
-				nil,
-			)
-			fakeSpawner.IsJobActiveReturns(false, nil)
-
-			Expect(h.ReconcileOnce(ctx)).To(BeNil())
-			Expect(fakeSpawner.SpawnJobCallCount()).To(Equal(1))
-
-			// Same task, second driver: the floor's spawn must not have made the
-			// instance deaf to the event path for its own vault.
-			Expect(h.ConsumeMessage(ctx, buildMsg(ownedTask("tid-mine")))).To(Succeed())
-			Expect(fakeSpawner.SpawnJobCallCount()).To(Equal(2))
-		},
-	)
-
-	It(
-		"spawns an event before the first reconcile pass completes (fail-open window)",
-		func() {
-			// A freshly started instance has not scanned yet. Dropping every event in
-			// that window would leave each task to be picked up only by the next tick;
-			// the window is one pass (<=60s) and the floor covers whatever it misses.
-			buildMsg := func(t lib.Task) *sarama.ConsumerMessage {
-				value, err := json.Marshal(t)
-				Expect(err).To(BeNil())
-				return &sarama.ConsumerMessage{Value: value}
-			}
-			fakeSpawner.IsJobActiveReturns(false, nil)
-
-			Expect(h.ConsumeMessage(ctx, buildMsg(ownedTask("tid-any")))).To(Succeed())
-			Expect(fakeSpawner.SpawnJobCallCount()).To(Equal(1))
-		},
-	)
-
 	// Spec 009: the parked-task recovery path. A task an agent parked — its own
 	// assignee cleared, status still in_progress, at a trigger phase, no
 	// current_job — is invisible to every spawn gate because they all read
@@ -845,11 +677,12 @@ var _ = Describe("TaskEventHandler reconcile loop", func() {
 	// the write changes the file, the controller publishes TaskUpdated for it, and
 	// that event drives the normal spawn path with every existing guard in place.
 
-	// parkedTask builds the vault shape of a parked task. taskType is what still
+	// parkedTask builds the view shape of a parked task. taskType is what still
 	// routes it.
 	parkedTask := func(phase domain.TaskPhase, taskType string) lib.Task {
 		return lib.Task{
 			TaskIdentifier: lib.TaskIdentifier("tid-parked"),
+			Vault:          testTaskVault,
 			Frontmatter: lib.TaskFrontmatter{
 				"status":    "in_progress",
 				"phase":     string(phase),
@@ -864,17 +697,15 @@ var _ = Describe("TaskEventHandler reconcile loop", func() {
 	// assignee is deliberately distinct from the fake's Resolve default ("claude")
 	// so a spec cannot pass by reading the wrong resolution.
 	restoreConfig := pkg.AgentConfiguration{
-		Assignee: "correct-agent",
+		Assignee: "resolved-agent",
 		Image:    "my-image:latest",
 	}
 
 	It("restores a parked task's routing value with no operator write (AC 1)", func() {
 		fakeResolver.ResolveByTaskTypeReturns(restoreConfig, nil)
-		fakeGitRestClient.ListReturns([]string{"24 Tasks/tid-parked.md"}, nil)
-		fakeGitRestClient.GetReturns(
-			[]byte(renderTaskFile(parkedTask(domain.TaskPhasePlanning, "github-update-go"))),
-			nil,
-		)
+		fakeView.SnapshotReturns([]lib.Task{
+			parkedTask(domain.TaskPhasePlanning, "github-update-go"),
+		})
 
 		before := testutil.ToFloat64(metrics.ReconcileRedrivenTotal)
 		Expect(h.ReconcileOnce(ctx)).To(Succeed())
@@ -883,13 +714,14 @@ var _ = Describe("TaskEventHandler reconcile loop", func() {
 		Expect(fakeResultPublisher.PublishRestoreAssigneeCallCount()).To(Equal(1))
 		_, publishedTask, assignee := fakeResultPublisher.PublishRestoreAssigneeArgsForCall(0)
 		Expect(publishedTask.TaskIdentifier).To(Equal(lib.TaskIdentifier("tid-parked")))
-		Expect(assignee).To(Equal("correct-agent"))
+		Expect(assignee).To(Equal("resolved-agent"))
 
 		// The declared task_type is what resolved it — not the assignee, which is
 		// empty, and not previous_assignee, which this fixture does not carry.
 		Expect(fakeResolver.ResolveByTaskTypeCallCount()).To(Equal(1))
-		_, resolvedType := fakeResolver.ResolveByTaskTypeArgsForCall(0)
+		_, resolvedType, preferAssignee := fakeResolver.ResolveByTaskTypeArgsForCall(0)
 		Expect(resolvedType).To(Equal("github-update-go"))
+		Expect(preferAssignee).To(BeEmpty())
 
 		// The restore is the whole action: no Job, and the pass counts it redriven.
 		Expect(fakeSpawner.SpawnJobCallCount()).To(Equal(0))
@@ -900,18 +732,19 @@ var _ = Describe("TaskEventHandler reconcile loop", func() {
 		fakeResolver.ResolveByTaskTypeReturns(restoreConfig, nil)
 		task := parkedTask(domain.TaskPhasePlanning, "github-update-go")
 		task.Frontmatter["previous_assignee"] = "stale-agent"
-		fakeGitRestClient.ListReturns([]string{"24 Tasks/tid-parked.md"}, nil)
-		fakeGitRestClient.GetReturns([]byte(renderTaskFile(task)), nil)
+		fakeView.SnapshotReturns([]lib.Task{task})
 
 		Expect(h.ReconcileOnce(ctx)).To(Succeed())
 
 		Expect(fakeResultPublisher.PublishRestoreAssigneeCallCount()).To(Equal(1))
 		_, _, assignee := fakeResultPublisher.PublishRestoreAssigneeArgsForCall(0)
-		Expect(assignee).To(Equal("correct-agent"))
+		Expect(assignee).To(Equal("resolved-agent"))
 
-		// stale-agent appears in no published command at all. Reading
-		// previous_assignee as a routing source is the substitution the operator
-		// runbook records a full night lost to (2026-09-13).
+		// stale-agent appears in no published command at all. previous_assignee is
+		// only a tie-break among Configs that already declare the task_type, never
+		// the sole routing source: routing on it alone is the substitution the
+		// operator runbook records a full night lost to (2026-09-13). The restore
+		// always writes the assignee of the Config the resolver returned.
 		for i := 0; i < fakeResultPublisher.PublishRestoreAssigneeCallCount(); i++ {
 			_, _, published := fakeResultPublisher.PublishRestoreAssigneeArgsForCall(i)
 			Expect(published).NotTo(Equal("stale-agent"))
@@ -921,11 +754,9 @@ var _ = Describe("TaskEventHandler reconcile loop", func() {
 
 	It("publishes nothing when the declared task_type matches no Config (AC 3)", func() {
 		fakeResolver.ResolveByTaskTypeReturns(pkg.AgentConfiguration{}, pkg.ErrConfigNotFound)
-		fakeGitRestClient.ListReturns([]string{"24 Tasks/tid-parked.md"}, nil)
-		fakeGitRestClient.GetReturns(
-			[]byte(renderTaskFile(parkedTask(domain.TaskPhasePlanning, "no-such-type"))),
-			nil,
-		)
+		fakeView.SnapshotReturns([]lib.Task{
+			parkedTask(domain.TaskPhasePlanning, "no-such-type"),
+		})
 
 		before := testutil.ToFloat64(
 			metrics.TaskEventsTotal.WithLabelValues("skipped_unknown_assignee"),
@@ -944,11 +775,7 @@ var _ = Describe("TaskEventHandler reconcile loop", func() {
 	})
 
 	It("does not rewrite a task that already carries an assignee (AC 4)", func() {
-		fakeGitRestClient.ListReturns([]string{"24 Tasks/tid-a.md"}, nil)
-		fakeGitRestClient.GetReturns(
-			[]byte(renderTaskFile(eligibleTask(domain.TaskPhaseExecution))),
-			nil,
-		)
+		fakeView.SnapshotReturns([]lib.Task{eligibleTask(domain.TaskPhaseExecution)})
 		fakeSpawner.IsJobActiveReturns(false, nil)
 
 		Expect(h.ReconcileOnce(ctx)).To(Succeed())
@@ -964,8 +791,7 @@ var _ = Describe("TaskEventHandler reconcile loop", func() {
 			task := parkedTask(domain.TaskPhaseExecution, "github-update-go")
 			task.Frontmatter["status"] = status
 			fakeResolver.ResolveByTaskTypeReturns(restoreConfig, nil)
-			fakeGitRestClient.ListReturns([]string{"24 Tasks/tid-parked.md"}, nil)
-			fakeGitRestClient.GetReturns([]byte(renderTaskFile(task)), nil)
+			fakeView.SnapshotReturns([]lib.Task{task})
 
 			Expect(h.ReconcileOnce(ctx)).To(Succeed())
 			Expect(fakeResultPublisher.PublishRestoreAssigneeCallCount()).To(Equal(0))
@@ -978,7 +804,7 @@ var _ = Describe("TaskEventHandler reconcile loop", func() {
 	It("does not re-drive a parked task outside its Config's trigger set (AC 6)", func() {
 		fakeResolver.ResolveByTaskTypeReturns(
 			pkg.AgentConfiguration{
-				Assignee: "correct-agent",
+				Assignee: "resolved-agent",
 				Image:    "my-image:latest",
 				Trigger: &agentv1.Trigger{
 					Phases:   domain.TaskPhases{domain.TaskPhaseExecution},
@@ -987,11 +813,9 @@ var _ = Describe("TaskEventHandler reconcile loop", func() {
 			},
 			nil,
 		)
-		fakeGitRestClient.ListReturns([]string{"24 Tasks/tid-parked.md"}, nil)
-		fakeGitRestClient.GetReturns(
-			[]byte(renderTaskFile(parkedTask(domain.TaskPhaseHumanReview, "github-update-go"))),
-			nil,
-		)
+		fakeView.SnapshotReturns([]lib.Task{
+			parkedTask(domain.TaskPhaseHumanReview, "github-update-go"),
+		})
 
 		Expect(h.ReconcileOnce(ctx)).To(Succeed())
 		Expect(fakeResultPublisher.PublishRestoreAssigneeCallCount()).To(Equal(0))
@@ -1000,11 +824,9 @@ var _ = Describe("TaskEventHandler reconcile loop", func() {
 
 	It("writes no counter key on the restore path (AC 7)", func() {
 		fakeResolver.ResolveByTaskTypeReturns(restoreConfig, nil)
-		fakeGitRestClient.ListReturns([]string{"24 Tasks/tid-parked.md"}, nil)
-		fakeGitRestClient.GetReturns(
-			[]byte(renderTaskFile(parkedTask(domain.TaskPhaseExecution, "github-update-go"))),
-			nil,
-		)
+		fakeView.SnapshotReturns([]lib.Task{
+			parkedTask(domain.TaskPhaseExecution, "github-update-go"),
+		})
 
 		Expect(h.ReconcileOnce(ctx)).To(Succeed())
 
@@ -1023,15 +845,13 @@ var _ = Describe("TaskEventHandler reconcile loop", func() {
 		"leaves a parked task untouched when its declared type is ambiguous (failure mode 2)",
 		func() {
 			// Two Configs declaring the same task_type: the executor does not guess.
-			// resolveConfigForReconcile returns the error unchanged and reconcileOne's
+			// resolveConfigForReconcile returns the error unchanged and gatherCandidate's
 			// resolve_error branch — which names the task and its task_type — turns it
 			// into a skip, so the ambiguity is diagnosable and the pass still completes.
 			fakeResolver.ResolveByTaskTypeReturns(pkg.AgentConfiguration{}, pkg.ErrConfigAmbiguous)
-			fakeGitRestClient.ListReturns([]string{"24 Tasks/tid-parked.md"}, nil)
-			fakeGitRestClient.GetReturns(
-				[]byte(renderTaskFile(parkedTask(domain.TaskPhaseExecution, "shared-type"))),
-				nil,
-			)
+			fakeView.SnapshotReturns([]lib.Task{
+				parkedTask(domain.TaskPhaseExecution, "shared-type"),
+			})
 
 			Expect(h.ReconcileOnce(ctx)).To(Succeed())
 			Expect(fakeResolver.ResolveByTaskTypeCallCount()).To(Equal(1))
@@ -1040,11 +860,68 @@ var _ = Describe("TaskEventHandler reconcile loop", func() {
 		},
 	)
 
+	It("passes previous_assignee to the task_type lookup as the tie-break", func() {
+		// On sun two Configs declared github-update-go and every parked task of
+		// that type was skipped as ambiguous. previous_assignee, written at
+		// escalation, is handed to the resolver only as a tie-break among the
+		// Configs that already declare the task_type, never as the sole routing
+		// source; the resolver decides, and the restore writes its Config's assignee.
+		fakeResolver.ResolveByTaskTypeReturns(
+			pkg.AgentConfiguration{Assignee: "tie-break-agent", Image: "my-image:latest"},
+			nil,
+		)
+		task := parkedTask(domain.TaskPhaseExecution, "github-update-go")
+		task.Frontmatter["previous_assignee"] = "tie-break-agent"
+		fakeView.SnapshotReturns([]lib.Task{task})
+
+		Expect(h.ReconcileOnce(ctx)).To(Succeed())
+
+		Expect(fakeResolver.ResolveByTaskTypeCallCount()).To(Equal(1))
+		_, resolvedType, preferAssignee := fakeResolver.ResolveByTaskTypeArgsForCall(0)
+		Expect(resolvedType).To(Equal("github-update-go"))
+		Expect(preferAssignee).To(Equal("tie-break-agent"))
+		Expect(fakeResultPublisher.PublishRestoreAssigneeCallCount()).To(Equal(1))
+		_, _, assignee := fakeResultPublisher.PublishRestoreAssigneeArgsForCall(0)
+		Expect(assignee).To(Equal("tie-break-agent"))
+	})
+
+	It(
+		"still skips a parked task whose task_type matches no Config despite previous_assignee",
+		func() {
+			fakeResolver.ResolveByTaskTypeReturns(pkg.AgentConfiguration{}, pkg.ErrConfigNotFound)
+			task := parkedTask(domain.TaskPhaseExecution, "no-such-type")
+			task.Frontmatter["previous_assignee"] = "tie-break-agent"
+			fakeView.SnapshotReturns([]lib.Task{task})
+
+			Expect(h.ReconcileOnce(ctx)).To(Succeed())
+
+			// previous_assignee never routes on its own: no type match, no restore.
+			Expect(fakeResolver.ResolveByTaskTypeCallCount()).To(Equal(1))
+			_, _, preferAssignee := fakeResolver.ResolveByTaskTypeArgsForCall(0)
+			Expect(preferAssignee).To(Equal("tie-break-agent"))
+			Expect(fakeResultPublisher.PublishRestoreAssigneeCallCount()).To(Equal(0))
+			Expect(fakeSpawner.SpawnJobCallCount()).To(Equal(0))
+		},
+	)
+
+	It("still skips a parked task that stays ambiguous despite previous_assignee", func() {
+		fakeResolver.ResolveByTaskTypeReturns(pkg.AgentConfiguration{}, pkg.ErrConfigAmbiguous)
+		task := parkedTask(domain.TaskPhaseExecution, "shared-type")
+		task.Frontmatter["previous_assignee"] = "tie-break-agent"
+		fakeView.SnapshotReturns([]lib.Task{task})
+
+		// The ambiguity propagates to reconcileOne's resolve_error skip as before:
+		// the pass still completes and nothing touches the task.
+		Expect(h.ReconcileOnce(ctx)).To(Succeed())
+		Expect(fakeResolver.ResolveByTaskTypeCallCount()).To(Equal(1))
+		Expect(fakeResultPublisher.PublishRestoreAssigneeCallCount()).To(Equal(0))
+		Expect(fakeSpawner.SpawnJobCallCount()).To(Equal(0))
+	})
+
 	It("leaves a parked task with no declared type untouched (no routing information)", func() {
 		task := parkedTask(domain.TaskPhaseExecution, "")
 		delete(task.Frontmatter, "task_type")
-		fakeGitRestClient.ListReturns([]string{"24 Tasks/tid-parked.md"}, nil)
-		fakeGitRestClient.GetReturns([]byte(renderTaskFile(task)), nil)
+		fakeView.SnapshotReturns([]lib.Task{task})
 
 		Expect(h.ReconcileOnce(ctx)).To(Succeed())
 		Expect(fakeResultPublisher.PublishRestoreAssigneeCallCount()).To(Equal(0))
@@ -1053,17 +930,597 @@ var _ = Describe("TaskEventHandler reconcile loop", func() {
 		Expect(fakeResolver.ResolveByTaskTypeCallCount()).To(Equal(0))
 	})
 
-	It("skips the file when the restore publish fails and does not fail the pass", func() {
+	It("skips the task when the restore publish fails and does not fail the pass", func() {
 		fakeResolver.ResolveByTaskTypeReturns(restoreConfig, nil)
 		fakeResultPublisher.PublishRestoreAssigneeReturns(errors.Errorf(ctx, "kafka: boom"))
-		fakeGitRestClient.ListReturns([]string{"24 Tasks/tid-parked.md"}, nil)
-		fakeGitRestClient.GetReturns(
-			[]byte(renderTaskFile(parkedTask(domain.TaskPhaseExecution, "github-update-go"))),
-			nil,
-		)
+		fakeView.SnapshotReturns([]lib.Task{
+			parkedTask(domain.TaskPhaseExecution, "github-update-go"),
+		})
 
 		// A publish failure is a skip, not a pass failure: the next tick retries.
 		Expect(h.ReconcileOnce(ctx)).To(Succeed())
 		Expect(fakeSpawner.SpawnJobCallCount()).To(Equal(0))
 	})
+
+	Describe("configurable reconcile timing", func() {
+		newTimedHandler := func(passTimeout, interval time.Duration) handler.TaskEventHandler {
+			return handler.NewTaskEventHandler(
+				fakeSpawner,
+				"dev",
+				base.Branch("prod"),
+				"",
+				true,
+				true,
+				fakeResolver,
+				fakeResultPublisher,
+				taskStore,
+				currentDateTime,
+				fakeView,
+				testTaskVault,
+				passTimeout,
+				interval,
+				pkg.ClaimModeOff,
+				nil,
+			)
+		}
+
+		It("bounds the pass by the configured timeout, not the default", func() {
+			fakeView.SnapshotReturns([]lib.Task{eligibleTask(domain.TaskPhaseExecution)})
+			var remaining time.Duration
+			fakeSpawner.ListActiveJobsStub = func(
+				listCtx context.Context,
+				_ libk8s.Namespace,
+				_ string,
+			) (map[lib.TaskIdentifier]bool, error) {
+				deadline, ok := listCtx.Deadline()
+				Expect(ok).To(BeTrue())
+				remaining = time.Until(deadline)
+				return nil, nil
+			}
+			Expect(newTimedHandler(150*time.Second, time.Minute).ReconcileOnce(ctx)).To(Succeed())
+			Expect(remaining).To(BeNumerically(">", handler.DefaultReconcilePassTimeout))
+			Expect(remaining).To(BeNumerically("~", 150*time.Second, time.Second))
+		})
+
+		It("ticks at the configured interval", func() {
+			var passes atomic.Int32
+			fakeView.SnapshotStub = func() []lib.Task {
+				passes.Add(1)
+				return nil
+			}
+			loopCtx, cancel := context.WithCancel(ctx)
+			defer cancel()
+			done := make(chan error, 1)
+			go func() {
+				done <- newTimedHandler(time.Second, 10*time.Millisecond).RunReconcileLoop(loopCtx)
+			}()
+			Eventually(passes.Load, time.Second, 5*time.Millisecond).Should(BeNumerically(">=", 3))
+			cancel()
+			Eventually(done).Should(Receive(BeNil()))
+		})
+	})
+
+	It("does not serve the event path the active-Job snapshot a running pass froze", func() {
+		// Regression for sun 2026-10-21: a reconcile pass ran for minutes, and
+		// while it ran the Kafka consumer and the deferred cap retries were
+		// answered from the pass's per-assignee cache. A snapshot taken at 6
+		// stayed at 6 while Jobs completed, so the executor logged
+		// `concurrency_cap running=6 cap=6` with only 4 Jobs active.
+		var liveClaude atomic.Int64
+		liveClaude.Store(6)
+		codexListed := make(chan struct{})
+		releaseCodex := make(chan struct{})
+		var holdCodex sync.Once
+		fakeResolver.ResolveStub = func(_ context.Context, assignee string) (pkg.AgentConfiguration, error) {
+			return pkg.AgentConfiguration{
+				Assignee:          assignee,
+				Image:             "my-image:latest",
+				MaxConcurrentJobs: 6,
+			}, nil
+		}
+		fakeSpawner.ListActiveJobsStub = func(
+			_ context.Context,
+			_ libk8s.Namespace,
+			assignee string,
+		) (map[lib.TaskIdentifier]bool, error) {
+			if assignee == "codex" {
+				// Hold the pass open after it has cached claude's count. Only the
+				// first codex lookup blocks; a refetch after a spawn returns at once.
+				holdCodex.Do(func() {
+					close(codexListed)
+					<-releaseCodex
+				})
+				return activeJobs(0), nil
+			}
+			return activeJobs(int(liveClaude.Load())), nil
+		}
+		fakeSpawner.SpawnJobReturns("job-name", nil)
+
+		claudeTask := eligibleTask(domain.TaskPhaseExecution)
+		codexTask := eligibleTask(domain.TaskPhaseExecution)
+		codexTask.TaskIdentifier = "tid-codex"
+		codexTask.Frontmatter["assignee"] = "codex"
+		fakeView.SnapshotReturns([]lib.Task{claudeTask, codexTask})
+
+		passDone := make(chan error, 1)
+		go func() { passDone <- h.ReconcileOnce(ctx) }()
+		Eventually(codexListed).Should(BeClosed())
+		Expect(fakeSpawner.SpawnJobCallCount()).To(Equal(0)) // claude deferred at 6/6
+
+		// Two of claude's Jobs complete while the pass is still running.
+		liveClaude.Store(4)
+		eventTask := eligibleTask(domain.TaskPhaseExecution)
+		eventTask.TaskIdentifier = "tid-event"
+		Expect(h.ConsumeMessage(ctx, buildMsg(eventTask))).To(Succeed())
+
+		close(releaseCodex)
+		Eventually(passDone).Should(Receive(BeNil()))
+		spawned := make([]lib.TaskIdentifier, 0, fakeSpawner.SpawnJobCallCount())
+		for i := range fakeSpawner.SpawnJobCallCount() {
+			_, spawnedTask, _ := fakeSpawner.SpawnJobArgsForCall(i)
+			spawned = append(spawned, spawnedTask.TaskIdentifier)
+		}
+		// The event path read the live 4/6 and admitted; the frozen 6/6 would defer it.
+		Expect(spawned).To(ContainElement(lib.TaskIdentifier("tid-event")))
+		Expect(spawned).NotTo(ContainElement(lib.TaskIdentifier("tid-a")))
+	})
+
+	It("lists active Jobs once per assignee for a whole reconcile pass", func() {
+		// The pass cache exists so a pass costs one `list jobs` per assignee, not
+		// two per task (2026-10-19, client-go's 5 QPS limiter). Scoping it to the
+		// pass context must not disable it.
+		fakeResolver.ResolveReturns(
+			pkg.AgentConfiguration{
+				Assignee:          "claude",
+				Image:             "my-image:latest",
+				MaxConcurrentJobs: 1,
+			},
+			nil,
+		)
+		fakeSpawner.ListActiveJobsReturns(activeJobs(1), nil) // at cap: every candidate defers
+		first := eligibleTask(domain.TaskPhaseExecution)
+		second := eligibleTask(domain.TaskPhaseExecution)
+		second.TaskIdentifier = "tid-b"
+		fakeView.SnapshotReturns([]lib.Task{first, second})
+
+		Expect(h.ReconcileOnce(ctx)).To(Succeed())
+		Expect(fakeSpawner.SpawnJobCallCount()).To(Equal(0))
+		Expect(fakeSpawner.ListActiveJobsCallCount()).To(Equal(1))
+	})
+
+	It("counts a Job the event path spawned mid-pass against the pass's cap check", func() {
+		// The pass cache must never read too low: a Job created on another path
+		// while the pass runs has to count, or the pass admits past the cap.
+		var mu sync.Mutex
+		liveClaude := map[lib.TaskIdentifier]bool{"tid-x": true}
+		codexListed := make(chan struct{})
+		releaseCodex := make(chan struct{})
+		var holdCodex sync.Once
+		fakeResolver.ResolveStub = func(_ context.Context, assignee string) (pkg.AgentConfiguration, error) {
+			return pkg.AgentConfiguration{
+				Assignee:          assignee,
+				Image:             "my-image:latest",
+				MaxConcurrentJobs: 2,
+			}, nil
+		}
+		fakeSpawner.ListActiveJobsStub = func(
+			_ context.Context,
+			_ libk8s.Namespace,
+			assignee string,
+		) (map[lib.TaskIdentifier]bool, error) {
+			if assignee == "codex" {
+				holdCodex.Do(func() {
+					close(codexListed)
+					<-releaseCodex
+				})
+				return activeJobs(0), nil
+			}
+			mu.Lock()
+			defer mu.Unlock()
+			snapshot := make(map[lib.TaskIdentifier]bool, len(liveClaude))
+			for id := range liveClaude {
+				snapshot[id] = true
+			}
+			return snapshot, nil
+		}
+		fakeSpawner.SpawnJobStub = func(
+			_ context.Context,
+			task lib.Task,
+			config pkg.AgentConfiguration,
+		) (string, error) {
+			if config.Assignee == "claude" {
+				mu.Lock()
+				liveClaude[task.TaskIdentifier] = true
+				mu.Unlock()
+			}
+			return "job-name", nil
+		}
+
+		running := eligibleTask(
+			domain.TaskPhaseExecution,
+		) // its Job is active: caches claude at 1/2
+		running.TaskIdentifier = "tid-x"
+		codexTask := eligibleTask(domain.TaskPhaseExecution)
+		codexTask.TaskIdentifier = "tid-codex"
+		codexTask.Frontmatter["assignee"] = "codex"
+		late := eligibleTask(domain.TaskPhaseExecution)
+		late.TaskIdentifier = "tid-c"
+		fakeView.SnapshotReturns([]lib.Task{running, codexTask, late})
+
+		passDone := make(chan error, 1)
+		go func() { passDone <- h.ReconcileOnce(ctx) }()
+		Eventually(codexListed).Should(BeClosed())
+
+		// The event path fills the second slot while the pass is held open.
+		eventTask := eligibleTask(domain.TaskPhaseExecution)
+		eventTask.TaskIdentifier = "tid-event"
+		Expect(h.ConsumeMessage(ctx, buildMsg(eventTask))).To(Succeed())
+
+		close(releaseCodex)
+		Eventually(passDone).Should(Receive(BeNil()))
+		mu.Lock()
+		defer mu.Unlock()
+		Expect(liveClaude).To(HaveKey(lib.TaskIdentifier("tid-event")))
+		Expect(
+			liveClaude,
+		).NotTo(HaveKey(lib.TaskIdentifier("tid-c")))
+		// 2/2: the pass must defer it
+	})
+
+	It(
+		"re-reads an assignee's active Jobs once the pass cache entry is older than its TTL",
+		func() {
+			// A pass on sun runs for minutes and, at the cap, never spawns to refresh
+			// itself. Without a TTL it refuses with free slots for its whole lifetime.
+			start := time.Date(2026, 10, 21, 11, 0, 0, 0, time.UTC)
+			currentDateTime.SetNow(libtime.DateTime(start))
+			fakeResolver.ResolveReturns(
+				pkg.AgentConfiguration{
+					Assignee:          "claude",
+					Image:             "my-image:latest",
+					MaxConcurrentJobs: 1,
+				},
+				nil,
+			)
+			fakeSpawner.ListActiveJobsStub = func(_ context.Context, _ libk8s.Namespace, _ string) (map[lib.TaskIdentifier]bool, error) {
+				if fakeSpawner.ListActiveJobsCallCount() == 1 {
+					// The other Job finishes while the pass is still running.
+					currentDateTime.SetNow(libtime.DateTime(start.Add(11 * time.Second)))
+					return map[lib.TaskIdentifier]bool{"tid-other": true}, nil
+				}
+				return activeJobs(0), nil
+			}
+			fakeSpawner.SpawnJobReturns("job-name", nil)
+			fakeView.SnapshotReturns([]lib.Task{eligibleTask(domain.TaskPhaseExecution)})
+
+			Expect(h.ReconcileOnce(ctx)).To(Succeed())
+			Expect(fakeSpawner.ListActiveJobsCallCount()).To(Equal(2))
+			Expect(fakeSpawner.SpawnJobCallCount()).To(Equal(1))
+		},
+	)
+
+	It("keeps other assignees' pass cache entries when one assignee spawns", func() {
+		fakeResolver.ResolveStub = func(_ context.Context, assignee string) (pkg.AgentConfiguration, error) {
+			return pkg.AgentConfiguration{
+				Assignee:          assignee,
+				Image:             "my-image:latest",
+				MaxConcurrentJobs: 2,
+			}, nil
+		}
+		var claudeLists atomic.Int64
+		fakeSpawner.ListActiveJobsStub = func(_ context.Context, _ libk8s.Namespace, assignee string) (map[lib.TaskIdentifier]bool, error) {
+			if assignee == "claude" {
+				claudeLists.Add(1)
+				return map[lib.TaskIdentifier]bool{"tid-x": true}, nil
+			}
+			return activeJobs(0), nil
+		}
+		fakeSpawner.SpawnJobReturns("job-name", nil)
+		running := eligibleTask(domain.TaskPhaseExecution)
+		running.TaskIdentifier = "tid-x"
+		codexTask := eligibleTask(domain.TaskPhaseExecution)
+		codexTask.TaskIdentifier = "tid-codex"
+		codexTask.Frontmatter["assignee"] = "codex"
+		late := eligibleTask(domain.TaskPhaseExecution)
+		late.TaskIdentifier = "tid-c"
+		fakeView.SnapshotReturns([]lib.Task{running, codexTask, late})
+
+		Expect(h.ReconcileOnce(ctx)).To(Succeed())
+		Expect(fakeSpawner.SpawnJobCallCount()).To(Equal(2)) // codex, then tid-c at 1/2
+		Expect(claudeLists.Load()).To(Equal(int64(1)))       // the codex spawn left claude cached
+	})
+
+	Describe("vault ownership from the view", func() {
+		It("AC4: a not-ready view drives nothing and counts view_not_ready", func() {
+			fakeView.ReadyReturns(false)
+			fakeView.SnapshotReturns([]lib.Task{eligibleTask(domain.TaskPhaseExecution)})
+
+			beforeNotReady := testutil.ToFloat64(
+				metrics.ReconcilePassesTotal.WithLabelValues("view_not_ready"),
+			)
+			beforeOK := testutil.ToFloat64(metrics.ReconcilePassesTotal.WithLabelValues("ok"))
+			out := captureStderr(func() {
+				Expect(h.ReconcileOnce(ctx)).To(Succeed())
+			})
+			Expect(fakeSpawner.SpawnJobCallCount()).To(Equal(0))
+			Expect(
+				testutil.ToFloat64(metrics.ReconcilePassesTotal.WithLabelValues("view_not_ready")),
+			).To(Equal(beforeNotReady + 1))
+			Expect(
+				testutil.ToFloat64(metrics.ReconcilePassesTotal.WithLabelValues("ok")),
+			).To(Equal(beforeOK))
+			Expect(out).To(ContainSubstring("event=reconcile_view_not_ready task_vault=openclaw"))
+		})
+
+		It("AC5: re-drives an eligible owned task without a Kafka event", func() {
+			task := eligibleTask(domain.TaskPhaseExecution)
+			task.TaskIdentifier = "tid-a"
+			fakeView.SnapshotReturns([]lib.Task{task})
+			fakeSpawner.IsJobActiveReturns(false, nil)
+			fakeSpawner.SpawnJobReturns("job-1", nil)
+
+			before := testutil.ToFloat64(metrics.ReconcileRedrivenTotal)
+			out := captureStderr(func() {
+				Expect(h.ReconcileOnce(ctx)).To(Succeed())
+			})
+			Expect(fakeSpawner.SpawnJobCallCount()).To(Equal(1))
+			Expect(testutil.ToFloat64(metrics.ReconcileRedrivenTotal)).To(Equal(before + 1))
+			Expect(out).To(ContainSubstring("event=reconcile_redrive task=tid-a"))
+		})
+
+		It("AC6: reconcile drives only the task stamped with this executor's vault", func() {
+			owned := eligibleTask(domain.TaskPhaseExecution)
+			owned.TaskIdentifier = "tid-owned"
+			foreign := eligibleTask(domain.TaskPhaseExecution)
+			foreign.TaskIdentifier = "tid-foreign"
+			foreign.Vault = "personal"
+			unstamped := eligibleTask(domain.TaskPhaseExecution)
+			unstamped.TaskIdentifier = "tid-unstamped"
+			unstamped.Vault = ""
+			fakeView.SnapshotReturns([]lib.Task{owned, foreign, unstamped})
+			fakeSpawner.IsJobActiveReturns(false, nil)
+
+			Expect(h.ReconcileOnce(ctx)).To(Succeed())
+			Expect(fakeSpawner.SpawnJobCallCount()).To(Equal(1))
+			_, spawnedTask, _ := fakeSpawner.SpawnJobArgsForCall(0)
+			Expect(spawnedTask.TaskIdentifier).To(Equal(lib.TaskIdentifier("tid-owned")))
+		})
+
+		It("AC6: the live path skips tasks from other vaults", func() {
+			liveSpawner := new(mocks.FakeJobSpawner)
+			liveSpawner.IsJobActiveReturns(false, nil)
+			liveHandler := handler.NewTaskEventHandler(
+				liveSpawner,
+				"dev",
+				base.Branch("prod"),
+				"",
+				true,
+				true,
+				fakeResolver,
+				fakeResultPublisher,
+				pkg.NewTaskStore(),
+				currentDateTime,
+				fakeView,
+				testTaskVault,
+				handler.DefaultReconcilePassTimeout,
+				handler.DefaultReconcileInterval,
+				pkg.ClaimModeOff,
+				nil,
+			)
+			owned := eligibleTask(domain.TaskPhaseExecution)
+			owned.TaskIdentifier = "tid-owned"
+			foreign := eligibleTask(domain.TaskPhaseExecution)
+			foreign.TaskIdentifier = "tid-foreign"
+			foreign.Vault = "personal"
+			unstamped := eligibleTask(domain.TaskPhaseExecution)
+			unstamped.TaskIdentifier = "tid-unstamped"
+			unstamped.Vault = ""
+
+			// Marshal directly rather than through buildMsg, which would stamp the
+			// empty vault on the third task.
+			before := testutil.ToFloat64(
+				metrics.TaskEventsTotal.WithLabelValues("skipped_foreign_vault"),
+			)
+			for _, task := range []lib.Task{owned, foreign, unstamped} {
+				value, err := json.Marshal(task)
+				Expect(err).To(BeNil())
+				Expect(
+					liveHandler.ConsumeMessage(ctx, &sarama.ConsumerMessage{Value: value}),
+				).To(Succeed())
+			}
+			Expect(liveSpawner.SpawnJobCallCount()).To(Equal(1))
+			Expect(
+				testutil.ToFloat64(
+					metrics.TaskEventsTotal.WithLabelValues("skipped_foreign_vault"),
+				),
+			).To(Equal(before + 2))
+		})
+
+		It("AC7: fails loudly when no task belongs to this executor's vault", func() {
+			foreignA := eligibleTask(domain.TaskPhaseExecution)
+			foreignA.Vault = "trading"
+			foreignB := eligibleTask(domain.TaskPhaseExecution)
+			foreignB.Vault = "personal"
+			foreignC := eligibleTask(domain.TaskPhaseExecution)
+			foreignC.Vault = "trading"
+			unstamped := eligibleTask(domain.TaskPhaseExecution)
+			unstamped.Vault = ""
+			fakeView.SnapshotReturns([]lib.Task{foreignA, foreignB, foreignC, unstamped})
+
+			beforeMismatch := testutil.ToFloat64(
+				metrics.ReconcilePassesTotal.WithLabelValues("task_vault_mismatch"),
+			)
+			beforeOK := testutil.ToFloat64(metrics.ReconcilePassesTotal.WithLabelValues("ok"))
+			out := captureStderr(func() {
+				Expect(h.ReconcileOnce(ctx)).To(Succeed())
+			})
+			Expect(fakeSpawner.SpawnJobCallCount()).To(Equal(0))
+			Expect(
+				testutil.ToFloat64(
+					metrics.ReconcilePassesTotal.WithLabelValues("task_vault_mismatch"),
+				),
+			).To(Equal(beforeMismatch + 1))
+			Expect(
+				testutil.ToFloat64(metrics.ReconcilePassesTotal.WithLabelValues("ok")),
+			).To(Equal(beforeOK))
+			Expect(out).To(ContainSubstring(
+				"event=task_vault_mismatch task_vault=openclaw seen=personal,trading",
+			))
+		})
+
+		It("AC7: a snapshot containing one owned task passes the vault gate", func() {
+			foreign := eligibleTask(domain.TaskPhaseExecution)
+			foreign.TaskIdentifier = "tid-foreign"
+			foreign.Vault = "trading"
+			owned := eligibleTask(domain.TaskPhaseExecution)
+			owned.TaskIdentifier = "tid-owned"
+			fakeView.SnapshotReturns([]lib.Task{foreign, owned})
+			fakeSpawner.IsJobActiveReturns(false, nil)
+
+			beforeOK := testutil.ToFloat64(metrics.ReconcilePassesTotal.WithLabelValues("ok"))
+			out := captureStderr(func() {
+				Expect(h.ReconcileOnce(ctx)).To(Succeed())
+			})
+			Expect(out).NotTo(ContainSubstring("task_vault_mismatch"))
+			Expect(
+				testutil.ToFloat64(metrics.ReconcilePassesTotal.WithLabelValues("ok")),
+			).To(Equal(beforeOK + 1))
+		})
+
+		It("AC7a: fails loudly when every task in the view is unstamped", func() {
+			tasks := make([]lib.Task, 0, 3)
+			for i := 0; i < 3; i++ {
+				task := eligibleTask(domain.TaskPhaseExecution)
+				task.TaskIdentifier = lib.TaskIdentifier(fmt.Sprintf("tid-%d", i))
+				task.Vault = ""
+				tasks = append(tasks, task)
+			}
+			fakeView.SnapshotReturns(tasks)
+
+			before := testutil.ToFloat64(
+				metrics.ReconcilePassesTotal.WithLabelValues("task_vault_unstamped"),
+			)
+			beforeOK := testutil.ToFloat64(metrics.ReconcilePassesTotal.WithLabelValues("ok"))
+			out := captureStderr(func() {
+				Expect(h.ReconcileOnce(ctx)).To(Succeed())
+			})
+			Expect(fakeSpawner.SpawnJobCallCount()).To(Equal(0))
+			Expect(
+				testutil.ToFloat64(
+					metrics.ReconcilePassesTotal.WithLabelValues("task_vault_unstamped"),
+				),
+			).To(Equal(before + 1))
+			Expect(
+				testutil.ToFloat64(metrics.ReconcilePassesTotal.WithLabelValues("ok")),
+			).To(Equal(beforeOK))
+			Expect(out).To(ContainSubstring("event=task_vault_unstamped tasks=3"))
+		})
+
+		It("AC11: scans a 15,000-task snapshot in under a second", func() {
+			tasks := make([]lib.Task, 0, 15000)
+			for i := 0; i < 15000; i++ {
+				task := eligibleTask(domain.TaskPhaseExecution)
+				task.TaskIdentifier = lib.TaskIdentifier(fmt.Sprintf("tid-%d", i))
+				if i < 100 {
+					tasks = append(tasks, task)
+					continue
+				}
+				if i%2 == 0 {
+					task.Vault = "other"
+				} else {
+					task.Frontmatter["status"] = "done"
+				}
+				tasks = append(tasks, task)
+			}
+			fakeView.SnapshotReturns(tasks)
+			fakeResolver.ResolveReturns(
+				pkg.AgentConfiguration{Assignee: "claude", Image: "my-image:latest"},
+				nil,
+			)
+			fakeSpawner.ListActiveJobsReturns(map[lib.TaskIdentifier]bool{}, nil)
+			fakeSpawner.SpawnJobReturns("job", nil)
+
+			beforeOK := testutil.ToFloat64(metrics.ReconcilePassesTotal.WithLabelValues("ok"))
+			beforeAborted := testutil.ToFloat64(
+				metrics.ReconcilePassesTotal.WithLabelValues("aborted"),
+			)
+			start := time.Now()
+			out := captureStderr(func() {
+				Expect(h.ReconcileOnce(ctx)).To(Succeed())
+			})
+			elapsed := time.Since(start)
+			GinkgoWriter.Printf("reconcile pass over 15000 tasks took %s\n", elapsed)
+			Expect(elapsed).To(BeNumerically("<", time.Second))
+			Expect(fakeSpawner.SpawnJobCallCount()).To(Equal(100))
+			Expect(
+				testutil.ToFloat64(metrics.ReconcilePassesTotal.WithLabelValues("ok")),
+			).To(Equal(beforeOK + 1))
+			Expect(
+				testutil.ToFloat64(metrics.ReconcilePassesTotal.WithLabelValues("aborted")),
+			).To(Equal(beforeAborted))
+			Expect(out).To(ContainSubstring("event=reconcile evaluated=100"))
+			Expect(out).To(ContainSubstring(`task_vault="openclaw"`))
+			Expect(out).NotTo(ContainSubstring("event=reconcile_aborted"))
+		})
+	})
+
+	Describe("queued_at from the view (AC10)", func() {
+		const viewQueuedAt = "2026-10-21T10:00:00Z"
+
+		BeforeEach(func() {
+			fakeResolver.ResolveReturns(
+				pkg.AgentConfiguration{
+					Assignee:          "claude",
+					Image:             "my-image:latest",
+					MaxConcurrentJobs: 1,
+				},
+				nil,
+			)
+			currentDateTime.SetNow(libtimetestParse("2026-10-21T10:00:00Z"))
+			fakeSpawner.IsJobActiveReturns(false, nil)
+			fakeSpawner.ListActiveJobsReturns(
+				map[lib.TaskIdentifier]bool{"other-task": true},
+				nil,
+			)
+		})
+
+		It("takes queued_at from the view when the event carries none", func() {
+			fakeView.GetReturns(lib.Task{
+				TaskIdentifier: lib.TaskIdentifier("tid-queued"),
+				Vault:          testTaskVault,
+				Frontmatter:    lib.TaskFrontmatter{"queued_at": viewQueuedAt},
+			}, true)
+			task := eligibleTask(domain.TaskPhaseExecution)
+			task.TaskIdentifier = "tid-queued"
+
+			Expect(h.ConsumeMessage(ctx, buildMsg(task))).To(Succeed())
+			Expect(fakeResultPublisher.PublishQueueEntryCallCount()).To(Equal(0))
+
+			currentDateTime.SetNow(libtimetestParse("2026-10-21T10:01:01Z"))
+			fakeSpawner.ListActiveJobsReturns(map[lib.TaskIdentifier]bool{}, nil)
+			Expect(h.EvalDeferredRespawns(ctx)).To(Succeed())
+
+			Expect(fakeSpawner.SpawnJobCallCount()).To(Equal(1))
+			_, spawnedTask, _ := fakeSpawner.SpawnJobArgsForCall(0)
+			queuedAt, ok := spawnedTask.Frontmatter.String("queued_at")
+			Expect(ok).To(BeTrue())
+			Expect(queuedAt).To(Equal(viewQueuedAt))
+		})
+
+		It("publishes a fresh queued_at when the view has no entry", func() {
+			fakeView.GetReturns(lib.Task{}, false)
+			task := eligibleTask(domain.TaskPhaseExecution)
+			task.TaskIdentifier = "tid-queued"
+
+			Expect(h.ConsumeMessage(ctx, buildMsg(task))).To(Succeed())
+			Expect(fakeResultPublisher.PublishQueueEntryCallCount()).To(Equal(1))
+		})
+	})
 })
+
+// libtimetestParse parses an RFC3339 instant for the specs above.
+func libtimetestParse(value string) libtime.DateTime {
+	parsed, err := time.Parse(time.RFC3339, value)
+	Expect(err).To(BeNil())
+	return libtime.DateTime(parsed)
+}

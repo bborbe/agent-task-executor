@@ -6,9 +6,10 @@ package handler
 
 import (
 	"context"
-	"encoding/json"
 	stderrors "errors"
 	"fmt"
+	"sort"
+	"strings"
 	"sync"
 	"time"
 
@@ -16,12 +17,13 @@ import (
 	lib "github.com/bborbe/agent"
 	"github.com/bborbe/cqrs/base"
 	"github.com/bborbe/errors"
+	libk8s "github.com/bborbe/k8s"
 	libtime "github.com/bborbe/time"
 	"github.com/bborbe/vault-cli/pkg/domain"
 	"github.com/golang/glog"
 
 	pkg "github.com/bborbe/agent-task-executor/pkg"
-	"github.com/bborbe/agent-task-executor/pkg/gitrestclient"
+	"github.com/bborbe/agent-task-executor/pkg/claim"
 	"github.com/bborbe/agent-task-executor/pkg/metrics"
 	"github.com/bborbe/agent-task-executor/pkg/spawner"
 )
@@ -41,7 +43,21 @@ var defaultTriggerStatuses = domain.TaskStatuses{
 // defaultRespawnGracePeriod is the window after job_started_at during which the executor
 // suppresses respawn when the K8s Job is inactive but no terminal phase has been observed.
 // The window gives the agent's terminal-phase write time to propagate through the vault pipeline.
-const defaultRespawnGracePeriod = 300 * time.Second
+// defaultRespawnGracePeriod is the spawn path's half of the success window: it
+// refuses to re-spawn a task whose Job succeeded this recently. It aliases the
+// claim package's SuccessGracePeriod deliberately — the other half holds the
+// claim for the same length — so the two cannot drift apart and leave a gap
+// where the claim is gone but the spawn guard has also expired.
+const defaultRespawnGracePeriod = claim.SuccessGracePeriod
+
+// taskRerunWindow is how far back a recorded success still identifies a spawn
+// as a re-run. It serves two purposes that must carry the same value: the
+// success record is pruned at this age, and a spawn inside it is counted as a
+// re-run. Deliberately separate from defaultRespawnGracePeriod — that one gates
+// the spawn refusal and must stay equal to the claim grace, whereas this one
+// only widens how long the record is kept, which is what lets a re-run an hour
+// later still be recognised as one.
+const taskRerunWindow = time.Hour
 
 // deferredRespawnInterval is the polling interval for the deferred-respawn reconciliation loop.
 // Must be ≤ 60s to satisfy the R ≤ 60s bound from spec 037 (R = interval + per-tick
@@ -54,12 +70,11 @@ const deferredRespawnInterval = 30 * time.Second
 // freed slot is picked up promptly without busy-polling the API server.
 const concurrencyCapRetryDelay = 60 * time.Second
 
-// defaultReconcileInterval is the interval between reconcile-loop passes
-// (spec 005). Mirrors the DefaultZombieSweeperIntervalSeconds CRD knob: a
-// package constant, not a CRD field and not env-configurable in this change.
-// 60s is a reasonable recovery latency for a task whose deferral was lost
-// across a restart.
-const defaultReconcileInterval = 60 * time.Second
+// DefaultReconcileInterval is the default interval between reconcile-loop
+// passes (spec 005), overridable per deployment via RECONCILE_INTERVAL. 60s is
+// a reasonable recovery latency for a task whose deferral was lost across a
+// restart.
+const DefaultReconcileInterval = 60 * time.Second
 
 // maxConsecutiveRedrives bounds how many times in a row the executor may spawn
 // the same task at the same phase with nothing advancing it.
@@ -83,24 +98,30 @@ const defaultReconcileInterval = 60 * time.Second
 // The reset is the phase. A task that moved phase has advanced and earns a fresh
 // streak; a task pinned at one phase across three consecutive spawns has not, and
 // stays capped until something moves it — an operator re-arm (which changes the
-// phase) or a restart (which empties the streak).
+// phase) or the task reaching a terminal state (which clears the streak).
 //
-// The streak is in-memory, and that is load-bearing rather than an optimisation.
-// A counter persisted in the task file is not merely redundant, it is defeated:
-// the agent pods rewrite the frontmatter from a snapshot taken at the start of
-// their run, so `trigger_scope` and `job_started_at` are clobbered back to their
-// pre-spawn values every time a Job completes (measured on the dev fixture,
-// 2026-10-14 — the file showed `trigger_scope: 'planning:'` under
-// `phase: execution`, and `job_started_at` from the task's creation). That
-// clobber is what makes `scopeChanged` true on every spawn and resets the
-// persisted `trigger_count` to 1, so any counter living in that file is reset by
-// the very loop it must count.
+// The streak is shared through `claims/redrive/<taskid>/<phase>/<n>` refs in the
+// same git-rest instance as the dispatch claims, so every cluster and every
+// restarted pod reads the same count. It is not kept in the task file: the agent
+// pods rewrite the frontmatter from a snapshot taken at the start of their run,
+// so `trigger_scope` and `job_started_at` are clobbered back to their pre-spawn
+// values every time a Job completes (measured on the dev fixture, 2026-10-14 —
+// the file showed `trigger_scope: 'planning:'` under `phase: execution`, and
+// `job_started_at` from the task's creation). That clobber is what makes
+// `scopeChanged` true on every spawn and resets the persisted `trigger_count` to
+// 1, so any counter living in that file is reset by the very loop it must count.
 //
-// The cost of in-memory: a task stuck across a restart is re-driven up to N more
-// times, not that it loops forever.
+// The in-memory map remains as a floor. A failed store read falls back to it, a
+// failed write still increments it, and a failed read never retires a task that
+// memory has not capped. Conversely, a task capped only by the shared store is
+// still refused: the cap takes the larger of the two counts.
+//
+// The explicit un-cap rule: a capped task spawns again only after an operator
+// deletes its refs under `claims/redrive/<taskid>/`, or the task moves to another
+// phase and is actually spawned there, or it reaches a terminal state.
 const maxConsecutiveRedrives = 3
 
-// reconcilePassTimeout bounds one reconcile pass so a slow or large vault
+// DefaultReconcilePassTimeout bounds one reconcile pass so a slow or large vault
 // cannot hold a pass open indefinitely (spec 005 Failure Modes: "Pass bounded
 // by a per-pass timeout; logs evaluate count so cost is visible"). Three
 // quarters of the interval: a pass completes within a tick and leaves headroom
@@ -109,16 +130,10 @@ const maxConsecutiveRedrives = 3
 // of ~200 non-terminal tasks, so the tasks ordered after the cut were never
 // reached. The per-assignee active-Job cache added in the same change removes
 // most of the cost; this is the headroom that keeps a slow pass from re-opening
-// the same window. Package constant — not configurable in this change.
-const reconcilePassTimeout = 45 * time.Second
-
-// deferredEntry tracks a task whose respawn was suppressed by the grace window.
-// The executor re-evaluates it once retryAfter is reached.
-type deferredEntry struct {
-	task       lib.Task
-	config     pkg.AgentConfiguration
-	retryAfter time.Time
-}
+// the same window. Overridable per deployment via RECONCILE_PASS_TIMEOUT: on
+// 2026-10-21 a sun executor reading the 15k-file openclaw vault aborted every
+// pass at 45s with evaluated=0.
+const DefaultReconcilePassTimeout = 45 * time.Second
 
 // terminalPhases is the set of phases that must never trigger a new spawn.
 // Extending this set requires a follow-up spec if vault-cli adds new terminal phases.
@@ -172,13 +187,13 @@ type TaskEventHandler interface {
 	// RunDeferredRespawnLoop polls evalDeferredRespawns every deferredRespawnInterval
 	// until ctx is cancelled. Must be run alongside the Kafka consumer.
 	RunDeferredRespawnLoop(ctx context.Context) error
-	// ReconcileOnce runs one reconcile pass: lists the task files under the
-	// configured task glob via git-rest, parses each file's frontmatter, and
-	// re-drives every eligible task through the existing spawn path. Called by
-	// RunReconcileLoop on each tick; also callable directly in tests.
+	// ReconcileOnce runs one reconcile pass: it snapshots the in-memory task
+	// view, applies the eligibility filter, and re-drives every eligible owned
+	// task through the existing spawn path. Called by RunReconcileLoop on each
+	// tick; also callable directly in tests.
 	ReconcileOnce(ctx context.Context) error
 	// RunReconcileLoop runs one pass immediately at startup, then every
-	// defaultReconcileInterval until ctx is cancelled. Must be run
+	// reconcile interval until ctx is cancelled. Must be run
 	// alongside the Kafka consumer.
 	RunReconcileLoop(ctx context.Context) error
 }
@@ -186,59 +201,117 @@ type TaskEventHandler interface {
 // NewTaskEventHandler creates a new TaskEventHandler.
 func NewTaskEventHandler(
 	jobSpawner spawner.JobSpawner,
+	namespace libk8s.Namespace,
 	branch base.Branch,
 	cluster string,
 	stageFilter bool,
+	runUntagged bool,
 	resolver pkg.ConfigResolver,
 	resultPublisher pkg.ResultPublisher,
 	taskStore *pkg.TaskStore,
 	currentDateTime libtime.CurrentDateTimeGetter,
-	gitRestClient gitrestclient.GitRestClient,
-	taskGlob string,
-) TaskEventHandler {
-	return &taskEventHandler{
-		jobSpawner:       jobSpawner,
-		branch:           branch,
-		cluster:          cluster,
-		stageFilter:      stageFilter,
-		resolver:         resolver,
-		resultPublisher:  resultPublisher,
-		taskStore:        taskStore,
-		currentDateTime:  currentDateTime,
-		deferredRespawns: make(map[lib.TaskIdentifier]deferredEntry),
-		spawnLocks:       make(map[string]*sync.Mutex),
-		gitRestClient:    gitRestClient,
-		taskGlob:         taskGlob,
-		redriveStreaks:   make(map[lib.TaskIdentifier]redriveStreak),
-		vaultTasks:       make(map[lib.TaskIdentifier]struct{}),
-		pathIDs:          make(map[string]lib.TaskIdentifier),
+	view TaskView,
+	taskVault string,
+	reconcilePassTimeout time.Duration,
+	reconcileInterval time.Duration,
+	claimMode pkg.ClaimMode,
+	claimRefClientFactory ClaimRefClientFactory,
+	// claimJobControl is optional so the many test call sites stay readable; a
+	// claim-taking mode without one fails loudly at lease-manager construction.
+	claimJobControl ...claim.JobControl,
+) ClaimLifecycleEventHandler {
+	handler := &taskEventHandler{
+		jobSpawner:            jobSpawner,
+		namespace:             namespace,
+		branch:                branch,
+		cluster:               cluster,
+		stageFilter:           stageFilter,
+		runUntagged:           runUntagged,
+		resolver:              resolver,
+		resultPublisher:       resultPublisher,
+		taskStore:             taskStore,
+		currentDateTime:       currentDateTime,
+		deferredRespawns:      make(map[lib.TaskIdentifier]deferredEntry),
+		deferredEpochs:        make(map[lib.TaskIdentifier]uint64),
+		queuedAtStamps:        make(map[lib.TaskIdentifier]string),
+		spawnLocks:            make(map[string]*sync.Mutex),
+		view:                  view,
+		taskVault:             taskVault,
+		reconcilePassTimeout:  reconcilePassTimeout,
+		reconcileInterval:     reconcileInterval,
+		claimMode:             claimMode,
+		claimRefClientFactory: claimRefClientFactory,
+		redriveStreaks:        make(map[lib.TaskIdentifier]redriveStreak),
 	}
+	if len(claimJobControl) > 0 {
+		handler.claimJobControl = claimJobControl[0]
+	}
+	return handler
 }
 
 type taskEventHandler struct {
 	jobSpawner       spawner.JobSpawner
+	namespace        libk8s.Namespace
 	branch           base.Branch
 	cluster          string
 	stageFilter      bool
+	runUntagged      bool
 	resolver         pkg.ConfigResolver
 	resultPublisher  pkg.ResultPublisher
 	taskStore        *pkg.TaskStore
 	currentDateTime  libtime.CurrentDateTimeGetter
 	deferredMu       sync.Mutex
 	deferredRespawns map[lib.TaskIdentifier]deferredEntry
-	spawnLocksMu     sync.Mutex
-	spawnLocks       map[string]*sync.Mutex
-	gitRestClient    gitrestclient.GitRestClient
-	taskGlob         string
-	redriveMu        sync.Mutex
-	redriveStreaks   map[lib.TaskIdentifier]redriveStreak
-	vaultMu          sync.RWMutex
-	vaultTasks       map[lib.TaskIdentifier]struct{}
-	vaultScanned     bool
-	pathIDs          map[string]lib.TaskIdentifier
-	jobCacheMu       sync.Mutex
-	jobCache         map[string]map[lib.TaskIdentifier]bool
-	jobCacheArmed    bool
+	// deferredEpochs counts removals per task, so a replay collected before an
+	// eviction can detect it. Entries are never deleted: resetting an epoch would
+	// re-validate a stale claim.
+	deferredEpochs map[lib.TaskIdentifier]uint64
+	// queuedAtStamps records the queued_at this executor already published for a
+	// task, so a deferral never re-stamps while the write is unlandable. The
+	// frontmatter and view checks in stampQueueEntry both read state that only a
+	// SUCCESSFUL vault write can update; a task whose file is gone never updates
+	// either, so without this map it re-stamps on every deferral, forever.
+	// Guarded by deferredMu.
+	queuedAtStamps        map[lib.TaskIdentifier]string
+	spawnLocksMu          sync.Mutex
+	spawnLocks            map[string]*sync.Mutex
+	view                  TaskView
+	taskVault             string
+	reconcilePassTimeout  time.Duration
+	reconcileInterval     time.Duration
+	claimMode             pkg.ClaimMode
+	claimRefClientFactory ClaimRefClientFactory
+	// claimJobControl lets the lease manager's fence and restart recovery act on
+	// a Job. Nil falls back to the loud unmanaged control, so a mode that takes a
+	// claim cannot silently run without it.
+	claimJobControl  claim.JobControl
+	claimManagerOnce sync.Once
+	claimManager     claim.LeaseManager
+	claimManagerErr  error
+	// spawnPendingSet marks tasks whose spawn is between taking the claim and
+	// recording the new Job. A terminal event for the previous Job arriving in
+	// that window names the only Job the store knows, so without this marker it
+	// would release the claim just taken for the replacement.
+	spawnPendingMu  sync.Mutex
+	spawnPendingSet map[lib.TaskIdentifier]struct{}
+	// claimLocks serialises, per task, the spawn path's mark+claim against a
+	// release path's check+snapshot+delete. Without it the pending check is
+	// check-then-act: a spawn could mark and take its claim between the check
+	// and the HeldClaims snapshot, and the release would delete the fresh claim.
+	claimLocksMu   sync.Mutex
+	claimLocks     map[lib.TaskIdentifier]*sync.Mutex
+	redriveMu      sync.Mutex
+	redriveStreaks map[lib.TaskIdentifier]redriveStreak
+	// redriveStore is the shared, persisted half of the redrive streak. It is
+	// built with the lease manager from the same claim-ref client and stays nil
+	// when claim mode takes no claim.
+	redriveStore claim.RedriveStreakStore
+	// spawnGens counts Jobs created by this executor per assignee, on any path.
+	// A pass cache entry read at an older generation is refetched, so a Job
+	// spawned by the Kafka consumer or the deferred loop mid-pass is never
+	// missed, and a spawn for one assignee leaves the others' entries valid.
+	spawnGenMu sync.Mutex
+	spawnGens  map[string]uint64
 }
 
 // lockAssigneeSpawn serializes the count-then-spawn sequence for one assignee and
@@ -278,72 +351,6 @@ func (h *taskEventHandler) lockAssigneeSpawn(assignee string) func() {
 	return mu.Unlock
 }
 
-// beginJobCache arms the per-reconcile-pass active-Job cache and returns the
-// function that disarms it. Inside a pass every lookup is answered from one
-// `list jobs` per assignee; outside a pass lookups go straight to the API, so
-// the Kafka consumer path is never served a snapshot a reconcile pass froze.
-//
-// Added 2026-10-19: spawnIfNeeded made two list calls per eligible task
-// (IsJobActive and CountActiveJobs). A pass over ~70 eligible tasks therefore
-// issued ~140 calls, and client-go's default 5 QPS limiter consumed the whole
-// 30 s pass budget before the first spawn — the `spawn_error ... context
-// deadline exceeded` that kept github-update-go at zero dispatch.
-func (h *taskEventHandler) beginJobCache() func() {
-	h.jobCacheMu.Lock()
-	h.jobCache = make(map[string]map[lib.TaskIdentifier]bool)
-	h.jobCacheArmed = true
-	h.jobCacheMu.Unlock()
-	return func() {
-		h.jobCacheMu.Lock()
-		h.jobCache = nil
-		h.jobCacheArmed = false
-		h.jobCacheMu.Unlock()
-	}
-}
-
-// invalidateJobCache drops the per-pass cache after a Job is created, so a later
-// lookup in the same pass cannot miss a Job this executor just made. The cache is
-// reset to an empty map rather than nil so it keeps repopulating for the rest of
-// the pass; nil is reserved for "no pass is armed".
-func (h *taskEventHandler) invalidateJobCache() {
-	h.jobCacheMu.Lock()
-	if h.jobCacheArmed {
-		h.jobCache = make(map[string]map[lib.TaskIdentifier]bool)
-	}
-	h.jobCacheMu.Unlock()
-}
-
-// activeJobsFor returns the set of task identifiers with an active Job for the
-// assignee. Inside an armed reconcile pass the answer is memoized per assignee;
-// outside one it is read live. Callers treat the returned map as read-only.
-func (h *taskEventHandler) activeJobsFor(
-	ctx context.Context,
-	assignee string,
-) (map[lib.TaskIdentifier]bool, error) {
-	h.jobCacheMu.Lock()
-	armed := h.jobCacheArmed
-	if armed {
-		if cached, ok := h.jobCache[assignee]; ok {
-			h.jobCacheMu.Unlock()
-			return cached, nil
-		}
-	}
-	h.jobCacheMu.Unlock()
-
-	active, err := h.jobSpawner.ListActiveJobs(ctx, assignee)
-	if err != nil {
-		return nil, err
-	}
-	if armed {
-		h.jobCacheMu.Lock()
-		if h.jobCache != nil {
-			h.jobCache[assignee] = active
-		}
-		h.jobCacheMu.Unlock()
-	}
-	return active, nil
-}
-
 // isJobActive reports whether an active Job exists for the task. Answered from
 // the per-assignee active set when the assignee is known, so a reconcile pass
 // costs one list per assignee rather than one per task. An empty assignee cannot
@@ -353,8 +360,12 @@ func (h *taskEventHandler) isJobActive(
 	task lib.Task,
 	config *pkg.AgentConfiguration,
 ) (bool, error) {
+	namespace, err := h.jobNamespaceForTask(ctx, config, task.TaskIdentifier)
+	if err != nil {
+		return false, err
+	}
 	if config == nil || config.Assignee == "" {
-		active, err := h.jobSpawner.IsJobActive(ctx, task.TaskIdentifier)
+		active, err := h.jobSpawner.IsJobActive(ctx, namespace, task.TaskIdentifier)
 		if err != nil {
 			return false, errors.Wrapf(
 				ctx,
@@ -365,11 +376,75 @@ func (h *taskEventHandler) isJobActive(
 		}
 		return active, nil
 	}
-	activeSet, err := h.activeJobsFor(ctx, config.Assignee)
+	activeSet, err := h.activeJobsFor(ctx, namespace, config.Assignee)
 	if err != nil {
 		return false, errors.Wrapf(ctx, err, "check active job for task %s", task.TaskIdentifier)
 	}
 	return activeSet[task.TaskIdentifier], nil
+}
+
+// markSpawnPending records that taskID is between taking its claim and having a
+// Job name to record.
+func (h *taskEventHandler) markSpawnPending(taskID lib.TaskIdentifier) {
+	h.spawnPendingMu.Lock()
+	defer h.spawnPendingMu.Unlock()
+	if h.spawnPendingSet == nil {
+		h.spawnPendingSet = make(map[lib.TaskIdentifier]struct{})
+	}
+	h.spawnPendingSet[taskID] = struct{}{}
+}
+
+// clearSpawnPending ends the window opened by markSpawnPending.
+func (h *taskEventHandler) clearSpawnPending(taskID lib.TaskIdentifier) {
+	h.spawnPendingMu.Lock()
+	defer h.spawnPendingMu.Unlock()
+	delete(h.spawnPendingSet, taskID)
+}
+
+// lockClaimRelease takes the per-task claim lock and returns its unlock. The
+// spawn path holds it across mark+claim; every release path holds it across
+// pending-check+snapshot+delete, so the two can never interleave.
+func (h *taskEventHandler) lockClaimRelease(taskID lib.TaskIdentifier) func() {
+	h.claimLocksMu.Lock()
+	if h.claimLocks == nil {
+		h.claimLocks = make(map[lib.TaskIdentifier]*sync.Mutex)
+	}
+	lock, ok := h.claimLocks[taskID]
+	if !ok {
+		lock = &sync.Mutex{}
+		h.claimLocks[taskID] = lock
+	}
+	h.claimLocksMu.Unlock()
+	lock.Lock()
+	return lock.Unlock
+}
+
+// spawnPendingFor reports whether taskID is inside the claim-then-store window.
+func (h *taskEventHandler) spawnPendingFor(taskID lib.TaskIdentifier) bool {
+	h.spawnPendingMu.Lock()
+	defer h.spawnPendingMu.Unlock()
+	_, ok := h.spawnPendingSet[taskID]
+	return ok
+}
+
+// staleEventForTask reports whether the task store holds an entry that tracks a
+// DIFFERENT Job than the event carries, i.e. the event belongs to a superseded
+// job cycle and must not act on the one that is running now. An absent entry is
+// not stale: after a restart the store holds nothing and the release must still
+// happen.
+func (h *taskEventHandler) staleEventForTask(task lib.Task) bool {
+	storedJob := h.storedCurrentJob(task)
+	return storedJob != "" && storedJob != task.Frontmatter.CurrentJob()
+}
+
+// storedCurrentJob returns the store entry's current_job, or "" when the store
+// holds no entry for the task.
+func (h *taskEventHandler) storedCurrentJob(task lib.Task) string {
+	stored, ok := h.taskStore.Load(task.TaskIdentifier)
+	if !ok {
+		return ""
+	}
+	return stored.Frontmatter.CurrentJob()
 }
 
 // cleanupTerminalTask clears in-flight state when a task has reached a terminal
@@ -380,7 +455,7 @@ func (h *taskEventHandler) isJobActive(
 // otherwise clear the entry, so without this a deferred entry created during the grace
 // window fires ~300s later and respawns a job for an already-done task (the "path C"
 // respawn observed on dev 2026-07-13 for probe 095c58d7).
-func (h *taskEventHandler) cleanupTerminalTask(task lib.Task) {
+func (h *taskEventHandler) cleanupTerminalTask(ctx context.Context, task lib.Task) {
 	status := string(task.Frontmatter.Status())
 	if status != "completed" && status != "aborted" {
 		return
@@ -395,19 +470,19 @@ func (h *taskEventHandler) cleanupTerminalTask(task lib.Task) {
 	// same job as the terminal event — or no job at all (defensive). A stale
 	// entry kept here is cleaned when the tracked job reaches terminal via
 	// HandleJob, the same mechanism the success path already relies on.
-	if stored, ok := h.taskStore.Load(task.TaskIdentifier); ok {
-		if storedJob := stored.Frontmatter.CurrentJob(); storedJob != "" &&
-			storedJob != task.Frontmatter.CurrentJob() {
-			glog.V(3).Infof(
-				"task %s %s: stale terminal event (store current_job=%s, event current_job=%s) — keeping store entry",
-				task.TaskIdentifier, status, storedJob, task.Frontmatter.CurrentJob(),
-			)
-			return
-		}
+	if h.staleEventForTask(task) {
+		glog.V(3).Infof(
+			"task %s %s: stale terminal event (store current_job=%s, event current_job=%s) — keeping store entry",
+			task.TaskIdentifier, status, h.storedCurrentJob(task), task.Frontmatter.CurrentJob(),
+		)
+		return
 	}
+	// Release after the stale-event guard: releasing before it would drop the
+	// claim of a job that is still running under a newer current_job.
+	h.ReleaseTaskClaim(ctx, task.TaskIdentifier)
 	h.taskStore.Delete(task.TaskIdentifier)
 	h.removeDeferredEntry(task.TaskIdentifier)
-	h.clearRedriveStreak(task.TaskIdentifier)
+	h.clearRedriveStreak(ctx, task.TaskIdentifier)
 	glog.V(3).
 		Infof("task %s %s: cleared task store + deferred respawn", task.TaskIdentifier, status)
 }
@@ -418,6 +493,28 @@ func (h *taskEventHandler) ConsumeMessage(ctx context.Context, msg *sarama.Consu
 		return err
 	}
 	if skip {
+		return nil
+	}
+	// A cold pod resumes its consumer from the last committed offset, so the first
+	// events it processes are a BACKLOG — snapshots of tasks as they looked when
+	// the event was produced, possibly minutes ago and possibly already handled by
+	// another cluster. Acting on one spawns a task on the strength of a stale
+	// snapshot, and none of the guards that would refuse it can help yet: the
+	// spawn path's anti-duplicate checks read the task view and the task store,
+	// and on a cold pod both are empty.
+	//
+	// The view is the durable half — it replays the compacted topic from the
+	// oldest offset — so waiting for it to be ready is waiting for the picture
+	// that makes those guards meaningful. Reconcile already refuses to run before
+	// then (event=reconcile_view_not_ready), and it is the source-of-truth floor:
+	// every task skipped here is driven by the next reconcile pass once the view
+	// is ready, so nothing is dropped, only deferred.
+	if h.view != nil && !h.view.Ready() {
+		metrics.TaskEventsTotal.WithLabelValues("skipped_view_not_ready").Inc()
+		glog.Infof(
+			"event=event_view_not_ready task=%s: task view has not replayed yet; reconcile will drive it",
+			task.TaskIdentifier,
+		)
 		return nil
 	}
 	_, err = h.spawnIfNeeded(ctx, task, config)
@@ -432,25 +529,24 @@ func (h *taskEventHandler) parseAndFilter(
 	ctx context.Context,
 	msg *sarama.ConsumerMessage,
 ) (lib.Task, *pkg.AgentConfiguration, bool, error) {
-	if len(msg.Value) == 0 {
-		glog.V(3).Infof("skip empty message at offset %d", msg.Offset)
+	task, err := decodeTaskEvent(ctx, msg.Value)
+	if err != nil {
+		switch {
+		case stderrors.Is(err, errEmptyTaskEvent):
+			glog.V(3).Infof("skip empty message at offset %d", msg.Offset)
+		case stderrors.Is(err, errEmptyTaskIdentifier):
+			glog.Warningf("task event at offset %d has empty TaskIdentifier, skipping", msg.Offset)
+		default:
+			glog.Warningf("failed to unmarshal task event at offset %d: %v", msg.Offset, err)
+		}
 		return lib.Task{}, nil, true, nil
 	}
 
-	var task lib.Task
-	if err := json.Unmarshal(msg.Value, &task); err != nil {
-		glog.Warningf("failed to unmarshal task event at offset %d: %v", msg.Offset, err)
-		return lib.Task{}, nil, true, nil
-	}
-
-	if task.TaskIdentifier == "" {
-		glog.Warningf("task event at offset %d has empty TaskIdentifier, skipping", msg.Offset)
-		return lib.Task{}, nil, true, nil
-	}
-
-	h.cleanupTerminalTask(task)
+	h.cleanupTerminalTask(ctx, task)
 
 	if h.skipForeignCluster(task) { // before Config resolution: not an unknown assignee
+		// A pending deferred entry holds a pre-retag snapshot; it must not outlive this.
+		h.removeDeferredEntry(task.TaskIdentifier)
 		return lib.Task{}, nil, true, nil
 	}
 
@@ -461,6 +557,8 @@ func (h *taskEventHandler) parseAndFilter(
 		return lib.Task{}, nil, false, err
 	}
 	if skip {
+		// An unresolvable assignee must not leave an older snapshot parked.
+		h.removeDeferredEntry(task.TaskIdentifier)
 		return lib.Task{}, nil, true, nil
 	}
 
@@ -474,47 +572,60 @@ func (h *taskEventHandler) parseAndFilter(
 			)
 		}
 		glog.V(2).Infof("type mismatch: %s (task %s)", mismatch, task.TaskIdentifier)
-		metrics.TaskEventsTotal.WithLabelValues("type_mismatch").Inc()
-		return lib.Task{}, nil, true, nil
+		return h.skipAndEvict(task, "type_mismatch")
 	}
 
 	if !effectiveTriggerStatuses(config).Contains(task.Frontmatter.Status()) {
-		glog.V(3).Infof(
-			"skip task %s with status %s", task.TaskIdentifier, task.Frontmatter.Status(),
-		)
-		metrics.TaskEventsTotal.WithLabelValues("skipped_status").Inc()
-		return lib.Task{}, nil, true, nil
+		glog.V(3).
+			Infof("skip task %s with status %s", task.TaskIdentifier, task.Frontmatter.Status())
+		// This also evicts for a stale terminal event that cleanupTerminalTask
+		// deliberately kept (store current_job != event current_job). Accepted:
+		// the reconcile floor re-drives a task still at in_progress within one
+		// interval, so the kept store entry is recovered rather than lost.
+		return h.skipAndEvict(task, "skipped_status")
 	}
 
 	phase := task.Frontmatter.Phase()
 	// terminal phases must not be spawned again — operator escalation required
 	if phase != nil && applyPhaseGate(task, *phase) {
+		// Same stale-event guard as cleanupTerminalTask: a replayed terminal-phase
+		// event for a task that was moved back to execution and re-spawned under a
+		// newer Job must not release the live claim, or a peer re-claims the key and
+		// runs the same task twice.
+		if !h.staleEventForTask(task) {
+			h.ReleaseTaskClaim(ctx, task.TaskIdentifier)
+		}
 		h.removeDeferredEntry(task.TaskIdentifier)
 		return lib.Task{}, nil, true, nil
 	}
 	if phase == nil || !effectiveTriggerPhases(config).Contains(*phase) {
 		glog.V(3).Infof("skip task %s with phase %v", task.TaskIdentifier, phase)
-		metrics.TaskEventsTotal.WithLabelValues("skipped_phase").Inc()
-		return lib.Task{}, nil, true, nil
+		return h.skipAndEvict(task, "skipped_phase")
 	}
 
 	stage := task.Frontmatter.Stage()
-	if h.stageFilter && stage != string(h.branch) {
-		glog.V(3).Infof(
-			"skip task %s with stage %s (executor branch %s)",
-			task.TaskIdentifier, stage, h.branch,
-		)
-		metrics.TaskEventsTotal.WithLabelValues("skipped_stage").Inc()
-		return lib.Task{}, nil, true, nil
+	if result, skip := h.stageSkipResult(task, stage); skip {
+		return h.skipAndEvict(task, result)
 	}
 
 	if task.Frontmatter.Assignee() == "" {
 		glog.V(3).Infof("skip task %s with empty assignee", task.TaskIdentifier)
-		metrics.TaskEventsTotal.WithLabelValues("skipped_assignee").Inc()
-		return lib.Task{}, nil, true, nil
+		return h.skipAndEvict(task, "skipped_assignee")
 	}
 
 	return task, config, false, nil
+}
+
+// skipAndEvict records a filter-skip metric, drops any parked respawn for the
+// task, and returns the parseAndFilter skip tuple. Every filter skip evicts:
+// an event that no longer qualifies must not leave an older snapshot to spawn.
+func (h *taskEventHandler) skipAndEvict(
+	task lib.Task,
+	result string,
+) (lib.Task, *pkg.AgentConfiguration, bool, error) {
+	metrics.TaskEventsTotal.WithLabelValues(result).Inc()
+	h.removeDeferredEntry(task.TaskIdentifier)
+	return lib.Task{}, nil, true, nil
 }
 
 // resolveConfig looks up the agent Config CR for the task's assignee.
@@ -583,7 +694,10 @@ func (h *taskEventHandler) resolveConfigForReconcile(
 	if taskType == "" {
 		return nil, false, nil
 	}
-	resolved, err := h.resolver.ResolveByTaskType(ctx, string(taskType))
+	// previous_assignee (written at escalation) only breaks a tie between several
+	// Configs declaring this task_type; it never routes a task on its own.
+	previousAssignee, _ := task.Frontmatter.String("previous_assignee")
+	resolved, err := h.resolver.ResolveByTaskType(ctx, string(taskType), previousAssignee)
 	if err != nil {
 		if stderrors.Is(err, pkg.ErrConfigNotFound) {
 			glog.V(2).Infof(
@@ -644,87 +758,61 @@ func effectiveTriggerStatuses(cfg *pkg.AgentConfiguration) domain.TaskStatuses {
 	return cfg.Trigger.Statuses
 }
 
-// checkActiveCurrentJob verifies whether spawn must be suppressed due to current_job state.
-// Returns (true, nil) when the spawn must be suppressed (job still active or inside grace window).
-// Returns (false, nil) when spawn may proceed. Returns (false, err) on unexpected errors.
-func (h *taskEventHandler) checkActiveCurrentJob(
-	ctx context.Context,
-	task lib.Task,
-	currentJob string,
-	config *pkg.AgentConfiguration,
-) (bool, error) {
-	active, err := h.jobSpawner.IsJobActive(ctx, task.TaskIdentifier)
-	if err != nil {
-		metrics.TaskEventsTotal.WithLabelValues("error").Inc()
-		return false, errors.Wrapf(
-			ctx,
-			err,
-			"check current_job active for task %s",
-			task.TaskIdentifier,
-		)
-	}
-	if active {
-		glog.V(3).Infof(
-			"skip task %s: current_job %s still active (from frontmatter)",
-			task.TaskIdentifier, currentJob,
-		)
-		metrics.TaskEventsTotal.WithLabelValues("skipped_active_job").Inc()
-		return true, nil
-	}
-	// Grace window: suppress respawn while the agent's terminal-phase write propagates.
-	// Treat missing or unparseable job_started_at as elapsed (preserves legacy-task behavior).
-	jobStartedAt, parseErr := task.Frontmatter.JobStartedAt()
-	if parseErr != nil {
-		glog.Warningf(
-			"task %s: failed to parse job_started_at: %v; treating grace period as elapsed",
-			task.TaskIdentifier, parseErr,
-		)
-	}
-	if parseErr == nil && !jobStartedAt.IsZero() {
-		elapsed := h.currentDateTime.Now().Time().Sub(jobStartedAt)
-		if elapsed < defaultRespawnGracePeriod {
-			glog.Infof(
-				"event=respawn_grace_window task=%s current_job=%s elapsed=%.0fs",
-				task.TaskIdentifier, currentJob, elapsed.Seconds(),
-			)
-			metrics.TaskEventsTotal.WithLabelValues("respawn_grace_window").Inc()
-			if config != nil {
-				retryAfter := jobStartedAt.Add(defaultRespawnGracePeriod)
-				h.deferredMu.Lock()
-				h.deferredRespawns[task.TaskIdentifier] = deferredEntry{
-					task:       task,
-					config:     *config,
-					retryAfter: retryAfter,
-				}
-				h.deferredMu.Unlock()
-			}
-			return true, nil
-		}
-	}
-	glog.V(2).Infof(
-		"task %s: current_job %s no longer active, proceeding to spawn",
-		task.TaskIdentifier, currentJob,
-	)
-	return false, nil
-}
-
 // spawnIfNeeded returns (spawned, err): spawned is true iff a new k8s Job was actually launched
 // (i.e. the call reached SpawnJob successfully). All early-return branches (suppression, trigger
 // cap, active job, terminal phase, errors) return spawned=false.
+//
+// The Kafka consumer's path passes no claim; a replay (deferred loop or reconcile
+// drive) goes through spawnIfNeededClaimed with the epoch its snapshot was
+// collected at, so an eviction landing mid-flight stops that snapshot.
 func (h *taskEventHandler) spawnIfNeeded(
 	ctx context.Context,
 	task lib.Task,
 	config *pkg.AgentConfiguration,
+) (bool, error) {
+	return h.spawnIfNeededClaimed(ctx, task, config, nil)
+}
+
+// spawnJobError marks a failed JobSpawner.SpawnJob call so the deferred-respawn
+// loop can skip that entry instead of exiting the whole process. Every other
+// error from the spawn path stays fatal.
+type spawnJobError struct {
+	err error
+}
+
+func (e *spawnJobError) Error() string { return e.err.Error() }
+
+func (e *spawnJobError) Unwrap() error { return e.err }
+
+// spawnIfNeededClaimed is spawnIfNeeded with an optional removal claim. With a
+// non-nil claim, both deferral stores and the final spawn decision re-check the
+// task's epoch, so a removeDeferredEntry that lands after the entry was
+// collected wins unless it arrives after the final claim check: the remaining
+// window is the duration of the SpawnJob call, which deliberately runs outside
+// deferredMu (an eviction blocked behind an in-flight create could not stop that
+// Job anyway). That window is accepted: the next reconcile pass's foreign read
+// only stops the task being re-parked, it does not remove a Job already created.
+func (h *taskEventHandler) spawnIfNeededClaimed(
+	ctx context.Context,
+	task lib.Task,
+	config *pkg.AgentConfiguration,
+	claim *deferredClaim,
 ) (bool, error) {
 	// Not this instance's task — see skipForeignVaultTask.
 	if h.skipForeignVaultTask(task) {
 		return false, nil
 	}
 
+	// A Config whose target namespace is unusable is left untouched for a human:
+	// no claim, no frontmatter write, no Job.
+	if h.rejectInvalidJobNamespace(ctx, task, config) {
+		return false, nil
+	}
+
 	// If current_job is set in frontmatter, a prior spawn notification was written
 	// to the task file. Verify the job is still active; if not, proceed to spawn.
 	if currentJob := task.Frontmatter.CurrentJob(); currentJob != "" {
-		suppress, err := h.checkActiveCurrentJob(ctx, task, currentJob, config)
+		suppress, err := h.checkActiveCurrentJob(ctx, task, currentJob, config, claim)
 		if err != nil {
 			return false, err
 		}
@@ -758,16 +846,17 @@ func (h *taskEventHandler) spawnIfNeeded(
 		return false, nil
 	}
 
-	// The last bound, and the only one that covers every path: a task that has
-	// been spawned maxConsecutiveRedrives times in a row at an unchanged phase is
-	// looping, not advancing. Checked here rather than at the call sites because
-	// the Kafka consumer, the deferred-respawn loop and the reconcile floor all
-	// funnel through this function — see maxConsecutiveRedrives.
-	if h.redriveStreakCapped(task, "") {
+	if h.recentlySucceeded(task) {
 		return false, nil
 	}
 
-	capped, err := h.deferIfAtConcurrencyCap(ctx, task, config)
+	// The last bound, and the only one that covers every path — see
+	// maxConsecutiveRedrives.
+	if h.redriveStreakCapped(ctx, task) {
+		return false, nil
+	}
+
+	capped, err := h.deferIfAtConcurrencyCap(ctx, task, config, claim)
 	if err != nil {
 		return false, err
 	}
@@ -782,25 +871,91 @@ func (h *taskEventHandler) spawnIfNeeded(
 		return false, nil
 	}
 
+	// Claimed replays decide under deferredMu, released before SpawnJob; the
+	// lock order is assignee spawn lock → deferredMu. An eviction landing after
+	// this check and during SpawnJob does not stop the spawn — see
+	// spawnIfNeededClaimed. See claimStillValid.
+	if !h.claimStillValid(claim) {
+		h.recordClaimInvalidated(task)
+		return false, nil
+	}
+
+	// Lease claim: taken after every existing gate and immediately before the Job
+	// is created, under the per-assignee spawn lock taken above. Taken earlier it
+	// would hold a lease for a task a gate skips; taken later it could not prevent
+	// the duplicate it exists to prevent. Do not confuse this lease with the
+	// deferred-removal claim argument of this function.
+	// Marked BEFORE the claim: acquireSpawnClaim stores the fresh claim, so a
+	// marker set after it would leave the window between the claim and the marker
+	// wide enough for a terminal event for the previous Job to see a
+	// current-looking store and release the claim just taken. Held until this
+	// function returns, i.e. past storeSpawnedJob.
+	h.markSpawnPending(task.TaskIdentifier)
+	defer h.clearSpawnPending(task.TaskIdentifier)
+
+	unlockClaim := h.lockClaimRelease(task.TaskIdentifier)
+	acquired := h.acquireSpawnClaim(ctx, task, config)
+	unlockClaim()
+	if !acquired {
+		return false, nil
+	}
+
+	return h.spawnClaimedJob(ctx, task, config)
+}
+
+// spawnClaimedJob creates the Job for a task whose claim is already held, and
+// records it. The caller holds the in-flight marker across this call — from
+// before the claim through storeSpawnedJob — because between the claim and the
+// store entry there is no Job name to compare against, so a terminal event for
+// the previous Job would otherwise look current and release the claim.
+func (h *taskEventHandler) spawnClaimedJob(
+	ctx context.Context,
+	task lib.Task,
+	config *pkg.AgentConfiguration,
+) (bool, error) {
 	jobName, err := h.jobSpawner.SpawnJob(ctx, task, *config)
 	if err != nil {
 		metrics.TaskEventsTotal.WithLabelValues("error").Inc()
-		return false, errors.Wrapf(ctx, err, "spawn job for task %s failed", task.TaskIdentifier)
+		// A claim taken for a Job that was never created must not stay held.
+		// Every SpawnJob error but one precedes the Job create, and an
+		// AlreadyExists answer is success; the accepted window is a lost
+		// Create response, where the Job exists and this release drops its
+		// claim until the lease expires. The pending marker is cleared first:
+		// this is the one release that must go through.
+		unlockRelease := h.lockClaimRelease(task.TaskIdentifier)
+		h.clearSpawnPending(task.TaskIdentifier)
+		h.releaseTaskClaimLocked(ctx, task.TaskIdentifier)
+		unlockRelease()
+		return false, errors.Wrapf(
+			ctx,
+			&spawnJobError{err: err},
+			"spawn job for task %s failed",
+			task.TaskIdentifier,
+		)
 	}
 
-	// A Job now exists: charge the attempt. The error still propagates — a
-	// counter write that cannot be recorded is a real fault, and the existing
-	// callers treat it as one. It no longer prevents the spawn, which is the
-	// point of moving the write here: a spawn that fails for infrastructure
-	// reasons leaves the budget untouched, and a Job that did start is charged.
-	// Record the Job before the counter write: if the write fails and this
-	// returns an error, the in-memory store must still know the Job exists.
-	h.invalidateJobCache()
+	if err := h.finishSpawn(ctx, task, config, jobName); err != nil {
+		return false, err
+	}
+	return true, nil
+}
+
+// finishSpawn records a Job that was just created. A counter write that cannot
+// be recorded is a real fault and still propagates, but it no longer prevents
+// the spawn: the Job exists. The Job is stored before the counter write, so if
+// the write fails the in-memory store still knows the Job exists.
+func (h *taskEventHandler) finishSpawn(
+	ctx context.Context,
+	task lib.Task,
+	config *pkg.AgentConfiguration,
+	jobName string,
+) error {
+	h.bumpSpawnGen(config.Assignee)
 	h.storeSpawnedJob(task, jobName)
 
 	if err := h.recordTriggerSpawn(ctx, task); err != nil {
 		metrics.TaskEventsTotal.WithLabelValues("error").Inc()
-		return false, err
+		return err
 	}
 
 	if err := h.resultPublisher.PublishSpawnNotification(ctx, task, jobName); err != nil {
@@ -815,8 +970,9 @@ func (h *taskEventHandler) spawnIfNeeded(
 	)
 	metrics.TaskEventsTotal.WithLabelValues("spawned").Inc()
 	metrics.JobsSpawnedTotal.Inc()
-	h.recordRedriveSpawn(task)
-	return true, nil
+	h.recordTaskRerun(task)
+	h.recordRedriveSpawn(ctx, task)
+	return nil
 }
 
 // storeSpawnedJob records the task under the job that was actually spawned. The
@@ -853,11 +1009,17 @@ func (h *taskEventHandler) deferIfAtConcurrencyCap(
 	ctx context.Context,
 	task lib.Task,
 	config *pkg.AgentConfiguration,
+	claim *deferredClaim,
 ) (bool, error) {
 	if config == nil || config.MaxConcurrentJobs <= 0 {
 		return false, nil
 	}
-	activeSet, err := h.activeJobsFor(ctx, config.Assignee)
+	namespace, err := h.jobNamespaceForTask(ctx, config, task.TaskIdentifier)
+	if err != nil {
+		metrics.TaskEventsTotal.WithLabelValues("error").Inc()
+		return false, err
+	}
+	activeSet, err := h.activeJobsFor(ctx, namespace, config.Assignee)
 	if err != nil {
 		metrics.TaskEventsTotal.WithLabelValues("error").Inc()
 		return false, errors.Wrapf(ctx, err, "count active jobs for assignee %s", config.Assignee)
@@ -875,6 +1037,16 @@ func (h *taskEventHandler) deferIfAtConcurrencyCap(
 		)
 		return false, nil
 	}
+	// Cheap pre-check before the side effects below: an evicted claim must not
+	// publish a queued_at or count a deferral. The authoritative check is at the
+	// store, under the same lock as the write.
+	h.deferredMu.Lock()
+	invalid := h.claimInvalidatedLocked(claim)
+	h.deferredMu.Unlock()
+	if invalid {
+		h.recordClaimInvalidated(task)
+		return true, nil
+	}
 	// V(1), not V(0): a capped deferral is an expected steady state and repeats
 	// once per retry interval per waiting task, so V(0) would be a constant
 	// stream during any backlog. V(1) is inside the deployed verbosity, so it
@@ -891,6 +1063,26 @@ func (h *taskEventHandler) deferIfAtConcurrencyCap(
 	metrics.DeferredConcurrencyCapTotal.WithLabelValues(config.Assignee).Inc()
 	task = h.stampQueueEntry(ctx, task)
 	h.deferredMu.Lock()
+	if h.claimInvalidatedLocked(claim) {
+		h.deferredMu.Unlock()
+		h.recordClaimInvalidated(task)
+		// The deferral ends here without re-parking, so the record stamped above
+		// must not outlive it.
+		h.clearQueuedAtStampIfNotDeferred(task.TaskIdentifier)
+		return true, nil
+	}
+	// A claimed replay stores only when nothing is parked: a concurrent fresh
+	// event may have parked a newer snapshot under the same id.
+	if claim != nil {
+		if _, exists := h.deferredRespawns[task.TaskIdentifier]; exists {
+			h.deferredMu.Unlock()
+			// Nothing is parked by this call. The existing entry keeps its own
+			// stamp, so this is a no-op when the task is parked and a clear when
+			// it is not.
+			h.clearQueuedAtStampIfNotDeferred(task.TaskIdentifier)
+			return true, nil
+		}
+	}
 	h.deferredRespawns[task.TaskIdentifier] = deferredEntry{
 		task:       task,
 		config:     *config,
@@ -905,16 +1097,24 @@ func (h *taskEventHandler) deferIfAtConcurrencyCap(
 // cap. queued_at is the moment the FIRST wait began: it is written once and never
 // moved by a later re-deferral, so the field can be read as a queue-entry time.
 //
-// Three cases, in order:
+// Four cases, in order:
 //
 //   - the task already carries queued_at (a re-deferred in-memory entry) — return
 //     it unchanged and publish nothing.
-//   - the vault file already carries queued_at — return a copy carrying it. The
-//     vault is the authority here because a duplicate Kafka event can arrive after
+//   - the task view already carries queued_at — return a copy carrying it. The
+//     view is the authority here because a duplicate Kafka event can arrive after
 //     the publish but before the controller has written the field; re-stamping
 //     would move the timestamp forward.
-//   - neither — stamp the injected clock's current UTC time, publish it, and
-//     return a copy carrying it so a later re-deferral takes the first branch.
+//   - this executor already published queued_at for the task — return a copy
+//     carrying that value and publish nothing. This is the case a missing task
+//     file depends on: both checks above read state only a SUCCESSFUL vault write
+//     updates, so for a task whose file was deleted (or whose write keeps failing)
+//     neither ever becomes true and the deferral would stamp a fresh value on
+//     every retry — once per concurrencyCapRetryDelay, indefinitely. Measured on
+//     nukedev 2026-10-23: one update-frontmatter command per minute for a task id
+//     with no file anywhere, each one a not-found at the controller.
+//   - none of the above — stamp the injected clock's current UTC time, record it,
+//     publish it, and return a copy carrying it.
 //
 // A failed publish is deliberately not retried. The returned copy still carries
 // the value, so the next re-deferral sees it and publishes nothing: that wait
@@ -923,10 +1123,14 @@ func (h *taskEventHandler) stampQueueEntry(ctx context.Context, task lib.Task) l
 	if v, ok := task.Frontmatter.String("queued_at"); ok && v != "" {
 		return task
 	}
-	if v := h.queuedAtFromVault(ctx, task.TaskIdentifier); v != "" {
+	if v := h.queuedAtFromView(task.TaskIdentifier); v != "" {
+		return taskWithFrontmatterValue(task, "queued_at", v)
+	}
+	if v := h.queuedAtStamp(task.TaskIdentifier); v != "" {
 		return taskWithFrontmatterValue(task, "queued_at", v)
 	}
 	queuedAt := h.currentDateTime.Now().UTC().Format("2006-01-02T15:04:05Z07:00")
+	h.recordQueuedAtStamp(task.TaskIdentifier, queuedAt)
 	if err := h.resultPublisher.PublishQueueEntry(ctx, task, queuedAt); err != nil {
 		glog.Warningf(
 			"event=queued_at_publish_failed task=%s queued_at=%s err=%v",
@@ -941,50 +1145,66 @@ func (h *taskEventHandler) stampQueueEntry(ctx context.Context, task lib.Task) l
 	return taskWithFrontmatterValue(task, "queued_at", queuedAt)
 }
 
-// queuedAtFromVault reads the task file through git-rest and returns its
-// queued_at frontmatter value, or "" when the path is unknown, the read fails,
-// the file is unparseable, or the field is absent/empty.
+// queuedAtFromView returns the queued_at the view holds for id, or "".
 //
 // It exists for a duplicate event that arrives after PublishQueueEntry but
-// before the controller has applied the write: without this read that event
-// would stamp a second, later timestamp. The read is a single bounded call on
-// the deferral path, which holds the per-assignee spawn lock — git-rest owns its
-// own timeouts and retries, so this adds no retry loop of its own. A failed read
-// only logs: the deferral itself must never fail because of this best-effort
-// write.
-func (h *taskEventHandler) queuedAtFromVault(
-	ctx context.Context,
-	id lib.TaskIdentifier,
-) string {
-	h.vaultMu.RLock()
-	var relPath string
-	for path, cachedID := range h.pathIDs {
-		if cachedID == id {
-			relPath = path
-			break
-		}
-	}
-	h.vaultMu.RUnlock()
-	if relPath == "" {
-		return ""
-	}
-	content, err := h.gitRestClient.Get(ctx, relPath)
-	if err != nil {
-		glog.Warningf(
-			"event=queued_at_vault_read_failed task=%s path=%s err=%v",
-			id, relPath, err,
-		)
-		return ""
-	}
-	task, ok := parseTaskFile(ctx, content)
+// before the controller has applied the write: without this lookup that event
+// would stamp a second, later timestamp. The view is already in memory, so this
+// costs a map lookup on the deferral path rather than a vault read.
+func (h *taskEventHandler) queuedAtFromView(id lib.TaskIdentifier) string {
+	viewTask, ok := h.view.Get(id)
 	if !ok {
 		return ""
 	}
-	v, ok := task.Frontmatter.String("queued_at")
+	v, ok := viewTask.Frontmatter.String("queued_at")
 	if !ok || v == "" {
 		return ""
 	}
 	return v
+}
+
+// queuedAtStamp returns the queued_at this executor already published for id, or "".
+//
+// It is the fallback for a task whose write can never land. queuedAtFromView only
+// knows a value the vault accepted, so a task whose file was deleted keeps
+// returning "" there and would re-stamp on every deferral; the record written by
+// recordQueuedAtStamp survives that, because it is executor-local.
+func (h *taskEventHandler) queuedAtStamp(id lib.TaskIdentifier) string {
+	h.deferredMu.Lock()
+	defer h.deferredMu.Unlock()
+	return h.queuedAtStamps[id]
+}
+
+// recordQueuedAtStamp remembers the queued_at published for id, so a later
+// deferral reuses it instead of publishing a later, wrong one.
+//
+// Recorded before the publish is attempted, not after: a failed publish is
+// deliberately not retried (see stampQueueEntry), and recording only on success
+// would let a task whose publish keeps failing re-stamp on every deferral — the
+// same unbounded loop this record exists to stop.
+func (h *taskEventHandler) recordQueuedAtStamp(id lib.TaskIdentifier, value string) {
+	h.deferredMu.Lock()
+	defer h.deferredMu.Unlock()
+	h.queuedAtStamps[id] = value
+}
+
+// clearQueuedAtStampIfNotDeferred drops the record for id unless the task is
+// parked in deferredRespawns, whose entry still needs it.
+//
+// This is the correct clear for every path that ends a deferral, because a
+// deferral can end in two ways: the task is re-parked (it is still waiting, so
+// the record must survive) or it is not (a skip branch, a failed spawn, an
+// evicted claim — the record must go). Clearing unconditionally would drop a
+// stamp a re-parked entry still depends on; not clearing at all leaves one
+// string behind per task that ever left the deferred state this way, and lets a
+// later, unrelated wait reuse a stale value — which admissionPriority then sorts
+// on as though the task had waited since then.
+func (h *taskEventHandler) clearQueuedAtStampIfNotDeferred(id lib.TaskIdentifier) {
+	h.deferredMu.Lock()
+	defer h.deferredMu.Unlock()
+	if _, parked := h.deferredRespawns[id]; !parked {
+		delete(h.queuedAtStamps, id)
+	}
 }
 
 // taskWithFrontmatterValue returns a copy of the task whose frontmatter carries
@@ -1001,245 +1221,261 @@ func taskWithFrontmatterValue(task lib.Task, key string, value interface{}) lib.
 	return copied
 }
 
-// evalDeferredRespawns checks all pending deferred-respawn entries and spawns a job
-// for each entry whose retryAfter has been reached. Entries are removed once processed.
-// The respawn_after_grace_window metric and log line fire ONLY when the call actually
-// results in a spawn (spec 037 AC #6: "recorded each time the follow-up evaluation
-// results in a spawn"); evaluations that no-op (active job already, trigger cap hit,
-// terminal phase) do not increment the metric.
-func (h *taskEventHandler) evalDeferredRespawns(ctx context.Context) error {
-	now := h.currentDateTime.Now().Time()
-
-	h.deferredMu.Lock()
-	var ready []deferredEntry
-	for taskID, entry := range h.deferredRespawns {
-		if !now.Before(entry.retryAfter) {
-			ready = append(ready, entry)
-			delete(h.deferredRespawns, taskID)
-		}
-	}
-	h.deferredMu.Unlock()
-
-	for _, entry := range ready {
-		select {
-		case <-ctx.Done():
-			return nil
-		default:
-		}
-		entry := entry // capture for closure
-		spawned, err := h.spawnIfNeeded(ctx, entry.task, &entry.config)
-		if err != nil {
-			return errors.Wrapf(
-				ctx, err, "deferred respawn for task %s", entry.task.TaskIdentifier,
-			)
-		}
-		if !spawned {
-			continue
-		}
-		jobStartedAt, _ := entry.task.Frontmatter.JobStartedAt()
-		elapsed := now.Sub(jobStartedAt)
-		glog.V(1).Infof(
-			"event=respawn_after_grace_window task=%s current_job=%s elapsed=%.0fs",
-			entry.task.TaskIdentifier, entry.task.Frontmatter.CurrentJob(), elapsed.Seconds(),
-		)
-		metrics.TaskEventsTotal.WithLabelValues("respawn_after_grace_window").Inc()
-	}
-	return nil
-}
-
-// removeDeferredEntry removes any pending deferred-respawn entry for the given task.
-// Called from parseAndFilter when a terminal-phase event arrives so no stale spawn fires.
-func (h *taskEventHandler) removeDeferredEntry(id lib.TaskIdentifier) {
-	h.deferredMu.Lock()
-	delete(h.deferredRespawns, id)
-	h.deferredMu.Unlock()
-}
-
-// EvalDeferredRespawns implements TaskEventHandler.
-func (h *taskEventHandler) EvalDeferredRespawns(ctx context.Context) error {
-	return h.evalDeferredRespawns(ctx)
-}
-
-// seedDeferredRespawnsFromStore scans the in-memory taskStore for tasks that look
-// like in-flight work (current_job set, phase non-terminal) and adds them to
-// deferredRespawns with retryAfter = job_started_at + defaultRespawnGracePeriod.
-// Called once from RunDeferredRespawnLoop on startup. Idempotent: any entry already
-// present in deferredRespawns is left untouched. This restores deferred state lost
-// when the in-memory map is wiped by an executor restart, so a task deferred
-// behind the concurrency cap does not remain stuck for want of a Kafka event that
-// will never arrive.
+// admissionPriority is the tie-break that decides which waiting task gets a free
+// slot when several are eligible at once.
 //
-// The agent configuration is resolved here at seed time (not left zero-valued):
-// a seeded entry is later evaluated by evalDeferredRespawns → spawnIfNeeded, which
-// spawns with the entry's config — a zero-valued config would spawn a Job with an
-// empty image. Tasks whose assignee config cannot be resolved are skipped; they
-// are re-evaluated when a genuine Kafka event for the task arrives.
-func (h *taskEventHandler) seedDeferredRespawnsFromStore(ctx context.Context) {
-	snapshot := h.taskStore.Snapshot()
-
-	h.deferredMu.Lock()
-	defer h.deferredMu.Unlock()
-	for taskID, task := range snapshot {
-		select {
-		case <-ctx.Done():
-			return
-		default:
-		}
-		if _, exists := h.deferredRespawns[taskID]; exists {
-			continue
-		}
-		currentJob := task.Frontmatter.CurrentJob()
-		if currentJob == "" {
-			continue
-		}
-		phase := task.Frontmatter.Phase()
-		if phase != nil && IsTerminal(*phase) {
-			continue
-		}
-		jobStartedAt, jobStartedErr := task.Frontmatter.JobStartedAt()
-		if jobStartedErr != nil {
-			continue
-		}
-		config, resolveErr := h.resolver.Resolve(ctx, task.Frontmatter.Assignee().String())
-		if resolveErr != nil {
-			glog.V(2).Infof(
-				"seed deferred respawn: skip task %s (config unresolvable for assignee %s): %v",
-				taskID, task.Frontmatter.Assignee(), resolveErr,
-			)
-			continue
-		}
-		h.deferredRespawns[taskID] = deferredEntry{
-			task:       task,
-			config:     config,
-			retryAfter: jobStartedAt.Add(defaultRespawnGracePeriod),
+// Key, in order: a task that has NEVER been attempted (no job_started_at) sorts
+// ahead of every task that has; among attempted tasks the earliest queue-entry
+// time wins — queued_at, the moment the first wait began, falling back to
+// job_started_at for a task that ran without ever being deferred.
+//
+// The "never attempted first" clause is the load-bearing one. Without it the order
+// is whichever order the caller happens to walk first: on the old reconcile floor
+// that was vault path order, which for the trading vault is filename order, so a
+// child delegated today (named 20261021-…) sorts behind every older child and is
+// never admitted while any of them is still eligible. Measured on prod 2026-10-21:
+// 67 eligible children against maxConcurrentJobs 1, and both admissions in a
+// 20-minute window were the first two files in filename order. Those older tasks
+// are the ones already given up on — maxConsecutiveRedrives retires a task after
+// three spawns at an unchanged phase — so replaying them ahead of fresh work is
+// exactly what starves the pipeline.
+func admissionPriority(task lib.Task) time.Time {
+	startedAt, err := task.Frontmatter.JobStartedAt()
+	if err != nil || startedAt.IsZero() {
+		return time.Time{}
+	}
+	if v, ok := task.Frontmatter.String("queued_at"); ok && v != "" {
+		if queuedAt, parseErr := time.Parse(time.RFC3339, v); parseErr == nil {
+			return queuedAt.UTC()
 		}
 	}
+	return startedAt.UTC()
 }
 
-// RunDeferredRespawnLoop implements TaskEventHandler.
-func (h *taskEventHandler) RunDeferredRespawnLoop(ctx context.Context) error {
-	// Startup reconciliation: recover deferred entries lost across an executor
-	// restart by scanning the in-memory taskStore. See seedDeferredRespawnsFromStore
-	// for the restart-safety rationale (spec 037 AC #5).
-	h.seedDeferredRespawnsFromStore(ctx)
-
-	// Fire one eval immediately after seeding so that tasks whose grace has
-	// already elapsed at startup are picked up without waiting for the first tick.
-	if err := h.evalDeferredRespawns(ctx); err != nil {
-		return errors.Wrapf(ctx, err, "deferred respawn loop initial eval")
-	}
-
-	ticker := time.NewTicker(deferredRespawnInterval)
-	defer ticker.Stop()
-	for {
-		select {
-		case <-ctx.Done():
-			return nil
-		case <-ticker.C:
-			if err := h.evalDeferredRespawns(ctx); err != nil {
-				return errors.Wrapf(ctx, err, "deferred respawn loop tick")
-			}
-		}
-	}
-}
-
-// ReconcileOnce runs a single reconcile pass: lists the task files under the
-// configured task glob via git-rest, parses each file's frontmatter, and drives
-// every eligible task. There are two outcomes for an eligible task: a parked
-// task — one whose routing value was cleared but whose declared task_type
-// resolves to a Config — gets that Config's assignee written back onto it (no
-// Job is spawned; the write's TaskUpdated drives the normal spawn path), and
-// every other eligible task is re-driven through the existing spawnIfNeeded path.
+// ReconcileOnce runs a single reconcile pass over a point-in-time snapshot of
+// the in-memory task view: it applies the eligibility filter and drives every
+// eligible task owned by this executor. There are two outcomes for an eligible
+// task: a parked task — one whose routing value was cleared but whose declared
+// task_type resolves to a Config — gets that Config's assignee written back onto
+// it (no Job is spawned; the write's TaskUpdated drives the normal spawn path),
+// and every other eligible task is re-driven through the existing
+// spawnIfNeeded path.
 //
 // The reconcile loop is the source-of-truth floor (spec 005): it derives state
-// from the world — the vault via git-rest, live Jobs via the spawner — rather
-// than from the in-memory maps a restart wipes, so a task whose concurrency-cap
-// deferral was lost across an executor restart is re-driven without a new Kafka
-// event and without a current_job value. It does NOT consult deferredRespawns.
+// from the world — the replayed task topic and live Jobs via the spawner —
+// rather than from the in-memory maps a restart wipes, so a task whose
+// concurrency-cap deferral was lost across an executor restart is re-driven
+// without a new Kafka event and without a current_job value. It does NOT consult
+// deferredRespawns.
 //
-// git-rest unavailability degrades gracefully (spec 005 Failure Modes): a
-// failed readiness, List, or Get skips the pass with a log line and the next
-// tick retries. ReconcileOnce returns nil for all vault-side failures so the
-// loop can never tear down the executor via service.Run.
+// View-side conditions degrade gracefully: a not-ready view, a snapshot with no
+// task from this executor's vault, and a snapshot in which every task is
+// unstamped each skip the pass with a log line and the next tick retries.
+// ReconcileOnce returns nil for all of them so the loop can never tear down the
+// executor via service.Run.
 func (h *taskEventHandler) ReconcileOnce(ctx context.Context) error {
-	// Bound the whole pass so a slow or large vault cannot hold it open
-	// indefinitely (spec 005 Failure Modes: "Pass bounded by a per-pass
-	// timeout; logs evaluate count so cost is visible"). On timeout the
-	// in-flight git-rest call returns a deadline error, which the gates below
-	// log and skip; the next tick retries.
-	passCtx, cancel := context.WithTimeout(ctx, reconcilePassTimeout)
+	// Bound the whole pass so a large view cannot hold it open indefinitely
+	// (spec 005 Failure Modes: "Pass bounded by a per-pass timeout; logs
+	// evaluate count so cost is visible"). The snapshot itself is in memory; the
+	// deadline bounds the per-task Job lookups and spawns that follow.
+	passCtx, cancel := context.WithTimeout(ctx, h.reconcilePassTimeout)
 	defer cancel()
 
 	// One `list jobs` per assignee for the whole pass, instead of two per task.
-	// Disarmed on return so the event path never reads a frozen snapshot.
-	disarmJobCache := h.beginJobCache()
-	defer disarmJobCache()
+	// Scoped to passCtx so the event path never reads a frozen snapshot.
+	passCtx = withJobCache(passCtx)
 
-	ready, err := h.gitRestClient.IsReady(passCtx)
-	if err != nil {
-		metrics.ReconcilePassesTotal.WithLabelValues("vault_unavailable").Inc()
-		glog.Warningf("event=reconcile_vault_unavailable reason=readiness_error err=%v", err)
+	if !h.view.Ready() {
+		metrics.ReconcilePassesTotal.WithLabelValues("view_not_ready").Inc()
+		glog.Warningf("event=reconcile_view_not_ready task_vault=%s", h.taskVault)
 		return nil
 	}
-	if !ready {
-		metrics.ReconcilePassesTotal.WithLabelValues("vault_unavailable").Inc()
-		glog.Warningf("event=reconcile_vault_unavailable reason=not_ready")
+	snapshot := h.view.Snapshot()
+	outcome, seen := classifyVaults(snapshot, h.taskVault)
+	switch outcome {
+	case vaultOutcomeUnstamped:
+		metrics.ReconcilePassesTotal.WithLabelValues("task_vault_unstamped").Inc()
+		glog.Warningf("event=task_vault_unstamped tasks=%d", len(snapshot))
+		return nil
+	case vaultOutcomeMismatch:
+		metrics.ReconcilePassesTotal.WithLabelValues("task_vault_mismatch").Inc()
+		glog.Warningf(
+			"event=task_vault_mismatch task_vault=%s seen=%s",
+			h.taskVault, strings.Join(seen, ","),
+		)
 		return nil
 	}
-	paths, err := h.gitRestClient.List(passCtx, h.taskGlob)
-	if err != nil {
-		metrics.ReconcilePassesTotal.WithLabelValues("list_failed").Inc()
-		glog.Warningf("event=reconcile_list_failed glob=%q err=%v", h.taskGlob, err)
+
+	// Once per pass: forget successes older than the re-run window, so the
+	// record stays bounded to results that may still be in flight and still
+	// long enough for a later spawn to be recognised as a re-run.
+	h.taskStore.PruneSucceededBefore(
+		h.currentDateTime.Now().Time().Add(-taskRerunWindow),
+	)
+	owned := ownedTasks(snapshot, h.taskVault)
+	c := reconcileCounters{}
+	// Two phases, deliberately. The gather below filters every task and holds
+	// the eligible ones; the drive loop then admits them in admission order.
+	// Spawning inside the gather loop would admit whichever task the map
+	// iteration happened to yield first, so a child delegated today sorts behind
+	// every older child and is never reached while any of them is still eligible.
+	candidates := h.gatherCandidates(passCtx, owned, &c)
+	if h.passDone(passCtx) {
+		c.logAborted()
 		return nil
 	}
-	paths = h.prioritizeUncachedPaths(paths)
-	evaluated, redriven, deferred, skipped, capped := 0, 0, 0, 0, 0
-	// Collected across the whole pass and published only once it completes: an
-	// aborted pass would otherwise disown every task it had not reached yet, and
-	// the instance would refuse to spawn its own tasks until the next tick.
-	seen := make(map[lib.TaskIdentifier]struct{}, len(paths))
-	for _, relPath := range paths {
-		select {
-		case <-passCtx.Done():
-			metrics.ReconcilePassesTotal.WithLabelValues("aborted").Inc()
-			glog.Infof(
-				"event=reconcile_aborted reason=context_cancelled evaluated=%d re_driven=%d deferred=%d skipped=%d",
-				evaluated,
-				redriven,
-				deferred,
-				skipped,
-			)
+	sortCandidatesByAdmissionPriority(candidates)
+	for _, candidate := range candidates {
+		if h.passDone(passCtx) {
+			c.logAborted()
 			return nil
-		default:
 		}
-		switch outcome := h.reconcileOne(passCtx, relPath, seen); outcome {
-		case reconcileOutcomeSkipped:
-			skipped++
-		case reconcileOutcomeRedriven:
-			evaluated++
-			redriven++
-		case reconcileOutcomeDeferred:
-			evaluated++
-			deferred++
-		case reconcileOutcomeCapped:
-			evaluated++
-			capped++
-		}
+		c.add(h.driveCandidate(passCtx, candidate))
 	}
-	h.publishVaultTasks(seen)
-	// Counted on every pass that got past List, so rate(ok)==0 is a true
-	// "the backstop is not running" signal rather than an absence of errors.
+	// Counted on every pass that got past the vault classification, so
+	// rate(ok)==0 is a true "the backstop is not running" signal rather than an
+	// absence of errors.
 	metrics.ReconcilePassesTotal.WithLabelValues("ok").Inc()
 	glog.Infof(
-		"event=reconcile evaluated=%d re_driven=%d deferred=%d skipped=%d capped=%d glob=%q",
-		evaluated, redriven, deferred, skipped, capped, h.taskGlob,
+		"event=reconcile evaluated=%d re_driven=%d deferred=%d skipped=%d capped=%d task_vault=%q",
+		c.evaluated, c.redriven, c.deferred, c.skipped, c.capped, h.taskVault,
 	)
 	return nil
 }
 
-// reconcileOutcome is what one vault file contributed to a pass's counters.
-// The three decision outcomes count as evaluated; Skipped covers an unreadable
-// file, an ineligible task, or a spawn error.
+// vaultPassOutcome is what a ready view snapshot says about task ownership.
+type vaultPassOutcome int
+
+const (
+	vaultOutcomeOK vaultPassOutcome = iota
+	vaultOutcomeMismatch
+	vaultOutcomeUnstamped
+)
+
+// classifyVaults decides whether a ready view snapshot lets the pass run and
+// returns the distinct non-empty vault slugs it saw, sorted.
+//
+// The mismatch and unstamped outcomes are unconditional: a view that holds
+// tasks but none from this executor's vault means the deployment is
+// misconfigured, and idling would look identical to a healthy quiet fleet.
+func classifyVaults(tasks []lib.Task, taskVault string) (vaultPassOutcome, []string) {
+	if len(tasks) == 0 {
+		return vaultOutcomeOK, nil
+	}
+	distinct := make(map[string]struct{}, len(tasks))
+	owned := false
+	for _, task := range tasks {
+		if task.Vault == "" {
+			continue
+		}
+		distinct[task.Vault] = struct{}{}
+		if task.Vault == taskVault {
+			owned = true
+		}
+	}
+	if len(distinct) == 0 {
+		return vaultOutcomeUnstamped, nil
+	}
+	seen := make([]string, 0, len(distinct))
+	for vault := range distinct {
+		seen = append(seen, vault)
+	}
+	sort.Strings(seen)
+	if !owned {
+		return vaultOutcomeMismatch, seen
+	}
+	return vaultOutcomeOK, seen
+}
+
+// ownedTasks returns the tasks whose stamped vault equals taskVault.
+func ownedTasks(tasks []lib.Task, taskVault string) []lib.Task {
+	owned := make([]lib.Task, 0, len(tasks))
+	for _, task := range tasks {
+		if task.Vault == taskVault {
+			owned = append(owned, task)
+		}
+	}
+	return owned
+}
+
+// passDone reports whether the reconcile pass has run out of time. It receives
+// from Done rather than reading Err so the cancellation check keeps the shape the
+// rest of this file uses; the pass is bounded by reconcilePassTimeout.
+func (h *taskEventHandler) passDone(passCtx context.Context) bool {
+	select {
+	case <-passCtx.Done():
+		return true
+	default:
+		return false
+	}
+}
+
+// reconcileCounters is the per-pass tally. A struct rather than five locals so the
+// gather helper, the drive loop and the abort path share it without ReconcileOnce
+// growing past the funlen bound.
+type reconcileCounters struct {
+	evaluated, redriven, deferred, skipped, capped int
+}
+
+// add folds one outcome into the tally. reconcileOutcomeCollected is never passed
+// here: a collected candidate is driven in the second phase, which reports its own
+// outcome.
+func (c *reconcileCounters) add(outcome reconcileOutcome) {
+	switch outcome {
+	case reconcileOutcomeRedriven:
+		c.evaluated++
+		c.redriven++
+	case reconcileOutcomeDeferred:
+		c.evaluated++
+		c.deferred++
+	case reconcileOutcomeCapped:
+		c.evaluated++
+		c.capped++
+	default:
+		c.skipped++
+	}
+}
+
+// logAborted records a pass cut short by its context, with the tally reached so far.
+func (c *reconcileCounters) logAborted() {
+	metrics.ReconcilePassesTotal.WithLabelValues("aborted").Inc()
+	glog.Infof(
+		"event=reconcile_aborted reason=context_cancelled evaluated=%d re_driven=%d deferred=%d skipped=%d",
+		c.evaluated,
+		c.redriven,
+		c.deferred,
+		c.skipped,
+	)
+}
+
+// gatherCandidates runs the pass's filter phase, returning the eligible tasks
+// and tallying everything else into c. It stops early when the pass context is
+// done; the caller checks passDone to tell an early stop from a complete gather.
+func (h *taskEventHandler) gatherCandidates(
+	passCtx context.Context,
+	tasks []lib.Task,
+	c *reconcileCounters,
+) []reconcileCandidate {
+	candidates := make([]reconcileCandidate, 0, len(tasks))
+	for _, task := range tasks {
+		if h.passDone(passCtx) {
+			return candidates
+		}
+		candidate, outcome := h.gatherCandidate(passCtx, task)
+		if outcome == reconcileOutcomeCollected {
+			candidates = append(candidates, candidate)
+			continue
+		}
+		// The parked-assignee restore publishes a routing value and consumes no
+		// spawn budget, so it reports from here rather than competing for a slot.
+		c.add(outcome)
+	}
+	return candidates
+}
+
+// reconcileOutcome is what one task contributed to a pass's counters.
+// The three decision outcomes count as evaluated; Skipped covers an ineligible
+// task or a spawn error.
 //
 // One deliberate difference from the pre-extraction accounting: a spawn error
 // used to increment BOTH evaluated and skipped, because evaluated was incremented
@@ -1252,41 +1488,52 @@ const (
 	reconcileOutcomeRedriven
 	reconcileOutcomeDeferred
 	reconcileOutcomeCapped
+	// reconcileOutcomeCollected means the task is eligible and has been held for
+	// the pass's admission-ordered drive phase; it contributes nothing to the
+	// counters yet.
+	reconcileOutcomeCollected
 )
 
-// reconcileOne evaluates one vault file and drives it when it is eligible. It
-// owns the whole per-file decision — read, eligibility filter, the
-// consecutive-re-drive cap, and the spawn — so ReconcileOnce stays a pass-level
-// loop over paths.
+// reconcileCandidate is one eligible task waiting to be driven. The pass
+// collects these first and sorts them before spawning anything, so admission
+// follows the queue's own order rather than map iteration order.
+type reconcileCandidate struct {
+	task   lib.Task
+	config *pkg.AgentConfiguration
+	// claim is the removal epoch captured at gather time, so an eviction landing
+	// between the gather and the drive invalidates the drive.
+	claim deferredClaim
+}
+
+// sortCandidatesByAdmissionPriority orders the pass's candidates in place so the
+// first one driven is the one that most deserves a free slot. See
+// admissionPriority for the rule and the measurement behind it.
+func sortCandidatesByAdmissionPriority(candidates []reconcileCandidate) {
+	sort.SliceStable(candidates, func(i, j int) bool {
+		return admissionPriority(candidates[i].task).Before(admissionPriority(candidates[j].task))
+	})
+}
+
+// gatherCandidate applies the eligibility filter to one snapshot task,
+// returning the candidate for the pass's drive phase. It owns everything that
+// does not compete for a spawn slot: the filter and the parked-assignee restore.
 //
-// seen collects every identifier this pass parsed, eligible or not; ReconcileOnce
-// publishes it as the instance's ownership set once the pass completes. Recording
-// before the eligibility gate is deliberate: the ownership test answers "is this
-// file in my vault", which eligibility does not change.
-func (h *taskEventHandler) reconcileOne(
+// Snapshot tasks are treated as read-only. The snapshot is a shallow copy and
+// its frontmatter map is shared with the view, so nothing here may write into it
+// in place.
+func (h *taskEventHandler) gatherCandidate(
 	ctx context.Context,
-	relPath string,
-	seen map[lib.TaskIdentifier]struct{},
-) reconcileOutcome {
-	content, err := h.gitRestClient.Get(ctx, relPath)
-	if err != nil {
-		glog.Warningf("event=reconcile_skip path=%s reason=get_failed err=%v", relPath, err)
-		return reconcileOutcomeSkipped
-	}
-	task, config, ok, err := h.reconcileTask(ctx, content)
-	if task.TaskIdentifier != "" {
-		seen[task.TaskIdentifier] = struct{}{}
-		h.recordPathID(relPath, task.TaskIdentifier)
-	}
+	task lib.Task,
+) (reconcileCandidate, reconcileOutcome) {
+	task, config, ok, err := h.reconcileTask(ctx, task)
 	if err != nil {
 		glog.Warningf(
-			"event=reconcile_skip path=%s reason=resolve_error task=%s task_type=%s err=%v",
-			relPath,
+			"event=reconcile_skip task=%s reason=resolve_error task_type=%s err=%v",
 			task.TaskIdentifier,
 			task.Frontmatter.TaskType(),
 			err,
 		)
-		return reconcileOutcomeSkipped
+		return reconcileCandidate{}, reconcileOutcomeSkipped
 	}
 	if !ok {
 		// Left the eligibility filter — it advanced, or it carries no routing
@@ -1294,30 +1541,64 @@ func (h *taskEventHandler) reconcileOne(
 		// to no Config). Nothing to clear here: the streak's phase key is what
 		// retires a task that genuinely moved on, and a task that left the filter
 		// is not spawned again either way.
-		return reconcileOutcomeSkipped
+		return reconcileCandidate{}, reconcileOutcomeSkipped
 	}
 	// A parked task whose declared task_type resolved to a Config: restoring the
 	// routing value is the whole action. The restore consumes no spawn budget, so
-	// this branches BEFORE the streak cap — a task the floor already re-drove
-	// maxConsecutiveRedrives times at this phase must still get its routing value
-	// back, otherwise it returns capped and stays parked forever, which is exactly
-	// the re-drive-and-re-park class this recovery path exists for. No Job is
-	// spawned here: the restore changes the file, the controller publishes
-	// TaskUpdated for it, and that event drives the normal spawn path.
+	// it happens here in the gather phase rather than being ordered against the
+	// admission queue — a task the floor already re-drove maxConsecutiveRedrives
+	// times at this phase must still get its routing value back, otherwise it
+	// stays parked forever, which is exactly the re-drive-and-re-park class this
+	// recovery path exists for. No Job is spawned here: the restore changes the
+	// file, the controller publishes TaskUpdated for it, and that event drives the
+	// normal spawn path.
 	if task.Frontmatter.Assignee() == "" {
-		return h.restoreParkedAssignee(ctx, task, config, relPath)
+		return reconcileCandidate{}, h.restoreParkedAssignee(ctx, task, config)
 	}
+	candidate := reconcileCandidate{task: task, config: config}
+	// Pin the removal epoch now: a retag eviction between this gather and the
+	// drive must invalidate the drive rather than being lost.
+	if task.TaskIdentifier != "" {
+		h.deferredMu.Lock()
+		candidate.claim = deferredClaim{
+			id:    task.TaskIdentifier,
+			epoch: h.deferredEpochs[task.TaskIdentifier],
+		}
+		h.deferredMu.Unlock()
+	}
+	return candidate, reconcileOutcomeCollected
+}
+
+// driveCandidate drives one collected candidate: the consecutive-re-drive cap and
+// the spawn. ReconcileOnce calls it in admission order, so the first candidate
+// that finds a free slot takes it and every later one is deferred by
+// deferIfAtConcurrencyCap.
+func (h *taskEventHandler) driveCandidate(
+	ctx context.Context,
+	candidate reconcileCandidate,
+) reconcileOutcome {
 	// Checked here as well as in spawnIfNeeded so the pass summary can report the
 	// skip as `capped` rather than folding it into `deferred`. Only the capped
 	// branch signals, so the two checks cannot double-count.
-	if h.redriveStreakCapped(task, relPath) {
+	//
+	// This is the in-memory pre-check only: a task capped solely by the shared
+	// store is reported as `deferred` here rather than `capped`, because the
+	// authoritative check runs in the spawn funnel below and its capped reason is
+	// deliberately not carried back. The cap still refuses and signals from that
+	// funnel, and the store read stays at one List per spawn decision.
+	if h.redriveStreakCappedInMemory(candidate.task) {
 		return reconcileOutcomeCapped
 	}
-	spawned, err := h.spawnIfNeeded(ctx, task, config)
+	spawned, err := h.spawnIfNeededClaimed(
+		ctx,
+		candidate.task,
+		candidate.config,
+		&candidate.claim,
+	)
 	if err != nil {
 		glog.Warningf(
 			"event=reconcile_skip task=%s reason=spawn_error err=%v",
-			task.TaskIdentifier,
+			candidate.task.TaskIdentifier,
 			err,
 		)
 		return reconcileOutcomeSkipped
@@ -1326,7 +1607,7 @@ func (h *taskEventHandler) reconcileOne(
 		return reconcileOutcomeDeferred
 	}
 	metrics.ReconcileRedrivenTotal.Inc()
-	glog.Infof("event=reconcile_redrive task=%s path=%s", task.TaskIdentifier, relPath)
+	glog.Infof("event=reconcile_redrive task=%s", candidate.task.TaskIdentifier)
 	return reconcileOutcomeRedriven
 }
 
@@ -1340,7 +1621,6 @@ func (h *taskEventHandler) restoreParkedAssignee(
 	ctx context.Context,
 	task lib.Task,
 	config *pkg.AgentConfiguration,
-	relPath string,
 ) reconcileOutcome {
 	if err := h.resultPublisher.PublishRestoreAssignee(ctx, task, config.Assignee); err != nil {
 		glog.Warningf(
@@ -1352,22 +1632,20 @@ func (h *taskEventHandler) restoreParkedAssignee(
 	}
 	metrics.ReconcileRedrivenTotal.Inc()
 	glog.Infof(
-		"event=reconcile_redrive task=%s path=%s reason=restore_assignee assignee=%s",
+		"event=reconcile_redrive task=%s reason=restore_assignee assignee=%s",
 		task.TaskIdentifier,
-		relPath,
 		config.Assignee,
 	)
 	return reconcileOutcomeRedriven
 }
 
-// reconcileTask parses a task file and applies the reconcile eligibility filter.
-// Returns (task, config, ok, err): ok=false when the file is not an eligible
-// task (unparseable frontmatter, missing task_identifier, status not in the
-// Config's trigger set, phase not in the Config's trigger set, stage mismatch, or
-// no routing information — an empty assignee whose declared task_type resolves to
-// no Config) — mirroring parseAndFilter's gates, except that a parked task whose
-// declared task_type resolves IS eligible here and is not eligible on the Kafka
-// path.
+// reconcileTask applies the reconcile eligibility filter to one snapshot task.
+// Returns (task, config, ok, err): ok=false when the task is not eligible (status
+// not in the Config's trigger set, phase not in the Config's trigger set, stage
+// mismatch, or no routing information — an empty assignee whose declared
+// task_type resolves to no Config) — mirroring parseAndFilter's gates, except
+// that a parked task whose declared task_type resolves IS eligible here and is
+// not eligible on the Kafka path.
 //
 // The trigger sets come from the resolved Config via effectiveTriggerPhases /
 // effectiveTriggerStatuses, NOT from the hardcoded defaults. Those helpers still
@@ -1387,13 +1665,12 @@ func (h *taskEventHandler) restoreParkedAssignee(
 // orphaned task is at a phase its own Config lists, so it is still re-driven.
 func (h *taskEventHandler) reconcileTask(
 	ctx context.Context,
-	content []byte,
+	task lib.Task,
 ) (lib.Task, *pkg.AgentConfiguration, bool, error) {
-	task, ok := parseTaskFile(ctx, content)
-	if !ok {
-		return task, nil, false, nil
-	}
 	if h.isForeignCluster(task) {
+		// Backstop for a reconcile-driven cap deferral that stored the pre-retag
+		// snapshot after the Kafka retag event was already consumed.
+		h.removeDeferredEntry(task.TaskIdentifier)
 		return task, nil, false, nil
 	}
 	config, skip, err := h.resolveConfigForReconcile(ctx, task)
@@ -1410,7 +1687,19 @@ func (h *taskEventHandler) reconcileTask(
 	if phase == nil || !effectiveTriggerPhases(config).Contains(*phase) {
 		return task, nil, false, nil
 	}
+	// A terminal task is never driven, even when a Config lists its phase in
+	// trigger.phases. The event path already refuses these in applyPhaseGate; this
+	// floor needs the same rule because the task view retains a task's body only
+	// while it can still spawn, so driving a terminal task here would hand the
+	// agent an empty task file instead of the task text.
+	if IsTerminal(*phase) {
+		return task, nil, false, nil
+	}
 	if h.stageFilter && task.Frontmatter.Stage() != string(h.branch) {
+		if h.pinOutsidePool(task, task.Frontmatter.Stage()) {
+			h.logPinOutsidePool(task, task.Frontmatter.Stage())
+			metrics.TaskEventsTotal.WithLabelValues("pin_outside_pool").Inc()
+		}
 		return task, nil, false, nil
 	}
 	// A parked task (empty routing value) is eligible when its declared
@@ -1423,204 +1712,40 @@ func (h *taskEventHandler) reconcileTask(
 	return task, config, true, nil
 }
 
-// redriveStreak is the executor's record of consecutive spawns for one task at
-// one phase: how many, and which phase they accrued in. See maxConsecutiveRedrives
-// for why the phase is the reset and why the streak is deliberately not persisted.
-type redriveStreak struct {
-	count int
-	phase string
-}
-
-// redriveStreakCapped reports whether the executor must skip this task because it
-// has spawned it maxConsecutiveRedrives times in a row at an unchanged phase, and
-// records the skip signal when it must.
-//
-// Skipping is the whole bound. The streak is deliberately NOT cleared here, so the
-// task stays capped until something moves it — clearing on the cap would let the
-// next spawn through and make the cap a no-op.
-//
-// Logged at V(1), not V(0): a capped task repeats this line on every event and
-// every pass for as long as it stays capped, which is an expected steady state —
-// the same reason event=concurrency_cap is V(1). The metric carries the alerting
-// signal.
-//
-// relPath is empty on the Kafka path, which has no vault path to name.
-//
-// The phase comparison is not redundant with recordRedriveSpawn's reset. The
-// streak is only ever rewritten AFTER a spawn succeeds, so a task that advanced
-// to a new phase still carries its old phase in the streak until that spawn
-// happens — and a count-only check would cap it before it ever could, stranding
-// exactly the task the reset exists to release.
-func (h *taskEventHandler) redriveStreakCapped(task lib.Task, relPath string) bool {
-	id := task.TaskIdentifier
-	phase := taskPhaseString(task)
-	h.redriveMu.Lock()
-	streak, ok := h.redriveStreaks[id]
-	h.redriveMu.Unlock()
-	if !ok || streak.phase != phase || streak.count < maxConsecutiveRedrives {
-		return false
-	}
-	metrics.RedriveCappedTotal.Inc()
-	glog.V(1).Infof(
-		"event=redrive_capped task=%s path=%s streak=%d cap=%d phase=%q",
-		id, relPath, streak.count, maxConsecutiveRedrives, streak.phase,
-	)
-	return true
-}
-
-// taskPhaseString returns the task's phase as a string, or "" when it carries
-// none. Shared by the cap check and the streak record so the two can never
-// disagree about which phase a streak belongs to.
-func taskPhaseString(task lib.Task) string {
-	if p := task.Frontmatter.Phase(); p != nil {
-		return string(*p)
-	}
-	return ""
-}
-
-// recordRedriveSpawn extends this task's streak with the spawn that just happened,
-// resetting it when the task has moved phase since the previous one.
-//
-// Called only after SpawnJob returned successfully, so a suppressed, deferred or
-// capped spawn does not count — the streak measures spawns, not attempts.
-func (h *taskEventHandler) recordRedriveSpawn(task lib.Task) {
-	id := task.TaskIdentifier
-	phase := taskPhaseString(task)
-	h.redriveMu.Lock()
-	defer h.redriveMu.Unlock()
-	if prev, ok := h.redriveStreaks[id]; ok && prev.phase == phase {
-		h.redriveStreaks[id] = redriveStreak{count: prev.count + 1, phase: phase}
-		return
-	}
-	h.redriveStreaks[id] = redriveStreak{count: 1, phase: phase}
-}
-
-// clearRedriveStreak ends this task's streak. Called when the task reaches a
-// terminal state, where a further spawn is an operator decision rather than a
-// re-drive of the loop this cap exists to bound.
-func (h *taskEventHandler) clearRedriveStreak(id lib.TaskIdentifier) {
-	h.redriveMu.Lock()
-	defer h.redriveMu.Unlock()
-	delete(h.redriveStreaks, id)
-}
-
-// vaultTasksOwned reports whether this executor instance owns the task — that is,
-// whether the task's file lives in the vault this instance serves.
-//
-// Ownership is decided from the vault, not from the event: a task event carries
-// only TaskIdentifier, frontmatter and content (lib.Task), so it names no vault,
-// and the Kafka consumer group is shared across every executor deployment — a
-// task's events reach whichever instance owns the partition, not the instance
-// whose vault holds the file. Without this test every instance drives every
-// vault's tasks. That is what made the consecutive-re-drive cap per-pod instead
-// of per-task: measured on dev 2026-10-14, one OpenClaw fixture was spawned by
-// three different pods (openclaw 18:19/18:33/18:48, trading 19:03/19:49,
-// personal 19:34), each starting its own streak at zero, so the loop produced
-// >=7 Jobs against a cap of 3.
-//
-// The set is refreshed wholesale at the end of every completed reconcile pass,
-// which already Lists and parses this vault's glob — so the test costs one map
-// lookup and no extra vault read, and a file deleted from the vault stops being
-// owned on the next tick.
-//
-// Fail-open until the first completed pass: a freshly started instance has not
-// scanned yet, and dropping every event in that window would leave each task to
-// be picked up only by the next tick. The window is one pass (<=60s) and the
-// instance's own floor covers whatever it misses.
-func (h *taskEventHandler) vaultTasksOwned(id lib.TaskIdentifier) bool {
-	h.vaultMu.RLock()
-	defer h.vaultMu.RUnlock()
-	if !h.vaultScanned {
-		return true
-	}
-	_, ok := h.vaultTasks[id]
-	return ok
-}
-
-// prioritizeUncachedPaths prunes the path→identifier cache to the paths the
-// vault still lists, folds the surviving identifiers into the ownership set, and
-// returns paths with the never-parsed ones first.
-//
-// A pass over a large vault can hit reconcilePassTimeout before it completes, and
-// an aborted pass publishes nothing — so without the cache a vault that grows past
-// one pass's budget freezes ownership at its last completed pass and every task
-// filed afterwards is skipped as foreign. Visiting new paths first means a new
-// task is owned within one pass, completed or not.
-func (h *taskEventHandler) prioritizeUncachedPaths(paths []string) []string {
-	h.vaultMu.Lock()
-	defer h.vaultMu.Unlock()
-	listed := make(map[string]struct{}, len(paths))
-	uncached := make([]string, 0)
-	cached := make([]string, 0, len(paths))
-	for _, relPath := range paths {
-		listed[relPath] = struct{}{}
-		if _, ok := h.pathIDs[relPath]; ok {
-			cached = append(cached, relPath)
-			continue
-		}
-		uncached = append(uncached, relPath)
-	}
-	for relPath := range h.pathIDs {
-		if _, ok := listed[relPath]; !ok {
-			delete(h.pathIDs, relPath)
-		}
-	}
-	if h.vaultScanned {
-		owned := make(map[lib.TaskIdentifier]struct{}, len(h.pathIDs))
-		for _, id := range h.pathIDs {
-			owned[id] = struct{}{}
-		}
-		h.vaultTasks = owned
-	}
-	return append(uncached, cached...)
-}
-
-// recordPathID caches the identifier parsed from relPath and owns it at once,
-// rather than waiting for the pass to complete.
-func (h *taskEventHandler) recordPathID(relPath string, id lib.TaskIdentifier) {
-	h.vaultMu.Lock()
-	defer h.vaultMu.Unlock()
-	h.pathIDs[relPath] = id
-	if h.vaultScanned {
-		h.vaultTasks[id] = struct{}{}
-	}
-}
-
-// publishVaultTasks replaces this instance's view of which tasks live in its
-// vault, from the identifiers one completed reconcile pass parsed.
-func (h *taskEventHandler) publishVaultTasks(seen map[lib.TaskIdentifier]struct{}) {
-	h.vaultMu.Lock()
-	defer h.vaultMu.Unlock()
-	h.vaultTasks = seen
-	h.vaultScanned = true
-}
-
 // skipForeignVaultTask reports whether the spawn must be dropped because the
-// task's file is not in this instance's vault, recording the skip signal when it
-// must. It is the cheapest and the widest gate in spawnIfNeeded — a foreign task
-// is not this instance's to spawn, whatever path delivered the event — so it runs
+// task is not owned by this executor, recording the skip signal when it must.
+//
+// Ownership is a plain comparison: the task's stamped vault must equal this
+// executor's TASK_VAULT. The Kafka consumer group is shared across every
+// executor deployment — a task's events reach whichever instance owns the
+// partition, not the instance whose vault holds the file — so without this test
+// every instance drives every vault's tasks. A task with no stamped vault is
+// never owned.
+//
+// It is the cheapest and the widest gate in spawnIfNeeded — a foreign task is
+// not this instance's to spawn, whatever path delivered the event — so it runs
 // first, and it is factored out only to keep spawnIfNeeded inside funlen.
 func (h *taskEventHandler) skipForeignVaultTask(task lib.Task) bool {
-	if h.vaultTasksOwned(task.TaskIdentifier) {
+	if task.Vault == h.taskVault {
 		return false
 	}
 	metrics.TaskEventsTotal.WithLabelValues("skipped_foreign_vault").Inc()
 	glog.V(2).Infof(
-		"skip task %s: not in this executor's vault glob=%q",
-		task.TaskIdentifier, h.taskGlob,
+		"skip task %s: foreign vault vault=%s task_vault=%s",
+		task.TaskIdentifier, task.Vault, h.taskVault,
 	)
 	return true
 }
 
 // RunReconcileLoop runs one reconcile pass immediately at startup, then every
-// defaultReconcileInterval until ctx is cancelled. ReconcileOnce returns
-// nil for all vault-side failures, so this loop cannot crash the executor when
-// git-rest is unreachable — the next tick just retries (spec 005 Failure Modes).
+// reconcile interval until ctx is cancelled. ReconcileOnce returns nil for all
+// view-side conditions, so this loop cannot crash the executor — the next tick
+// just retries (spec 005 Failure Modes).
 func (h *taskEventHandler) RunReconcileLoop(ctx context.Context) error {
 	if err := h.ReconcileOnce(ctx); err != nil {
 		glog.Errorf("event=reconcile initial pass failed: %v", err)
 	}
-	ticker := time.NewTicker(defaultReconcileInterval)
+	ticker := time.NewTicker(h.reconcileInterval)
 	defer ticker.Stop()
 	for {
 		select {
@@ -1785,12 +1910,68 @@ func taskCluster(task lib.Task) string {
 	return v
 }
 
+// pinOutsidePool reports whether the task is pinned to this executor while its
+// stage sits outside this executor's pool, so it can never run here.
+//
+// The pin must be non-empty: taskCluster returns "" both for a task with no
+// cluster frontmatter and for an executor built with CLUSTER="", so a bare
+// `taskCluster(task) == h.cluster` would report every untagged stage-mismatched
+// task on an unpinned executor as a dead pin. A task with no pin is a plain
+// stage skip.
+func (h *taskEventHandler) pinOutsidePool(task lib.Task, stage string) bool {
+	c := taskCluster(task)
+	return c != "" && c == h.cluster && stage != string(h.branch)
+}
+
+// stageSkipResult decides what a stage-filter mismatch means. A task whose
+// cluster pin names this executor while its stage sits outside this executor's
+// pool can never run here, so it is reported as a dead pin rather than folded
+// into the plain stage skip; a task with no cluster pin is an ordinary stage
+// skip and must not be reported. Returns skip=false when the task passes the
+// filter.
+func (h *taskEventHandler) stageSkipResult(
+	task lib.Task,
+	stage string,
+) (string, bool) {
+	if !h.stageFilter || stage == string(h.branch) {
+		return "", false
+	}
+	if h.pinOutsidePool(task, stage) {
+		h.logPinOutsidePool(task, stage)
+		return "pin_outside_pool", true
+	}
+	glog.V(3).Infof(
+		"skip task %s with stage %s (executor branch %s)",
+		task.TaskIdentifier, stage, h.branch,
+	)
+	return "skipped_stage", true
+}
+
+// logPinOutsidePool reports a task whose cluster pin names this executor while
+// its stage sits outside this executor's pool. Such a task can never run here,
+// and before this line it did so silently: the pin was neither foreign (so the
+// foreign-cluster skip did not fire) nor runnable, so nothing anywhere in the
+// fleet recorded it. Both the Kafka path and the reconcile floor call this.
+//
+// It is logged at V(2) because that is the level the deployed executors run at
+// (-v=2); the neighbouring plain stage skip is V(3) and would be invisible.
+func (h *taskEventHandler) logPinOutsidePool(task lib.Task, stage string) {
+	glog.V(2).Infof(
+		"event=pin_outside_pool task=%s cluster=%s stage=%s",
+		task.TaskIdentifier, h.cluster, stage,
+	)
+}
+
 // isForeignCluster reports whether the task names a cluster other than the one
-// this executor runs in. A task without a cluster is never foreign, so tasks
-// filed before the field existed keep their previous routing.
+// this executor runs in. A task without a cluster is foreign only when the
+// executor opted out of untagged tasks (RUN_UNTAGGED=false), so tasks filed
+// before the field existed keep their previous routing on every other cluster.
 func (h *taskEventHandler) isForeignCluster(task lib.Task) bool {
 	c := taskCluster(task)
-	return c != "" && c != h.cluster
+	if c == "" {
+		return !h.runUntagged
+	}
+	return c != h.cluster
 }
 
 // skipForeignCluster logs and counts a task routed to another cluster and
@@ -1798,6 +1979,12 @@ func (h *taskEventHandler) isForeignCluster(task lib.Task) bool {
 func (h *taskEventHandler) skipForeignCluster(task lib.Task) bool {
 	if !h.isForeignCluster(task) {
 		return false
+	}
+	if taskCluster(task) == "" {
+		glog.V(2).
+			Infof("skip task %s: untagged (executor cluster %s runs only tagged tasks)", task.TaskIdentifier, h.cluster)
+		metrics.TaskEventsTotal.WithLabelValues("skipped_untagged").Inc()
+		return true
 	}
 	glog.V(2).Infof(
 		"skip task %s: foreign cluster %s (executor cluster %s)",
