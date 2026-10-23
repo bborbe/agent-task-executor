@@ -305,3 +305,65 @@ func TestReleaseAfterSuccessCapsAFutureCompletion(t *testing.T) {
 		)
 	}
 }
+
+// TestReleaseInsideTheSuccessHoldKeepsTheClaim is the regression for the
+// 2026-10-23 v0.30.5 re-runs: task 70688157 succeeded on nuke prod at 09:45:51
+// with hold_until 09:50:51, yet sun claimed and ran it at 09:48:20. When prod
+// read the task's terminal phase it called the plain Release, which deleted the
+// held claim and ended the hold minutes early, while sun's stale vault view
+// still read the task as eligible.
+//
+// A plain Release inside the window must leave the claim to the hold's own
+// expiry, so the peer keeps getting a conflict until the window passes.
+func TestReleaseInsideTheSuccessHoldKeepsTheClaim(t *testing.T) {
+	client := newSuccessHoldRefClient()
+	job := finishedJobControl{}
+	start := time.Date(2026, 10, 23, 9, 45, 51, 0, time.UTC)
+	clockA := &stepClock{now: start}
+	clockB := &stepClock{now: start}
+
+	mgrA, err := NewLeaseManager("nuke-prod", client, job, clockA, libtime.NewWaiterDuration())
+	if err != nil {
+		t.Fatalf("NewLeaseManager(nuke-prod) returned %v", err)
+	}
+	mgrB, err := NewLeaseManager("sun", client, job, clockB, libtime.NewWaiterDuration())
+	if err != nil {
+		t.Fatalf("NewLeaseManager(sun) returned %v", err)
+	}
+
+	ctx := context.Background()
+	const key = "claims/repo/task-3"
+
+	if _, claimErr := mgrA.Claim(ctx, key, "task-3"); claimErr != nil {
+		t.Fatalf("cluster A claim returned %v; want success", claimErr)
+	}
+	if err := mgrA.ReleaseAfterSuccess(ctx, key, libtime.DateTime(start)); err != nil {
+		t.Fatalf("ReleaseAfterSuccess returned %v; want nil", err)
+	}
+
+	// The terminal phase arrives inside the window and triggers a plain Release.
+	clockA.set(start.Add(2 * time.Minute))
+	if err := mgrA.Release(ctx, key); err != nil {
+		t.Fatalf("Release inside the hold returned %v; want nil", err)
+	}
+	if got := len(mgrA.HeldClaims()); got != 1 {
+		t.Fatalf("A held claims = %d after Release inside the hold; want 1", got)
+	}
+
+	clockB.set(start.Add(2*time.Minute + 29*time.Second))
+	held, err := mgrB.Claim(ctx, key, "task-3")
+	if !stderrors.Is(err, ErrLeaseConflict) || held != nil {
+		t.Fatalf("peer claim inside the hold = (%v, %v); want (nil, ErrLeaseConflict)", held, err)
+	}
+
+	// The hold's own expiry still releases it.
+	clockA.set(start.Add(SuccessGracePeriod + time.Second))
+	if tickErr := mgrA.Tick(ctx); tickErr != nil {
+		t.Fatalf("A tick returned %v; want nil", tickErr)
+	}
+	clockB.set(start.Add(SuccessGracePeriod + 2*time.Second))
+	held, err = mgrB.Claim(ctx, key, "task-3")
+	if err != nil || held == nil {
+		t.Fatalf("peer claim after the hold = (%v, %v); want a held claim", held, err)
+	}
+}
