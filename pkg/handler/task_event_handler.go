@@ -781,11 +781,54 @@ func (h *taskEventHandler) checkActiveCurrentJob(
 			return true, nil
 		}
 	}
+	// No Job for this task is active here, which is not the same as the Job
+	// being over: current_job lives in the shared vault frontmatter, so it can
+	// name a Job another cluster created, and this informer only sees its own
+	// cluster's Jobs. Without this guard the frontmatter's Job reads as finished
+	// and authorises a second cluster to run a task that is still running.
+	if !h.jobProvablyFinished(task, currentJob) {
+		glog.Infof(
+			"event=respawn_foreign_job task=%s current_job=%s: this executor spawned a different Job for the task; suppressing spawn",
+			task.TaskIdentifier,
+			currentJob,
+		)
+		metrics.TaskEventsTotal.WithLabelValues("skipped_foreign_job").Inc()
+		h.storeGraceWindowDeferral(
+			task,
+			config,
+			h.currentDateTime.Now().Time().Add(deferredRespawnInterval),
+			claim,
+		)
+		return true, nil
+	}
+
 	glog.V(2).Infof(
 		"task %s: current_job %s no longer active, proceeding to spawn",
 		task.TaskIdentifier, currentJob,
 	)
 	return false, nil
+}
+
+// jobProvablyFinished reports whether the Job named in current_job has certainly
+// ended, given that no Job for this task is active in this cluster.
+//
+// current_job lives in the shared vault frontmatter, so it can name a Job that
+// another cluster created, and this informer only sees its own cluster's Jobs —
+// "not active here" is not by itself evidence that the Job is over. The one
+// local fact that settles it is the store: its entry is written when this
+// executor creates a Job and removed when that Job's terminal event is
+// processed, which is also what clears current_job. A store entry naming a
+// different Job therefore proves the frontmatter's Job belongs to someone else.
+//
+// With no store entry (a restart, or a spawn this executor never made) there is
+// nothing local to distinguish a foreign Job from a finished one, so the
+// previous behaviour stands: the grace window is the only bound, and a respawn
+// after it proceeds. Bounding that case by the Job's deadline instead was tried
+// and reverted — it withholds a legitimate respawn for up to 30 minutes, which
+// the deferred-respawn contract does not allow.
+func (h *taskEventHandler) jobProvablyFinished(task lib.Task, currentJob string) bool {
+	stored := h.storedCurrentJob(task)
+	return stored == "" || stored == currentJob
 }
 
 // spawnIfNeeded returns (spawned, err): spawned is true iff a new k8s Job was actually launched

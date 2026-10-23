@@ -154,6 +154,7 @@ func init() {
 	TaskEventsTotal.WithLabelValues("spawn_suppressed_terminal_phase").Add(0)
 	TaskEventsTotal.WithLabelValues("unknown_phase").Add(0)
 	TaskEventsTotal.WithLabelValues("respawn_grace_window").Add(0)
+	TaskEventsTotal.WithLabelValues("skipped_foreign_job").Add(0)
 	TaskEventsTotal.WithLabelValues("respawn_after_grace_window").Add(0)
 	TaskEventsTotal.WithLabelValues("deferred_concurrency_cap").Add(0)
 	TaskEventsTotal.WithLabelValues("deferred_claim_invalidated").Add(0)
