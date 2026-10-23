@@ -1,8 +1,13 @@
 ---
-status: approved
+status: completed
 spec: [014-job-watcher-sandbox-namespaces]
+summary: Added a feat bullet for cross-namespace Job observation under the existing Unreleased heading and documented the watcher's observation surface in the CRD reference; make precommit exited 0.
+execution_id: agent-task-executor-job-watcher-sandbox-exec-032-spec-014-changelog-docs
+dark-factory-version: v0.198.7
 created: "2026-10-23T18:45:00Z"
 queued: "2026-10-23T17:26:27Z"
+started: "2026-10-23T18:22:19Z"
+completed: "2026-10-23T18:27:36Z"
 branch: dark-factory/job-watcher-sandbox-namespaces
 ---
 

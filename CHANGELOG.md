@@ -4,6 +4,7 @@ All notable changes to this project will be documented in this file.
 
 ## Unreleased
 
+- feat: **the Job watcher now observes every Config's sandbox namespace.** The watcher derives its watched set from the executor namespace plus every distinct `spec.jobNamespace` its Configs name, starts one Job/Pod informer pair per namespace, and re-resolves the set every 60 seconds so a Config flip is picked up without an executor restart. A terminal-failed Job in a sandbox namespace now produces the same synthetic failure and store cleanup as one in the executor namespace. A namespace no Config names is never watched, no informer is stopped for a namespace a Config stops naming, and no new RBAC is requested.
 - fix: **a sandbox Job is now classified from its own namespace's Pod cache.** `JobWatcher.PodLister` takes the namespace whose lister is wanted and returns nil for a namespace that is not watched or has not synced, so `terminalPodDetail` reads the Job's namespace instead of the executor's. The zombie sweeper resolves each task's namespace from the Configs it already lists — first Config whose assignee matches, falling back to the executor namespace when none matches or the Config's `jobNamespace` is unresolvable — and skips only that task while its namespace's cache is still syncing, rather than reading the executor's cache or stopping the whole tick.
 
 ## v0.32.0

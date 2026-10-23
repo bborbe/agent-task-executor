@@ -59,6 +59,10 @@ If `spec.trigger` is omitted, or if `trigger.phases` / `trigger.statuses` are ab
 
 With a per-vault executor, each instance serves one Obsidian vault: it learns its vault from the required `VAULT_NAME` environment variable and resolves Config CRs by the composed `{assignee}-{vaultName}` key. Config CR names follow the `{assignee}-{vault}` convention. A Config CR whose assignee is the plain value without the vault suffix never matches, so unmatched tasks keep the existing unknown-assignee skip behavior.
 
+## Job and Pod Observation
+
+The executor's Job watcher observes Jobs and Pods in the executor's own namespace plus every distinct `spec.jobNamespace` named by a Config. The watched set is re-resolved every 60 seconds from the Configs, so a Config that starts naming a new namespace is observed without an executor restart. A namespace that a Config stops naming is not un-watched: its informer keeps running until restart. A namespace no Config names is never watched, and the executor requests no RBAC beyond what it already holds.
+
 ## Properties
 
 **Declarative** — apply a Config CRD, system picks it up. Remove it, system stops watching.
