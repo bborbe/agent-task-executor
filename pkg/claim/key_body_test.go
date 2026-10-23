@@ -236,4 +236,17 @@ var _ = Describe("DeriveClaimKeyWithBody", func() {
 			true,
 		),
 	)
+
+	It("wraps a per-PR validation error with its origin", func() {
+		_, _, err := claim.DeriveClaimKeyWithBody(
+			context.Background(),
+			"pr-review",
+			"abc123",
+			".hidden",
+			"agent",
+			"https://github.com/.hidden/agent/pull/1",
+		)
+		Expect(err).To(HaveOccurred())
+		Expect(err.Error()).To(ContainSubstring("derive pr claim key"))
+	})
 })

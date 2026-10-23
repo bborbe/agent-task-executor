@@ -6,6 +6,7 @@ package claim
 
 import (
 	"context"
+	"sort"
 	stdtime "time"
 
 	"github.com/bborbe/errors"
@@ -71,6 +72,12 @@ func (m *leaseManager) retryPendingDeletions(ctx context.Context) {
 		}
 		if held.pendingDeletionPath == "fence" {
 			m.bestEffortDelete(ctx, key, held.sha)
+			glog.Infof(
+				"event=claim_released key=%s task=%s result=fenced sha=%s",
+				key,
+				held.taskID,
+				held.sha,
+			)
 		}
 		delete(m.held, key)
 	}
@@ -101,7 +108,7 @@ func (m *leaseManager) fenceClaim(ctx context.Context, key string, held *heldCla
 	}
 	if err := m.jobControl.DeleteJob(ctx, held.taskID); err != nil {
 		countClaim("error")
-		countClaimRemoval(key, held.taskID, "fenced", held.sha)
+		countClaimFencePending(key, held.taskID)
 		held.pendingJobDeletion = true
 		held.pendingDeletionPath = "fence"
 		return
@@ -163,18 +170,25 @@ func (m *leaseManager) releaseExpiredHolds(ctx context.Context) {
 	}
 }
 
+// joblessPassBudget stops one jobless pass from starting further Job checks
+// once this much time has passed since the pass began; a check already
+// started may still run up to RequestTimeout.
+const joblessPassBudget = 10 * libtime.Second
+
 // releaseJoblessClaims releases held claims whose Job has been continuously
 // absent for at least JoblessGrace. Claims owned by another release path keep
 // their own handling.
 func (m *leaseManager) releaseJoblessClaims(ctx context.Context) {
 	now := m.currentDateTime.Now()
-	for _, key := range m.heldKeys() {
-		held, ok := m.held[key]
-		if !ok || !joblessEligible(held) {
-			continue
+	for _, key := range m.joblessDueKeys(now) {
+		if ctx.Err() != nil {
+			return
 		}
-		if !held.lastJoblessCheckAt.Time().IsZero() &&
-			now.Sub(held.lastJoblessCheckAt) < JoblessCheckInterval {
+		if m.currentDateTime.Now().Sub(now) >= joblessPassBudget {
+			return
+		}
+		held, ok := m.held[key]
+		if !ok {
 			continue
 		}
 		held.lastJoblessCheckAt = now
@@ -197,6 +211,30 @@ func (m *leaseManager) releaseJoblessClaims(ctx context.Context) {
 		}
 		m.releaseJoblessClaim(ctx, key, held)
 	}
+}
+
+// joblessDueKeys returns the keys of held claims the jobless pass owns and
+// whose check is due at now. Never-checked claims come first, then the oldest
+// lastJoblessCheckAt; ties keep heldKeys order, which is sorted by key.
+func (m *leaseManager) joblessDueKeys(now libtime.DateTime) []string {
+	keys := make([]string, 0, len(m.held))
+	for _, key := range m.heldKeys() {
+		held := m.held[key]
+		if !joblessEligible(held) {
+			continue
+		}
+		if !held.lastJoblessCheckAt.Time().IsZero() &&
+			now.Sub(held.lastJoblessCheckAt) < JoblessCheckInterval {
+			continue
+		}
+		keys = append(keys, key)
+	}
+	sort.SliceStable(keys, func(i, j int) bool {
+		return m.held[keys[i]].lastJoblessCheckAt.Time().Before(
+			m.held[keys[j]].lastJoblessCheckAt.Time(),
+		)
+	})
+	return keys
 }
 
 // joblessEligible reports whether the jobless release owns this claim. The

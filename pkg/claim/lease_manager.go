@@ -7,7 +7,6 @@ package claim
 import (
 	"context"
 	stderrors "errors"
-	"fmt"
 	"sort"
 	"strings"
 	"sync"
@@ -154,23 +153,37 @@ func countClaim(result string) {
 
 // countClaimRemoval increments executor_claim_total{result} and logs the one
 // release line for a claim this manager stops holding. Every path that counts
-// released, already_released, fenced or claim_lost calls it. The pending
-// Job-deletion retry does not: its fence was already counted and logged when
-// the deletion was first attempted.
+// released, already_released, fenced or claim_lost calls it. A fence whose Job
+// deletion fails is counted by countClaimFencePending instead;
+// retryPendingDeletions logs its release line later without counting again.
 func countClaimRemoval(key string, taskID string, result string, sha string) {
 	metrics.ClaimTotal.WithLabelValues(result).Inc()
-	line := fmt.Sprintf(
+	if result == "claim_lost" {
+		glog.Warningf(
+			"event=claim_released key=%s task=%s result=%s sha=%s",
+			key,
+			taskID,
+			result,
+			sha,
+		)
+		return
+	}
+	glog.Infof(
 		"event=claim_released key=%s task=%s result=%s sha=%s",
 		key,
 		taskID,
 		result,
 		sha,
 	)
-	if result == "claim_lost" {
-		glog.Warning(line)
-		return
-	}
-	glog.Info(line)
+}
+
+// countClaimFencePending counts a fence whose Job deletion failed. The claim
+// stays held in pending Job deletion, so it logs the fence-pending line
+// instead of a release line. retryPendingDeletions logs the release line,
+// without counting again, once a later tick deletes the Job and the ref.
+func countClaimFencePending(key string, taskID string) {
+	countClaim("fenced")
+	glog.Warningf("event=claim_fence_pending key=%s task=%s", key, taskID)
 }
 
 // fenceAt is the instant a holder must have stopped its Job.
@@ -620,7 +633,7 @@ func (m *leaseManager) recoverFence(
 	if running || runErr != nil {
 		if err := m.jobControl.DeleteJob(ctx, ref.TaskID); err != nil {
 			countClaim("error")
-			countClaimRemoval(key, ref.TaskID, "fenced", ref.Sha)
+			countClaimFencePending(key, ref.TaskID)
 			m.held[key] = &heldClaim{
 				key:                 key,
 				taskID:              ref.TaskID,

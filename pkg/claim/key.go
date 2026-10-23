@@ -71,13 +71,13 @@ func DeriveClaimKeyWithBody(
 	number, found := pullRequestNumberFromBody(owner, repo, body)
 	if found {
 		if err := validateClaimComponent(ctx, "owner", owner); err != nil {
-			return "", false, err
+			return "", false, errors.Wrapf(ctx, err, "derive pr claim key")
 		}
 		if err := validateClaimComponent(ctx, "repo", repo); err != nil {
-			return "", false, err
+			return "", false, errors.Wrapf(ctx, err, "derive pr claim key")
 		}
 		if err := validateClaimComponent(ctx, "pull request number", number); err != nil {
-			return "", false, err
+			return "", false, errors.Wrapf(ctx, err, "derive pr claim key")
 		}
 		return "claims/pr/" + owner + "-" + repo + "-" + number, false, nil
 	}

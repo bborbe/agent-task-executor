@@ -44,13 +44,17 @@ fallback logs one `event=claim_key_fallback task=<id> repo=<owner>/<repo>`
 warning and increments the unlabelled `executor_claim_key_fallback_total`
 counter once.
 
-Two log lines make claims observable at runtime:
+These log lines make claims observable at runtime:
 
 - `event=claim_acquired key=<key> task=<id>` — one per successful `Claim` or
   `Takeover`.
 - `event=claim_released key=<key> task=<id> result=<label> sha=<sha>` — one per
   removal, with `result` one of `released`, `already_released`, `fenced` or
   `claim_lost`. The `claim_lost` line is logged at warning level.
+- `event=claim_fence_pending key=<key> task=<id>` — warning, logged when the
+  fence cannot delete the claim's Job. `fenced` is counted then and the claim
+  stays held; the `event=claim_released … result=fenced` line follows once a
+  later tick deletes the Job and the ref, without counting again.
 
 ## Claim state machine
 

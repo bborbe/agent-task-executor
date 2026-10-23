@@ -6,10 +6,12 @@ package claim_test
 
 import (
 	"context"
+	stderrors "errors"
 	"flag"
 	"io"
 	"net/http"
 	"os"
+	"strings"
 
 	libtime "github.com/bborbe/time"
 	"github.com/golang/glog"
@@ -110,6 +112,39 @@ var _ = Describe("LeaseManager claim release log", func() {
 		Expect(out).To(ContainSubstring(
 			"event=claim_released key=" + key + " task=" + task + " result=fenced",
 		))
+	})
+
+	It("logs claim_fence_pending, then one result=fenced line once the Job is deleted", func() {
+		key := "claims/task/log-fence-pending"
+		task := "t-log-fence-pending"
+		job.deleteFn = func(_ string, call int) error {
+			if call == 1 {
+				return stderrors.New("delete failed")
+			}
+			return nil
+		}
+		_, err := mgr.Claim(ctx, key, task)
+		Expect(err).NotTo(HaveOccurred())
+		before := snapshotClaims()
+
+		first := captureGlogStderr(func() {
+			clock.SetNow(leaseTestT0.Add(240 * libtime.Second))
+			Expect(mgr.Tick(ctx)).To(Succeed())
+		})
+		Expect(first).To(ContainSubstring("event=claim_fence_pending key=" + key + " task=" + task))
+		Expect(first).NotTo(ContainSubstring("claim_released"))
+		Expect(mgr.HeldClaims()).To(HaveLen(1))
+
+		second := captureGlogStderr(func() {
+			clock.SetNow(leaseTestT0.Add(250 * libtime.Second))
+			Expect(mgr.Tick(ctx)).To(Succeed())
+		})
+		Expect(strings.Count(
+			second,
+			"event=claim_released key="+key+" task="+task+" result=fenced",
+		)).To(Equal(1))
+		Expect(mgr.HeldClaims()).To(BeEmpty())
+		Expect(snapshotClaims()["fenced"] - before["fenced"]).To(Equal(1.0))
 	})
 
 	It("logs one line with result=claim_lost", func() {
