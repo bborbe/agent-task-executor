@@ -44,7 +44,14 @@ var _ = Describe("jobWatcher backoff-limit pod detail", func() {
 			},
 			Content: lib.TaskContent("do the work"),
 		}
-		watcher = NewJobWatcher(fake.NewSimpleClientset(), "test-ns", taskStore, fakePublisher, nil)
+		watcher = NewJobWatcher(
+			fake.NewSimpleClientset(),
+			"test-ns",
+			NewEventHandlerConfig(),
+			taskStore,
+			fakePublisher,
+			nil,
+		)
 	})
 
 	makeJob := func(name string, taskID string, conditions ...batchv1.JobCondition) *batchv1.Job {

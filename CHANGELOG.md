@@ -2,6 +2,10 @@
 
 All notable changes to this project will be documented in this file.
 
+## Unreleased
+
+- feat: **the Job watcher now observes every namespace a Config places Jobs in.** It receives the Config provider and derives its watched set from the executor's own namespace plus each Config's resolved `spec.jobNamespace`, starting one Job/Pod informer pair per namespace with the existing 5-minute resync and task-id label selector. A Config whose `jobNamespace` equals the executor namespace is skipped with an ERROR and no informer; every other namespace keeps watching. Handler dispatch is gated per namespace: an event is handled only once its own namespace's cache has synced, and an unconfigured namespace is never handled. The stale-terminal re-delivery guard now asks about the Job's own namespace rather than always the executor's. Provider, informer-construction and handler-registration failures fail `Run`; list/watch failures during cache sync remain environmental.
+
 ## v0.31.1
 
 - fix: **a stale success no longer releases a claim inside a newer run's success hold.** The Job watcher keeps re-reporting an older Job of the same task as succeeded. That completion is already past its own window, so `ReleaseAfterSuccess` used to delete the claim the newer run's hold protects, and the peer cluster ran the task again seconds later (seen live on v0.30.7 for update-go and releaser tasks). The call now keeps a claim whose hold is still in the future, logs `event=release_kept_success_grace`, and extends a hold but never shortens it.

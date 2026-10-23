@@ -345,6 +345,7 @@ func (a *application) Run(ctx context.Context, sentryClient libsentry.Client) er
 	jobWatcher := factory.CreateJobWatcher(
 		kubeClient,
 		a.Namespace,
+		eventHandlerConfig,
 		taskStore,
 		resultPublisher,
 		taskEventHandler,

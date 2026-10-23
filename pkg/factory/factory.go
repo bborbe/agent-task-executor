@@ -57,15 +57,24 @@ func CreateServiceReconcileLoop(
 	return spawner.NewServiceReconcileLoop(provider, resolver, reconciler, interval)
 }
 
-// CreateJobWatcher creates a JobWatcher that reacts to terminal batch/v1 Job states.
+// CreateJobWatcher creates a JobWatcher that reacts to terminal batch/v1 Job
+// states in the executor's namespace and in every namespace a Config names.
 func CreateJobWatcher(
 	kubeClient kubernetes.Interface,
 	namespace libk8s.Namespace,
+	configProvider libk8s.Provider[agentv1.Config],
 	taskStore *pkg.TaskStore,
 	publisher pkg.ResultPublisher,
 	claimReleaser pkg.ClaimReleaser,
 ) pkg.JobWatcher {
-	return pkg.NewJobWatcher(kubeClient, namespace, taskStore, publisher, claimReleaser)
+	return pkg.NewJobWatcher(
+		kubeClient,
+		namespace,
+		configProvider,
+		taskStore,
+		publisher,
+		claimReleaser,
+	)
 }
 
 // CreateClaimLifecycleRunFuncs returns the run funcs that keep the lease
