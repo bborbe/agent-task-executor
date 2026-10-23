@@ -1,8 +1,13 @@
 ---
-status: approved
+status: completed
 spec: [014-job-watcher-sandbox-namespaces]
+summary: Added a 60-second package-level re-resolution tick to JobWatcher.Run that starts informers only for newly named namespaces, with a test proving a Config flip is picked up and an already-watched namespace is not restarted.
+execution_id: agent-task-executor-job-watcher-sandbox-exec-030-spec-014-reresolve-tick
+dark-factory-version: v0.198.7
 created: "2026-10-23T18:45:00Z"
 queued: "2026-10-23T17:26:27Z"
+started: "2026-10-23T17:38:38Z"
+completed: "2026-10-23T17:47:53Z"
 branch: dark-factory/job-watcher-sandbox-namespaces
 ---
 

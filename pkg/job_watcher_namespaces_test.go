@@ -377,6 +377,127 @@ func TestJobWatcherFailsLoudly(t *testing.T) {
 	})
 }
 
+// namespaceInformerRegistry records how many times an informer pair was
+// constructed per namespace, so a test can prove that a namespace already
+// being watched is not restarted by the re-resolution tick.
+type namespaceInformerRegistry struct {
+	mu            sync.Mutex
+	informers     map[libk8s.Namespace]*fakeNamespaceInformer
+	constructions map[libk8s.Namespace]int
+}
+
+func newNamespaceInformerRegistry() *namespaceInformerRegistry {
+	return &namespaceInformerRegistry{
+		informers:     map[libk8s.Namespace]*fakeNamespaceInformer{},
+		constructions: map[libk8s.Namespace]int{},
+	}
+}
+
+func (r *namespaceInformerRegistry) new(
+	_ kubernetes.Interface,
+	namespace libk8s.Namespace,
+) (jobWatcherNamespaceInformer, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.constructions[namespace]++
+	informer := &fakeNamespaceInformer{synced: true}
+	r.informers[namespace] = informer
+	return informer, nil
+}
+
+func (r *namespaceInformerRegistry) count(namespace libk8s.Namespace) int {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.constructions[namespace]
+}
+
+func (r *namespaceInformerRegistry) constructed(namespaces ...libk8s.Namespace) bool {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	for _, namespace := range namespaces {
+		if r.constructions[namespace] == 0 {
+			return false
+		}
+	}
+	return true
+}
+
+func waitForConstructedNamespaces(
+	t *testing.T,
+	registry *namespaceInformerRegistry,
+	namespaces ...libk8s.Namespace,
+) {
+	t.Helper()
+	deadline := time.Now().Add(2 * time.Second)
+	for !registry.constructed(namespaces...) {
+		if time.Now().After(deadline) {
+			t.Fatalf("timed out waiting for namespaces %v", namespaceStrings(namespaces))
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+}
+
+func TestJobWatcherReresolvesNamespaceSet(t *testing.T) {
+	provider := &namespaceTestProvider{}
+	provider.setItems(configNamed("one", "ns-one"))
+	registry := newNamespaceInformerRegistry()
+
+	w, ok := NewJobWatcher(
+		fake.NewClientset(),
+		"dev",
+		provider,
+		NewTaskStore(),
+		&fakeResultPublisher{},
+		nil,
+	).(*jobWatcher)
+	if !ok {
+		t.Fatalf("NewJobWatcher did not return *jobWatcher")
+	}
+	w.newNamespaceInformer = registry.new
+
+	old := jobWatcherNamespaceReresolveInterval
+	jobWatcherNamespaceReresolveInterval = 10 * time.Millisecond
+	t.Cleanup(func() { jobWatcherNamespaceReresolveInterval = old })
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	errCh := make(chan error, 1)
+	go func() {
+		errCh <- w.Run(ctx)
+	}()
+
+	waitForConstructedNamespaces(t, registry, "dev", "ns-one")
+
+	provider.setErr(stderrors.New("config provider down"))
+	time.Sleep(35 * time.Millisecond)
+	select {
+	case err := <-errCh:
+		t.Fatalf("Run returned on a tick provider error: %v", err)
+	default:
+	}
+	provider.setErr(nil)
+
+	provider.setItems(configNamed("one", "ns-one"), configNamed("two", "ns-two"))
+	waitForConstructedNamespaces(t, registry, "ns-two")
+
+	if got := registry.count("ns-two"); got != 1 {
+		t.Fatalf("ns-two constructed %d times, want 1", got)
+	}
+	if got := registry.count("ns-one"); got != 1 {
+		t.Fatalf("ns-one constructed %d times, want 1", got)
+	}
+
+	cancel()
+	select {
+	case err := <-errCh:
+		if err != nil {
+			t.Fatalf("Run returned error after cancellation: %v", err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatalf("Run did not return after context cancellation")
+	}
+}
+
 func TestJobWatcherAwaitsCacheSync(t *testing.T) {
 	ctx := context.Background()
 	provider := &namespaceTestProvider{}

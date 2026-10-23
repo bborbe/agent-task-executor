@@ -94,6 +94,11 @@ const (
 	jobWatcherTaskIDLabel  = "agent.benjamin-borbe.de/task-id"
 )
 
+// jobWatcherNamespaceReresolveInterval is how often the watched namespace set
+// is re-derived from the Configs. It is a package-level variable, not
+// configuration and not an injected clock, so tests can shorten it directly.
+var jobWatcherNamespaceReresolveInterval = 60 * time.Second
+
 // jobWatcherNamespaceInformer is one namespace's Job and Pod informers. It is
 // an interface so the namespace-set tests can count starts and control the
 // cache-sync barrier without an API server.
@@ -190,8 +195,33 @@ func (w *jobWatcher) Run(ctx context.Context) error {
 	if err := w.reconcileNamespaceSet(ctx); err != nil {
 		return err
 	}
-	<-ctx.Done()
-	return nil
+	ticker := time.NewTicker(jobWatcherNamespaceReresolveInterval)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return nil
+		case <-ticker.C:
+			cfgs, err := w.configProvider.Get(ctx)
+			if err != nil {
+				// The Config provider is populated asynchronously and can fail
+				// transiently; the already-running informers keep watching and
+				// the next tick retries. Killing the executor over this is the
+				// worse outcome.
+				glog.Errorf("job watcher: re-resolve namespace set: %v", err)
+				continue
+			}
+			if err := w.startInformersForNamespaces(
+				ctx,
+				resolveJobWatcherNamespaces(ctx, w.namespace, cfgs),
+			); err != nil {
+				// A wiring failure while starting a new namespace's informers
+				// is deterministic and must fail the run, exactly as it does at
+				// startup.
+				return errors.Wrapf(ctx, err, "start informers for re-resolved namespaces")
+			}
+		}
+	}
 }
 
 func (w *jobWatcher) reconcileNamespaceSet(ctx context.Context) error {
