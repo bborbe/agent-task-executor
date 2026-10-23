@@ -338,6 +338,7 @@ func configSpecProperties() map[string]apiextensionsv1.JSONSchemaProps {
 			Type:    "string",
 			Pattern: "^[a-z0-9]([-a-z0-9]*[a-z0-9])?$",
 		},
+		"jobNamespace":    {Type: "string"},
 		"imagePullSecret": {Type: "string"},
 		// 0 = unlimited (see AgentConfiguration.MaxConcurrentJobs).
 		"maxConcurrentJobs": {Type: "integer", Minimum: &crdMinZero},

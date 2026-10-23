@@ -2,6 +2,10 @@
 
 All notable changes to this project will be documented in this file.
 
+## Unreleased
+
+- feat: add `spec.jobNamespace` to the `Config` CRD and carry it through to `AgentConfiguration`, with `ResolveJobNamespace` defaulting an empty value to the executor's own namespace and rejecting an explicit match.
+
 ## v0.30.7
 
 - fix: **the success hold now survives a plain release.** When a task's terminal phase reached the executor that ran it, the phase gate and terminal cleanup called `LeaseManager.Release`. That deleted the claim at once and ignored the `holdUntil` that `ReleaseAfterSuccess` had set. The terminal phase reaches the winning cluster's vault view before a peer's, so the hold ended exactly while the peer still read the task as eligible. Measured on v0.30.5, 2026-10-23: task `70688157` succeeded on nuke prod at 09:45:51 with hold_until 09:50:51. Sun claimed and ran it again at 09:48:20, still reading phase `execution`. Six re-runs in two hours followed the same shape. `Release` now keeps a claim whose hold has not expired (`event=release_kept_success_grace`), and the hold's own expiry releases it.

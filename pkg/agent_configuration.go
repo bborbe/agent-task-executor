@@ -71,6 +71,10 @@ type AgentConfiguration struct {
 	MaxConcurrentJobs int
 	// PriorityClassName is stamped on Job PodTemplates and on a service StatefulSet pod template.
 	PriorityClassName string
+	// JobNamespace is the namespace this Config's Jobs must be created in, from
+	// ConfigSpec.JobNamespace. Empty means the executor's own namespace. Resolve
+	// it with ResolveJobNamespace before use.
+	JobNamespace string
 	// ImagePullSecret is the name of the K8s Secret used for image pulls.
 	// Empty uses the cluster default (typically "docker").
 	ImagePullSecret string
@@ -128,6 +132,7 @@ func (a AgentConfigurations) TaggedConfigurations(branch string) AgentConfigurat
 			Resources:               c.Resources.DeepCopy(),
 			MaxConcurrentJobs:       c.MaxConcurrentJobs,
 			PriorityClassName:       c.PriorityClassName,
+			JobNamespace:            c.JobNamespace,
 			ImagePullSecret:         c.ImagePullSecret,
 			Trigger:                 c.Trigger,
 			ZombieJobTimeoutSeconds: c.ZombieJobTimeoutSeconds,
