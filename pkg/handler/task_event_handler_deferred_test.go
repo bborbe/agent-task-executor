@@ -627,6 +627,101 @@ var _ = Describe("TaskEventHandler", func() {
 				Expect(fakeSpawner.SpawnJobCallCount()).To(Equal(0))
 			})
 
+			// Each row parks the task at the cap, then delivers a second event that
+			// trips exactly one parseAndFilter skip. Once the slot frees, the parked
+			// snapshot must be gone: a skip that leaves it behind spawns the pre-skip
+			// task on a cluster the task no longer names.
+			DescribeTable("a parseAndFilter skip evicts the parked deferred entry",
+				func(mutate func(lib.Task) lib.Task, reconfigure func()) {
+					setRunning := setupCapDeferral()
+					routingHandler := newRoutingHandler("nukeprod", true)
+
+					currentDateTime.SetNow(libtimetest.ParseDateTime("2026-10-21T08:00:00Z"))
+					Expect(
+						routingHandler.ConsumeMessage(
+							ctx,
+							buildMsg(buildRoutingTask("tid-skip", "")),
+						),
+					).To(Succeed())
+					Expect(fakeSpawner.SpawnJobCallCount()).To(Equal(0))
+
+					if reconfigure != nil {
+						reconfigure()
+					}
+					Expect(
+						routingHandler.ConsumeMessage(
+							ctx,
+							buildMsg(mutate(buildRoutingTask("tid-skip", ""))),
+						),
+					).To(Succeed())
+
+					setRunning(0)
+					currentDateTime.SetNow(libtimetest.ParseDateTime("2026-10-21T08:01:30Z"))
+					Expect(routingHandler.EvalDeferredRespawns(ctx)).To(Succeed())
+
+					Expect(fakeSpawner.SpawnJobCallCount()).To(Equal(0))
+				},
+				Entry("skipped_status", func(task lib.Task) lib.Task {
+					task.Frontmatter["status"] = "hold"
+					return task
+				}, nil),
+				Entry("skipped_phase", func(task lib.Task) lib.Task {
+					task.Frontmatter["phase"] = string(domain.TaskPhaseTodo)
+					return task
+				}, nil),
+				Entry("skipped_stage", func(task lib.Task) lib.Task {
+					task.Frontmatter["stage"] = "dev"
+					return task
+				}, nil),
+				Entry("skipped_assignee", func(task lib.Task) lib.Task {
+					delete(task.Frontmatter, "assignee")
+					return task
+				}, nil),
+				Entry("type_mismatch", func(task lib.Task) lib.Task {
+					task.Frontmatter["task_type"] = "backtest"
+					return task
+				}, func() {
+					fakeResolver.ResolveReturns(
+						pkg.AgentConfiguration{
+							Assignee:          "claude",
+							Image:             "my-image:latest",
+							MaxConcurrentJobs: 1,
+							TaskTypes:         []string{"other"},
+						},
+						nil,
+					)
+				}),
+			)
+
+			It("spawns the parked task when the second event trips no skip", func() {
+				// Positive control: the skip table above only means something if an
+				// eligible second event really does leave the parked entry spawnable.
+				setRunning := setupCapDeferral()
+				routingHandler := newRoutingHandler("nukeprod", true)
+
+				currentDateTime.SetNow(libtimetest.ParseDateTime("2026-10-21T08:00:00Z"))
+				Expect(
+					routingHandler.ConsumeMessage(
+						ctx,
+						buildMsg(buildRoutingTask("tid-control", "")),
+					),
+				).To(Succeed())
+				Expect(fakeSpawner.SpawnJobCallCount()).To(Equal(0))
+
+				Expect(
+					routingHandler.ConsumeMessage(
+						ctx,
+						buildMsg(buildRoutingTask("tid-control", "")),
+					),
+				).To(Succeed())
+
+				setRunning(0)
+				currentDateTime.SetNow(libtimetest.ParseDateTime("2026-10-21T08:01:30Z"))
+				Expect(routingHandler.EvalDeferredRespawns(ctx)).To(Succeed())
+
+				Expect(fakeSpawner.SpawnJobCallCount()).To(Equal(1))
+			})
+
 			It(
 				"does not spawn a deferred task whose later event drops its cluster tag "+
 					"on a cluster that refuses untagged tasks",
