@@ -79,10 +79,9 @@ const crdName = "configs.agent.benjamin-borbe.de"
 // Jobs(...).Create with a 422 the operator has to correlate by hand.
 const crdDNS1123Label = "^[a-z0-9]([-a-z0-9]*[a-z0-9])?$"
 
-// crdMaxNameLen is the 63-character ceiling a DNS-1123 label (and so a
-// namespace name) carries. The pattern alone does not bound the length, so an
-// over-long jobNamespace would pass admission and fail later at Jobs().Create
-// with a 422.
+// crdMaxNameLen is the 63-character ceiling a DNS-1123 label carries. The
+// pattern alone does not bound the length, so an over-long jobNamespace would
+// pass admission and fail later at Jobs().Create with a 422.
 var crdMaxNameLen = int64(63)
 
 // SetupCustomResourceDefinition installs or updates the Config CRD on the cluster.

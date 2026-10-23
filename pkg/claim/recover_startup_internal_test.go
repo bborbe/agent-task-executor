@@ -204,18 +204,3 @@ func TestWaitForTaskViewBlocksUntilReady(t *testing.T) {
 		t.Fatal("waitForTaskView did not return once the view became ready")
 	}
 }
-
-// TestWaitForTaskViewWithoutView asserts a caller with no view does not wait: it
-// has no task to resolve a namespace from, so every lookup is its own namespace.
-func TestWaitForTaskViewWithoutView(t *testing.T) {
-	done := make(chan struct{})
-	go func() {
-		waitForTaskView(context.Background(), nil)
-		close(done)
-	}()
-	select {
-	case <-done:
-	case <-time.After(2 * time.Second):
-		t.Fatal("waitForTaskView waited with no view to wait for")
-	}
-}

@@ -135,6 +135,11 @@ func (r staticResolver) ResolveByTaskType(
 	return r.config, nil
 }
 
+// resolverFor returns a resolver whose every Config carries jobNamespace.
+func resolverFor(jobNamespace string) pkg.ConfigResolver {
+	return staticResolver{config: pkg.AgentConfiguration{JobNamespace: jobNamespace}}
+}
+
 // failingResolver is a ConfigResolver that fails every lookup.
 type failingResolver struct{}
 
@@ -230,9 +235,8 @@ func TestKubeJobControlFollowsJobNamespace(t *testing.T) {
 }
 
 // TestKubeJobControlNamespaceFallbacks pins every path that cannot name a
-// namespace to the executor's own. The fallback must stay explicit and tested:
-// it is fail-safe for releasing a claim (the fence never blocks a release) and
-// fail-open for duplicate prevention, so a change that widens it silently is a
+// namespace to the executor's own. The fallback is fail-safe for releasing a
+// claim and fail-open for duplicate prevention, so widening it silently is a
 // correctness regression, not a refactor.
 func TestKubeJobControlNamespaceFallbacks(t *testing.T) {
 	const sandbox = "dev-agents-sandbox"
@@ -243,48 +247,18 @@ func TestKubeJobControlNamespaceFallbacks(t *testing.T) {
 		view     TaskView
 		want     libk8s.Namespace
 	}{
+		{"no resolver", nil, viewWithTask("task-1"), "test-ns"},
+		{"no view", resolverFor(sandbox), nil, "test-ns"},
+		{"unknown task", resolverFor(sandbox), viewWithTask("task-other"), "test-ns"},
+		{"resolver error", failingResolver{}, viewWithTask("task-1"), "test-ns"},
+		{"empty jobNamespace", resolverFor(""), viewWithTask("task-1"), "test-ns"},
 		{
-			name:     "no resolver falls back to the executor namespace",
-			resolver: nil,
-			view:     viewWithTask("task-1"),
-			want:     "test-ns",
+			"equal to the executor namespace",
+			resolverFor("test-ns"),
+			viewWithTask("task-1"),
+			"test-ns",
 		},
-		{
-			name:     "no view falls back to the executor namespace",
-			resolver: staticResolver{config: pkg.AgentConfiguration{JobNamespace: sandbox}},
-			view:     nil,
-			want:     "test-ns",
-		},
-		{
-			name:     "an unknown task falls back to the executor namespace",
-			resolver: staticResolver{config: pkg.AgentConfiguration{JobNamespace: sandbox}},
-			view:     viewWithTask("task-other"),
-			want:     "test-ns",
-		},
-		{
-			name:     "a resolver error falls back to the executor namespace",
-			resolver: failingResolver{},
-			view:     viewWithTask("task-1"),
-			want:     "test-ns",
-		},
-		{
-			name:     "an empty jobNamespace falls back to the executor namespace",
-			resolver: staticResolver{config: pkg.AgentConfiguration{}},
-			view:     viewWithTask("task-1"),
-			want:     "test-ns",
-		},
-		{
-			name:     "a jobNamespace equal to the executor namespace is rejected",
-			resolver: staticResolver{config: pkg.AgentConfiguration{JobNamespace: "test-ns"}},
-			view:     viewWithTask("task-1"),
-			want:     "test-ns",
-		},
-		{
-			name:     "a configured jobNamespace is used",
-			resolver: staticResolver{config: pkg.AgentConfiguration{JobNamespace: sandbox}},
-			view:     viewWithTask("task-1"),
-			want:     sandbox,
-		},
+		{"configured jobNamespace", resolverFor(sandbox), viewWithTask("task-1"), sandbox},
 	}
 
 	for _, test := range tests {
