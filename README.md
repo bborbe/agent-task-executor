@@ -43,6 +43,32 @@ rebuilds the view.
 | `GITREST_URL` | — | git-rest HTTP API base URL the claim ref client writes leased claim refs through. Required when `CLAIM_MODE` is `shadow` or `on` (startup fails without it); unused in `off`. This is the claim transport only — task state is read from the in-memory task view, never from git-rest. |
 | `GITREST_GATEWAY_SECRET` | — | **NAME** of the K8s Secret carrying the git-rest gateway secret (data key `gateway-secret`), never the secret value. Read only when `CLAIM_MODE` is `shadow` or `on`; empty disables gateway auth. |
 
+## Task frontmatter fields written by the executor
+
+These keys are owned by the executor. An agent's own result write-back must never
+emit them: the executor is the only writer, and a value arriving from a pod is a
+clobber, not an update.
+
+| Field | Written when | Format | Meaning |
+|---|---|---|---|
+| `queued_at` | The task is first deferred behind an agent's `maxConcurrentJobs` cap. | RFC3339, `2006-01-02T15:04:05Z07:00` | When the task started waiting. A re-deferral on a later reconcile cycle keeps the first value, so the field marks the queue entry and not the last retry. |
+
+`queued_at` is stamped from the executor's injected clock through the same
+`UpdateFrontmatterCommand` CQRS path `PublishSpawnNotification` uses, and only
+when a vault read finds no existing value — the event payload alone does not
+decide, because a deferred entry holds the pre-write copy of the task. The write
+is logged at `V(1)` as `event=queued_at_written task=<id> queued_at=<value>`.
+
+The guard is a vault read, not a lock, so it is best-effort rather than atomic:
+two events processed inside one write's git-rest commit latency can each stamp,
+and the value then advances by a few seconds right after the first write. It does
+not move on later reconcile cycles.
+
+Paired with `job_started_at` it yields a queue age, `job_started_at - queued_at`.
+`job_started_at` is **not** executor-owned in practice: the agent pod rewrites the
+frontmatter from its start-of-run snapshot, so that key reverts on write-back
+while `queued_at` survives.
+
 ## Links
 
 Dev:

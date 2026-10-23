@@ -2,6 +2,10 @@
 
 All notable changes to this project will be documented in this file.
 
+## Unreleased
+
+- docs: **the executor-owned frontmatter fields are documented in the README.** A new "Task frontmatter fields written by the executor" section records `queued_at` — stamped at the concurrency-cap deferral, RFC3339, executor-owned and never to be emitted by an agent result write-back — notes that its vault-read guard is best-effort rather than atomic, and notes that `job_started_at` reverts on the pod's snapshot write-back while `queued_at` survives.
+
 ## v0.34.1
 
 - fix: **a task pinned to a cluster outside its own stage pool is now reported instead of silently dropped.** A task whose `cluster` names this executor while its `stage` differs from `BRANCH` could never run here and nothing anywhere in the fleet recorded it — it was not foreign, so the foreign-cluster skip did not fire, and the stage filter dropped it with only a `V(3)` line no deployed executor emits. It is now logged as `event=pin_outside_pool` at `V(2)` and counted as `agent_executor_task_events_total{result="pin_outside_pool"}`, replacing `skipped_stage` for that case so one event still yields one result on the Kafka path. Both the Kafka path and the reconcile floor report, because a task that reaches the floor has no Kafka event behind it; the floor re-derives from the in-memory view on every pass, so it counts each pass rather than each event. The guard requires a **non-empty** pin — `taskCluster(task)` is `""` both for a task with no `cluster` and for an executor built with `CLUSTER=""`, so a bare equality check would report every untagged stage-mismatched task on an unpinned executor. A task with no `cluster` is a plain stage skip and keeps counting as `skipped_stage`. `README.md` no longer advises setting `STAGE_FILTER=false` on sun — that made the cluster run tasks of every stage, and sun runs it `true`.
