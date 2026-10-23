@@ -1,8 +1,13 @@
 ---
-status: approved
+status: completed
 spec: [012-bug-pr-review-claims-serialize-per-repo]
+summary: Added body-aware per-pull-request claim keying for pr-review tasks with a repository-key fallback counter and warning, plus table and handler tests.
+execution_id: agent-task-executor-claim-reaper-exec-023-spec-012-per-pr-claim-key
+dark-factory-version: v0.198.7
 created: "2026-10-23T12:26:59Z"
 queued: "2026-10-23T12:36:10Z"
+started: "2026-10-23T12:44:18Z"
+completed: "2026-10-23T12:53:08Z"
 branch: dark-factory/bug-pr-review-claims-serialize-per-repo
 ---
 

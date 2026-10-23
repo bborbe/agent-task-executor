@@ -4,6 +4,7 @@ All notable changes to this project will be documented in this file.
 
 ## Unreleased
 
+- feat: **pr-review tasks now claim per pull request instead of per repository.** `claim.DeriveClaimKeyWithBody` keys a `pr-review` task as `claims/pr/<owner>-<repo>-<n>` when the task body carries the repository's own standalone `https://github.com/<owner>/<repo>/pull/<n>` URL, so independent pull-request reviews of one repository run in parallel. A body with no usable URL falls back to the existing `claims/repo/<owner>-<repo>` key, increments the new unlabelled `executor_claim_key_fallback_total` counter and logs `event=claim_key_fallback`. Same-pull-request reviews and every other task type keep their current exclusion; `update-go`, `release` and `build-fix` remain repo-keyed.
 - fix: **a held claim is now released when its Job has been continuously absent for 300 s.** A Job deleted by hand, or whose terminal event was lost, left its claim held and renewed forever, so the task could never be respawned and the repository stayed blocked. The lease loop now asks `JobControl.IsJobRunning` at most once a minute per claim and sends one compare-and-swap `DELETE` with the held sha once the Job has been gone for the grace period, counting `jobless_released` and logging `event=claim_jobless_released`. The success hold, a pending release, a pending Job deletion and an unanswered adopted running check keep their own handling.
 
 ## v0.30.7

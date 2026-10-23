@@ -1,8 +1,9 @@
 ---
-status: prompted
+status: verifying
 approved: "2026-10-23T12:13:49Z"
 generating: "2026-10-23T12:15:20Z"
 prompted: "2026-10-23T12:23:27Z"
+verifying: "2026-10-23T12:44:17Z"
 branch: dark-factory/bug-held-claim-outlives-vanished-job
 ---
 

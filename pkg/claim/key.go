@@ -6,6 +6,7 @@ package claim
 
 import (
 	"context"
+	"strconv"
 	"strings"
 
 	"github.com/bborbe/errors"
@@ -46,6 +47,89 @@ func DeriveClaimKey(
 		return "", err
 	}
 	return "claims/task/" + taskID, nil
+}
+
+// DeriveClaimKeyWithBody maps a task to the claim key it uses. It behaves like
+// DeriveClaimKey, except that a pr-review task whose body carries the task
+// repository's own pull-request URL is keyed per pull request. The second
+// return value reports that a pr-review task fell back to the repository key;
+// it is meaningful only when the error is nil.
+func DeriveClaimKeyWithBody(
+	ctx context.Context,
+	taskType string,
+	taskID string,
+	owner string,
+	repo string,
+	body string,
+) (string, bool, error) {
+	if taskType != "pr-review" {
+		key, err := DeriveClaimKey(ctx, taskType, taskID, owner, repo)
+		return key, false, err
+	}
+	owner = strings.ToLower(owner)
+	repo = strings.ToLower(repo)
+	number, found := pullRequestNumberFromBody(owner, repo, body)
+	if found {
+		if err := validateClaimComponent(ctx, "owner", owner); err != nil {
+			return "", false, err
+		}
+		if err := validateClaimComponent(ctx, "repo", repo); err != nil {
+			return "", false, err
+		}
+		if err := validateClaimComponent(ctx, "pull request number", number); err != nil {
+			return "", false, err
+		}
+		return "claims/pr/" + owner + "-" + repo + "-" + number, false, nil
+	}
+	key, err := DeriveClaimKey(ctx, taskType, taskID, owner, repo)
+	return key, true, err
+}
+
+// pullRequestNumberFromBody returns the first standalone pull-request URL in
+// body that names owner/repo, with the number in canonical decimal form.
+func pullRequestNumberFromBody(owner, repo, body string) (string, bool) {
+	if owner == "" || repo == "" {
+		return "", false
+	}
+	for _, line := range strings.Split(body, "\n") {
+		if number, ok := pullRequestNumberFromLine(owner, repo, strings.TrimSpace(line)); ok {
+			return number, true
+		}
+	}
+	return "", false
+}
+
+// pullRequestNumberFromLine returns the number in line when line is exactly
+// https://github.com/<owner>/<repo>/pull/<n>, and false otherwise.
+func pullRequestNumberFromLine(owner, repo, line string) (string, bool) {
+	const prefix = "https://github.com/"
+	if !strings.HasPrefix(line, prefix) {
+		return "", false
+	}
+	parts := strings.Split(strings.TrimPrefix(line, prefix), "/")
+	if len(parts) != 4 {
+		return "", false
+	}
+	if parts[2] != "pull" {
+		return "", false
+	}
+	if !strings.EqualFold(parts[0], owner) || !strings.EqualFold(parts[1], repo) {
+		return "", false
+	}
+	raw := parts[3]
+	if len(raw) < 1 || len(raw) > 10 {
+		return "", false
+	}
+	for i := 0; i < len(raw); i++ {
+		if raw[i] < '0' || raw[i] > '9' {
+			return "", false
+		}
+	}
+	value, err := strconv.Atoi(raw)
+	if err != nil || value < 1 {
+		return "", false
+	}
+	return strconv.Itoa(value), true
 }
 
 // validateClaimComponent rejects a value that must not appear in a claim key

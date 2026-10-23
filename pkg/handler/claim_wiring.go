@@ -16,6 +16,7 @@ import (
 
 	pkg "github.com/bborbe/agent-task-executor/pkg"
 	"github.com/bborbe/agent-task-executor/pkg/claim"
+	"github.com/bborbe/agent-task-executor/pkg/metrics"
 )
 
 // ClaimRefClientFactory builds the git-rest claim ref client. It is called at
@@ -103,15 +104,23 @@ func (h *taskEventHandler) acquireSpawnClaim(ctx context.Context, task lib.Task)
 		return h.claimFailureDecision(task, "lease_manager", err)
 	}
 	owner, repo := claimOwnerRepo(task)
-	key, err := claim.DeriveClaimKey(
+	key, fallback, err := claim.DeriveClaimKeyWithBody(
 		ctx,
 		string(task.Frontmatter.TaskType()),
 		string(task.TaskIdentifier),
 		owner,
 		repo,
+		string(task.Content),
 	)
 	if err != nil {
 		return h.claimFailureDecision(task, "derive_key", err)
+	}
+	if fallback {
+		metrics.ClaimKeyFallbackTotal.Inc()
+		glog.Warningf(
+			"event=claim_key_fallback task=%s repo=%s/%s",
+			task.TaskIdentifier, owner, repo,
+		)
 	}
 	_, claimErr := manager.Claim(ctx, key, string(task.TaskIdentifier))
 	if claimErr == nil {
