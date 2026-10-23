@@ -542,7 +542,7 @@ func logDualConflict(secondary, taskID string) {
 func (m *leaseManager) Release(ctx context.Context, key string) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	held, ok := m.held[key]
+	held, ok := m.findHeld(key)
 	if !ok {
 		return nil
 	}
@@ -560,7 +560,7 @@ func (m *leaseManager) Release(ctx context.Context, key string) error {
 		)
 		return nil
 	}
-	return m.releaseLocked(ctx, key, held)
+	return m.releaseLocked(ctx, held)
 }
 
 // ReleaseAfterSuccess is Release, but it refuses to let go until
@@ -585,7 +585,7 @@ func (m *leaseManager) ReleaseAfterSuccess(
 ) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	held, ok := m.held[key]
+	held, ok := m.findHeld(key)
 	if !ok {
 		return nil
 	}
@@ -620,11 +620,47 @@ func (m *leaseManager) ReleaseAfterSuccess(
 		)
 		return nil
 	}
-	return m.releaseLocked(ctx, key, held)
+	return m.releaseLocked(ctx, held)
 }
 
-// releaseLocked deletes one held claim's ref. The caller holds m.mu.
-func (m *leaseManager) releaseLocked(ctx context.Context, key string, held *heldClaim) error {
+// deleteRef deletes one ref and reports "released", or "already_released" when
+// the store answered 409. Any other error is returned unchanged.
+func (m *leaseManager) deleteRef(ctx context.Context, key, sha string) (string, error) {
+	err := m.refClient.Delete(ctx, key, sha)
+	if err == nil {
+		return "released", nil
+	}
+	if errors.Is(err, ErrLeaseConflict) {
+		return "already_released", nil
+	}
+	return "", err
+}
+
+// deleteRefWithDeadline deletes one ref under the tick's deadline-capped
+// context and reports the same labels as deleteRef.
+func (m *leaseManager) deleteRefWithDeadline(
+	ctx context.Context,
+	key, sha string,
+) (string, error) {
+	reqCtx, cancel := m.requestContext(ctx)
+	defer cancel()
+	return m.deleteRef(reqCtx, key, sha)
+}
+
+// pairRemovalResult combines the two ref outcomes into one removal label: only
+// a pair whose refs were both already gone counts as already_released.
+func pairRemovalResult(primary, secondary string) string {
+	if primary == "already_released" && secondary == "already_released" {
+		return "already_released"
+	}
+	return "released"
+}
+
+// releaseLocked deletes both refs of a held claim as one unit. The caller
+// holds m.mu. A non-409 failure on either ref leaves the whole claim
+// pending-release so the retry pass finishes it; the primary is never counted
+// as released while the secondary is still there.
+func (m *leaseManager) releaseLocked(ctx context.Context, held *heldClaim) error {
 	running, err := m.jobControl.IsJobRunning(ctx, held.taskID)
 	if err != nil {
 		countClaim("error")
@@ -639,25 +675,36 @@ func (m *leaseManager) releaseLocked(ctx context.Context, key string, held *held
 		// alive, and the Job's own terminal event releases it.
 		glog.Infof(
 			"event=release_deferred_job_running key=%s task_id=%s",
-			key,
+			held.key,
 			held.taskID,
 		)
 		return nil
 	}
-	err = m.refClient.Delete(ctx, key, held.sha)
-	if err == nil {
-		delete(m.held, key)
-		countClaimRemoval(key, held.taskID, "released", held.sha)
+	primaryResult, err := m.deleteRef(ctx, held.key, held.sha)
+	if err != nil {
+		held.releasePending = true
+		countClaim("error")
+		return err
+	}
+	if held.secondKey == "" {
+		delete(m.held, held.key)
+		countClaimRemoval(held.key, held.taskID, primaryResult, held.sha)
 		return nil
 	}
-	if errors.Is(err, ErrLeaseConflict) {
-		delete(m.held, key)
-		countClaimRemoval(key, held.taskID, "already_released", held.sha)
-		return nil
+	secondaryResult, err := m.deleteRef(ctx, held.secondKey, held.secondSha)
+	if err != nil {
+		held.releasePending = true
+		countClaim("error")
+		return err
 	}
-	held.releasePending = true
-	countClaim("error")
-	return err
+	delete(m.held, held.key)
+	countClaimRemoval(
+		held.key,
+		held.taskID,
+		pairRemovalResult(primaryResult, secondaryResult),
+		held.sha,
+	)
+	return nil
 }
 
 // Takeover replaces an expired claim with one for taskID, using one CAS write.

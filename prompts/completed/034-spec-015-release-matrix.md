@@ -1,8 +1,13 @@
 ---
-status: approved
+status: completed
 spec: [015-dual-acquire-claim-keys]
+summary: Made every release, fence, lost-claim and renew path act on both refs of a dual claim as one unit, with pair-aware pending-release retry and new AC4/AC5/AC6 tests.
+execution_id: agent-task-executor-dual-acquire-exec-034-spec-015-release-matrix
+dark-factory-version: v0.198.7
 created: "2026-10-23T19:40:00Z"
 queued: "2026-10-23T19:51:10Z"
+started: "2026-10-23T20:14:35Z"
+completed: "2026-10-23T20:26:56Z"
 branch: dark-factory/dual-acquire-claim-keys
 ---
 
