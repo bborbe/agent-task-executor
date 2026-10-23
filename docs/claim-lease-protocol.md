@@ -87,6 +87,32 @@ equals its own name. For each entry:
 - A failed running check keeps the claim held and renewed, and the check is
   re-asked at every tick until it answers.
 - A claim of another cluster is never touched.
+- Keys under `claims/redrive/` are skipped before the cluster comparison, so a
+  streak ref is never adopted, renewed, fenced or released regardless of its
+  `cluster` value.
+
+## Streak refs
+
+A streak ref records how many consecutive times a task has been spawned at one
+phase. It lives in the same git-rest ref store as claims but is not a claim, and
+no lease-manager path treats it as one.
+
+- Key shape: `claims/redrive/<taskid>/<phase>/<n>`, where `n` is an integer
+  greater than or equal to 1. A task with no phase uses the phase component
+  `none`.
+- `cluster` is always the sentinel `redrive-streak`. It must never equal a real
+  executor cluster name.
+- `lease_until` is create time + 24 h. It is informational only: nothing renews
+  it and nothing expires a streak ref.
+- No lease-manager path acts on a streak ref — recovery, renew, fence, takeover,
+  release and audit all skip the `claims/redrive/` prefix. A streak ref
+  therefore never triggers a fence and never stops a task's Job.
+- The count is the number of consecutive spawns at one phase. Recording a spawn
+  at a new phase resets the streak by deleting the old phase's refs.
+- To un-cap a task, an operator deletes its streak refs through git-rest: list
+  them with `GET /api/v1/refs?prefix=claims/redrive/<taskid>` and delete each
+  entry with
+  `DELETE /api/v1/refs/claims/redrive/<taskid>/<phase>/<n>?expected_sha=<sha>`.
 
 ## Lost-response recovery
 

@@ -511,6 +511,12 @@ func (m *leaseManager) Recover(ctx context.Context) error {
 		return err
 	}
 	for _, ref := range refs {
+		// Streak refs are not claims: skip them by key before any cluster
+		// comparison, so an executor whose cluster is the streak sentinel still
+		// never adopts, renews, fences or releases one.
+		if strings.HasPrefix(strings.TrimPrefix(ref.Ref, "refs/"), RedriveStreakPrefix) {
+			continue
+		}
 		if ref.Cluster != m.cluster {
 			continue
 		}
