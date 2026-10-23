@@ -7,6 +7,7 @@ package handler
 import (
 	"context"
 
+	lib "github.com/bborbe/agent"
 	"github.com/bborbe/errors"
 	libk8s "github.com/bborbe/k8s"
 	batchv1 "k8s.io/api/batch/v1"
@@ -29,22 +30,65 @@ const claimTaskIDLabel = "agent.benjamin-borbe.de/task-id"
 type kubeJobControl struct {
 	kubeClient kubernetes.Interface
 	namespace  libk8s.Namespace
+	resolver   pkg.ConfigResolver
+	view       TaskView
 }
 
 // NewKubeJobControl returns the JobControl the lease manager needs before a
 // claim-taking mode may run its fence. Without it a claim that cannot renew
 // keeps its Job running unclaimed, which is the duplicate the claims exist to
 // prevent.
+//
+// resolver and view let the fence find a Job a Config has placed outside the
+// executor's namespace; either may be nil, in which case every lookup targets
+// the executor's namespace — today's behaviour, and the only behaviour possible
+// before a Config sets jobNamespace.
+//
+// The task comes from the TaskView, never from the spawn-time TaskStore: the
+// store is empty after a restart, and startup recovery asks about Jobs this pod
+// was running BEFORE it restarted. Reading the store released the claims of
+// sandboxed Jobs that were still running, so a peer could run the same task
+// twice. The view replays the compacted task event topic instead.
 func NewKubeJobControl(
 	kubeClient kubernetes.Interface,
 	namespace libk8s.Namespace,
+	resolver pkg.ConfigResolver,
+	view TaskView,
 ) claim.JobControl {
-	return &kubeJobControl{kubeClient: kubeClient, namespace: namespace}
+	return &kubeJobControl{
+		kubeClient: kubeClient,
+		namespace:  namespace,
+		resolver:   resolver,
+		view:       view,
+	}
+}
+
+// namespaceFor resolves the namespace taskID's Job lives in. Every failure path
+// falls back to the executor's namespace: the fence must never be the reason a
+// claim cannot be released, and before a Config sets jobNamespace that fallback
+// is also the correct answer.
+func (c *kubeJobControl) namespaceFor(ctx context.Context, taskID string) libk8s.Namespace {
+	if c.resolver == nil || c.view == nil {
+		return c.namespace
+	}
+	task, ok := c.view.Get(lib.TaskIdentifier(taskID))
+	if !ok {
+		return c.namespace
+	}
+	config, err := c.resolver.Resolve(ctx, task.Frontmatter.Assignee().String())
+	if err != nil {
+		return c.namespace
+	}
+	namespace, err := pkg.ResolveJobNamespace(ctx, c.namespace, config.JobNamespace)
+	if err != nil {
+		return c.namespace
+	}
+	return namespace
 }
 
 // IsJobRunning reports whether a non-terminal Job exists for taskID.
 func (c *kubeJobControl) IsJobRunning(ctx context.Context, taskID string) (bool, error) {
-	jobs, err := c.jobsForTask(ctx, taskID)
+	jobs, err := c.jobsForTask(ctx, c.namespaceFor(ctx, taskID), taskID)
 	if err != nil {
 		return false, err
 	}
@@ -59,13 +103,14 @@ func (c *kubeJobControl) IsJobRunning(ctx context.Context, taskID string) (bool,
 // DeleteJob deletes every Job for taskID. Deleting an absent Job is not an
 // error: the fence is the last resort and must not report a Job already gone.
 func (c *kubeJobControl) DeleteJob(ctx context.Context, taskID string) error {
-	jobs, err := c.jobsForTask(ctx, taskID)
+	namespace := c.namespaceFor(ctx, taskID)
+	jobs, err := c.jobsForTask(ctx, namespace, taskID)
 	if err != nil {
 		return err
 	}
 	propagation := metav1.DeletePropagationBackground
 	for _, job := range jobs {
-		if delErr := c.kubeClient.BatchV1().Jobs(string(c.namespace)).Delete(
+		if delErr := c.kubeClient.BatchV1().Jobs(string(namespace)).Delete(
 			ctx,
 			job.Name,
 			metav1.DeleteOptions{PropagationPolicy: &propagation},
@@ -79,9 +124,10 @@ func (c *kubeJobControl) DeleteJob(ctx context.Context, taskID string) error {
 // jobsForTask lists the Jobs carrying taskID's label.
 func (c *kubeJobControl) jobsForTask(
 	ctx context.Context,
+	namespace libk8s.Namespace,
 	taskID string,
 ) ([]batchv1.Job, error) {
-	jobs, err := c.kubeClient.BatchV1().Jobs(string(c.namespace)).List(
+	jobs, err := c.kubeClient.BatchV1().Jobs(string(namespace)).List(
 		ctx,
 		metav1.ListOptions{LabelSelector: claimTaskIDLabel + "=" + taskID},
 	)

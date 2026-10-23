@@ -56,6 +56,7 @@ var _ = Describe("respawned-second-success race", func() {
 		taskStore = pkg.NewTaskStore()
 		h = handler.NewTaskEventHandler(
 			fakeSpawner,
+			"dev",
 			base.Branch("prod"),
 			"",
 			true,

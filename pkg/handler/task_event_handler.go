@@ -17,6 +17,7 @@ import (
 	lib "github.com/bborbe/agent"
 	"github.com/bborbe/cqrs/base"
 	"github.com/bborbe/errors"
+	libk8s "github.com/bborbe/k8s"
 	libtime "github.com/bborbe/time"
 	"github.com/bborbe/vault-cli/pkg/domain"
 	"github.com/golang/glog"
@@ -191,6 +192,7 @@ type TaskEventHandler interface {
 // NewTaskEventHandler creates a new TaskEventHandler.
 func NewTaskEventHandler(
 	jobSpawner spawner.JobSpawner,
+	namespace libk8s.Namespace,
 	branch base.Branch,
 	cluster string,
 	stageFilter bool,
@@ -211,6 +213,7 @@ func NewTaskEventHandler(
 ) ClaimLifecycleEventHandler {
 	handler := &taskEventHandler{
 		jobSpawner:            jobSpawner,
+		namespace:             namespace,
 		branch:                branch,
 		cluster:               cluster,
 		stageFilter:           stageFilter,
@@ -239,6 +242,7 @@ func NewTaskEventHandler(
 
 type taskEventHandler struct {
 	jobSpawner       spawner.JobSpawner
+	namespace        libk8s.Namespace
 	branch           base.Branch
 	cluster          string
 	stageFilter      bool
@@ -347,8 +351,12 @@ func (h *taskEventHandler) isJobActive(
 	task lib.Task,
 	config *pkg.AgentConfiguration,
 ) (bool, error) {
+	namespace, err := h.jobNamespaceForTask(ctx, config, task.TaskIdentifier)
+	if err != nil {
+		return false, err
+	}
 	if config == nil || config.Assignee == "" {
-		active, err := h.jobSpawner.IsJobActive(ctx, task.TaskIdentifier)
+		active, err := h.jobSpawner.IsJobActive(ctx, namespace, task.TaskIdentifier)
 		if err != nil {
 			return false, errors.Wrapf(
 				ctx,
@@ -359,7 +367,7 @@ func (h *taskEventHandler) isJobActive(
 		}
 		return active, nil
 	}
-	activeSet, err := h.activeJobsFor(ctx, config.Assignee)
+	activeSet, err := h.activeJobsFor(ctx, namespace, config.Assignee)
 	if err != nil {
 		return false, errors.Wrapf(ctx, err, "check active job for task %s", task.TaskIdentifier)
 	}
@@ -790,6 +798,12 @@ func (h *taskEventHandler) spawnIfNeededClaimed(
 		return false, nil
 	}
 
+	// A Config whose target namespace is unusable is left untouched for a human:
+	// no claim, no frontmatter write, no Job.
+	if h.rejectInvalidJobNamespace(ctx, task, config) {
+		return false, nil
+	}
+
 	// If current_job is set in frontmatter, a prior spawn notification was written
 	// to the task file. Verify the job is still active; if not, proceed to spawn.
 	if currentJob := task.Frontmatter.CurrentJob(); currentJob != "" {
@@ -994,7 +1008,12 @@ func (h *taskEventHandler) deferIfAtConcurrencyCap(
 	if config == nil || config.MaxConcurrentJobs <= 0 {
 		return false, nil
 	}
-	activeSet, err := h.activeJobsFor(ctx, config.Assignee)
+	namespace, err := h.jobNamespaceForTask(ctx, config, task.TaskIdentifier)
+	if err != nil {
+		metrics.TaskEventsTotal.WithLabelValues("error").Inc()
+		return false, err
+	}
+	activeSet, err := h.activeJobsFor(ctx, namespace, config.Assignee)
 	if err != nil {
 		metrics.TaskEventsTotal.WithLabelValues("error").Inc()
 		return false, errors.Wrapf(ctx, err, "count active jobs for assignee %s", config.Assignee)

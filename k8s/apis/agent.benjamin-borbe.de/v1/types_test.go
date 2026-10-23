@@ -982,3 +982,63 @@ var _ = Describe("AgentType", func() {
 		})
 	})
 })
+
+var _ = Describe("JSON round-trip for jobNamespace", func() {
+	It("round-trips jobNamespace through JSON", func() {
+		spec := agentv1.ConfigSpec{
+			Assignee:     "claude-agent",
+			Image:        "example/image:latest",
+			Heartbeat:    "30m",
+			JobNamespace: "dev-agents-sandbox",
+		}
+		data, err := json.Marshal(spec)
+		Expect(err).To(BeNil())
+		var decoded agentv1.ConfigSpec
+		Expect(json.Unmarshal(data, &decoded)).To(Succeed())
+		Expect(decoded.JobNamespace).To(Equal("dev-agents-sandbox"))
+	})
+
+	It("omits jobNamespace from JSON when empty", func() {
+		spec := agentv1.ConfigSpec{
+			Assignee:  "claude-agent",
+			Image:     "example/image:latest",
+			Heartbeat: "30m",
+		}
+		data, err := json.Marshal(spec)
+		Expect(err).To(BeNil())
+		Expect(string(data)).NotTo(ContainSubstring("jobNamespace"))
+	})
+})
+
+var _ = Describe("Equal with jobNamespace", func() {
+	It("returns false when JobNamespace differs", func() {
+		a := agentv1.ConfigSpec{
+			Assignee:     "claude",
+			Image:        "registry/agent-claude",
+			Heartbeat:    "30m",
+			JobNamespace: "dev-agents-sandbox",
+		}
+		b := agentv1.ConfigSpec{
+			Assignee:  "claude",
+			Image:     "registry/agent-claude",
+			Heartbeat: "30m",
+		}
+		Expect(a.Equal(b)).To(BeFalse())
+	})
+
+	It("returns true when JobNamespace matches", func() {
+		a := agentv1.ConfigSpec{
+			Assignee:     "claude",
+			Image:        "registry/agent-claude",
+			Heartbeat:    "30m",
+			JobNamespace: "dev-agents-sandbox",
+		}
+		b := agentv1.ConfigSpec{
+			Assignee:     "claude",
+			Image:        "registry/agent-claude",
+			Heartbeat:    "30m",
+			JobNamespace: "dev-agents-sandbox",
+		}
+		Expect(a.Equal(b)).To(BeTrue())
+	})
+})

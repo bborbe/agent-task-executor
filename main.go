@@ -390,7 +390,10 @@ func (a *application) Run(ctx context.Context, sentryClient libsentry.Client) er
 			// fault the mode already tolerates.
 			glog.Warningf("claim lease loop disabled: %v", managerErr)
 		case manager != nil:
-			runFuncs = append(runFuncs, factory.CreateClaimLifecycleRunFuncs(manager)...)
+			runFuncs = append(
+				runFuncs,
+				factory.CreateClaimLifecycleRunFuncs(manager, taskView.Ready)...,
+			)
 		}
 	}
 

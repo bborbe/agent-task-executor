@@ -172,6 +172,7 @@ func newRedriveHarness(mode pkg.ClaimMode, client *mocks.FakeClaimRefClient) *cl
 	}
 	h.eventHandler = handler.NewTaskEventHandler(
 		spawner,
+		"dev",
 		base.Branch("prod"),
 		"self",
 		true,

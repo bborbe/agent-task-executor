@@ -20,6 +20,21 @@ const recoverStartupAttempts = 5
 // endpoint without holding the boot open.
 const recoverStartupRetryDelay = time.Second
 
+// recoverStartupViewWait bounds how long recovery waits for the task view to
+// finish replaying before it decides any claim's fate.
+//
+// The wait is load-bearing for correctness. A claim's Job may live outside the
+// executor's namespace, and the fence finds it through the task's assignee —
+// read from the view. Deciding against a view that has not caught up reads "no
+// task, no Job" for a Job that is running and releases its claim: the duplicate
+// the claims exist to prevent. A boot that outlasts the bound proceeds and logs
+// it, so a view that never becomes ready (Kafka down) cannot stop recovery.
+const recoverStartupViewWait = 60 * time.Second
+
+// recoverStartupViewPollInterval is how often the readiness gate re-checks. A
+// var, not a const, so a test can shrink the gate's latency.
+var recoverStartupViewPollInterval = 500 * time.Millisecond
+
 // RecoverAtStartup re-adopts, releases or fences the claims this cluster held
 // before a restart, retried a bounded number of times.
 //
@@ -32,7 +47,12 @@ const recoverStartupRetryDelay = time.Second
 // It never returns an error. A git-rest outage at boot must not crash-loop an
 // executor that can still process tasks: the failure is logged and the claims
 // stay unheld, which is the behaviour before this step existed.
-func RecoverAtStartup(ctx context.Context, manager LeaseManager) error {
+func RecoverAtStartup(
+	ctx context.Context,
+	manager LeaseManager,
+	viewReady func() bool,
+) error {
+	waitForTaskView(ctx, viewReady)
 	for attempt := 1; attempt <= recoverStartupAttempts; attempt++ {
 		err := manager.Recover(ctx)
 		if err == nil {
@@ -57,6 +77,36 @@ func RecoverAtStartup(ctx context.Context, manager LeaseManager) error {
 	return nil
 }
 
+// waitForTaskView blocks until the task view has replayed, the bound expires or
+// ctx is done. A nil check function means the caller has no view and every
+// namespace lookup is the executor's own, so there is nothing to wait for.
+func waitForTaskView(ctx context.Context, viewReady func() bool) {
+	if viewReady == nil || viewReady() {
+		return
+	}
+	glog.Infof("claim recovery: waiting up to %s for the task view replay", recoverStartupViewWait)
+	deadline := time.NewTimer(recoverStartupViewWait)
+	defer deadline.Stop()
+	ticker := time.NewTicker(recoverStartupViewPollInterval)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-deadline.C:
+			glog.Warningf(
+				"claim recovery: task view not ready after %s; a claim whose Job lives outside this namespace may be released",
+				recoverStartupViewWait,
+			)
+			return
+		case <-ticker.C:
+			if viewReady() {
+				return
+			}
+		}
+	}
+}
+
 // RunClaimRecovery is RecoverAtStartup as a run-group member: it recovers once,
 // then holds until the context is cancelled.
 //
@@ -68,8 +118,12 @@ func RecoverAtStartup(ctx context.Context, manager LeaseManager) error {
 // canceled` while every other component was still healthy. Recovering is a
 // startup action, not a component with a lifetime, so it waits on the same
 // context everything else waits on.
-func RunClaimRecovery(ctx context.Context, manager LeaseManager) error {
-	_ = RecoverAtStartup(ctx, manager) // never returns an error; see above
+func RunClaimRecovery(
+	ctx context.Context,
+	manager LeaseManager,
+	viewReady func() bool,
+) error {
+	_ = RecoverAtStartup(ctx, manager, viewReady) // never returns an error; see above
 	<-ctx.Done()
 	return nil
 }
