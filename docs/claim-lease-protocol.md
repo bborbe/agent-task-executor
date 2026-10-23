@@ -18,6 +18,7 @@ no knob, flag or opt-out for any of them.
 | Takeover grace | 30 s | A claim may be taken over no earlier than `lease_until + 30 s`. |
 | Jobless grace | 300 s | A held claim whose Job has been continuously not running for this long is released. |
 | Jobless check interval | 60 s | How often the lease loop asks whether a held claim's Job is still running. |
+| Jobless pass budget | 10 s | One jobless pass starts no new Job check after this long; due claims are visited oldest-check-first, so claims a pass did not reach are checked first on the following ticks. A check already started may still run up to the request timeout. |
 | Request timeout cap | 30 s | Hard cap on every git-rest request; a tick also caps each request at the earliest `fenceAt` among held claims. |
 
 `fenceAt = lease_until − 60 s`. The fence fires when `now > fenceAt − 10 s`.
@@ -55,6 +56,11 @@ These log lines make claims observable at runtime:
   fence cannot delete the claim's Job. `fenced` is counted then and the claim
   stays held; the `event=claim_released … result=fenced` line follows once a
   later tick deletes the Job and the ref, without counting again.
+- `event=claim_jobless_released key=<key> task=<id> jobless_since=<RFC3339>` —
+  warning, logged when a held claim's Job has been continuously not running for
+  the jobless grace. It counts the `jobless_released` result once; the
+  `event=claim_released` line for the same removal follows from the release
+  itself.
 
 ## Claim state machine
 
