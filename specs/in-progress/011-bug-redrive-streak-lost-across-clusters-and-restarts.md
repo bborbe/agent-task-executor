@@ -1,6 +1,8 @@
 ---
-status: approved
+status: prompted
 approved: "2026-10-23T09:20:26Z"
+generating: "2026-10-23T09:22:53Z"
+prompted: "2026-10-23T09:37:49Z"
 branch: dark-factory/bug-redrive-streak-lost-across-clusters-and-restarts
 ---
 
