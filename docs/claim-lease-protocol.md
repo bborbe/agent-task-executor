@@ -104,15 +104,28 @@ no lease-manager path treats it as one.
   executor cluster name.
 - `lease_until` is create time + 24 h. It is informational only: nothing renews
   it and nothing expires a streak ref.
-- No lease-manager path acts on a streak ref — recovery, renew, fence, takeover,
-  release and audit all skip the `claims/redrive/` prefix. A streak ref
-  therefore never triggers a fence and never stops a task's Job.
+- No lease-manager path acts on a streak ref. Restart recovery is the only path
+  that lists the whole `claims/` prefix, and it skips `claims/redrive/` keys
+  explicitly; renew, fence, takeover, release and audit act only on the
+  `claims/task/` and `claims/repo/` keys the executor derives itself, so they
+  never reach a streak ref. A streak ref therefore never triggers a fence and
+  never stops a task's Job.
 - The count is the number of consecutive spawns at one phase. Recording a spawn
   at a new phase resets the streak by deleting the old phase's refs.
 - To un-cap a task, an operator deletes its streak refs through git-rest: list
   them with `GET /api/v1/refs?prefix=claims/redrive/<taskid>` and delete each
   entry with
   `DELETE /api/v1/refs/claims/redrive/<taskid>/<phase>/<n>?expected_sha=<sha>`.
+- Streak refs are cleared only when the executor handles the task's terminal
+  state (or records a spawn at a new phase). A task that disappears without
+  that — its file deleted, reassigned to another vault, or a clear whose
+  deletes failed (logged as `event=redrive_streak_write_failed`) — leaves its
+  refs behind; nothing reaps them. They are inert (a vanished task is never
+  spawned), and the same list-and-delete above removes them;
+  `GET /api/v1/refs?prefix=claims/redrive` lists every remaining streak ref.
+- A task capped by the shared streak but not by this executor's memory is
+  reported as `deferred`, not `capped`, in the reconcile pass summary;
+  `executor_redrive_capped_total` counts every cap regardless.
 
 ## Lost-response recovery
 
