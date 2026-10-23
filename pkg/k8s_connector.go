@@ -350,7 +350,8 @@ func configSpecProperties() map[string]apiextensionsv1.JSONSchemaProps {
 		"imagePullSecret":    {Type: "string"},
 		// 0 = unlimited (see AgentConfiguration.MaxConcurrentJobs).
 		"maxConcurrentJobs": {Type: "integer", Minimum: &crdMinZero},
-		// Optional; unset means true. false parks a taken-over task at human_review.
+		// Optional; unset means false. true re-dispatches a taken-over task;
+		// false or unset parks it at human_review.
 		"rerunOnLostClaim": {Type: "boolean"},
 		// Minimums mirror the Helm chart's config-crd.yaml (10 / 30) and the
 		// admission guards in k8s/apis/agent.benjamin-borbe.de/v1/types.go.

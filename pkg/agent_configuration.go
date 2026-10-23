@@ -80,11 +80,23 @@ type AgentConfiguration struct {
 	ImagePullSecret string
 	// Trigger declares the per-agent phase and status conditions under which the executor spawns a Job.
 	Trigger *agentv1.Trigger
+	// RerunOnLostClaim mirrors ConfigSpec.RerunOnLostClaim. After another
+	// executor takes over this agent's expired claim, false parks the task at
+	// phase human_review instead of re-dispatching it; nil means the Config did
+	// not set the field and parks too. Resolve it with LostClaimAction.
+	RerunOnLostClaim *bool
 	// ZombieJobTimeoutSeconds mirrors ConfigSpec.ZombieJobTimeoutSeconds. The
 	// spawner stamps this value onto Job.Spec.ActiveDeadlineSeconds; the sweeper
 	// uses it as the elapsed-time threshold. nil means "use the default
 	// DefaultZombieJobTimeoutSeconds from the CRD types package".
 	ZombieJobTimeoutSeconds *int32
+}
+
+// LostClaimAction maps RerunOnLostClaim to the action to take after another
+// executor takes over this agent's expired claim. It delegates to the CRD type
+// so the mapping has exactly one implementation.
+func (a AgentConfiguration) LostClaimAction() agentv1.LostClaimAction {
+	return agentv1.ConfigSpec{RerunOnLostClaim: a.RerunOnLostClaim}.LostClaimAction()
 }
 
 // EffectiveZombieJobTimeoutSeconds returns the effective deadline in seconds:
@@ -135,6 +147,7 @@ func (a AgentConfigurations) TaggedConfigurations(branch string) AgentConfigurat
 			JobNamespace:            c.JobNamespace,
 			ImagePullSecret:         c.ImagePullSecret,
 			Trigger:                 c.Trigger,
+			RerunOnLostClaim:        c.RerunOnLostClaim,
 			ZombieJobTimeoutSeconds: c.ZombieJobTimeoutSeconds,
 		}
 	}

@@ -24,7 +24,7 @@ func TestAcquireSpawnClaimLogsAcquiredOnClaim(t *testing.T) {
 
 	var ok bool
 	out := captureGlogStderr(t, func() {
-		ok = h.acquireSpawnClaim(ctx, gateTask("", ""))
+		ok = h.acquireSpawnClaim(ctx, gateTask("", ""), redispatchConfig())
 	})
 
 	if !ok {
@@ -45,7 +45,7 @@ func TestAcquireSpawnClaimLogsAcquiredOnTakeover(t *testing.T) {
 
 	var ok bool
 	out := captureGlogStderr(t, func() {
-		ok = h.acquireSpawnClaim(ctx, gateTask("", ""))
+		ok = h.acquireSpawnClaim(ctx, gateTask("", ""), redispatchConfig())
 	})
 
 	if !ok {
@@ -66,7 +66,7 @@ func TestAcquireSpawnClaimDoesNotLogAcquiredWhenBothFail(t *testing.T) {
 
 	var ok bool
 	out := captureGlogStderr(t, func() {
-		ok = h.acquireSpawnClaim(ctx, gateTask("", ""))
+		ok = h.acquireSpawnClaim(ctx, gateTask("", ""), redispatchConfig())
 	})
 
 	if ok {

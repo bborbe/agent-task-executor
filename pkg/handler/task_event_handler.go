@@ -898,7 +898,7 @@ func (h *taskEventHandler) spawnIfNeededClaimed(
 	defer h.clearSpawnPending(task.TaskIdentifier)
 
 	unlockClaim := h.lockClaimRelease(task.TaskIdentifier)
-	acquired := h.acquireSpawnClaim(ctx, task)
+	acquired := h.acquireSpawnClaim(ctx, task, config)
 	unlockClaim()
 	if !acquired {
 		return false, nil

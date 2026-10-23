@@ -21,18 +21,18 @@ var _ = Describe("LostClaimAction", func() {
 			spec := agentv1.ConfigSpec{RerunOnLostClaim: field}
 			Expect(spec.LostClaimAction()).To(Equal(expected))
 		},
-		Entry("unset re-dispatches", nil, agentv1.RedispatchAfterLostClaim),
+		Entry("unset parks at human_review", nil, agentv1.ParkAfterLostClaim),
 		Entry("true re-dispatches", boolPtr(true), agentv1.RedispatchAfterLostClaim),
 		Entry("false parks at human_review", boolPtr(false), agentv1.ParkAfterLostClaim),
 	)
 })
 
 var _ = Describe("rerunOnLostClaim JSON", func() {
-	It("treats an absent field as nil and true", func() {
+	It("treats an absent field as nil and parks", func() {
 		var spec agentv1.ConfigSpec
 		Expect(json.Unmarshal([]byte(`{}`), &spec)).To(Succeed())
 		Expect(spec.RerunOnLostClaim).To(BeNil())
-		Expect(spec.RerunOnLostClaimEnabled()).To(BeTrue())
+		Expect(spec.RerunOnLostClaimEnabled()).To(BeFalse())
 	})
 
 	It("decodes an explicit false", func() {
