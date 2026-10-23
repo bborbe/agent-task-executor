@@ -27,6 +27,10 @@ const RequestTimeout = 30 * libtime.Second
 // It is final: the claim client never retries.
 var ErrLeaseConflict = stderrors.New("lease conflict")
 
+// ErrRefNotFound is returned when git-rest answers 404 on a DELETE. It is
+// final: the ref is already gone.
+var ErrRefNotFound = stderrors.New("ref not found")
+
 // ClaimRef is one entry of GET /api/v1/refs. Ref is the full ref name
 // ("refs/claims/..."), not the key. LeaseUntil is the raw RFC3339 string the
 // server returned; callers parse it and never trust it without validation.
@@ -256,6 +260,8 @@ func (c *claimRefClient) Delete(ctx context.Context, key string, expectedSha str
 		return nil
 	case http.StatusConflict:
 		return errors.Wrapf(ctx, ErrLeaseConflict, "DELETE refs %s returned 409", key)
+	case http.StatusNotFound:
+		return errors.Wrapf(ctx, ErrRefNotFound, "DELETE refs %s returned 404", key)
 	default:
 		return errors.Errorf(ctx, "DELETE refs %s returned %d", key, resp.StatusCode)
 	}
