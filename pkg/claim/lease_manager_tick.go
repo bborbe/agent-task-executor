@@ -46,6 +46,7 @@ func (m *leaseManager) Tick(ctx context.Context) error {
 		return err
 	}
 	m.retryPendingReleases(ctx)
+	m.releaseExpiredHolds(ctx)
 	m.recheckRunning(ctx)
 	if err := ctx.Err(); err != nil {
 		return err
@@ -128,6 +129,30 @@ func (m *leaseManager) retryPendingReleases(ctx context.Context) {
 		default:
 			countClaim("error")
 		}
+	}
+}
+
+// releaseExpiredHolds releases claims whose success-grace hold has run out.
+//
+// ReleaseAfterSuccess sets that hold when a Job succeeds, covering the window in
+// which the vault has not yet absorbed the result. Nothing else would ever end
+// it — no further event arrives for a task that just finished — so this pass is
+// what turns a bounded hold into an actual release. A failed release leaves
+// releasePending set and is retried by retryPendingReleases on the next tick.
+func (m *leaseManager) releaseExpiredHolds(ctx context.Context) {
+	now := m.currentDateTime.Now().Time()
+	for _, key := range m.heldKeys() {
+		held, ok := m.held[key]
+		if !ok || held.holdUntil.Time().IsZero() {
+			continue
+		}
+		if now.Before(held.holdUntil.Time()) {
+			continue
+		}
+		held.holdUntil = libtime.DateTime{}
+		reqCtx, cancel := m.requestContext(ctx)
+		_ = m.releaseLocked(reqCtx, key, held)
+		cancel()
 	}
 }
 

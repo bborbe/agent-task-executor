@@ -6,8 +6,10 @@ package handler
 
 import (
 	"context"
+	"time"
 
 	lib "github.com/bborbe/agent"
+	libtime "github.com/bborbe/time"
 	"github.com/golang/glog"
 
 	pkg "github.com/bborbe/agent-task-executor/pkg"
@@ -42,12 +44,62 @@ func (h *taskEventHandler) ReleaseTaskClaim(ctx context.Context, taskID lib.Task
 	h.releaseTaskClaimLocked(ctx, taskID)
 }
 
+// ReleaseTaskClaimAfterSuccess is ReleaseTaskClaim for a Job that SUCCEEDED: the
+// claim is not deleted yet, it is held for claim.SuccessGracePeriod from
+// completedAt and released by the lease loop once that window passes.
+//
+// The window exists because a succeeded Job is not yet a finished task. The
+// agent published its result, but the vault learns about it on the controller's
+// own cycle, and until it does a peer cluster reads the task as still eligible —
+// with no record anywhere that it just ran, since that record is per-pod memory.
+// The claim is the one artefact both clusters share, so keeping it is what makes
+// the peer's Claim fail instead of running the task twice. Measured 2026-10-23:
+// task 1788bf3c completed on nuke prod at 05:55:00 and ran again on sun at
+// 05:55:30, both successful.
+//
+// A failed Job must use ReleaseTaskClaim instead: a retry belongs to this
+// cluster, and holding its claim would only delay it.
+func (h *taskEventHandler) ReleaseTaskClaimAfterSuccess(
+	ctx context.Context,
+	taskID lib.TaskIdentifier,
+	completedAt time.Time,
+) {
+	if h.claimMode == pkg.ClaimModeOff {
+		return
+	}
+	unlockClaim := h.lockClaimRelease(taskID)
+	defer unlockClaim()
+	h.releaseTaskClaimLockedWith(
+		ctx,
+		taskID,
+		func(manager claim.LeaseManager, key string) error {
+			return manager.ReleaseAfterSuccess(ctx, key, libtime.DateTime(completedAt))
+		},
+	)
+}
+
 // releaseTaskClaimLocked is ReleaseTaskClaim's body for a caller that already
 // holds this task's claim lock. The failed-spawn path needs it so that clearing
 // the in-flight marker and releasing are atomic against a concurrent spawn.
 func (h *taskEventHandler) releaseTaskClaimLocked(
 	ctx context.Context,
 	taskID lib.TaskIdentifier,
+) {
+	h.releaseTaskClaimLockedWith(
+		ctx,
+		taskID,
+		func(manager claim.LeaseManager, key string) error {
+			return manager.Release(ctx, key)
+		},
+	)
+}
+
+// releaseTaskClaimLockedWith runs one release per claim this executor holds for
+// the task, using the caller's release strategy.
+func (h *taskEventHandler) releaseTaskClaimLockedWith(
+	ctx context.Context,
+	taskID lib.TaskIdentifier,
+	release func(manager claim.LeaseManager, key string) error,
 ) {
 	// A spawn in flight for this task holds the claim for the replacement Job:
 	// the store still names the previous Job, so a terminal event arriving here
@@ -74,7 +126,7 @@ func (h *taskEventHandler) releaseTaskClaimLocked(
 		if held.TaskID != string(taskID) {
 			continue
 		}
-		if releaseErr := manager.Release(ctx, held.Key); releaseErr != nil {
+		if releaseErr := release(manager, held.Key); releaseErr != nil {
 			glog.Warningf(
 				"event=claim_release_failed task=%s key=%s err=%v",
 				taskID,

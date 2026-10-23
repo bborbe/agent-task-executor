@@ -42,7 +42,12 @@ var defaultTriggerStatuses = domain.TaskStatuses{
 // defaultRespawnGracePeriod is the window after job_started_at during which the executor
 // suppresses respawn when the K8s Job is inactive but no terminal phase has been observed.
 // The window gives the agent's terminal-phase write time to propagate through the vault pipeline.
-const defaultRespawnGracePeriod = 300 * time.Second
+// defaultRespawnGracePeriod is the spawn path's half of the success window: it
+// refuses to re-spawn a task whose Job succeeded this recently. It aliases the
+// claim package's SuccessGracePeriod deliberately — the other half holds the
+// claim for the same length — so the two cannot drift apart and leave a gap
+// where the claim is gone but the spawn guard has also expired.
+const defaultRespawnGracePeriod = claim.SuccessGracePeriod
 
 // deferredRespawnInterval is the polling interval for the deferred-respawn reconciliation loop.
 // Must be ≤ 60s to satisfy the R ≤ 60s bound from spec 037 (R = interval + per-tick
@@ -453,6 +458,28 @@ func (h *taskEventHandler) ConsumeMessage(ctx context.Context, msg *sarama.Consu
 		return err
 	}
 	if skip {
+		return nil
+	}
+	// A cold pod resumes its consumer from the last committed offset, so the first
+	// events it processes are a BACKLOG — snapshots of tasks as they looked when
+	// the event was produced, possibly minutes ago and possibly already handled by
+	// another cluster. Acting on one spawns a task on the strength of a stale
+	// snapshot, and none of the guards that would refuse it can help yet: the
+	// spawn path's anti-duplicate checks read the task view and the task store,
+	// and on a cold pod both are empty.
+	//
+	// The view is the durable half — it replays the compacted topic from the
+	// oldest offset — so waiting for it to be ready is waiting for the picture
+	// that makes those guards meaningful. Reconcile already refuses to run before
+	// then (event=reconcile_view_not_ready), and it is the source-of-truth floor:
+	// every task skipped here is driven by the next reconcile pass once the view
+	// is ready, so nothing is dropped, only deferred.
+	if h.view != nil && !h.view.Ready() {
+		metrics.TaskEventsTotal.WithLabelValues("skipped_view_not_ready").Inc()
+		glog.Infof(
+			"event=event_view_not_ready task=%s: task view has not replayed yet; reconcile will drive it",
+			task.TaskIdentifier,
+		)
 		return nil
 	}
 	_, err = h.spawnIfNeeded(ctx, task, config)

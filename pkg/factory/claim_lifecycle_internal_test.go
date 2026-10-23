@@ -10,6 +10,8 @@ import (
 	"testing"
 	"time"
 
+	libtime "github.com/bborbe/time"
+
 	"github.com/bborbe/agent-task-executor/pkg/claim"
 )
 
@@ -53,6 +55,12 @@ func (s *stubLeaseManager) Claim(
 }
 
 func (s *stubLeaseManager) Release(context.Context, string) error { return nil }
+
+func (s *stubLeaseManager) ReleaseAfterSuccess(
+	context.Context, string, libtime.DateTime,
+) error {
+	return nil
+}
 
 func (s *stubLeaseManager) Takeover(
 	context.Context, string, string,
