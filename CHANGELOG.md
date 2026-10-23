@@ -2,6 +2,10 @@
 
 All notable changes to this project will be documented in this file.
 
+## Unreleased
+
+- fix: **a task pinned to a cluster outside its own stage pool is now reported instead of silently dropped.** A task whose `cluster` names this executor while its `stage` differs from `BRANCH` could never run here and nothing anywhere in the fleet recorded it — it was not foreign, so the foreign-cluster skip did not fire, and the stage filter dropped it with only a `V(3)` line no deployed executor emits. It is now logged as `event=pin_outside_pool` at `V(2)` and counted as `agent_executor_task_events_total{result="pin_outside_pool"}`, replacing `skipped_stage` for that case so the metric keeps one result per event. Both the Kafka path and the reconcile floor report, because a task that reaches the floor has no Kafka event behind it. The guard is `taskCluster(task) == h.cluster`: a task with no `cluster` is a plain stage skip and keeps counting as `skipped_stage`, so an untagged task on a stage-filtering executor is never mislabelled a dead pin. `README.md` no longer advises setting `STAGE_FILTER=false` on sun — that made the cluster run tasks of every stage, and sun runs it `true`.
+
 ## v0.33.0
 
 - feat: **the Job watcher now observes every Config's sandbox namespace.** The watcher derives its watched set from the executor namespace plus every distinct `spec.jobNamespace` its Configs name, starts one Job/Pod informer pair per namespace, and re-resolves the set every 60 seconds so a Config flip is picked up without an executor restart. A terminal-failed Job in a sandbox namespace now produces the same synthetic failure and store cleanup as one in the executor namespace. A namespace no Config names is never watched, no informer is stopped for a namespace a Config stops naming, and no new RBAC is requested.
