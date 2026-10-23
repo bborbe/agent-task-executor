@@ -119,6 +119,10 @@ func (h *taskEventHandler) evalDeferredRespawns(ctx context.Context) error {
 		if !spawned {
 			continue
 		}
+		// The task is no longer waiting behind the cap, so the queued_at record
+		// has served its purpose. Dropping it keeps the map bounded by the
+		// deferred working set.
+		h.clearQueuedAtStamp(entry.task.TaskIdentifier)
 		jobStartedAt, _ := entry.task.Frontmatter.JobStartedAt()
 		elapsed := now.Sub(jobStartedAt)
 		glog.V(1).Infof(
@@ -141,6 +145,7 @@ func (h *taskEventHandler) evalDeferredRespawns(ctx context.Context) error {
 func (h *taskEventHandler) removeDeferredEntry(id lib.TaskIdentifier) {
 	h.deferredMu.Lock()
 	delete(h.deferredRespawns, id)
+	delete(h.queuedAtStamps, id)
 	h.deferredEpochs[id]++
 	h.deferredMu.Unlock()
 }

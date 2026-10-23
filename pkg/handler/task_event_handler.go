@@ -215,6 +215,7 @@ func NewTaskEventHandler(
 		currentDateTime:       currentDateTime,
 		deferredRespawns:      make(map[lib.TaskIdentifier]deferredEntry),
 		deferredEpochs:        make(map[lib.TaskIdentifier]uint64),
+		queuedAtStamps:        make(map[lib.TaskIdentifier]string),
 		spawnLocks:            make(map[string]*sync.Mutex),
 		view:                  view,
 		taskVault:             taskVault,
@@ -245,7 +246,14 @@ type taskEventHandler struct {
 	// deferredEpochs counts removals per task, so a replay collected before an
 	// eviction can detect it. Entries are never deleted: resetting an epoch would
 	// re-validate a stale claim.
-	deferredEpochs        map[lib.TaskIdentifier]uint64
+	deferredEpochs map[lib.TaskIdentifier]uint64
+	// queuedAtStamps records the queued_at this executor already published for a
+	// task, so a deferral never re-stamps while the write is unlandable. The
+	// frontmatter and view checks in stampQueueEntry both read state that only a
+	// SUCCESSFUL vault write can update; a task whose file is gone never updates
+	// either, so without this map it re-stamps on every deferral, forever.
+	// Guarded by deferredMu.
+	queuedAtStamps        map[lib.TaskIdentifier]string
 	spawnLocksMu          sync.Mutex
 	spawnLocks            map[string]*sync.Mutex
 	view                  TaskView
@@ -1051,12 +1059,20 @@ func (h *taskEventHandler) deferIfAtConcurrencyCap(
 //
 //   - the task already carries queued_at (a re-deferred in-memory entry) — return
 //     it unchanged and publish nothing.
-//   - the vault file already carries queued_at — return a copy carrying it. The
-//     vault is the authority here because a duplicate Kafka event can arrive after
+//   - the task view already carries queued_at — return a copy carrying it. The
+//     view is the authority here because a duplicate Kafka event can arrive after
 //     the publish but before the controller has written the field; re-stamping
 //     would move the timestamp forward.
-//   - neither — stamp the injected clock's current UTC time, publish it, and
-//     return a copy carrying it so a later re-deferral takes the first branch.
+//   - this executor already published queued_at for the task — return a copy
+//     carrying that value and publish nothing. This is the case a missing task
+//     file depends on: both checks above read state only a SUCCESSFUL vault write
+//     updates, so for a task whose file was deleted (or whose write keeps failing)
+//     neither ever becomes true and the deferral would stamp a fresh value on
+//     every retry — once per concurrencyCapRetryDelay, indefinitely. Measured on
+//     nukedev 2026-10-23: one update-frontmatter command per minute for a task id
+//     with no file anywhere, each one a not-found at the controller.
+//   - none of the above — stamp the injected clock's current UTC time, record it,
+//     publish it, and return a copy carrying it.
 //
 // A failed publish is deliberately not retried. The returned copy still carries
 // the value, so the next re-deferral sees it and publishes nothing: that wait
@@ -1068,7 +1084,11 @@ func (h *taskEventHandler) stampQueueEntry(ctx context.Context, task lib.Task) l
 	if v := h.queuedAtFromView(task.TaskIdentifier); v != "" {
 		return taskWithFrontmatterValue(task, "queued_at", v)
 	}
+	if v := h.queuedAtStamp(task.TaskIdentifier); v != "" {
+		return taskWithFrontmatterValue(task, "queued_at", v)
+	}
 	queuedAt := h.currentDateTime.Now().UTC().Format("2006-01-02T15:04:05Z07:00")
+	h.recordQueuedAtStamp(task.TaskIdentifier, queuedAt)
 	if err := h.resultPublisher.PublishQueueEntry(ctx, task, queuedAt); err != nil {
 		glog.Warningf(
 			"event=queued_at_publish_failed task=%s queued_at=%s err=%v",
@@ -1099,6 +1119,40 @@ func (h *taskEventHandler) queuedAtFromView(id lib.TaskIdentifier) string {
 		return ""
 	}
 	return v
+}
+
+// queuedAtStamp returns the queued_at this executor already published for id, or "".
+//
+// It is the fallback for a task whose write can never land. queuedAtFromView only
+// knows a value the vault accepted, so a task whose file was deleted keeps
+// returning "" there and would re-stamp on every deferral; the record written by
+// recordQueuedAtStamp survives that, because it is executor-local.
+func (h *taskEventHandler) queuedAtStamp(id lib.TaskIdentifier) string {
+	h.deferredMu.Lock()
+	defer h.deferredMu.Unlock()
+	return h.queuedAtStamps[id]
+}
+
+// recordQueuedAtStamp remembers the queued_at published for id, so a later
+// deferral reuses it instead of publishing a later, wrong one.
+//
+// Recorded before the publish is attempted, not after: a failed publish is
+// deliberately not retried (see stampQueueEntry), and recording only on success
+// would let a task whose publish keeps failing re-stamp on every deferral — the
+// same unbounded loop this record exists to stop.
+func (h *taskEventHandler) recordQueuedAtStamp(id lib.TaskIdentifier, value string) {
+	h.deferredMu.Lock()
+	defer h.deferredMu.Unlock()
+	h.queuedAtStamps[id] = value
+}
+
+// clearQueuedAtStamp drops the record for id once the task is no longer deferred,
+// so the map stays bounded by the deferred working set rather than growing with
+// every task the executor has ever deferred.
+func (h *taskEventHandler) clearQueuedAtStamp(id lib.TaskIdentifier) {
+	h.deferredMu.Lock()
+	defer h.deferredMu.Unlock()
+	delete(h.queuedAtStamps, id)
 }
 
 // taskWithFrontmatterValue returns a copy of the task whose frontmatter carries
