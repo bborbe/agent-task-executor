@@ -81,6 +81,7 @@ var _ = Describe("TaskEventHandler", func() {
 		currentDateTime = libtime.NewCurrentDateTime()
 		h = handler.NewTaskEventHandler(
 			fakeSpawner,
+			"dev",
 			base.Branch("prod"),
 			"",
 			true,
@@ -1008,6 +1009,7 @@ var _ = Describe("TaskEventHandler", func() {
 				)
 				clusterHandler = handler.NewTaskEventHandler(
 					clusterSpawner,
+					"dev",
 					base.Branch("prod"),
 					"nukedev",
 					true,
@@ -1063,6 +1065,7 @@ var _ = Describe("TaskEventHandler", func() {
 			newHandler := func(runUntagged bool) handler.TaskEventHandler {
 				return handler.NewTaskEventHandler(
 					untaggedSpawner,
+					"dev",
 					base.Branch("prod"),
 					"sun",
 					true,
@@ -1137,6 +1140,7 @@ var _ = Describe("TaskEventHandler", func() {
 				)
 				stageHandler = handler.NewTaskEventHandler(
 					stageSpawner,
+					"dev",
 					base.Branch("dev"),
 					"sun",
 					false,
@@ -1179,6 +1183,7 @@ var _ = Describe("TaskEventHandler", func() {
 			)
 			localHandler := handler.NewTaskEventHandler(
 				localSpawner,
+				"dev",
 				base.Branch("dev"),
 				"",
 				true,
@@ -1234,6 +1239,7 @@ var _ = Describe("TaskEventHandler", func() {
 			)
 			localHandler := handler.NewTaskEventHandler(
 				localSpawner,
+				"dev",
 				base.Branch("dev"),
 				"",
 				true,

@@ -1,7 +1,13 @@
 ---
-status: draft
+status: completed
 spec: [002-config-job-namespace]
+summary: SpawnJob now creates Jobs in the Config-resolved namespace, the event handler rejects an executor-namespace Config with an ERROR log and no Job, and the app:agent pod label is pinned by tests.
+execution_id: agent-task-executor-job-namespace-exec-023-spec-002-spawner-create-path
+dark-factory-version: v0.198.7
 created: "2026-10-23T11:05:00Z"
+queued: "2026-10-23T11:19:16Z"
+started: "2026-10-23T11:19:17Z"
+completed: "2026-10-23T11:28:12Z"
 branch: dark-factory/config-job-namespace
 ---
 

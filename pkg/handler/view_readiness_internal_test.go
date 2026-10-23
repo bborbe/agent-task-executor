@@ -54,6 +54,7 @@ func TestConsumeMessageDoesNotSpawnBeforeTheViewIsReady(t *testing.T) {
 	spawner := &stubJobSpawner{}
 	handler := NewTaskEventHandler(
 		spawner,
+		"dev",
 		"prod",
 		"self",
 		true,

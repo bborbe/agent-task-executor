@@ -1,8 +1,9 @@
 ---
-status: prompted
+status: verifying
 approved: "2026-10-23T10:58:11Z"
 generating: "2026-10-23T11:00:14Z"
 prompted: "2026-10-23T11:14:17Z"
+verifying: "2026-10-23T11:18:52Z"
 branch: dark-factory/config-job-namespace
 ---
 

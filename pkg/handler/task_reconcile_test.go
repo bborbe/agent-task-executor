@@ -58,6 +58,7 @@ var _ = Describe("TaskEventHandler reconcile loop", func() {
 		currentDateTime = libtime.NewCurrentDateTime()
 		h = handler.NewTaskEventHandler(
 			fakeSpawner,
+			"dev",
 			base.Branch("prod"),
 			"",
 			true,
@@ -119,6 +120,7 @@ var _ = Describe("TaskEventHandler reconcile loop", func() {
 		untaggedResolver := &mocks.FakeConfigResolver{}
 		untaggedHandler := handler.NewTaskEventHandler(
 			fakeSpawner,
+			"dev",
 			base.Branch("prod"),
 			"sun",
 			true,
@@ -942,6 +944,7 @@ var _ = Describe("TaskEventHandler reconcile loop", func() {
 		newTimedHandler := func(passTimeout, interval time.Duration) handler.TaskEventHandler {
 			return handler.NewTaskEventHandler(
 				fakeSpawner,
+				"dev",
 				base.Branch("prod"),
 				"",
 				true,
@@ -1283,6 +1286,7 @@ var _ = Describe("TaskEventHandler reconcile loop", func() {
 			liveSpawner.IsJobActiveReturns(false, nil)
 			liveHandler := handler.NewTaskEventHandler(
 				liveSpawner,
+				"dev",
 				base.Branch("prod"),
 				"",
 				true,

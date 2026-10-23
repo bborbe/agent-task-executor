@@ -124,6 +124,11 @@ func (s *jobSpawner) SpawnJob(
 	task lib.Task,
 	config pkg.AgentConfiguration,
 ) (string, error) {
+	jobNamespace, err := pkg.ResolveJobNamespace(ctx, s.namespace, config.JobNamespace)
+	if err != nil {
+		return "", err
+	}
+
 	assignee := task.Frontmatter.Assignee().String()
 	now := s.currentDateTimeGetter.Now()
 	jobName := jobNameFromTask(assignee, task.TaskIdentifier, now)
@@ -154,7 +159,7 @@ func (s *jobSpawner) SpawnJob(
 
 	objectMetaBuilder := k8s.NewObjectMetaBuilder()
 	objectMetaBuilder.SetName(k8s.Name(jobName))
-	objectMetaBuilder.SetNamespace(s.namespace)
+	objectMetaBuilder.SetNamespace(jobNamespace)
 
 	jobBuilder := k8s.NewJobBuilder()
 	jobBuilder.SetObjectMetaBuild(objectMetaBuilder)
@@ -180,26 +185,37 @@ func (s *jobSpawner) SpawnJob(
 	}
 	applyActiveDeadlineSeconds(config, jobName, task.TaskIdentifier, job)
 
-	_, err = s.kubeClient.BatchV1().
-		Jobs(s.namespace.String()).
+	if err := s.createJob(ctx, jobNamespace, job, jobName, task.TaskIdentifier, config.Image); err != nil {
+		return "", err
+	}
+	return jobName, nil
+}
+
+// createJob submits the built Job to the resolved namespace. An AlreadyExists
+// response is treated as success, keeping the spawn idempotent across
+// concurrent callers and retries.
+func (s *jobSpawner) createJob(
+	ctx context.Context,
+	jobNamespace k8s.Namespace,
+	job *batchv1.Job,
+	jobName string,
+	taskID lib.TaskIdentifier,
+	image string,
+) error {
+	_, err := s.kubeClient.BatchV1().
+		Jobs(jobNamespace.String()).
 		Create(ctx, job, metav1.CreateOptions{})
 	if err != nil {
 		if k8serrors.IsAlreadyExists(err) {
 			glog.V(2).
-				Infof("job %s already exists for task %s, treating as success", jobName, task.TaskIdentifier)
-			return jobName, nil
+				Infof("job %s already exists for task %s, treating as success", jobName, taskID)
+			return nil
 		}
-		return "", errors.Wrapf(
-			ctx,
-			err,
-			"create job %s for task %s failed",
-			jobName,
-			task.TaskIdentifier,
-		)
+		return errors.Wrapf(ctx, err, "create job %s for task %s failed", jobName, taskID)
 	}
 	glog.V(2).
-		Infof("created job %s for task %s with image %s", jobName, task.TaskIdentifier, config.Image)
-	return jobName, nil
+		Infof("created job %s for task %s with image %s", jobName, taskID, image)
+	return nil
 }
 
 func (s *jobSpawner) IsJobActive(

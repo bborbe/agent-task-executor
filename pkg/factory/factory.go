@@ -208,6 +208,7 @@ func CreateConsumer(
 	)
 	taskEventHandler := handler.NewTaskEventHandler(
 		jobSpawner,
+		namespace,
 		branch,
 		cluster,
 		stageFilter,

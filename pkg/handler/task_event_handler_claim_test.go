@@ -86,6 +86,7 @@ func newClaimHarness(mode pkg.ClaimMode) *claimHarness {
 	}
 	h.eventHandler = handler.NewTaskEventHandler(
 		spawner,
+		"dev",
 		base.Branch("prod"),
 		"self",
 		true,

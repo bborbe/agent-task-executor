@@ -73,6 +73,7 @@ var _ = Describe("TaskEventHandler", func() {
 		currentDateTime = libtime.NewCurrentDateTime()
 		h = handler.NewTaskEventHandler(
 			fakeSpawner,
+			"dev",
 			base.Branch("prod"),
 			"",
 			true,
@@ -487,6 +488,7 @@ var _ = Describe("TaskEventHandler", func() {
 			newRoutingHandler := func(cluster string, runUntagged bool) handler.TaskEventHandler {
 				return handler.NewTaskEventHandler(
 					fakeSpawner,
+					"dev",
 					base.Branch("prod"),
 					cluster,
 					true,
@@ -1172,6 +1174,7 @@ var _ = Describe("TaskEventHandler", func() {
 
 					freshHandler := handler.NewTaskEventHandler(
 						fakeSpawner,
+						"dev",
 						base.Branch("prod"),
 						"",
 						true,
@@ -1227,6 +1230,7 @@ var _ = Describe("TaskEventHandler", func() {
 
 					freshHandler := handler.NewTaskEventHandler(
 						fakeSpawner,
+						"dev",
 						base.Branch("prod"),
 						"",
 						true,

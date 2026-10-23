@@ -17,6 +17,7 @@ import (
 	lib "github.com/bborbe/agent"
 	"github.com/bborbe/cqrs/base"
 	"github.com/bborbe/errors"
+	libk8s "github.com/bborbe/k8s"
 	libtime "github.com/bborbe/time"
 	"github.com/bborbe/vault-cli/pkg/domain"
 	"github.com/golang/glog"
@@ -185,6 +186,7 @@ type TaskEventHandler interface {
 // NewTaskEventHandler creates a new TaskEventHandler.
 func NewTaskEventHandler(
 	jobSpawner spawner.JobSpawner,
+	namespace libk8s.Namespace,
 	branch base.Branch,
 	cluster string,
 	stageFilter bool,
@@ -205,6 +207,7 @@ func NewTaskEventHandler(
 ) ClaimLifecycleEventHandler {
 	handler := &taskEventHandler{
 		jobSpawner:            jobSpawner,
+		namespace:             namespace,
 		branch:                branch,
 		cluster:               cluster,
 		stageFilter:           stageFilter,
@@ -233,6 +236,7 @@ func NewTaskEventHandler(
 
 type taskEventHandler struct {
 	jobSpawner       spawner.JobSpawner
+	namespace        libk8s.Namespace
 	branch           base.Branch
 	cluster          string
 	stageFilter      bool
@@ -777,6 +781,12 @@ func (h *taskEventHandler) spawnIfNeededClaimed(
 ) (bool, error) {
 	// Not this instance's task — see skipForeignVaultTask.
 	if h.skipForeignVaultTask(task) {
+		return false, nil
+	}
+
+	// A Config whose target namespace is unusable is left untouched for a human:
+	// no claim, no frontmatter write, no Job.
+	if h.rejectInvalidJobNamespace(ctx, task, config) {
 		return false, nil
 	}
 
