@@ -1,6 +1,8 @@
 ---
-status: approved
+status: prompted
 approved: "2026-10-23T19:15:49Z"
+generating: "2026-10-23T19:18:10Z"
+prompted: "2026-10-23T19:41:09Z"
 branch: dark-factory/dual-acquire-claim-keys
 ---
 
@@ -27,6 +29,7 @@ A key-scheme change can be rolled out one cluster at a time without ever creatin
 - Changing the per-PR key shape, the four repo-keyed task types, or the task-id-keyed types.
 - Tuning claim write volume. Doubling writes for repo-keyed tasks is a real, accepted cost of this design; it is watched outside this repo, by the `Claim Pushes Stay Within GitHub Limits Under Load` task in the claim-scheduling goal.
 - Removing the dual write. That is a later, separate release once every cluster runs this one.
+- Restoring per-repo serialisation of `pr-review` claims. Writing the per-repo ref for every repo-keyed task means two reviews of the same repo cannot run concurrently even when they are different PRs — the property `A pr-review Repo Claim Is Held Only While a Review of That Repo Runs` removed. This spec reintroduces it for the duration of the dual write; that is the accepted price of the migration, and dropping the dual write restores the previous behaviour.
 
 ## Assumptions
 
@@ -40,10 +43,10 @@ A key-scheme change can be rolled out one cluster at a time without ever creatin
 - [ ] AC1 — two executors, one deriving `claims/pr/…` and one deriving `claims/repo/…` for the same task, cannot both acquire it: the second `Claim` returns `ErrLeaseConflict`. Evidence: `go test ./pkg/claim/ -run TestDualAcquireKeys -v` passes, where `TestDualAcquireKeys` is a **plain Go test**, not a Ginkgo `It` — the package's Ginkgo entry point is `TestClaim`, so a `-run TestDualAcquireKeys` against an `It` selects zero tests and exits 0 vacuously. The test asserts `stderrors.Is(err, ErrLeaseConflict)` on the second acquire.
 - [ ] AC2 — when the two derivations differ, acquiring writes both refs, per-repo first. Evidence: the fake git-rest records exactly two `PUT`s, in order `claims/repo/<owner>-<repo>` then `claims/pr/<owner>-<repo>-<n>`; the test asserts that ordered slice.
 - [ ] AC3 — when the second write conflicts, the first is released and no Job is created. Evidence: the fake records `PUT A`, `PUT B → 409`, `DELETE A` in that order, and the spawn path returns false.
-- [ ] AC4 — **every** release path removes both refs. Evidence: a table-driven test with one case per path — plain `Release`, `ReleaseAfterSuccess` (success hold), fenced, jobless release, release-after-running-check, takeover, and claim-lost — each asserting the fake records two `DELETE`s carrying the two held shas. A path that deletes only the primary fails its own row.
+- [ ] AC4 — **every** release path removes both refs. Evidence: a table-driven test with one case per path — plain `Release`, `ReleaseAfterSuccess` (success hold), fenced, jobless release, release-after-running-check, takeover, and claim-lost — each asserting the fake records two `DELETE`s carrying the two held shas. One documented exception: claim-lost sends no ref `DELETE` at all by design (the claim already belongs to another cluster), so its row asserts zero ref `DELETE`s and one Job delete. A path that deletes only the primary fails its own row.
 - [ ] AC5 — a renew tick renews both refs, and a fence deletes both. Evidence: after one renew tick the fake records two `PUT`s whose `expected_sha` are the two held shas and whose `lease_until` are equal; after a fence it records two `DELETE`s and the held set is empty.
 - [ ] AC6 — a partial release is retried, not dropped. Evidence: with the second `DELETE` returning a non-`409` error, the held set still contains both keys and the next tick records the retried `DELETE`; the claim is not removed from `held`.
-- [ ] AC7 — restart recovery re-adopts both refs for a running Job, and repairs a half-written pair. Evidence: a listing carrying both keys with the manager's own cluster yields two adopted claims; a listing carrying only one adopts that one and records a `PUT` for the other.
+- [ ] AC7 — restart recovery re-adopts both refs for a running Job, and repairs a half-written pair. Evidence: a listing carrying both keys with the manager's own cluster yields two adopted claims; a per-PR-only listing adopts the PR ref and records a `PUT` for the derived per-repo partner; a per-repo-only listing is adopted as a single claim with no `PUT`, because a repo key carries neither the task type nor the PR number and the partner is therefore not derivable.
 - [ ] AC8 — a task whose two derivations are equal acquires exactly one ref, in both shapes. Evidence: two cases. (a) A task-id-keyed type records exactly one `PUT` and no `DELETE`. (b) A `pr-review` task whose body carries no bare PR URL records exactly one `PUT` and no `DELETE` — the fallback shape named in Problem. Case (b) is load-bearing: an implementation that special-cases only task-id types writes the per-repo key twice, the second `PUT` conflicts against its own first, and per DB2 the primary is released and no Job spawns, so every `pr-review` task without a bare URL stops running.
 - [ ] AC9 — the protocol document states pair handling. Evidence: `grep -n 'dual acquire' docs/claim-lease-protocol.md` returns at least one line, and the same file's Claim keys, Fence, Takeover and Restart recovery sections each name the pair.
 - [ ] **Post-Deploy (Rung-2):** **AC10** — after one `pr-review` task with a bare PR URL is dispatched in the window, the dual write is live on nuke dev: the executor logs one `event=claim_dual_acquired` line naming both keys. Evidence: `kubectlnukedev -n dev logs deploy/agent-task-executor-openclaw --since=30m | grep 'event=claim_dual_acquired'` returns ≥1 line containing both `key=claims/repo/` and `second=claims/pr/`. A window with no repo-keyed dispatch proves nothing and does not satisfy this.
@@ -93,6 +96,7 @@ A key-scheme change can be rolled out one cluster at a time without ever creatin
 | Primary written, process dies before the secondary | Restart recovery finds one ref, adopts it, re-derives and writes the other | Automatic on restart; the task is not spawned until both are held | the extra `PUT` in the recovery pass |
 | One of the two refs cannot be released | Claim stays pending-release, retried every tick until the fence point | Existing pending-release path; no new state | the claim stays in the held set across ticks; `event=claim_released` never fires for it |
 | Fleet permanently mixed (a cluster never upgraded) | Every cluster keeps writing both refs; correctness holds, write volume stays doubled | The operator completes the rollout; the dual write is removed in a later release | each cluster's running Job image per pass |
+| A secondary ref outlives its owner (crash, claim-lost, a failed DELETE) | The next `ClaimPair` that conflicts on the secondary reads it back and displaces it with a compare-and-swap once its lease has expired, so the task is not permanently unclaimable | Automatic on the next dispatch pass; no operator action | the `taken_over` count rising where a plain create would have failed |
 | git-rest rate-limits the doubled writes | A write failing on 429 is treated as a plain error: the primary is released and the pass retries | Next pass retries; the accepted cost is that the doubled volume may lengthen the retry cycle | `executor_claim_total{result="error"}` |
 
 ## Security / Abuse
