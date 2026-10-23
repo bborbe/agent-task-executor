@@ -6,6 +6,8 @@ package claim
 
 import (
 	"context"
+	"sort"
+	stdtime "time"
 
 	"github.com/bborbe/errors"
 	libtime "github.com/bborbe/time"
@@ -47,6 +49,7 @@ func (m *leaseManager) Tick(ctx context.Context) error {
 	}
 	m.retryPendingReleases(ctx)
 	m.releaseExpiredHolds(ctx)
+	m.releaseJoblessClaims(ctx)
 	m.recheckRunning(ctx)
 	if err := ctx.Err(); err != nil {
 		return err
@@ -69,6 +72,12 @@ func (m *leaseManager) retryPendingDeletions(ctx context.Context) {
 		}
 		if held.pendingDeletionPath == "fence" {
 			m.bestEffortDelete(ctx, key, held.sha)
+			glog.Infof(
+				"event=claim_released key=%s task=%s result=fenced sha=%s",
+				key,
+				held.taskID,
+				held.sha,
+			)
 		}
 		delete(m.held, key)
 	}
@@ -94,19 +103,19 @@ func (m *leaseManager) fenceClaim(ctx context.Context, key string, held *heldCla
 	if held.releasePending {
 		m.bestEffortDelete(ctx, key, held.sha)
 		delete(m.held, key)
-		countClaim("fenced")
+		countClaimRemoval(key, held.taskID, "fenced", held.sha)
 		return
 	}
 	if err := m.jobControl.DeleteJob(ctx, held.taskID); err != nil {
 		countClaim("error")
-		countClaim("fenced")
+		countClaimFencePending(key, held.taskID)
 		held.pendingJobDeletion = true
 		held.pendingDeletionPath = "fence"
 		return
 	}
 	m.bestEffortDelete(ctx, key, held.sha)
 	delete(m.held, key)
-	countClaim("fenced")
+	countClaimRemoval(key, held.taskID, "fenced", held.sha)
 }
 
 // retryPendingReleases retries the ref DELETE of claims whose release failed.
@@ -122,10 +131,10 @@ func (m *leaseManager) retryPendingReleases(ctx context.Context) {
 		switch {
 		case err == nil:
 			delete(m.held, key)
-			countClaim("released")
+			countClaimRemoval(key, held.taskID, "released", held.sha)
 		case errors.Is(err, ErrLeaseConflict):
 			delete(m.held, key)
-			countClaim("already_released")
+			countClaimRemoval(key, held.taskID, "already_released", held.sha)
 		default:
 			countClaim("error")
 		}
@@ -159,6 +168,101 @@ func (m *leaseManager) releaseExpiredHolds(ctx context.Context) {
 		_ = m.releaseLocked(reqCtx, key, held)
 		cancel()
 	}
+}
+
+// joblessPassBudget stops one jobless pass from starting further Job checks
+// once this much time has passed since the pass began; a check already
+// started may still run up to RequestTimeout.
+const joblessPassBudget = 10 * libtime.Second
+
+// releaseJoblessClaims releases held claims whose Job has been continuously
+// absent for at least JoblessGrace. Claims owned by another release path keep
+// their own handling.
+func (m *leaseManager) releaseJoblessClaims(ctx context.Context) {
+	now := m.currentDateTime.Now()
+	for _, key := range m.joblessDueKeys(now) {
+		if ctx.Err() != nil {
+			return
+		}
+		if m.currentDateTime.Now().Sub(now) >= joblessPassBudget {
+			return
+		}
+		held, ok := m.held[key]
+		if !ok {
+			continue
+		}
+		held.lastJoblessCheckAt = now
+		checkCtx, cancel := m.requestContext(ctx)
+		running, err := m.jobControl.IsJobRunning(checkCtx, held.taskID)
+		cancel()
+		if err != nil {
+			countClaim("error")
+			continue
+		}
+		if running {
+			held.joblessSince = libtime.DateTime(stdtime.Time{})
+			continue
+		}
+		if held.joblessSince.Time().IsZero() {
+			held.joblessSince = now
+		}
+		if now.Sub(held.joblessSince) < JoblessGrace {
+			continue
+		}
+		m.releaseJoblessClaim(ctx, key, held)
+	}
+}
+
+// joblessDueKeys returns the keys of held claims the jobless pass owns and
+// whose check is due at now. Never-checked claims come first, then the oldest
+// lastJoblessCheckAt; ties keep heldKeys order, which is sorted by key.
+func (m *leaseManager) joblessDueKeys(now libtime.DateTime) []string {
+	keys := make([]string, 0, len(m.held))
+	for _, key := range m.heldKeys() {
+		held := m.held[key]
+		if !joblessEligible(held) {
+			continue
+		}
+		if !held.lastJoblessCheckAt.Time().IsZero() &&
+			now.Sub(held.lastJoblessCheckAt) < JoblessCheckInterval {
+			continue
+		}
+		keys = append(keys, key)
+	}
+	sort.SliceStable(keys, func(i, j int) bool {
+		return m.held[keys[i]].lastJoblessCheckAt.Time().Before(
+			m.held[keys[j]].lastJoblessCheckAt.Time(),
+		)
+	})
+	return keys
+}
+
+// joblessEligible reports whether the jobless release owns this claim. The
+// success hold, a pending release, a pending Job deletion and an unanswered
+// adopted running check each keep their own path.
+func joblessEligible(held *heldClaim) bool {
+	return !held.pendingJobDeletion &&
+		!held.releasePending &&
+		!held.needsRunningCheck &&
+		held.holdUntil.Time().IsZero()
+}
+
+// releaseJoblessClaim releases one claim whose Job is gone, logging and
+// counting the decision once. A failed DELETE keeps the claim with a pending
+// release, which retryPendingReleases handles without counting again.
+func (m *leaseManager) releaseJoblessClaim(
+	ctx context.Context,
+	key string,
+	held *heldClaim,
+) {
+	countClaim("jobless_released")
+	glog.Warningf(
+		"event=claim_jobless_released key=%s task=%s jobless_since=%s",
+		key,
+		held.taskID,
+		held.joblessSince.Time().UTC().Format(stdtime.RFC3339),
+	)
+	m.releaseAfterRunningCheck(ctx, key, held)
 }
 
 // recheckRunning re-asks the Job running check of claims adopted with an
@@ -195,10 +299,10 @@ func (m *leaseManager) releaseAfterRunningCheck(
 	switch {
 	case err == nil:
 		delete(m.held, key)
-		countClaim("released")
+		countClaimRemoval(key, held.taskID, "released", held.sha)
 	case errors.Is(err, ErrLeaseConflict):
 		delete(m.held, key)
-		countClaim("already_released")
+		countClaimRemoval(key, held.taskID, "already_released", held.sha)
 	default:
 		countClaim("error")
 		held.releasePending = true
@@ -251,13 +355,7 @@ func (m *leaseManager) renewClaim(
 
 // claimLost deletes the Job and drops the claim without contacting git-rest.
 func (m *leaseManager) claimLost(ctx context.Context, key string, held *heldClaim) {
-	countClaim("claim_lost")
-	glog.Warningf(
-		"claim lost key=%s task_id=%s sha=%s",
-		key,
-		held.taskID,
-		held.sha,
-	)
+	countClaimRemoval(key, held.taskID, "claim_lost", held.sha)
 	if err := m.jobControl.DeleteJob(ctx, held.taskID); err != nil {
 		countClaim("error")
 		held.pendingJobDeletion = true

@@ -28,9 +28,25 @@ var _ = Describe("Metrics", func() {
 		Expect(names).To(HaveKey("executor_reconcile_redriven_total"))
 		Expect(names).To(HaveKey("executor_claim_total"))
 		Expect(names).To(HaveKey("executor_claim_mismatch_total"))
+		Expect(names).To(HaveKey("executor_claim_key_fallback_total"))
 	})
 
-	It("pre-initializes all 13 claim result series", func() {
+	It("pre-initializes the claim-key fallback counter at zero", func() {
+		mfs, err := prometheus.DefaultGatherer.Gather()
+		Expect(err).NotTo(HaveOccurred())
+
+		for _, mf := range mfs {
+			if mf.GetName() != "executor_claim_key_fallback_total" {
+				continue
+			}
+			Expect(mf.GetMetric()).To(HaveLen(1))
+			Expect(mf.GetMetric()[0].GetCounter().GetValue()).To(Equal(float64(0)))
+			return
+		}
+		Fail("executor_claim_key_fallback_total not registered")
+	})
+
+	It("pre-initializes all 14 claim result series", func() {
 		mfs, err := prometheus.DefaultGatherer.Gather()
 		Expect(err).NotTo(HaveOccurred())
 
@@ -49,6 +65,7 @@ var _ = Describe("Metrics", func() {
 			"already_released",
 			"adopted",
 			"error",
+			"jobless_released",
 		))
 	})
 

@@ -33,6 +33,12 @@ const (
 	FenceLead = 10 * libtime.Second
 	// TakeoverGrace is how long after the lease end a takeover is allowed.
 	TakeoverGrace = 30 * libtime.Second
+	// JoblessGrace is how long a held claim's Job must be continuously absent
+	// before the lease loop releases the claim.
+	JoblessGrace = 300 * libtime.Second
+	// JoblessCheckInterval is how often the lease loop asks JobControl whether a
+	// held claim's Job is still running.
+	JoblessCheckInterval = 60 * libtime.Second
 )
 
 // ErrLeaseNotExpired is returned by Takeover when the listed claim is still
@@ -122,6 +128,12 @@ type heldClaim struct {
 	// being renewed, until this instant, so a peer cannot take the task over in
 	// the window between a Job succeeding and its result reaching the vault.
 	holdUntil libtime.DateTime
+	// joblessSince is the instant of the first consecutive check that saw the
+	// Job not running; the zero value means "not currently jobless".
+	joblessSince libtime.DateTime
+	// lastJoblessCheckAt is the instant of the last IsJobRunning call made by the
+	// jobless pass; the zero value means "never checked".
+	lastJoblessCheckAt libtime.DateTime
 }
 
 type leaseManager struct {
@@ -137,6 +149,41 @@ type leaseManager struct {
 // countClaim increments executor_claim_total{result}.
 func countClaim(result string) {
 	metrics.ClaimTotal.WithLabelValues(result).Inc()
+}
+
+// countClaimRemoval increments executor_claim_total{result} and logs the one
+// release line for a claim this manager stops holding. Every path that counts
+// released, already_released, fenced or claim_lost calls it. A fence whose Job
+// deletion fails is counted by countClaimFencePending instead;
+// retryPendingDeletions logs its release line later without counting again.
+func countClaimRemoval(key string, taskID string, result string, sha string) {
+	metrics.ClaimTotal.WithLabelValues(result).Inc()
+	if result == "claim_lost" {
+		glog.Warningf(
+			"event=claim_released key=%s task=%s result=%s sha=%s",
+			key,
+			taskID,
+			result,
+			sha,
+		)
+		return
+	}
+	glog.Infof(
+		"event=claim_released key=%s task=%s result=%s sha=%s",
+		key,
+		taskID,
+		result,
+		sha,
+	)
+}
+
+// countClaimFencePending counts a fence whose Job deletion failed. The claim
+// stays held in pending Job deletion, so it logs the fence-pending line
+// instead of a release line. retryPendingDeletions logs the release line,
+// without counting again, once a later tick deletes the Job and the ref.
+func countClaimFencePending(key string, taskID string) {
+	countClaim("fenced")
+	glog.Warningf("event=claim_fence_pending key=%s task=%s", key, taskID)
 }
 
 // fenceAt is the instant a holder must have stopped its Job.
@@ -395,12 +442,12 @@ func (m *leaseManager) releaseLocked(ctx context.Context, key string, held *held
 	err = m.refClient.Delete(ctx, key, held.sha)
 	if err == nil {
 		delete(m.held, key)
-		countClaim("released")
+		countClaimRemoval(key, held.taskID, "released", held.sha)
 		return nil
 	}
 	if errors.Is(err, ErrLeaseConflict) {
 		delete(m.held, key)
-		countClaim("already_released")
+		countClaimRemoval(key, held.taskID, "already_released", held.sha)
 		return nil
 	}
 	held.releasePending = true
@@ -586,7 +633,7 @@ func (m *leaseManager) recoverFence(
 	if running || runErr != nil {
 		if err := m.jobControl.DeleteJob(ctx, ref.TaskID); err != nil {
 			countClaim("error")
-			countClaim("fenced")
+			countClaimFencePending(key, ref.TaskID)
 			m.held[key] = &heldClaim{
 				key:                 key,
 				taskID:              ref.TaskID,
@@ -600,7 +647,7 @@ func (m *leaseManager) recoverFence(
 		}
 	}
 	m.bestEffortDelete(ctx, key, ref.Sha)
-	countClaim("fenced")
+	countClaimRemoval(key, ref.TaskID, "fenced", ref.Sha)
 }
 
 // recoverAdopt holds, releases or re-checks the claim of a Job that may still
@@ -643,9 +690,9 @@ func (m *leaseManager) recoverAdopt(
 	err := m.refClient.Delete(ctx, key, ref.Sha)
 	switch {
 	case err == nil:
-		countClaim("released")
+		countClaimRemoval(key, ref.TaskID, "released", ref.Sha)
 	case errors.Is(err, ErrLeaseConflict):
-		countClaim("already_released")
+		countClaimRemoval(key, ref.TaskID, "already_released", ref.Sha)
 	default:
 		countClaim("error")
 	}

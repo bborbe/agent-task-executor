@@ -16,9 +16,51 @@ no knob, flag or opt-out for any of them.
 | Fence margin | 60 s | `fenceAt` is this long before `lease_until`. |
 | Fence lead | 10 s | The fence fires when `now > fenceAt − 10 s`, so a 10 s tick lands at or before `fenceAt`. |
 | Takeover grace | 30 s | A claim may be taken over no earlier than `lease_until + 30 s`. |
+| Jobless grace | 300 s | A held claim whose Job has been continuously not running for this long is released. |
+| Jobless check interval | 60 s | How often the lease loop asks whether a held claim's Job is still running. |
+| Jobless pass budget | 10 s | One jobless pass starts no new Job check after this long; due claims are visited oldest-check-first, so claims a pass did not reach are checked first on the following ticks. A check already started may still run up to the request timeout. |
 | Request timeout cap | 30 s | Hard cap on every git-rest request; a tick also caps each request at the earliest `fenceAt` among held claims. |
 
 `fenceAt = lease_until − 60 s`. The fence fires when `now > fenceAt − 10 s`.
+
+## Claim keys
+
+Every claim lives at one of three key shapes. Owner and repo are lowercased in
+every key, and keys and task ids are never metric label values.
+
+| Key shape | Used by |
+|---|---|
+| `claims/task/<task id>` | task-id-keyed types |
+| `claims/repo/<owner>-<repo>` | `update-go`, `release`, `build-fix`, and the `pr-review` fallback |
+| `claims/pr/<owner>-<repo>-<n>` | `pr-review` with a usable PR link |
+
+A `pr-review` key is per pull request when the task body carries a standalone
+pull-request URL: the first body line that, after trimming surrounding
+whitespace, is exactly `https://github.com/<o>/<r>/pull/<n>`, where `<o>/<r>`
+matches the task repository case-insensitively, `<n>` is 1–10 digits with a
+value of at least 1, and nothing follows `<n>`.
+
+When no line qualifies, the key falls back to `claims/repo/<owner>-<repo>`. The
+fallback logs one `event=claim_key_fallback task=<id> repo=<owner>/<repo>`
+warning and increments the unlabelled `executor_claim_key_fallback_total`
+counter once.
+
+These log lines make claims observable at runtime:
+
+- `event=claim_acquired key=<key> task=<id>` — one per successful `Claim` or
+  `Takeover`.
+- `event=claim_released key=<key> task=<id> result=<label> sha=<sha>` — one per
+  removal, with `result` one of `released`, `already_released`, `fenced` or
+  `claim_lost`. The `claim_lost` line is logged at warning level.
+- `event=claim_fence_pending key=<key> task=<id>` — warning, logged when the
+  fence cannot delete the claim's Job. `fenced` is counted then and the claim
+  stays held; the `event=claim_released … result=fenced` line follows once a
+  later tick deletes the Job and the ref, without counting again.
+- `event=claim_jobless_released key=<key> task=<id> jobless_since=<RFC3339>` —
+  warning, logged when a held claim's Job has been continuously not running for
+  the jobless grace. It counts the `jobless_released` result once; the
+  `event=claim_released` line for the same removal follows from the release
+  itself.
 
 ## Claim state machine
 
@@ -39,6 +81,10 @@ claimed → held → renewed / recovered / lost / fenced / released
 - `fenced`: the holder could not keep the lease alive and stopped its own Job at
   or before `fenceAt`.
 - `released`: the Job ended and the claim was deleted with the held sha.
+- Jobless release: a held claim whose Job has been continuously not running for
+  `JoblessGrace` is deleted with the held sha, and the task becomes eligible for
+  respawn. The success hold, a pending release, a pending Job deletion and an
+  unanswered adopted running check are excluded and keep their own handling.
 - Pending Job deletion: deleting the Job failed on the lost or fence path. The
   claim stays held, no renew and no ref `DELETE` are sent, and the Job deletion
   is retried at every tick.
@@ -46,7 +92,7 @@ claimed → held → renewed / recovered / lost / fenced / released
   stays held and later ticks retry the delete instead of renewing, until the
   fence point.
 
-`executor_claim_total{result}` counts every outcome above; all 13 result series
+`executor_claim_total{result}` counts every outcome above; all 14 result series
 are pre-initialised to 0. Keys and task ids are never label values.
 
 ## Fence
