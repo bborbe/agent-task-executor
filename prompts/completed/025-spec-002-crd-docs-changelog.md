@@ -1,7 +1,13 @@
 ---
-status: draft
+status: completed
 spec: [002-config-job-namespace]
+summary: 'Documented spec.jobNamespace (default and rejection rule) in the CRD reference and recorded the feature under the existing ## Unreleased changelog section'
+execution_id: agent-task-executor-job-namespace-exec-025-spec-002-crd-docs-changelog
+dark-factory-version: v0.198.7
 created: "2026-10-23T11:05:00Z"
+queued: "2026-10-23T11:40:38Z"
+started: "2026-10-23T11:40:40Z"
+completed: "2026-10-23T11:47:09Z"
 branch: dark-factory/config-job-namespace
 ---
 
