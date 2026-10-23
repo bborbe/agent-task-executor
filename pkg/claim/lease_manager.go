@@ -300,11 +300,26 @@ func (m *leaseManager) storeClaim(
 }
 
 // Release deletes the held claim. A 409 means already released and is nil.
+// A claim inside its success hold is kept until the hold expires.
 func (m *leaseManager) Release(ctx context.Context, key string) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	held, ok := m.held[key]
 	if !ok {
+		return nil
+	}
+	// A success hold outranks a plain release. The terminal phase reaches this
+	// cluster's vault view before a peer's does, so deleting here would end the
+	// hold exactly while the peer still reads the task as eligible (observed
+	// 2026-10-23: task 70688157 re-ran on sun 149 s after succeeding on nuke
+	// prod). The hold's own expiry in releaseExpiredHolds releases it.
+	if m.currentDateTime.Now().Time().Before(held.holdUntil.Time()) {
+		glog.Infof(
+			"event=release_kept_success_grace key=%s task_id=%s hold_until=%s",
+			key,
+			held.taskID,
+			held.holdUntil.Time().UTC().Format(stdtime.RFC3339),
+		)
 		return nil
 	}
 	return m.releaseLocked(ctx, key, held)
