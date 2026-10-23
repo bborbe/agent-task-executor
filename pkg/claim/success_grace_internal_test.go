@@ -92,6 +92,12 @@ func (c *stepClock) Now() libtime.DateTime {
 	return libtime.DateTime(c.now)
 }
 
+func (c *stepClock) get() time.Time {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.now
+}
+
 func (c *stepClock) set(at time.Time) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -189,5 +195,113 @@ func TestReleaseAfterSuccessReleasesImmediatelyWhenTheWindowHasPassed(t *testing
 	}
 	if got := len(mgr.HeldClaims()); got != 0 {
 		t.Fatalf("held claims = %d after a release past the window; want 0", got)
+	}
+}
+
+// failingJobControl errors the IsJobRunning check on its first call and answers
+// finished afterwards, so a hold that is released on a later tick proves the
+// retry rather than a single lucky pass.
+type failingJobControl struct {
+	mu    sync.Mutex
+	calls int
+}
+
+func (c *failingJobControl) IsJobRunning(context.Context, string) (bool, error) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.calls++
+	if c.calls == 1 {
+		return false, stderrors.New("apiserver hiccup")
+	}
+	return false, nil
+}
+
+func (c *failingJobControl) DeleteJob(context.Context, string) error { return nil }
+
+// TestReleaseAfterSuccessRetriesWhenTheJobCheckFails is the review's blocking
+// finding. releaseExpiredHolds used to clear holdUntil BEFORE releasing, so a
+// failed Job-running read left the claim with no hold and no releasePending: it
+// kept being renewed with nothing left to release it, forever. The hold is now
+// left expired until a release actually succeeds, so the next tick retries.
+func TestReleaseAfterSuccessRetriesWhenTheJobCheckFails(t *testing.T) {
+	client := newSuccessHoldRefClient()
+	job := &failingJobControl{}
+	start := time.Date(2026, 10, 23, 5, 55, 0, 0, time.UTC)
+	clock := &stepClock{now: start}
+
+	mgr, err := NewLeaseManager("nuke-prod", client, job, clock, libtime.NewWaiterDuration())
+	if err != nil {
+		t.Fatalf("NewLeaseManager returned %v", err)
+	}
+	ctx := context.Background()
+	const key = "claims/repo/task-3"
+
+	if _, claimErr := mgr.Claim(ctx, key, "task-3"); claimErr != nil {
+		t.Fatalf("claim returned %v; want success", claimErr)
+	}
+	if releaseErr := mgr.ReleaseAfterSuccess(ctx, key, libtime.DateTime(start)); releaseErr != nil {
+		t.Fatalf("ReleaseAfterSuccess returned %v; want nil", releaseErr)
+	}
+
+	// Walk the clock in tick-sized steps so renewals keep the lease ahead of the
+	// fence; only the hold expiry is under test.
+	for step := 0; step < 32; step++ {
+		clock.set(clock.get().Add(10 * time.Second))
+		if tickErr := mgr.Tick(ctx); tickErr != nil {
+			t.Fatalf("tick returned %v; want nil", tickErr)
+		}
+		if len(mgr.HeldClaims()) == 0 {
+			break
+		}
+	}
+	if got := len(mgr.HeldClaims()); got != 0 {
+		t.Fatalf(
+			"held claims = %d after the hold expired and one Job check failed; want 0 (the next tick must retry the release)",
+			got,
+		)
+	}
+}
+
+// TestReleaseAfterSuccessCapsAFutureCompletion pins the clock-skew bound: a
+// completion stamped in the future must not stretch the hold beyond one window
+// from now, or a skewed API server could pin a claim far past the lease.
+func TestReleaseAfterSuccessCapsAFutureCompletion(t *testing.T) {
+	client := newSuccessHoldRefClient()
+	job := finishedJobControl{}
+	start := time.Date(2026, 10, 23, 5, 55, 0, 0, time.UTC)
+	clock := &stepClock{now: start}
+
+	mgr, err := NewLeaseManager("nuke-prod", client, job, clock, libtime.NewWaiterDuration())
+	if err != nil {
+		t.Fatalf("NewLeaseManager returned %v", err)
+	}
+	ctx := context.Background()
+	const key = "claims/repo/task-4"
+
+	if _, claimErr := mgr.Claim(ctx, key, "task-4"); claimErr != nil {
+		t.Fatalf("claim returned %v; want success", claimErr)
+	}
+	// Completion stamped an hour in the future.
+	if releaseErr := mgr.ReleaseAfterSuccess(
+		ctx, key, libtime.DateTime(start.Add(time.Hour)),
+	); releaseErr != nil {
+		t.Fatalf("ReleaseAfterSuccess returned %v; want nil", releaseErr)
+	}
+	if got := len(mgr.HeldClaims()); got != 1 {
+		t.Fatalf(
+			"held claims = %d immediately after a future-stamped completion; want 1 (still inside the window)",
+			got,
+		)
+	}
+	// One window from NOW, not one window from the future stamp, so it is over.
+	clock.set(start.Add(SuccessGracePeriod + time.Second))
+	if tickErr := mgr.Tick(ctx); tickErr != nil {
+		t.Fatalf("tick returned %v; want nil", tickErr)
+	}
+	if got := len(mgr.HeldClaims()); got != 0 {
+		t.Fatalf(
+			"held claims = %d one window after now; want 0 — the future stamp must be capped",
+			got,
+		)
 	}
 }

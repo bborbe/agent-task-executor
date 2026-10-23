@@ -153,6 +153,9 @@ func (h *taskEventHandler) jobProvablyFinished(
 		task.TaskIdentifier,
 		stored,
 	)
-	h.taskStore.Delete(task.TaskIdentifier)
+	// Compare-and-delete: the JobExists call above is I/O, and a spawn can store a
+	// new entry for a new Job while it is in flight. Deleting unconditionally would
+	// drop that entry and leave its Job unclaimed and invisible to the release path.
+	h.taskStore.DeleteIfCurrentJob(task.TaskIdentifier, stored)
 	return true, nil
 }

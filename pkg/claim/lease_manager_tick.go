@@ -149,7 +149,12 @@ func (m *leaseManager) releaseExpiredHolds(ctx context.Context) {
 		if now.Before(held.holdUntil.Time()) {
 			continue
 		}
-		held.holdUntil = libtime.DateTime{}
+		// holdUntil is deliberately NOT cleared here. Clearing it first would leave
+		// a claim with no hold and no releasePending when the release fails — a
+		// failed IsJobRunning read is exactly that — and the claim would then be
+		// renewed forever with nothing left to release it. Leaving it expired means
+		// the next tick tries again, which is the same convergence retryPendingReleases
+		// uses.
 		reqCtx, cancel := m.requestContext(ctx)
 		_ = m.releaseLocked(reqCtx, key, held)
 		cancel()
