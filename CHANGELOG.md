@@ -2,6 +2,10 @@
 
 All notable changes to this project will be documented in this file.
 
+## Unreleased
+
+- feat: **the executor counts task re-runs.** `executor_task_reruns_total{task_type}` increments when a Job is spawned for a task whose last success was recorded for the *same phase* inside a 1 h window — a re-run, meaning the same unit of work running twice. The phase scoping is deliberate: a task that succeeds at planning and is spawned again for execution has advanced, not re-run, and counting that would fire a re-run alert on every ordinary task. The series is created at 0 on every spawn, so the absent-tier alert can tell "no re-run yet" from "the metric stopped being exported". The success record's retention moves from the 300 s respawn grace to a new `taskRerunWindow` (1 h) so a re-run an hour later is still recognisable; `defaultRespawnGracePeriod` and `claim.SuccessGracePeriod` keep their 300 s, so spawn refusal and claim holds are unchanged. A task whose first success ran on another cluster is not in this executor's store and is not counted here; cross-cluster re-runs stay visible via `executor_claim_total{result=~"taken_over|adopted"}`.
+
 ## v0.31.1
 
 - fix: **a stale success no longer releases a claim inside a newer run's success hold.** The Job watcher keeps re-reporting an older Job of the same task as succeeded. That completion is already past its own window, so `ReleaseAfterSuccess` used to delete the claim the newer run's hold protects, and the peer cluster ran the task again seconds later (seen live on v0.30.7 for update-go and releaser tasks). The call now keeps a claim whose hold is still in the future, logs `event=release_kept_success_grace`, and extends a hold but never shortens it.

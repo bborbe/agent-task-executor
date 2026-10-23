@@ -50,6 +50,15 @@ var defaultTriggerStatuses = domain.TaskStatuses{
 // where the claim is gone but the spawn guard has also expired.
 const defaultRespawnGracePeriod = claim.SuccessGracePeriod
 
+// taskRerunWindow is how far back a recorded success still identifies a spawn
+// as a re-run. It serves two purposes that must carry the same value: the
+// success record is pruned at this age, and a spawn inside it is counted as a
+// re-run. Deliberately separate from defaultRespawnGracePeriod — that one gates
+// the spawn refusal and must stay equal to the claim grace, whereas this one
+// only widens how long the record is kept, which is what lets a re-run an hour
+// later still be recognised as one.
+const taskRerunWindow = time.Hour
+
 // deferredRespawnInterval is the polling interval for the deferred-respawn reconciliation loop.
 // Must be ≤ 60s to satisfy the R ≤ 60s bound from spec 037 (R = interval + per-tick
 // comparison/spawn overhead; 30 s leaves headroom under the 60 s bound).
@@ -965,6 +974,7 @@ func (h *taskEventHandler) finishSpawn(
 	)
 	metrics.TaskEventsTotal.WithLabelValues("spawned").Inc()
 	metrics.JobsSpawnedTotal.Inc()
+	h.recordTaskRerun(task)
 	h.recordRedriveSpawn(ctx, task)
 	return nil
 }
@@ -1300,10 +1310,11 @@ func (h *taskEventHandler) ReconcileOnce(ctx context.Context) error {
 		return nil
 	}
 
-	// Once per pass: forget successes older than the grace window, so the
-	// record stays bounded to results that may still be in flight.
+	// Once per pass: forget successes older than the re-run window, so the
+	// record stays bounded to results that may still be in flight and still
+	// long enough for a later spawn to be recognised as a re-run.
 	h.taskStore.PruneSucceededBefore(
-		h.currentDateTime.Now().Time().Add(-defaultRespawnGracePeriod),
+		h.currentDateTime.Now().Time().Add(-taskRerunWindow),
 	)
 	owned := ownedTasks(snapshot, h.taskVault)
 	c := reconcileCounters{}
