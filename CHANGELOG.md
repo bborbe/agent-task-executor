@@ -2,7 +2,7 @@
 
 All notable changes to this project will be documented in this file.
 
-## Unreleased
+## v0.34.0
 
 - feat: **a task whose claim is taken over is now parked at `human_review` instead of re-run when its Config says so.** `ConfigSpec.LostClaimAction()` had no production caller, so `rerunOnLostClaim: false` was inert and a lost claim re-ran the task on whichever cluster won the next claim. The takeover branch in `pkg/handler/claim_wiring.go` § `acquireSpawnClaim` now consults it: `ParkAfterLostClaim` publishes `phase: human_review` and creates no Job, logging `event=parked_lost_claim key=… task=…` so the park is attributable independently of the vault write's propagation, and counting `executor_parked_lost_claim_total{result}` because the new default makes an unexpected fleet-wide park alertable rather than log-only. Only `CLAIM_MODE=on` parks — shadow's contract is to take claims without ever blocking a dispatch. The phase write is retried, and the success line is logged only once it lands: returning without the write is not fail-safe on its own, since `releaseJoblessClaims` drops the held claim after 300 s and a task still in a spawnable phase would then run again. `RerunOnLostClaim` is carried through `AgentConfiguration` and `TaggedConfigurations` so the decision is reachable from the claim path. **The unset default flips to `false`**: a Config that leaves the field out now parks rather than re-dispatches, so the guard covers every agent that has not explicitly opted back in. `human_review` was already in the terminal-phase set, so a parked task is never re-spawned.
 
