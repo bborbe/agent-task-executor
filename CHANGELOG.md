@@ -2,7 +2,7 @@
 
 All notable changes to this project will be documented in this file.
 
-## Unreleased
+## v0.32.0
 
 - feat: **the executor counts task re-runs.** `executor_task_reruns_total{task_type}` increments when a Job is spawned for a task whose last success was recorded for the *same phase* inside a 1 h window — a re-run, meaning the same unit of work running twice. The phase scoping is deliberate: a task that succeeds at planning and is spawned again for execution has advanced, not re-run, and counting that would fire a re-run alert on every ordinary task. The series is created at 0 on every spawn, so the absent-tier alert can tell "no re-run yet" from "the metric stopped being exported". The success record's retention moves from the 300 s respawn grace to a new `taskRerunWindow` (1 h) so a re-run an hour later is still recognisable; `defaultRespawnGracePeriod` and `claim.SuccessGracePeriod` keep their 300 s, so spawn refusal and claim holds are unchanged. A task whose first success ran on another cluster is not in this executor's store and is not counted here; cross-cluster re-runs stay visible via `executor_claim_total{result=~"taken_over|adopted"}`.
 
