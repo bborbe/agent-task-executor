@@ -1,8 +1,13 @@
 ---
-status: approved
+status: completed
 spec: [015-dual-acquire-claim-keys]
+summary: 'Documented the dual-acquire claim-key pair in docs/claim-lease-protocol.md and added a feat bullet under the existing ## Unreleased changelog section.'
+execution_id: agent-task-executor-dual-acquire-exec-036-spec-015-protocol-docs
+dark-factory-version: v0.198.7
 created: "2026-10-23T20:05:00Z"
 queued: "2026-10-23T19:51:10Z"
+started: "2026-10-23T20:41:44Z"
+completed: "2026-10-23T20:48:50Z"
 branch: dark-factory/dual-acquire-claim-keys
 ---
 
