@@ -2,7 +2,7 @@
 
 All notable changes to this project will be documented in this file.
 
-## Unreleased
+## v0.30.8
 
 - fix: **the consecutive-re-drive cap is now shared across clusters and survives a restart.** The streak lived only in each executor's memory, so two clusters driving the same task each counted their own spawns and a restarted pod started at zero — task `1788bf3c` was re-driven past the cap that way. The count is now also written to `claims/redrive/<taskid>/<phase>/<n>` refs in the same git-rest instance as the dispatch claims, and the cap refuses when the larger of the stored and in-memory counts reaches 3. A failed store read or write falls back to the in-memory floor with a warning, and claim mode `off` is unchanged: no store is built and no request is sent.
 
