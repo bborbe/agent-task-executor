@@ -367,3 +367,61 @@ func TestReleaseInsideTheSuccessHoldKeepsTheClaim(t *testing.T) {
 		t.Fatalf("peer claim after the hold = (%v, %v); want a held claim", held, err)
 	}
 }
+
+// TestStaleSuccessInsideTheHoldKeepsTheClaim replays task 1788bf3c: a newer run
+// succeeds and holds the claim, then the watcher re-reports an older job of the
+// same task as succeeded. That stale completion is already past its own window
+// and must not release the claim the newer run's hold protects.
+func TestStaleSuccessInsideTheHoldKeepsTheClaim(t *testing.T) {
+	client := newSuccessHoldRefClient()
+	job := finishedJobControl{}
+	newerDone := time.Date(2026, 10, 23, 13, 26, 4, 0, time.UTC)
+	olderDone := time.Date(2026, 10, 23, 13, 20, 15, 0, time.UTC)
+	clockA := &stepClock{now: newerDone.Add(9 * time.Second)}
+	clockB := &stepClock{now: newerDone.Add(9 * time.Second)}
+
+	mgrA, err := NewLeaseManager("sun", client, job, clockA, libtime.NewWaiterDuration())
+	if err != nil {
+		t.Fatalf("NewLeaseManager(sun) returned %v", err)
+	}
+	mgrB, err := NewLeaseManager("nuke-prod", client, job, clockB, libtime.NewWaiterDuration())
+	if err != nil {
+		t.Fatalf("NewLeaseManager(nuke-prod) returned %v", err)
+	}
+
+	ctx := context.Background()
+	const key = "claims/task/task-4"
+
+	if _, claimErr := mgrA.Claim(ctx, key, "task-4"); claimErr != nil {
+		t.Fatalf("cluster A claim returned %v; want success", claimErr)
+	}
+	if err := mgrA.ReleaseAfterSuccess(ctx, key, libtime.DateTime(newerDone)); err != nil {
+		t.Fatalf("ReleaseAfterSuccess(newer) returned %v; want nil", err)
+	}
+
+	// The older job's success is re-reported inside the newer run's hold.
+	clockA.set(newerDone.Add(35 * time.Second))
+	if err := mgrA.ReleaseAfterSuccess(ctx, key, libtime.DateTime(olderDone)); err != nil {
+		t.Fatalf("ReleaseAfterSuccess(older) returned %v; want nil", err)
+	}
+	if got := len(mgrA.HeldClaims()); got != 1 {
+		t.Fatalf("A held claims = %d after a stale success inside the hold; want 1", got)
+	}
+
+	clockB.set(newerDone.Add(65 * time.Second))
+	held, err := mgrB.Claim(ctx, key, "task-4")
+	if !stderrors.Is(err, ErrLeaseConflict) || held != nil {
+		t.Fatalf("peer claim inside the hold = (%v, %v); want (nil, ErrLeaseConflict)", held, err)
+	}
+
+	// The newer run's hold still ends on time.
+	clockA.set(newerDone.Add(SuccessGracePeriod + time.Second))
+	if tickErr := mgrA.Tick(ctx); tickErr != nil {
+		t.Fatalf("A tick returned %v; want nil", tickErr)
+	}
+	clockB.set(newerDone.Add(SuccessGracePeriod + 2*time.Second))
+	held, err = mgrB.Claim(ctx, key, "task-4")
+	if err != nil || held == nil {
+		t.Fatalf("peer claim after the hold = (%v, %v); want a held claim", held, err)
+	}
+}

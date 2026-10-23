@@ -2,6 +2,10 @@
 
 All notable changes to this project will be documented in this file.
 
+## Unreleased
+
+- fix: **a stale success no longer releases a claim inside a newer run's success hold.** The Job watcher keeps re-reporting an older Job of the same task as succeeded. That completion is already past its own window, so `ReleaseAfterSuccess` used to delete the claim the newer run's hold protects, and the peer cluster ran the task again seconds later (seen live on v0.30.7 for update-go and releaser tasks). The call now keeps a claim whose hold is still in the future, logs `event=release_kept_success_grace`, and extends a hold but never shortens it.
+
 ## v0.30.9
 
 - fix: **a held claim is now released when its Job has been continuously absent for 300 s.** A Job deleted by hand, or whose terminal event was lost, left its claim held and renewed forever, so the task could never be respawned and the repository stayed blocked. The lease loop now asks `JobControl.IsJobRunning` at most once a minute per claim and sends one compare-and-swap `DELETE` with the held sha once the Job has been gone for the grace period, counting `jobless_released` and logging `event=claim_jobless_released`. The success hold, a pending release, a pending Job deletion and an unanswered adopted running check keep their own handling. Each jobless pass starts no new check after 10 s, or as soon as the context is done; claims it did not reach are checked first on the following ticks.

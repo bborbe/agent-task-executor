@@ -406,12 +406,26 @@ func (m *leaseManager) ReleaseAfterSuccess(
 		holdUntil = now.Add(SuccessGracePeriod)
 	}
 	if now.Before(holdUntil) {
-		held.holdUntil = libtime.DateTime(holdUntil)
+		// Extend, never shorten: an older completion must not pull a newer hold in.
+		if holdUntil.After(held.holdUntil.Time()) {
+			held.holdUntil = libtime.DateTime(holdUntil)
+		}
 		glog.Infof(
 			"event=release_deferred_success_grace key=%s task_id=%s hold_until=%s",
 			key,
 			held.taskID,
-			holdUntil.UTC().Format(stdtime.RFC3339),
+			held.holdUntil.Time().UTC().Format(stdtime.RFC3339),
+		)
+		return nil
+	}
+	// A stale success — an older Job of the same task re-reported after a newer
+	// run already took a hold — must not release the claim that hold protects.
+	if now.Before(held.holdUntil.Time()) {
+		glog.Infof(
+			"event=release_kept_success_grace key=%s task_id=%s hold_until=%s",
+			key,
+			held.taskID,
+			held.holdUntil.Time().UTC().Format(stdtime.RFC3339),
 		)
 		return nil
 	}
