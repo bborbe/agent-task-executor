@@ -187,6 +187,7 @@ func init() {
 		"already_released",
 		"adopted",
 		"error",
+		"jobless_released",
 	} {
 		ClaimTotal.WithLabelValues(result).Add(0)
 	}

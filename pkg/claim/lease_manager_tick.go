@@ -6,6 +6,7 @@ package claim
 
 import (
 	"context"
+	stdtime "time"
 
 	"github.com/bborbe/errors"
 	libtime "github.com/bborbe/time"
@@ -47,6 +48,7 @@ func (m *leaseManager) Tick(ctx context.Context) error {
 	}
 	m.retryPendingReleases(ctx)
 	m.releaseExpiredHolds(ctx)
+	m.releaseJoblessClaims(ctx)
 	m.recheckRunning(ctx)
 	if err := ctx.Err(); err != nil {
 		return err
@@ -159,6 +161,70 @@ func (m *leaseManager) releaseExpiredHolds(ctx context.Context) {
 		_ = m.releaseLocked(reqCtx, key, held)
 		cancel()
 	}
+}
+
+// releaseJoblessClaims releases held claims whose Job has been continuously
+// absent for at least JoblessGrace. Claims owned by another release path keep
+// their own handling.
+func (m *leaseManager) releaseJoblessClaims(ctx context.Context) {
+	now := m.currentDateTime.Now()
+	for _, key := range m.heldKeys() {
+		held, ok := m.held[key]
+		if !ok || !joblessEligible(held) {
+			continue
+		}
+		if !held.lastJoblessCheckAt.Time().IsZero() &&
+			now.Sub(held.lastJoblessCheckAt) < JoblessCheckInterval {
+			continue
+		}
+		held.lastJoblessCheckAt = now
+		checkCtx, cancel := m.requestContext(ctx)
+		running, err := m.jobControl.IsJobRunning(checkCtx, held.taskID)
+		cancel()
+		if err != nil {
+			countClaim("error")
+			continue
+		}
+		if running {
+			held.joblessSince = libtime.DateTime(stdtime.Time{})
+			continue
+		}
+		if held.joblessSince.Time().IsZero() {
+			held.joblessSince = now
+		}
+		if now.Sub(held.joblessSince) < JoblessGrace {
+			continue
+		}
+		m.releaseJoblessClaim(ctx, key, held)
+	}
+}
+
+// joblessEligible reports whether the jobless release owns this claim. The
+// success hold, a pending release, a pending Job deletion and an unanswered
+// adopted running check each keep their own path.
+func joblessEligible(held *heldClaim) bool {
+	return !held.pendingJobDeletion &&
+		!held.releasePending &&
+		!held.needsRunningCheck &&
+		held.holdUntil.Time().IsZero()
+}
+
+// releaseJoblessClaim releases one claim whose Job is gone, logging and
+// counting the decision once. A failed DELETE keeps the claim with a pending
+// release, which retryPendingReleases handles without counting again.
+func (m *leaseManager) releaseJoblessClaim(
+	ctx context.Context,
+	key string,
+	held *heldClaim,
+) {
+	countClaim("jobless_released")
+	glog.Warningf(
+		"event=claim_jobless_released key=%s task=%s jobless_since=%s",
+		key,
+		held.taskID,
+		held.joblessSince.Time().UTC().Format(stdtime.RFC3339),
+	)
+	m.releaseAfterRunningCheck(ctx, key, held)
 }
 
 // recheckRunning re-asks the Job running check of claims adopted with an

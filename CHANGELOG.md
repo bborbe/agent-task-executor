@@ -2,6 +2,10 @@
 
 All notable changes to this project will be documented in this file.
 
+## Unreleased
+
+- fix: **a held claim is now released when its Job has been continuously absent for 300 s.** A Job deleted by hand, or whose terminal event was lost, left its claim held and renewed forever, so the task could never be respawned and the repository stayed blocked. The lease loop now asks `JobControl.IsJobRunning` at most once a minute per claim and sends one compare-and-swap `DELETE` with the held sha once the Job has been gone for the grace period, counting `jobless_released` and logging `event=claim_jobless_released`. The success hold, a pending release, a pending Job deletion and an unanswered adopted running check keep their own handling.
+
 ## v0.30.7
 
 - fix: **the success hold now survives a plain release.** When a task's terminal phase reached the executor that ran it, the phase gate and terminal cleanup called `LeaseManager.Release`. That deleted the claim at once and ignored the `holdUntil` that `ReleaseAfterSuccess` had set. The terminal phase reaches the winning cluster's vault view before a peer's, so the hold ended exactly while the peer still read the task as eligible. Measured on v0.30.5, 2026-10-23: task `70688157` succeeded on nuke prod at 09:45:51 with hold_until 09:50:51. Sun claimed and ran it again at 09:48:20, still reading phase `execution`. Six re-runs in two hours followed the same shape. `Release` now keeps a claim whose hold has not expired (`event=release_kept_success_grace`), and the hold's own expiry releases it.

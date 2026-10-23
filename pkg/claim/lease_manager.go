@@ -33,6 +33,12 @@ const (
 	FenceLead = 10 * libtime.Second
 	// TakeoverGrace is how long after the lease end a takeover is allowed.
 	TakeoverGrace = 30 * libtime.Second
+	// JoblessGrace is how long a held claim's Job must be continuously absent
+	// before the lease loop releases the claim.
+	JoblessGrace = 300 * libtime.Second
+	// JoblessCheckInterval is how often the lease loop asks JobControl whether a
+	// held claim's Job is still running.
+	JoblessCheckInterval = 60 * libtime.Second
 )
 
 // ErrLeaseNotExpired is returned by Takeover when the listed claim is still
@@ -122,6 +128,12 @@ type heldClaim struct {
 	// being renewed, until this instant, so a peer cannot take the task over in
 	// the window between a Job succeeding and its result reaching the vault.
 	holdUntil libtime.DateTime
+	// joblessSince is the instant of the first consecutive check that saw the
+	// Job not running; the zero value means "not currently jobless".
+	joblessSince libtime.DateTime
+	// lastJoblessCheckAt is the instant of the last IsJobRunning call made by the
+	// jobless pass; the zero value means "never checked".
+	lastJoblessCheckAt libtime.DateTime
 }
 
 type leaseManager struct {

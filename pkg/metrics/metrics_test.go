@@ -30,7 +30,7 @@ var _ = Describe("Metrics", func() {
 		Expect(names).To(HaveKey("executor_claim_mismatch_total"))
 	})
 
-	It("pre-initializes all 13 claim result series", func() {
+	It("pre-initializes all 14 claim result series", func() {
 		mfs, err := prometheus.DefaultGatherer.Gather()
 		Expect(err).NotTo(HaveOccurred())
 
@@ -49,6 +49,7 @@ var _ = Describe("Metrics", func() {
 			"already_released",
 			"adopted",
 			"error",
+			"jobless_released",
 		))
 	})
 
