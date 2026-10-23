@@ -227,7 +227,8 @@ no lease-manager path treats it as one.
   everywhere except on an executor that has itself counted 3 spawns at that
   phase, which stays capped until it restarts or the task moves phase.
 - A task capped by the shared streak but not by this executor's memory is
-  reported as `deferred`, not `capped`, in the reconcile pass summary;
+  reported as `capped` in the reconcile pass summary, like one this executor
+  counted itself: the spawn funnel carries its refusal back to the pass.
   `executor_redrive_capped_total` counts every cap regardless.
 
 ## Lost-response recovery
