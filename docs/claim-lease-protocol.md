@@ -125,6 +125,32 @@ stays pending-release.
 `executor_claim_total{result}` counts every outcome above; all 14 result series
 are pre-initialised to 0. Keys and task ids are never label values.
 
+## Admission capacity
+
+A cluster admits a task only when the assignee has a free slot. The number of
+slots is the **smaller of** the Config's declared `maxConcurrentJobs` and the pod
+quota that scopes the agent's `priorityClassName`.
+
+The quota is the `hard.pods` of the `ResourceQuota` whose `scopeSelector`
+matches `PriorityClass In [<priorityClassName>]`, preferring `status.hard` and
+falling back to `spec.hard`. It is read at most once per namespace and priority
+class per 30 seconds.
+
+A zero `maxConcurrentJobs` means "no declared cap" and does not disable the
+quota bound; zero for both means uncapped. A failed quota read, a Config with no
+priority class, or no quota scoping that class leaves the declared cap as the
+only bound; a failed read also logs one `event=pod_quota_read_failed` warning.
+
+Because admission is decided before the claim is taken, a task over the bound is
+**never claimed**: it is deferred and a peer cluster can take it immediately.
+That is why the fence and takeover rules only ever have to bound a holder that
+is actually running.
+
+The decision is visible in one line: `event=concurrency_admit` and
+`event=concurrency_cap` both carry `running=`, `cap=`, `max=` and `quota=`,
+where `cap` is the effective bound, `max` the declared value and `quota` the
+value read from the quota (0 when no quota bound applies).
+
 ## Fence
 
 A held claim is fenced when `now > fenceAt − 10 s`. The holder:

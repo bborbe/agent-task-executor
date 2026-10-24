@@ -1,8 +1,13 @@
 ---
-status: approved
+status: completed
 spec: [016-bug-claim-only-until-quota]
+summary: Documented the pod-quota admission bound in the claim lease protocol and README and recorded the change under CHANGELOG Unreleased
+execution_id: agent-task-executor-claim-quota-exec-039-spec-016-docs-changelog
+dark-factory-version: v0.198.7
 created: "2026-10-24T19:34:00Z"
 queued: "2026-10-24T19:46:05Z"
+started: "2026-10-24T20:05:37Z"
+completed: "2026-10-24T20:14:34Z"
 branch: dark-factory/bug-claim-only-until-quota
 ---
 
