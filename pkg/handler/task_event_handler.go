@@ -899,6 +899,7 @@ func (h *taskEventHandler) spawnIfNeededClaimed(
 		if h.handleJobLookupDenied(err) {
 			return spawnOutcomeSuppressed, nil
 		}
+		metrics.TaskEventsTotal.WithLabelValues("error").Inc()
 		return spawnOutcomeSuppressed, err
 	}
 	if capped {
@@ -1066,7 +1067,9 @@ func (h *taskEventHandler) deferIfAtConcurrencyCap(
 	}
 	activeSet, err := h.activeJobsFor(ctx, namespace, config.Assignee)
 	if err != nil {
-		metrics.TaskEventsTotal.WithLabelValues("error").Inc()
+		// The caller counts the error, not this branch: a refused read is
+		// suppressed rather than propagated, and counting it here would make the
+		// same denial visible on this path and invisible on isJobActive's.
 		return false, wrapJobLookupError(
 			ctx,
 			err,

@@ -114,6 +114,7 @@ func (h *taskEventHandler) suppressForActiveCurrentJob(
 	if h.handleJobLookupDenied(err) {
 		return true, nil
 	}
+	metrics.TaskEventsTotal.WithLabelValues("error").Inc()
 	return false, err
 }
 

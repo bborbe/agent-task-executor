@@ -33,7 +33,7 @@ func (h *taskEventHandler) checkActiveCurrentJob(
 	}
 	active, err := h.jobSpawner.IsJobActive(ctx, namespace, task.TaskIdentifier)
 	if err != nil {
-		metrics.TaskEventsTotal.WithLabelValues("error").Inc()
+		// The caller counts the error, not this branch — see deferIfAtConcurrencyCap.
 		return false, wrapJobLookupError(
 			ctx,
 			err,
