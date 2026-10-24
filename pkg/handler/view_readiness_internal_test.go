@@ -69,7 +69,7 @@ func TestConsumeMessageDoesNotSpawnBeforeTheViewIsReady(t *testing.T) {
 		DefaultReconcileInterval,
 		pkg.ClaimModeOff,
 		nil,
-		noopJobControl{},
+		WithClaimJobControl(noopJobControl{}),
 	)
 	h, ok := handler.(*taskEventHandler)
 	if !ok {

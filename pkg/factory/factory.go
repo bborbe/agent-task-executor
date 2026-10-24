@@ -204,6 +204,7 @@ func CreateConsumer(
 	jobFsGroup int64,
 	view handler.TaskView,
 	taskVault string,
+	vaultAliases []string,
 	reconcilePassTimeout time.Duration,
 	reconcileInterval time.Duration,
 	claimMode pkg.ClaimMode,
@@ -238,7 +239,10 @@ func CreateConsumer(
 		reconcileInterval,
 		claimMode,
 		claimRefClientFactory,
-		handler.NewKubeJobControl(kubeClient, namespace, resolver, view),
+		handler.WithVaultAliases(vaultAliases),
+		handler.WithClaimJobControl(
+			handler.NewKubeJobControl(kubeClient, namespace, resolver, view),
+		),
 	)
 	topic := lib.TaskV1SchemaID.EventTopic(topicPrefix)
 	offsetManager := libkafka.NewSaramaOffsetManager(

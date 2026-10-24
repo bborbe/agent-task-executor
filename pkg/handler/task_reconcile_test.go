@@ -590,6 +590,84 @@ var _ = Describe("TaskEventHandler reconcile loop", func() {
 		Expect(out).To(ContainSubstring("event=reconcile evaluated=0"))
 	})
 
+	// The reconcile floor compares a task's stamped vault against the executor's
+	// own. Plain equality leaves it blind to a task stamped with an accepted
+	// alias, so the backstop never re-drives what the event path now admits —
+	// and because the pass still counts ok, that blindness is invisible.
+	Describe("vault aliases reach the reconcile floor (SC3e)", func() {
+		aliasHandler := func() handler.ClaimLifecycleEventHandler {
+			return handler.NewTaskEventHandler(
+				fakeSpawner,
+				"dev",
+				base.Branch("prod"),
+				"",
+				true,
+				true,
+				fakeResolver,
+				fakeResultPublisher,
+				taskStore,
+				currentDateTime,
+				fakeView,
+				testTaskVault,
+				handler.DefaultReconcilePassTimeout,
+				handler.DefaultReconcileInterval,
+				pkg.ClaimModeOff,
+				nil,
+				handler.WithVaultAliases(handler.DefaultVaultAliases(testTaskVault)),
+			)
+		}
+
+		It("drives a view holding only alias-stamped tasks", func() {
+			aliasH := aliasHandler()
+			aliasTask := eligibleTask(domain.TaskPhaseExecution)
+			aliasTask.Vault = "private-agent"
+			fakeView.SnapshotReturns([]lib.Task{aliasTask})
+			fakeSpawner.IsJobActiveReturns(false, nil)
+
+			beforeOK := testutil.ToFloat64(metrics.ReconcilePassesTotal.WithLabelValues("ok"))
+			beforeMismatch := testutil.ToFloat64(
+				metrics.ReconcilePassesTotal.WithLabelValues("task_vault_mismatch"),
+			)
+
+			out := captureStderr(func() {
+				Expect(aliasH.ReconcileOnce(ctx)).To(BeNil())
+			})
+
+			Expect(out).To(ContainSubstring("evaluated=1"))
+			Expect(
+				testutil.ToFloat64(metrics.ReconcilePassesTotal.WithLabelValues("ok")),
+			).To(Equal(beforeOK + 1))
+			Expect(
+				testutil.ToFloat64(
+					metrics.ReconcilePassesTotal.WithLabelValues("task_vault_mismatch"),
+				),
+			).To(Equal(beforeMismatch))
+		})
+
+		It("still rejects a view holding only a genuinely foreign vault", func() {
+			aliasH := aliasHandler()
+			foreignTask := eligibleTask(domain.TaskPhaseExecution)
+			foreignTask.Vault = "trading"
+			fakeView.SnapshotReturns([]lib.Task{foreignTask})
+
+			beforeOK := testutil.ToFloat64(metrics.ReconcilePassesTotal.WithLabelValues("ok"))
+			beforeMismatch := testutil.ToFloat64(
+				metrics.ReconcilePassesTotal.WithLabelValues("task_vault_mismatch"),
+			)
+
+			Expect(aliasH.ReconcileOnce(ctx)).To(BeNil())
+
+			Expect(
+				testutil.ToFloat64(
+					metrics.ReconcilePassesTotal.WithLabelValues("task_vault_mismatch"),
+				),
+			).To(Equal(beforeMismatch + 1))
+			Expect(
+				testutil.ToFloat64(metrics.ReconcilePassesTotal.WithLabelValues("ok")),
+			).To(Equal(beforeOK))
+		})
+	})
+
 	It("runs one pass immediately at startup before any ticker fire (DB 1)", func() {
 		fakeView.SnapshotReturns([]lib.Task{eligibleTask(domain.TaskPhaseExecution)})
 
