@@ -60,8 +60,12 @@ func (m VaultMatcher) Vault() string {
 // Keep each entry symmetric: an executor carrying either name must accept the
 // other, or the cluster still stamping the old slug keeps dropping.
 var defaultVaultAliases = map[string][]string{
-	"openclaw":      {"openclaw", "private-agent"},
-	"private-agent": {"openclaw", "private-agent"},
+	"openclaw":         {"openclaw", "private-agent"},
+	"private-agent":    {"openclaw", "private-agent"},
+	"personal":         {"personal", "private-personal"},
+	"private-personal": {"personal", "private-personal"},
+	"trading":          {"trading", "private-trading"},
+	"private-trading":  {"trading", "private-trading"},
 }
 
 // DefaultVaultAliases returns the built-in alias set for vault, or nil when the
