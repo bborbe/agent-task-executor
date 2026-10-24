@@ -1,6 +1,7 @@
 ---
-status: draft
-kind: bug
+status: approved
+approved: "2026-10-24T19:27:54Z"
+branch: dark-factory/bug-claim-only-until-quota
 ---
 
 ## Summary
