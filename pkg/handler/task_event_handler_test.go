@@ -1129,6 +1129,271 @@ var _ = Describe("TaskEventHandler", func() {
 			})
 		})
 
+		// The routing contract the claims rollout depends on: `stage` selects the
+		// pool, `cluster:` is only a hand-set pin. It holds today and must keep
+		// holding as claims land, so it is pinned here rather than left implicit.
+		//
+		// RUN_UNTAGGED stays in the matrix because it is the guard that keeps a
+		// pool member out of the untagged set until claims are on — with claims
+		// off, an untagged task eligible on two clusters is a duplicate run.
+		Context("stage selects the pool, cluster is only a pin", func() {
+			var poolSpawner *mocks.FakeJobSpawner
+			var poolResolver *mocks.FakeConfigResolver
+			newPoolHandler := func(
+				branch base.Branch,
+				cluster string,
+				runUntagged bool,
+			) handler.TaskEventHandler {
+				return handler.NewTaskEventHandler(
+					poolSpawner,
+					"dev",
+					branch,
+					cluster,
+					true,
+					runUntagged,
+					poolResolver,
+					&mocks.FakeResultPublisher{},
+					pkg.NewTaskStore(),
+					libtime.NewCurrentDateTime(),
+					fakeView,
+					testTaskVault,
+					handler.DefaultReconcilePassTimeout,
+					handler.DefaultReconcileInterval,
+					pkg.ClaimModeOff,
+					nil,
+				)
+			}
+			buildPoolTask := func(stage, cluster string) lib.Task {
+				frontmatter := lib.TaskFrontmatter{
+					"status":   "in_progress",
+					"phase":    string(domain.TaskPhaseExecution),
+					"assignee": "claude",
+				}
+				if stage != "" {
+					frontmatter["stage"] = stage
+				}
+				if cluster != "" {
+					frontmatter["cluster"] = cluster
+				}
+				return lib.Task{
+					TaskIdentifier: lib.TaskIdentifier("tid-pool-" + stage + "-" + cluster),
+					Frontmatter:    frontmatter,
+				}
+			}
+			BeforeEach(func() {
+				poolSpawner = new(mocks.FakeJobSpawner)
+				poolSpawner.IsJobActiveReturns(false, nil)
+				poolResolver = &mocks.FakeConfigResolver{}
+				poolResolver.ResolveReturns(
+					pkg.AgentConfiguration{Assignee: "claude", Image: "my-image:latest"},
+					nil,
+				)
+			})
+			// A missing stage means prod. A missing cluster means "no pin": the
+			// task belongs to every cluster in its pool that accepts untagged work.
+			DescribeTable(
+				"spawn decision",
+				func(
+					branch base.Branch,
+					cluster string,
+					runUntagged bool,
+					stage, pin string,
+					want int,
+				) {
+					err := newPoolHandler(branch, cluster, runUntagged).ConsumeMessage(
+						ctx, buildMsg(buildPoolTask(stage, pin)),
+					)
+					Expect(err).To(BeNil())
+					Expect(poolSpawner.SpawnJobCallCount()).To(Equal(want))
+				},
+				// Claims on: untagged work is in the pool.
+				Entry(
+					"prod executor, prod task, no pin",
+					base.Branch("prod"),
+					"nukeprod",
+					true,
+					"prod",
+					"",
+					1,
+				),
+				Entry(
+					"dev executor, dev task, no pin",
+					base.Branch("dev"),
+					"nukedev",
+					true,
+					"dev",
+					"",
+					1,
+				),
+				Entry(
+					"prod executor, dev task, no pin",
+					base.Branch("prod"),
+					"nukeprod",
+					true,
+					"dev",
+					"",
+					0,
+				),
+				Entry(
+					"dev executor, prod task, no pin",
+					base.Branch("dev"),
+					"nukedev",
+					true,
+					"prod",
+					"",
+					0,
+				),
+				Entry(
+					"prod executor, absent stage defaults to prod",
+					base.Branch("prod"),
+					"nukeprod",
+					true,
+					"",
+					"",
+					1,
+				),
+				Entry(
+					"dev executor, absent stage defaults to prod",
+					base.Branch("dev"),
+					"nukedev",
+					true,
+					"",
+					"",
+					0,
+				),
+				Entry(
+					"sun executor, prod task, no pin",
+					base.Branch("prod"),
+					"sun",
+					true,
+					"prod",
+					"",
+					1,
+				),
+				Entry(
+					"sun executor, dev task, no pin",
+					base.Branch("prod"),
+					"sun",
+					true,
+					"dev",
+					"",
+					0,
+				),
+				Entry(
+					"sun executor, absent stage defaults to prod",
+					base.Branch("prod"),
+					"sun",
+					true,
+					"",
+					"",
+					1,
+				),
+				// A pin narrows to one cluster inside the pool.
+				Entry(
+					"prod executor, pinned to self",
+					base.Branch("prod"),
+					"nukeprod",
+					true,
+					"prod",
+					"nukeprod",
+					1,
+				),
+				Entry(
+					"prod executor, pinned to sun",
+					base.Branch("prod"),
+					"nukeprod",
+					true,
+					"prod",
+					"sun",
+					0,
+				),
+				Entry(
+					"sun executor, pinned to self",
+					base.Branch("prod"),
+					"sun",
+					true,
+					"prod",
+					"sun",
+					1,
+				),
+				Entry(
+					"sun executor, pinned to nukeprod",
+					base.Branch("prod"),
+					"sun",
+					true,
+					"prod",
+					"nukeprod",
+					0,
+				),
+				Entry(
+					"dev executor, pinned to self",
+					base.Branch("dev"),
+					"nukedev",
+					true,
+					"dev",
+					"nukedev",
+					1,
+				),
+				Entry(
+					"dev executor, pinned to nukeprod",
+					base.Branch("dev"),
+					"nukedev",
+					true,
+					"dev",
+					"nukeprod",
+					0,
+				),
+				// A pin never overrides the pool.
+				Entry(
+					"prod executor, dev task pinned to self",
+					base.Branch("prod"),
+					"nukeprod",
+					true,
+					"dev",
+					"nukeprod",
+					0,
+				),
+				// Claims off (RUN_UNTAGGED=false): no untagged work at all, so two
+				// clusters can never start the same task. A pin still works.
+				Entry(
+					"claims off, sun, prod task, no pin",
+					base.Branch("prod"),
+					"sun",
+					false,
+					"prod",
+					"",
+					0,
+				),
+				Entry(
+					"claims off, prod executor, prod task, no pin",
+					base.Branch("prod"),
+					"nukeprod",
+					false,
+					"prod",
+					"",
+					0,
+				),
+				Entry(
+					"claims off, sun, pinned to self",
+					base.Branch("prod"),
+					"sun",
+					false,
+					"prod",
+					"sun",
+					1,
+				),
+				Entry(
+					"claims off, prod executor, pinned to self",
+					base.Branch("prod"),
+					"nukeprod",
+					false,
+					"prod",
+					"nukeprod",
+					1,
+				),
+			)
+		})
+
 		Context("stage filter disabled", func() {
 			var stageSpawner *mocks.FakeJobSpawner
 			var stageHandler handler.TaskEventHandler
