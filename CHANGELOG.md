@@ -2,6 +2,10 @@
 
 All notable changes to this project will be documented in this file.
 
+## Unreleased
+
+- test: **the reconcile floor's routing decision is pinned against the event path's.** `reconcileTask` has its own eligibility path and re-derives from the in-memory view on every pass, so it never sees the Kafka event the event path filters. It shares `isForeignCluster` and the stage check today, but nothing asserted that: a divergence would let the floor spawn a task the event path refuses, and for a stage-mismatched or pinned task that is a run on the wrong cluster — the duplicate this whole change exists to prevent. Four entries cover the agreeing cases, with a spawn-expected control row so the table cannot pass vacuously by returning zero for every input. No behaviour change.
+
 ## v0.35.2
 
 - test: **`skipped_untagged` is now asserted, the last of the four routing results without coverage.** The other three — `pin_outside_pool`, `skipped_stage` and `skipped_foreign_cluster` — are already pinned in the same file; `skipped_untagged` was not, so a regression reporting a claims-off untagged skip as `skipped_stage` would have passed every existing spec. `RUN_UNTAGGED=false` is the guard that keeps a pool member out of the untagged set until claims are on, and the `result` label is how a mis-set pool flag becomes findable — reported as a stage mismatch, nobody looking for it would find it. No behaviour change.
