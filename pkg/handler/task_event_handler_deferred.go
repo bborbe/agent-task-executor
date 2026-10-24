@@ -97,7 +97,8 @@ func (h *taskEventHandler) evalDeferredRespawns(ctx context.Context) error {
 		}
 		replay := replay // capture for closure
 		entry := replay.entry
-		spawned, err := h.spawnIfNeededClaimed(ctx, entry.task, &entry.config, &replay.claim)
+		outcome, err := h.spawnIfNeededClaimed(ctx, entry.task, &entry.config, &replay.claim)
+		spawned := outcome.spawned()
 		if err != nil {
 			// A single failed Job create (e.g. a Job the API server rejects) must
 			// not exit the process and starve every other due entry. The entry is
@@ -156,6 +157,39 @@ func (h *taskEventHandler) removeDeferredEntry(id lib.TaskIdentifier) {
 	delete(h.queuedAtStamps, id)
 	h.deferredEpochs[id]++
 	h.deferredMu.Unlock()
+}
+
+// clearQueuedAtStampIfNotDeferred drops the record for id unless the task is
+// parked in deferredRespawns, whose entry still needs it.
+//
+// This is the correct clear for every path that ends a deferral, because a
+// deferral can end in two ways: the task is re-parked (it is still waiting, so
+// the record must survive) or it is not (a skip branch, a failed spawn, an
+// evicted claim — the record must go). Clearing unconditionally would drop a
+// stamp a re-parked entry still depends on; not clearing at all leaves one
+// string behind per task that ever left the deferred state this way, and lets a
+// later, unrelated wait reuse a stale value — which admissionPriority then sorts
+// on as though the task had waited since then.
+func (h *taskEventHandler) clearQueuedAtStampIfNotDeferred(id lib.TaskIdentifier) {
+	h.deferredMu.Lock()
+	defer h.deferredMu.Unlock()
+	if _, parked := h.deferredRespawns[id]; !parked {
+		delete(h.queuedAtStamps, id)
+	}
+}
+
+// taskWithFrontmatterValue returns a copy of the task whose frontmatter carries
+// one extra key. The frontmatter map is copied rather than mutated in place: the
+// caller's map is shared with the event and may still be held by a deferred
+// entry, so an in-place write would corrupt that entry.
+func taskWithFrontmatterValue(task lib.Task, key string, value interface{}) lib.Task {
+	copied := task
+	copied.Frontmatter = make(lib.TaskFrontmatter, len(task.Frontmatter)+1)
+	for k, v := range task.Frontmatter {
+		copied.Frontmatter[k] = v
+	}
+	copied.Frontmatter[key] = value
+	return copied
 }
 
 // claimInvalidatedLocked reports whether claim was superseded by a removal. The

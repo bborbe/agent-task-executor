@@ -24,7 +24,12 @@ import (
 // stubJobSpawner satisfies spawner.JobSpawner without importing the mocks
 // package, which imports pkg/handler and so cannot be used from an internal
 // test of it.
-type stubJobSpawner struct{ spawned int }
+type stubJobSpawner struct {
+	spawned int
+	// active is the per-assignee active set ListActiveJobs answers with. Nil is
+	// an empty set.
+	active map[lib.TaskIdentifier]bool
+}
 
 func (s *stubJobSpawner) SpawnJob(
 	context.Context, lib.Task, pkg.AgentConfiguration,
@@ -46,7 +51,7 @@ func (s *stubJobSpawner) CountActiveJobs(context.Context, libk8s.Namespace, stri
 func (s *stubJobSpawner) ListActiveJobs(
 	context.Context, libk8s.Namespace, string,
 ) (map[lib.TaskIdentifier]bool, error) {
-	return map[lib.TaskIdentifier]bool{}, nil
+	return s.active, nil
 }
 
 func (s *stubJobSpawner) JobExists(context.Context, libk8s.Namespace, string) (bool, error) {
