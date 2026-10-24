@@ -34,9 +34,11 @@ func (h *taskEventHandler) checkActiveCurrentJob(
 	active, err := h.jobSpawner.IsJobActive(ctx, namespace, task.TaskIdentifier)
 	if err != nil {
 		metrics.TaskEventsTotal.WithLabelValues("error").Inc()
-		return false, errors.Wrapf(
+		return false, wrapJobLookupError(
 			ctx,
 			err,
+			assigneeOf(config),
+			namespace,
 			"check current_job active for task %s",
 			task.TaskIdentifier,
 		)

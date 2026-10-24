@@ -161,6 +161,35 @@ var DeferredConcurrencyCapTotal = promauto.NewCounterVec(
 	[]string{"assignee"},
 )
 
+// JobLookupDeniedTotal counts active-job reads the API server refused on
+// authentication (401) or authorization (403), by assignee and namespace. Such
+// a read is not transient: retrying cannot help until the credential or the
+// grant is restored, so the caller suppresses the spawn instead of failing the
+// message, and this counter is the only surface saying an assignee went quiet
+// because its identity broke — the deferral itself is silent.
+//
+// The series is seeded at 0 by PreInitJobLookupDenied on every successful read,
+// not in init(): the assignee domain comes from agent Config CRs and the
+// namespace is resolved per task, so neither can be enumerated at init — the
+// same constraint recorded on DeferredConcurrencyCapTotal. Without the seed,
+// `increase(...[5m]) > 0` cannot be told apart from a metric nobody publishes.
+// Cardinality is bounded by the Config CRs times the namespaces they dispatch to.
+var JobLookupDeniedTotal = promauto.NewCounterVec(
+	prometheus.CounterOpts{
+		Name: "agent_executor_job_lookup_denied_total",
+		Help: "Total number of active-job reads refused with 401/403, by assignee and namespace.",
+	},
+	[]string{"assignee", "namespace"},
+)
+
+// PreInitJobLookupDenied seeds JobLookupDeniedTotal at 0 for one served
+// assignee/namespace pair. It is called after a successful read, so the seeded
+// pairs are exactly the pairs this executor actually reads: an assignee it
+// never serves gets no series, which is the truthful answer.
+func PreInitJobLookupDenied(assignee, namespace string) {
+	JobLookupDeniedTotal.WithLabelValues(assignee, namespace).Add(0)
+}
+
 // TaskViewSkippedTotal counts task event messages the in-memory task view
 // could not decode. A skipped message never blocks readiness.
 var TaskViewSkippedTotal = promauto.NewCounter(prometheus.CounterOpts{
