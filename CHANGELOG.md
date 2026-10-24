@@ -2,7 +2,7 @@
 
 All notable changes to this project will be documented in this file.
 
-## Unreleased
+## v0.38.0
 
 - fix: **a refused active-job read defers the task instead of exiting the executor.** `ListActiveJobs` and `IsJobActive` returned their error unwrapped, so a single `401 Unauthorized` from `list jobs` propagated `isJobActive` → `spawnIfNeededClaimed` → `spawnIfNeeded` → `ConsumeMessage` → `run failed` and restarted the process for **every** assignee on that executor. Observed 2026-10-24 (Sentry `NUKE-PROD-CG`): one task's lookup was refused while the control plane moved into `agent`, and the whole openclaw executor went down rather than deferring that one task. `401` and `403` are now classified as `jobLookupDeniedError` — the read-path sibling of `spawnJobError` — and suppressed at every read site (`isJobActive`, `checkActiveCurrentJob`, `deferIfAtConcurrencyCap`), leaving the reconcile floor to re-drive the task once the credential or grant is restored. The deferral is silent, so `agent_executor_job_lookup_denied_total{assignee,namespace}` carries the visibility, seeded at 0 on each successful read because the assignee domain comes from Config CRs and cannot be enumerated at init; the log is throttled to one line per assignee/namespace per minute. Every other read error — a `500`, a `404`, a `429` — stays fatal, so a programming fault is not relabelled as an outage.
 
