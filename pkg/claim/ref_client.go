@@ -20,12 +20,27 @@ import (
 	"github.com/golang/glog"
 )
 
-// RequestTimeout is the hard per-request cap for every git-rest claim call.
+// RequestTimeout is the hard per-request cap for the write calls (Put, Delete).
+// A write makes git-rest push a ref, so it keeps the full budget.
 const RequestTimeout = 30 * libtime.Second
+
+// ReadTimeout is the per-request cap for GET /api/v1/refs. Reads are bounded
+// below RequestTimeout because git-rest answers a slow read with a 500 only
+// after its own `git ls-remote` has already outlasted the caller's cap — so
+// waiting the full RequestTimeout buys nothing and stalls the claim or redrive
+// loop for 30 s on every failed read. A read that cannot be completed inside
+// this bound returns ErrRefsUnavailable.
+const ReadTimeout = 10 * libtime.Second
 
 // ErrLeaseConflict is returned when git-rest answers 409 on a PUT or DELETE.
 // It is final: the claim client never retries.
 var ErrLeaseConflict = stderrors.New("lease conflict")
+
+// ErrRefsUnavailable is returned when a read could not be completed — a
+// transport failure, ReadTimeout expiring, or a 5xx. It is NOT an empty
+// result: a caller must defer the task and never treat it as "no refs exist",
+// which would let two clusters take the same claim.
+var ErrRefsUnavailable = stderrors.New("refs unavailable")
 
 // ErrRefNotFound is returned when git-rest answers 404 on a DELETE. It is
 // final: the ref is already gone.
@@ -126,9 +141,51 @@ func formatLeaseUntil(leaseUntil libtime.DateTime) string {
 	return leaseUntil.Time().UTC().Format(time.RFC3339)
 }
 
-// List returns every claim ref under prefix. Reads fail-fast; no retry.
+// refsUnavailable reports one failed read at the default verbosity — the line
+// SC2 measures — and returns ErrRefsUnavailable without the transport cause in
+// the message. The cause goes to V(2), so a default-verbosity log carries no raw
+// deadline text and callers classify on the sentinel rather than on a string.
+func refsUnavailable(ctx context.Context, prefix string, start time.Time, cause error) error {
+	glog.V(0).Infof(
+		"event=refs_unavailable op=list prefix=%s task=%s elapsed_ms=%d bound_ms=%d",
+		prefix,
+		taskIDFromPrefix(prefix),
+		time.Since(start).Milliseconds(),
+		ReadTimeout.Duration().Milliseconds(),
+	)
+	glog.V(2).Infof("event=refs_unavailable_cause prefix=%s cause=%v", prefix, cause)
+	return errors.Wrapf(
+		ctx,
+		ErrRefsUnavailable,
+		"GET refs prefix %s exceeded the %s read bound",
+		prefix,
+		ReadTimeout,
+	)
+}
+
+// taskIDFromPrefix returns the task id carried by a redrive-streak prefix
+// ("claims/redrive/<taskID>"), or "" for any other prefix. Claim keys carry a
+// task id only in the "claims/task/<id>" form, which is not guessed at here.
+func taskIDFromPrefix(prefix string) string {
+	trimmed, ok := strings.CutPrefix(prefix, RedriveStreakPrefix)
+	if !ok {
+		return ""
+	}
+	return trimmed
+}
+
+// List returns every claim ref under prefix. Reads fail-fast; no retry. A read
+// that cannot be completed — transport failure, ReadTimeout, or a 5xx — returns
+// ErrRefsUnavailable and never an empty slice.
 func (c *claimRefClient) List(ctx context.Context, prefix string) ([]ClaimRef, error) {
-	ctx, cancel := context.WithTimeout(ctx, RequestTimeout.Duration())
+	// Elapsed is a transport measurement, not domain time, so it is taken from
+	// the monotonic clock rather than an injected CurrentDateTimeGetter.
+	start := time.Now()
+	// parent is kept so a caller's own cancellation or deadline still surfaces
+	// as context.DeadlineExceeded / context.Canceled — only this read's bound
+	// means "refs unavailable".
+	parent := ctx
+	ctx, cancel := context.WithTimeout(parent, ReadTimeout.Duration())
 	defer cancel()
 	q := url.Values{}
 	q.Set("prefix", prefix)
@@ -144,15 +201,24 @@ func (c *claimRefClient) List(ctx context.Context, prefix string) ([]ClaimRef, e
 	c.setAuthHeaders(req)
 	resp, err := c.httpClient.Do(req)
 	if err != nil {
-		return nil, errors.Wrapf(ctx, err, "GET refs prefix %s", prefix)
+		if parentErr := parent.Err(); parentErr != nil {
+			return nil, errors.Wrapf(ctx, parentErr, "GET refs prefix %s", prefix)
+		}
+		return nil, refsUnavailable(ctx, prefix, start, err)
 	}
 	defer resp.Body.Close()
 	glog.V(3).Infof("git-rest refs GET prefix=%s status=%d", prefix, resp.StatusCode)
 	body, err := io.ReadAll(io.LimitReader(resp.Body, 10*1024*1024))
 	if err != nil {
-		return nil, errors.Wrapf(ctx, err, "read GET refs response body for prefix %s", prefix)
+		if parentErr := parent.Err(); parentErr != nil {
+			return nil, errors.Wrapf(ctx, parentErr, "GET refs prefix %s", prefix)
+		}
+		return nil, refsUnavailable(ctx, prefix, start, err)
 	}
 	if resp.StatusCode != http.StatusOK {
+		if resp.StatusCode >= http.StatusInternalServerError {
+			return nil, refsUnavailable(ctx, prefix, start, stderrors.New(resp.Status))
+		}
 		return nil, errors.Errorf(ctx, "GET refs prefix %s returned %d", prefix, resp.StatusCode)
 	}
 	var refs []ClaimRef

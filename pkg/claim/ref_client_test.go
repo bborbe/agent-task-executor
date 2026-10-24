@@ -406,6 +406,71 @@ var _ = Describe("ClaimRefClient", func() {
 		})
 	})
 
+	Describe("read bound", func() {
+		It("bounds a read below the write cap", func() {
+			Expect(
+				claim.ReadTimeout.Duration(),
+			).To(BeNumerically("<", claim.RequestTimeout.Duration()))
+		})
+
+		It("returns ErrRefsUnavailable for a 5xx read and no refs", func() {
+			server = httptest.NewServer(
+				http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+					w.WriteHeader(http.StatusInternalServerError)
+					_, _ = w.Write([]byte("boom"))
+				}),
+			)
+			client = claim.NewClaimRefClient(server.URL, "", "agent-task-executor")
+
+			refs, err := client.List(ctx, "claims/redrive/task-1")
+
+			Expect(refs).To(BeNil())
+			Expect(err).To(HaveOccurred())
+			Expect(stderrors.Is(err, claim.ErrRefsUnavailable)).To(BeTrue())
+			Expect(err.Error()).NotTo(ContainSubstring("context deadline exceeded"))
+		})
+
+		It("returns ErrRefsUnavailable when the read cannot complete", func() {
+			// A listener that is already closed makes the dial fail fast, which
+			// exercises the transport branch without waiting out the bound.
+			unreachable := httptest.NewServer(
+				http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+					w.WriteHeader(http.StatusOK)
+					_, _ = w.Write([]byte(`[]`))
+				}),
+			)
+			url := unreachable.URL
+			unreachable.Close()
+			client = claim.NewClaimRefClient(url, "", "agent-task-executor")
+
+			refs, err := client.List(ctx, "claims/redrive/task-1")
+
+			Expect(refs).To(BeNil())
+			Expect(stderrors.Is(err, claim.ErrRefsUnavailable)).To(BeTrue())
+			Expect(err.Error()).NotTo(ContainSubstring("context deadline exceeded"))
+		})
+
+		It("does not classify a 4xx read as unavailable", func() {
+			server = httptest.NewServer(
+				http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+					w.WriteHeader(http.StatusBadRequest)
+					_, _ = w.Write([]byte("bad"))
+				}),
+			)
+			client = claim.NewClaimRefClient(server.URL, "", "agent-task-executor")
+
+			_, err := client.List(ctx, "claims/")
+
+			Expect(err).To(HaveOccurred())
+			Expect(stderrors.Is(err, claim.ErrRefsUnavailable)).To(BeFalse())
+			Expect(err.Error()).To(ContainSubstring("400"))
+		})
+
+		It("keeps the write cap unchanged", func() {
+			Expect(claim.RequestTimeout.Duration()).To(Equal(30 * time.Second))
+		})
+	})
+
 	Describe("secret leakage", func() {
 		BeforeEach(func() {
 			server = httptest.NewServer(
