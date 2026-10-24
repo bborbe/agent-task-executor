@@ -1062,7 +1062,8 @@ func (h *taskEventHandler) deferIfAtConcurrencyCap(
 	}
 	namespace, err := h.jobNamespaceForTask(ctx, config, task.TaskIdentifier)
 	if err != nil {
-		metrics.TaskEventsTotal.WithLabelValues("error").Inc()
+		// Not counted here: the caller counts every error it propagates, and an
+		// increment on both sides would count this failure twice.
 		return false, err
 	}
 	activeSet, err := h.activeJobsFor(ctx, namespace, config.Assignee)

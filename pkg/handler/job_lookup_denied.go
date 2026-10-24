@@ -118,6 +118,76 @@ func (h *taskEventHandler) suppressForActiveCurrentJob(
 	return false, err
 }
 
+// withinRespawnGraceWindow reports whether the task is still inside the window
+// after job_started_at during which a respawn is suppressed, storing the
+// grace-window deferral when it is.
+//
+// A missing or unparseable job_started_at counts as elapsed, preserving the
+// behaviour of legacy tasks. Extracted from checkActiveCurrentJob so that
+// function stays inside its length budget.
+func (h *taskEventHandler) withinRespawnGraceWindow(
+	task lib.Task,
+	config *pkg.AgentConfiguration,
+	currentJob string,
+	claim *deferredClaim,
+) bool {
+	jobStartedAt, parseErr := task.Frontmatter.JobStartedAt()
+	if parseErr != nil {
+		glog.Warningf(
+			"task %s: failed to parse job_started_at: %v; treating grace period as elapsed",
+			task.TaskIdentifier, parseErr,
+		)
+		return false
+	}
+	if jobStartedAt.IsZero() {
+		return false
+	}
+	elapsed := h.currentDateTime.Now().Time().Sub(jobStartedAt)
+	if elapsed >= defaultRespawnGracePeriod {
+		return false
+	}
+	glog.Infof(
+		"event=respawn_grace_window task=%s current_job=%s elapsed=%.0fs",
+		task.TaskIdentifier, currentJob, elapsed.Seconds(),
+	)
+	metrics.TaskEventsTotal.WithLabelValues("respawn_grace_window").Inc()
+	h.storeGraceWindowDeferral(
+		task,
+		config,
+		jobStartedAt.Add(defaultRespawnGracePeriod),
+		claim,
+	)
+	return true
+}
+
+// currentJobFinished reports whether the Job named in current_job has certainly
+// ended, classifying a failed read.
+//
+// The JobExists inside jobProvablyFinished is the second active-job read in
+// checkActiveCurrentJob, and it can be refused where the first was granted — a
+// `get jobs` 403 beside a `list jobs` grant. Classifying it here is what keeps
+// that asymmetry from exiting ConsumeMessage. Extracted so the gate stays inside
+// its length budget.
+func (h *taskEventHandler) currentJobFinished(
+	ctx context.Context,
+	task lib.Task,
+	currentJob string,
+	namespace libk8s.Namespace,
+	assignee string,
+) (bool, error) {
+	finished, err := h.jobProvablyFinished(ctx, task, currentJob, namespace)
+	if err != nil {
+		return false, wrapJobLookupError(
+			ctx,
+			err,
+			assignee,
+			namespace,
+			"check whether current_job is finished",
+		)
+	}
+	return finished, nil
+}
+
 // handleJobLookupDenied reports a denied active-job read and returns true when
 // err was one. The task is deliberately not re-parked: the reconcile floor
 // re-drives any eligible task with no active Job within its interval, which is
@@ -142,6 +212,12 @@ func (h *taskEventHandler) logJobLookupDenied(denied *jobLookupDeniedError) {
 	key := denied.assignee + "/" + denied.namespace.String()
 	now := h.currentDateTime.Now().Time()
 	h.jobLookupDeniedMu.Lock()
+	// Lazily initialised, like bumpSpawnGen: internal tests build
+	// &taskEventHandler{...} directly, and a nil map would panic on the path
+	// whose whole job is to keep the executor alive.
+	if h.jobLookupDeniedLoggedAt == nil {
+		h.jobLookupDeniedLoggedAt = make(map[string]time.Time)
+	}
 	last, logged := h.jobLookupDeniedLoggedAt[key]
 	if logged && now.Sub(last) < jobLookupDeniedInterval {
 		h.jobLookupDeniedMu.Unlock()

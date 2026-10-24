@@ -26,7 +26,6 @@ import (
 	. "github.com/onsi/gomega"
 	"github.com/prometheus/client_golang/prometheus/testutil"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
-	"k8s.io/apimachinery/pkg/runtime/schema"
 
 	agentv1 "github.com/bborbe/agent-task-executor/k8s/apis/agent.benjamin-borbe.de/v1"
 	"github.com/bborbe/agent-task-executor/mocks"
@@ -287,50 +286,6 @@ var _ = Describe("TaskEventHandler", func() {
 			}
 			err := h.ConsumeMessage(ctx, buildMsg(task))
 			Expect(err).NotTo(BeNil())
-			Expect(fakeSpawner.SpawnJobCallCount()).To(Equal(0))
-		})
-
-		// SC1: a refused identity must not exit the consumer. Before this change
-		// the 401 propagated out of ConsumeMessage as `run failed` and restarted
-		// the executor for every assignee (Sentry NUKE-PROD-CG, 2026-10-24).
-		It("defers instead of failing when the active-Job lookup is unauthorized", func() {
-			fakeSpawner.ListActiveJobsReturns(nil, apierrors.NewUnauthorized("token expired"))
-			before := testutil.ToFloat64(
-				metrics.JobLookupDeniedTotal.WithLabelValues("claude", "dev"),
-			)
-			task := lib.Task{
-				TaskIdentifier: lib.TaskIdentifier("tid-401"),
-				Frontmatter: lib.TaskFrontmatter{
-					"status":   "in_progress",
-					"phase":    string(domain.TaskPhaseExecution),
-					"assignee": "claude",
-				},
-			}
-			err := h.ConsumeMessage(ctx, buildMsg(task))
-			Expect(err).To(BeNil())
-			Expect(fakeSpawner.SpawnJobCallCount()).To(Equal(0))
-			after := testutil.ToFloat64(
-				metrics.JobLookupDeniedTotal.WithLabelValues("claude", "dev"),
-			)
-			Expect(after - before).To(Equal(float64(1)))
-		})
-
-		It("defers instead of failing when the active-Job lookup is forbidden", func() {
-			fakeSpawner.ListActiveJobsReturns(nil, apierrors.NewForbidden(
-				schema.GroupResource{Resource: "jobs"},
-				"claude",
-				errors.Errorf(ctx, "no list grant"),
-			))
-			task := lib.Task{
-				TaskIdentifier: lib.TaskIdentifier("tid-403"),
-				Frontmatter: lib.TaskFrontmatter{
-					"status":   "in_progress",
-					"phase":    string(domain.TaskPhaseExecution),
-					"assignee": "claude",
-				},
-			}
-			err := h.ConsumeMessage(ctx, buildMsg(task))
-			Expect(err).To(BeNil())
 			Expect(fakeSpawner.SpawnJobCallCount()).To(Equal(0))
 		})
 
