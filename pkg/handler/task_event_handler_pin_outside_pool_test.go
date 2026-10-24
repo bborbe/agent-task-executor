@@ -145,6 +145,12 @@ var _ = Describe("A cluster pin outside its stage pool", func() {
 		)
 	}
 
+	untaggedSkipCount := func() float64 {
+		return testutil.ToFloat64(
+			metrics.TaskEventsTotal.WithLabelValues("skipped_untagged"),
+		)
+	}
+
 	Describe("on the Kafka path", func() {
 		It("reports a pin naming its own cluster whose stage is outside its pool", func() {
 			task := routedTask(lib.TaskFrontmatter{
@@ -194,6 +200,31 @@ var _ = Describe("A cluster pin outside its stage pool", func() {
 			// stage-filtering executor.
 			Expect(pinCount()).To(Equal(beforePin))
 			Expect(stageSkipCount()).To(Equal(beforeStage + 1))
+		})
+
+		It("counts an untagged task as skipped_untagged on a claims-off executor", func() {
+			// RUN_UNTAGGED=false is the guard that keeps a pool member out of the
+			// untagged set until claims are on. The metric's `result` label must
+			// name that reason specifically: reported as skipped_stage it would
+			// read as a stage mismatch, and nobody looking for a mis-set pool flag
+			// would find it.
+			claimsOff := buildHandler("sun", true, false)
+
+			task := routedTask(lib.TaskFrontmatter{
+				"status":   "in_progress",
+				"phase":    string(domain.TaskPhaseExecution),
+				"assignee": "claude",
+				"stage":    "prod",
+			})
+
+			beforeUntagged := untaggedSkipCount()
+			beforeStage := stageSkipCount()
+
+			Expect(claimsOff.ConsumeMessage(ctx, buildMsg(task))).To(BeNil())
+
+			Expect(untaggedSkipCount()).To(Equal(beforeUntagged + 1))
+			Expect(stageSkipCount()).To(Equal(beforeStage))
+			Expect(fakeSpawner.SpawnJobCallCount()).To(Equal(0))
 		})
 
 		It("does not report an untagged task on an executor with an empty CLUSTER", func() {
