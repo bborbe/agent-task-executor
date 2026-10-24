@@ -230,25 +230,52 @@ func renewDue(now, lastRenewAt libtime.DateTime) bool {
 // the caller's: the caller's request context has already expired in exactly the
 // case this read-back exists to recover, so deriving from it would kill the
 // recovery at the moment it is needed.
-const ReadBackTimeout = 30 * libtime.Second
+//
+// It is deliberately shorter than RequestTimeout, which ClaimRefClient.List
+// applies to the same call. The read-back runs uninterruptibly (WithoutCancel)
+// while the caller holds the lease manager's lock, so this window also bounds
+// how long a shutdown or a fence can be held up by a store that has stopped
+// answering.
+const ReadBackTimeout = 10 * libtime.Second
 
-// readBackRecovery is readBack for the post-error recovery path. It drops the
-// caller's deadline and cancellation with context.WithoutCancel and applies its
-// own bound, so a write that failed after the caller's context expired can still
-// be read back and recovered. Context values are preserved.
+// recoveryContext returns the bounded context used by the claim recovery path:
+// the read-back that proves a failed write landed, and the compensating delete
+// that unwinds a half-written claim pair. Both run after the caller's context
+// may already be dead, so both must survive its cancellation.
+func recoveryContext(ctx context.Context) (context.Context, context.CancelFunc) {
+	return context.WithTimeout(context.WithoutCancel(ctx), ReadBackTimeout.Duration())
+}
+
+// readBackRecovery is readBack for the create and takeover recovery paths. It
+// drops the caller's deadline and cancellation with context.WithoutCancel and
+// applies its own bound, so a write that failed after the caller's context
+// expired can still be read back and recovered. Context values are preserved.
 //
 // Without this, a caller whose context expired mid-Put — the reconcile pass
 // bounds the whole pass, and git-rest caps the write at RequestTimeout — left
 // the read-back dead on the already-expired context. A push that had in fact
 // landed was then recorded as an error, leaving a lease nobody owned until it
 // expired, and the next admission re-ran the task.
-func (m *leaseManager) readBackRecovery(
-	ctx context.Context,
-	key string,
-) (*ClaimRef, error) {
-	reqCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), ReadBackTimeout.Duration())
+//
+// The renew path (renewReadBack) deliberately keeps requestContext instead: it
+// runs on the lease loop's context rather than on a caller's deadline, and its
+// deadline is capped at the earliest fenceAt so a hanging read-back cannot delay
+// a fence.
+func (m *leaseManager) readBackRecovery(ctx context.Context, key string) (*ClaimRef, error) {
+	reqCtx, cancel := recoveryContext(ctx)
 	defer cancel()
 	return m.readBack(reqCtx, key)
+}
+
+// deleteRefRecovery is the compensating delete that unwinds a half-written claim
+// pair. It ignores the outcome, like the other best-effort deletes, but runs on
+// recoveryContext: a recovered primary is unwound in exactly the case the
+// caller's context is already dead, so a caller-context delete would be a no-op
+// and would leak the ref it was recovering.
+func (m *leaseManager) deleteRefRecovery(ctx context.Context, key, sha string) {
+	reqCtx, cancel := recoveryContext(ctx)
+	defer cancel()
+	_ = m.refClient.Delete(reqCtx, key, sha)
 }
 
 // readBack lists the exact key and returns the entry whose ref equals
@@ -415,7 +442,7 @@ func (m *leaseManager) claimPairLocked(
 		return held, nil
 	}
 	if !errors.Is(err, ErrLeaseConflict) {
-		_ = m.refClient.Delete(ctx, primary, primarySha)
+		m.deleteRefRecovery(ctx, primary, primarySha)
 		countClaim("error")
 		return nil, err
 	}
@@ -431,7 +458,7 @@ func (m *leaseManager) claimPairLocked(
 	); ok {
 		return held, nil
 	}
-	_ = m.refClient.Delete(ctx, primary, primarySha)
+	m.deleteRefRecovery(ctx, primary, primarySha)
 	logDualConflict(secondary, taskID)
 	countClaim("conflict")
 	return nil, err
@@ -933,7 +960,7 @@ func (m *leaseManager) takeoverSecondary(
 	if err == nil {
 		return sha, nil
 	}
-	_ = m.refClient.Delete(ctx, primary, primarySha)
+	m.deleteRefRecovery(ctx, primary, primarySha)
 	if errors.Is(err, ErrLeaseConflict) {
 		countClaim("conflict")
 	} else {

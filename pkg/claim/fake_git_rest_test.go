@@ -43,6 +43,11 @@ type fakeFault struct {
 	// Apply (PUT only) performs the CAS write, when it would succeed, before
 	// answering Status.
 	Apply bool
+	// AfterApply runs after the CAS write has been stored and the store lock
+	// released, but before Status is written. Use it to act on a state the
+	// caller must be able to observe — cancelling a context once the write is
+	// visible, without racing the write itself.
+	AfterApply func()
 }
 
 type fakePutBody struct {
@@ -168,6 +173,9 @@ func (f *fakeGitRest) process(req fakeRequest) (int, []byte) {
 	}
 	status, body := f.handleNormal(req)
 	if fault != nil {
+		if fault.AfterApply != nil {
+			fault.AfterApply()
+		}
 		return fault.Status, []byte(fault.Body)
 	}
 	return status, body

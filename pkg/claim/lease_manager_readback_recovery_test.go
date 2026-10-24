@@ -8,7 +8,6 @@ import (
 	"context"
 	stderrors "errors"
 	"net/http"
-	"sync"
 
 	libtime "github.com/bborbe/time"
 	. "github.com/onsi/ginkgo/v2"
@@ -45,15 +44,18 @@ var _ = Describe("LeaseManager read-back recovery", func() {
 		callerCtx, cancel := context.WithCancel(ctx)
 		defer cancel()
 
-		var once sync.Once
 		fake.SetFault(func(req fakeRequest) *fakeFault {
 			if req.Method != http.MethodPut {
 				return nil
 			}
-			// The write lands at the store, but the caller's context is cancelled
-			// before the response reaches it: the cancelled-request case.
-			once.Do(cancel)
-			return &fakeFault{Status: http.StatusInternalServerError, Apply: true}
+			// The write is stored first, then the caller's context is cancelled
+			// before the response reaches it: the cancelled-request case, with the
+			// stored state guaranteed observable to the read-back.
+			return &fakeFault{
+				Status:     http.StatusInternalServerError,
+				Apply:      true,
+				AfterApply: cancel,
+			}
 		})
 
 		before := snapshotClaims()
@@ -62,12 +64,15 @@ var _ = Describe("LeaseManager read-back recovery", func() {
 		Expect(held).NotTo(BeNil())
 		Expect(held.Key).To(Equal("claims/task/cancel"))
 		Expect(mgr.HeldClaims()).To(HaveLen(1))
+		stored, ok := fake.Ref("refs/claims/task/cancel")
+		Expect(ok).To(BeTrue())
+		Expect(held.Sha).To(Equal(stored.Sha))
 		expectClaimDelta(before, snapshotClaims(), map[string]float64{"recovered": 1})
 	})
 
 	// Negative control: a 409 is a conflict, never a recovery. If the conflict
-	// path reached the read-back at all, the listing request below would appear
-	// and this test would fail.
+	// path reached the read-back at all, the counter delta would read `error`
+	// rather than `conflict`, and the listing request below would appear.
 	It("treats a 409 as a conflict and never reads the claim back", func() {
 		mgr := newTestManager("self", claim.NewClaimRefClient(fake.URL(), "", ""), job, clock)
 		fake.Seed(
@@ -85,5 +90,30 @@ var _ = Describe("LeaseManager read-back recovery", func() {
 		Expect(requestsMatching(fake.Requests(), http.MethodGet, "")).To(BeEmpty())
 		Expect(mgr.HeldClaims()).To(BeEmpty())
 		expectClaimDelta(before, snapshotClaims(), map[string]float64{"conflict": 1})
+	})
+
+	// The other half of the fix: only the post-error read-back escapes the
+	// caller's cancellation. A pre-check listing is not recovery — an
+	// already-expired caller must still be refused, so widening the escape to it
+	// would be a bug. If this listing moved onto the recovery context it would
+	// succeed and answer `takeover_too_early` for the live seeded lease, not
+	// `error`.
+	It("keeps a pre-check listing on the caller's context", func() {
+		mgr := newTestManager("self", claim.NewClaimRefClient(fake.URL(), "", ""), job, clock)
+		fake.Seed(
+			"refs/claims/task/precheck",
+			"0000000000000000000000000000000000000002",
+			"other",
+			"t-other",
+			rfc3339(clock.Now().Add(claim.LeaseDuration)),
+		)
+		callerCtx, cancel := context.WithCancel(ctx)
+		cancel()
+
+		before := snapshotClaims()
+		_, err := mgr.Takeover(callerCtx, "claims/task/precheck", "t-mine")
+		Expect(err).To(HaveOccurred())
+		Expect(mgr.HeldClaims()).To(BeEmpty())
+		expectClaimDelta(before, snapshotClaims(), map[string]float64{"error": 1})
 	})
 })
