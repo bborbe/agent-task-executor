@@ -758,6 +758,24 @@ func effectiveTriggerStatuses(cfg *pkg.AgentConfiguration) domain.TaskStatuses {
 	return cfg.Trigger.Statuses
 }
 
+// spawnOutcome is what the spawn funnel decided. It exists so the reconcile pass
+// can tell its two refusals apart: a task retired by the consecutive-re-drive cap
+// is not waiting for a slot, and reporting it as deferred reads as a healthy
+// backlog. Suppressed is the zero value so an unhandled branch can never report
+// a spawn.
+type spawnOutcome int
+
+const (
+	spawnOutcomeSuppressed spawnOutcome = iota
+	spawnOutcomeSpawned
+	spawnOutcomeCapped
+)
+
+// spawned reports whether the funnel actually created a Job.
+func (o spawnOutcome) spawned() bool {
+	return o == spawnOutcomeSpawned
+}
+
 // spawnIfNeeded returns (spawned, err): spawned is true iff a new k8s Job was actually launched
 // (i.e. the call reached SpawnJob successfully). All early-return branches (suppression, trigger
 // cap, active job, terminal phase, errors) return spawned=false.
@@ -770,7 +788,8 @@ func (h *taskEventHandler) spawnIfNeeded(
 	task lib.Task,
 	config *pkg.AgentConfiguration,
 ) (bool, error) {
-	return h.spawnIfNeededClaimed(ctx, task, config, nil)
+	outcome, err := h.spawnIfNeededClaimed(ctx, task, config, nil)
+	return outcome.spawned(), err
 }
 
 // spawnJobError marks a failed JobSpawner.SpawnJob call so the deferred-respawn
@@ -797,16 +816,16 @@ func (h *taskEventHandler) spawnIfNeededClaimed(
 	task lib.Task,
 	config *pkg.AgentConfiguration,
 	claim *deferredClaim,
-) (bool, error) {
+) (spawnOutcome, error) {
 	// Not this instance's task — see skipForeignVaultTask.
 	if h.skipForeignVaultTask(task) {
-		return false, nil
+		return spawnOutcomeSuppressed, nil
 	}
 
 	// A Config whose target namespace is unusable is left untouched for a human:
 	// no claim, no frontmatter write, no Job.
 	if h.rejectInvalidJobNamespace(ctx, task, config) {
-		return false, nil
+		return spawnOutcomeSuppressed, nil
 	}
 
 	// If current_job is set in frontmatter, a prior spawn notification was written
@@ -814,10 +833,10 @@ func (h *taskEventHandler) spawnIfNeededClaimed(
 	if currentJob := task.Frontmatter.CurrentJob(); currentJob != "" {
 		suppress, err := h.checkActiveCurrentJob(ctx, task, currentJob, config, claim)
 		if err != nil {
-			return false, err
+			return spawnOutcomeSuppressed, err
 		}
 		if suppress {
-			return false, nil
+			return spawnOutcomeSuppressed, nil
 		}
 	}
 
@@ -838,37 +857,37 @@ func (h *taskEventHandler) spawnIfNeededClaimed(
 	active, err := h.isJobActive(ctx, task, config)
 	if err != nil {
 		metrics.TaskEventsTotal.WithLabelValues("error").Inc()
-		return false, err
+		return spawnOutcomeSuppressed, err
 	}
 	if active {
 		glog.V(3).Infof("skip task %s: active job exists", task.TaskIdentifier)
 		metrics.TaskEventsTotal.WithLabelValues("skipped_active_job").Inc()
-		return false, nil
+		return spawnOutcomeSuppressed, nil
 	}
 
 	if h.recentlySucceeded(task) {
-		return false, nil
+		return spawnOutcomeSuppressed, nil
 	}
 
 	// The last bound, and the only one that covers every path — see
 	// maxConsecutiveRedrives.
 	if h.redriveStreakCapped(ctx, task) {
-		return false, nil
+		return spawnOutcomeCapped, nil
 	}
 
 	capped, err := h.deferIfAtConcurrencyCap(ctx, task, config, claim)
 	if err != nil {
-		return false, err
+		return spawnOutcomeSuppressed, err
 	}
 	if capped {
-		return false, nil
+		return spawnOutcomeSuppressed, nil
 	}
 
 	// Scoped trigger budget: check only. The counter write is published by
 	// recordTriggerSpawn after SpawnJob succeeds, so an infrastructure failure
 	// cannot burn one of the task's attempts.
 	if h.checkTriggerBudget(task) {
-		return false, nil
+		return spawnOutcomeSuppressed, nil
 	}
 
 	// Claimed replays decide under deferredMu, released before SpawnJob; the
@@ -877,7 +896,7 @@ func (h *taskEventHandler) spawnIfNeededClaimed(
 	// spawnIfNeededClaimed. See claimStillValid.
 	if !h.claimStillValid(claim) {
 		h.recordClaimInvalidated(task)
-		return false, nil
+		return spawnOutcomeSuppressed, nil
 	}
 
 	// Lease claim: taken after every existing gate and immediately before the Job
@@ -897,10 +916,14 @@ func (h *taskEventHandler) spawnIfNeededClaimed(
 	acquired := h.acquireSpawnClaim(ctx, task, config)
 	unlockClaim()
 	if !acquired {
-		return false, nil
+		return spawnOutcomeSuppressed, nil
 	}
 
-	return h.spawnClaimedJob(ctx, task, config)
+	spawned, err := h.spawnClaimedJob(ctx, task, config)
+	if err != nil || !spawned {
+		return spawnOutcomeSuppressed, err
+	}
+	return spawnOutcomeSpawned, nil
 }
 
 // spawnClaimedJob creates the Job for a task whose claim is already held, and
@@ -1186,39 +1209,6 @@ func (h *taskEventHandler) recordQueuedAtStamp(id lib.TaskIdentifier, value stri
 	h.deferredMu.Lock()
 	defer h.deferredMu.Unlock()
 	h.queuedAtStamps[id] = value
-}
-
-// clearQueuedAtStampIfNotDeferred drops the record for id unless the task is
-// parked in deferredRespawns, whose entry still needs it.
-//
-// This is the correct clear for every path that ends a deferral, because a
-// deferral can end in two ways: the task is re-parked (it is still waiting, so
-// the record must survive) or it is not (a skip branch, a failed spawn, an
-// evicted claim — the record must go). Clearing unconditionally would drop a
-// stamp a re-parked entry still depends on; not clearing at all leaves one
-// string behind per task that ever left the deferred state this way, and lets a
-// later, unrelated wait reuse a stale value — which admissionPriority then sorts
-// on as though the task had waited since then.
-func (h *taskEventHandler) clearQueuedAtStampIfNotDeferred(id lib.TaskIdentifier) {
-	h.deferredMu.Lock()
-	defer h.deferredMu.Unlock()
-	if _, parked := h.deferredRespawns[id]; !parked {
-		delete(h.queuedAtStamps, id)
-	}
-}
-
-// taskWithFrontmatterValue returns a copy of the task whose frontmatter carries
-// one extra key. The frontmatter map is copied rather than mutated in place: the
-// caller's map is shared with the event and may still be held by a deferred
-// entry, so an in-place write would corrupt that entry.
-func taskWithFrontmatterValue(task lib.Task, key string, value interface{}) lib.Task {
-	copied := task
-	copied.Frontmatter = make(lib.TaskFrontmatter, len(task.Frontmatter)+1)
-	for k, v := range task.Frontmatter {
-		copied.Frontmatter[k] = v
-	}
-	copied.Frontmatter[key] = value
-	return copied
 }
 
 // admissionPriority is the tie-break that decides which waiting task gets a free
@@ -1581,15 +1571,14 @@ func (h *taskEventHandler) driveCandidate(
 	// skip as `capped` rather than folding it into `deferred`. Only the capped
 	// branch signals, so the two checks cannot double-count.
 	//
-	// This is the in-memory pre-check only: a task capped solely by the shared
-	// store is reported as `deferred` here rather than `capped`, because the
-	// authoritative check runs in the spawn funnel below and its capped reason is
-	// deliberately not carried back. The cap still refuses and signals from that
-	// funnel, and the store read stays at one List per spawn decision.
+	// This in-memory pre-check is the fast path that avoids a store read for a
+	// task this process has already counted to the cap. It is not the whole
+	// answer: the spawn funnel below carries its refusal back, so a task capped
+	// solely by the shared store is reported as `capped` too.
 	if h.redriveStreakCappedInMemory(candidate.task) {
 		return reconcileOutcomeCapped
 	}
-	spawned, err := h.spawnIfNeededClaimed(
+	outcome, err := h.spawnIfNeededClaimed(
 		ctx,
 		candidate.task,
 		candidate.config,
@@ -1603,12 +1592,16 @@ func (h *taskEventHandler) driveCandidate(
 		)
 		return reconcileOutcomeSkipped
 	}
-	if !spawned {
+	switch outcome {
+	case spawnOutcomeSpawned:
+		metrics.ReconcileRedrivenTotal.Inc()
+		glog.Infof("event=reconcile_redrive task=%s", candidate.task.TaskIdentifier)
+		return reconcileOutcomeRedriven
+	case spawnOutcomeCapped:
+		return reconcileOutcomeCapped
+	default:
 		return reconcileOutcomeDeferred
 	}
-	metrics.ReconcileRedrivenTotal.Inc()
-	glog.Infof("event=reconcile_redrive task=%s", candidate.task.TaskIdentifier)
-	return reconcileOutcomeRedriven
 }
 
 // restoreParkedAssignee publishes the resolved configuration's assignee back onto
