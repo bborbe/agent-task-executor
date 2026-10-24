@@ -63,7 +63,7 @@ func claimBoolPtr(b bool) *bool { return &b }
 
 // newClaimHarness builds a handler in the given claim mode with defaults that
 // let a qualifying task spawn exactly once.
-func newClaimHarness(mode pkg.ClaimMode) *claimHarness {
+func newClaimHarness(mode pkg.ClaimMode, opts ...handler.HandlerOption) *claimHarness {
 	spawner := new(mocks.FakeJobSpawner)
 	spawner.SpawnJobReturns("job-1", nil)
 	spawner.IsJobActiveReturns(false, nil)
@@ -115,7 +115,10 @@ func newClaimHarness(mode pkg.ClaimMode) *claimHarness {
 			h.factoryCalls++
 			return client
 		},
-		handler.WithClaimJobControl(noopClaimJobControl{}),
+		append(
+			[]handler.HandlerOption{handler.WithClaimJobControl(noopClaimJobControl{})},
+			opts...,
+		)...,
 	)
 	return h
 }
