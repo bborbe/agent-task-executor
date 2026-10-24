@@ -2,7 +2,7 @@
 
 All notable changes to this project will be documented in this file.
 
-## Unreleased
+## v0.36.1
 
 - fix: **the read-back that recovers a claim after a failed write survives the caller's expired context.** A create or takeover that fails without a `409` is read back to prove whether the write landed. That read-back ran on the caller's context, and the caller is a reconcile pass bounded by its own deadline while git-rest caps the write at `RequestTimeout` — so the context was already expired in exactly the case the read-back exists to handle. The listing then failed immediately, a push that had in fact landed was recorded as `executor_claim_total{result="error"}`, and the claim was dropped: a lease nobody owned until it expired, after which the next admission re-ran the task. `recoveryContext` now derives from `context.WithoutCancel` under its own `ReadBackTimeout` (10 s, deliberately below the client's own 30 s cap because the call runs uninterruptibly while the manager's lock is held), and is used by the three post-error recovery sites — `createPrimary`, `takeoverPrimary` and `takeoverExpired`. It also backs the compensating delete that unwinds a half-written pair: that delete now runs in exactly the case the caller's context is dead, so on the caller's context it was a no-op that leaked the very primary the read-back had just recovered. The pre-check listings that are not recovery stay on the caller's context, and `renewReadBack` deliberately keeps `requestContext` — it runs on the lease loop's context, not a caller's deadline, and its deadline is capped at the earliest `fenceAt` so a hanging read-back cannot delay a fence. The 30 s caller cap is unchanged; the recovery gets a fresh window rather than a share of the expired one.
 
