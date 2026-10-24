@@ -157,6 +157,63 @@ var _ = Describe("TaskEventHandler reconcile loop", func() {
 		Expect(testutil.ToFloat64(metrics.ReconcileRedrivenTotal)).To(Equal(before + 1))
 	})
 
+	// The reconcile floor has its own eligibility path (`reconcileTask`),
+	// separate from the Kafka event path: it re-derives from the in-memory view
+	// on every pass, so it never sees the event that the event path filters. It
+	// shares `isForeignCluster` and the stage check today, but nothing pinned
+	// that. A divergence would let the floor spawn a task the event path refuses
+	// — and for a stage-mismatched or pinned task that means a run on the wrong
+	// cluster, which is the duplicate this task exists to prevent.
+	DescribeTable(
+		"applies the same routing decision as the event path",
+		func(branch base.Branch, cluster string, stage, pin string, want int) {
+			floorHandler := handler.NewTaskEventHandler(
+				fakeSpawner,
+				"dev",
+				branch,
+				cluster,
+				true,
+				true,
+				fakeResolver,
+				fakeResultPublisher,
+				taskStore,
+				currentDateTime,
+				fakeView,
+				testTaskVault,
+				handler.DefaultReconcilePassTimeout,
+				handler.DefaultReconcileInterval,
+				pkg.ClaimModeOff,
+				nil,
+			)
+			task := eligibleTask(domain.TaskPhasePlanning)
+			task.Frontmatter["stage"] = stage
+			if pin != "" {
+				task.Frontmatter["cluster"] = pin
+			}
+			fakeView.SnapshotReturns([]lib.Task{task})
+			fakeSpawner.IsJobActiveReturns(false, nil)
+
+			Expect(floorHandler.ReconcileOnce(ctx)).To(BeNil())
+			Expect(fakeSpawner.SpawnJobCallCount()).To(Equal(want))
+		},
+		Entry(
+			"a matching stage with no pin is re-driven",
+			base.Branch("prod"), "nukeprod", "prod", "", 1,
+		),
+		Entry(
+			"a stage mismatch is not re-driven",
+			base.Branch("prod"), "nukeprod", "dev", "", 0,
+		),
+		Entry(
+			"a pin naming another cluster is not re-driven",
+			base.Branch("prod"), "nukeprod", "prod", "sun", 0,
+		),
+		Entry(
+			"a pin naming this cluster outside its stage pool is not re-driven",
+			base.Branch("dev"), "nukeprod", "prod", "nukeprod", 0,
+		),
+	)
+
 	Describe("a Job that already succeeded but whose result has not reached the vault", func() {
 		// Measured nuke dev 2026-10-21: task a055d019's claude-headless Job
 		// finished in ~20 s, the file still read `phase: execution` with no
