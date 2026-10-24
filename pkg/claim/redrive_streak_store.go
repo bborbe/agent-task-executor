@@ -147,6 +147,10 @@ func (s *redriveStreakStore) Snapshot(ctx context.Context) (map[string]map[strin
 		return nil, errors.Wrapf(ctx, err, "list all redrive streak refs")
 	}
 	counts := make(map[string]map[string]int, len(refs))
+	// No ctx.Done() check in this loop, deliberately and for the same reason
+	// Count has none: refs is already in memory, returned by the one list call
+	// above, and folding it is pure CPU over a bounded slice. Cancellation is
+	// observed at the call that can actually block.
 	for _, ref := range refs {
 		taskID, phase, _, ok := parseRedriveStreakRef(ref.Ref)
 		if !ok {

@@ -8,6 +8,8 @@ import (
 	"context"
 	"sync"
 
+	"github.com/golang/glog"
+
 	"github.com/bborbe/agent-task-executor/pkg/claim"
 )
 
@@ -64,9 +66,16 @@ func (c *passRedriveStreakCache) count(
 ) (int, error) {
 	c.once.Do(func() {
 		c.snapshot, c.err = store.Snapshot(ctx)
+		glog.V(2).Infof(
+			"event=reconcile_streak_snapshot tasks=%d err=%v", len(c.snapshot), c.err,
+		)
 	})
 	if c.err != nil {
 		return 0, c.err
 	}
+	// RedriveStreakPhaseComponent is a pure normalization helper, not a
+	// capability: it maps "" to the frozen "none" component so this lookup keys
+	// the snapshot exactly the way RedriveStreakStore.Count does. Nothing is
+	// injected for it because there is nothing to substitute.
 	return c.snapshot[taskID][claim.RedriveStreakPhaseComponent(phase)], nil
 }
