@@ -2,6 +2,10 @@
 
 All notable changes to this project will be documented in this file.
 
+## Unreleased
+
+- feat: **an executor owns a task stamped with a known alias of its vault, not only its exact name.** One Obsidian vault is stamped under two slugs while a rename is in flight across clusters, so plain equality made every cluster that disagreed silently drop the other's tasks — logged as `skipped_foreign_vault`, indistinguishable from a quiet fleet. `VaultMatcher` replaces the three `task.Vault == taskVault` comparisons (`skipForeignVaultTask`, `classifyVaults`, `ownedTasks`), so the event path and the reconcile floor reach the same verdict; wiring only the event path would leave the backstop blind while every test still passed. The accepted set comes from a built-in map keyed by the executor's own vault (`openclaw` ↔ `private-agent`), overridable per deployment by `VAULT_ALIASES`. It is never a shared global list — that would let each executor admit the others' vaults, the same bug in the opposite direction — so both negative directions are tested: a `trading` stamp is still dropped by the `openclaw` executor, and a `private-agent` stamp by the `trading` one.
+
 ## v0.35.3
 
 - test: **the reconcile floor's routing decision is pinned against the event path's.** `reconcileTask` has its own eligibility path and re-derives from the in-memory view on every pass, so it never sees the Kafka event the event path filters. It shares `isForeignCluster` and the stage check today, but nothing asserted that: a divergence would let the floor spawn a task the event path refuses, and for a stage-mismatched or pinned task that is a run on the wrong cluster — the duplicate this whole change exists to prevent. Four entries cover the agreeing cases, with a spawn-expected control row so the table cannot pass vacuously by returning zero for every input. No behaviour change.

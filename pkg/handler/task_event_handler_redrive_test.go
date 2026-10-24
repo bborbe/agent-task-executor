@@ -190,7 +190,7 @@ func newRedriveHarness(mode pkg.ClaimMode, client *mocks.FakeClaimRefClient) *cl
 			h.factoryCalls++
 			return client
 		},
-		noopClaimJobControl{},
+		handler.WithClaimJobControl(noopClaimJobControl{}),
 	)
 	return h
 }

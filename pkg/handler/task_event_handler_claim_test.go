@@ -115,7 +115,7 @@ func newClaimHarness(mode pkg.ClaimMode) *claimHarness {
 			h.factoryCalls++
 			return client
 		},
-		noopClaimJobControl{},
+		handler.WithClaimJobControl(noopClaimJobControl{}),
 	)
 	return h
 }

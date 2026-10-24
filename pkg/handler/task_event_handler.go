@@ -216,9 +216,10 @@ func NewTaskEventHandler(
 	reconcileInterval time.Duration,
 	claimMode pkg.ClaimMode,
 	claimRefClientFactory ClaimRefClientFactory,
-	// claimJobControl is optional so the many test call sites stay readable; a
-	// claim-taking mode without one fails loudly at lease-manager construction.
-	claimJobControl ...claim.JobControl,
+	// opts carries optional dependencies so the many test call sites stay
+	// readable. A claim-taking mode without a job control fails loudly at
+	// lease-manager construction.
+	opts ...HandlerOption,
 ) ClaimLifecycleEventHandler {
 	handler := &taskEventHandler{
 		jobSpawner:            jobSpawner,
@@ -236,15 +237,15 @@ func NewTaskEventHandler(
 		queuedAtStamps:        make(map[lib.TaskIdentifier]string),
 		spawnLocks:            make(map[string]*sync.Mutex),
 		view:                  view,
-		taskVault:             taskVault,
+		vaultMatcher:          NewVaultMatcher(taskVault, nil),
 		reconcilePassTimeout:  reconcilePassTimeout,
 		reconcileInterval:     reconcileInterval,
 		claimMode:             claimMode,
 		claimRefClientFactory: claimRefClientFactory,
 		redriveStreaks:        make(map[lib.TaskIdentifier]redriveStreak),
 	}
-	if len(claimJobControl) > 0 {
-		handler.claimJobControl = claimJobControl[0]
+	for _, opt := range opts {
+		opt(handler)
 	}
 	return handler
 }
@@ -276,7 +277,7 @@ type taskEventHandler struct {
 	spawnLocksMu          sync.Mutex
 	spawnLocks            map[string]*sync.Mutex
 	view                  TaskView
-	taskVault             string
+	vaultMatcher          VaultMatcher
 	reconcilePassTimeout  time.Duration
 	reconcileInterval     time.Duration
 	claimMode             pkg.ClaimMode
@@ -1277,11 +1278,11 @@ func (h *taskEventHandler) ReconcileOnce(ctx context.Context) error {
 
 	if !h.view.Ready() {
 		metrics.ReconcilePassesTotal.WithLabelValues("view_not_ready").Inc()
-		glog.Warningf("event=reconcile_view_not_ready task_vault=%s", h.taskVault)
+		glog.Warningf("event=reconcile_view_not_ready task_vault=%s", h.vaultMatcher.Vault())
 		return nil
 	}
 	snapshot := h.view.Snapshot()
-	outcome, seen := classifyVaults(snapshot, h.taskVault)
+	outcome, seen := classifyVaults(snapshot, h.vaultMatcher)
 	switch outcome {
 	case vaultOutcomeUnstamped:
 		metrics.ReconcilePassesTotal.WithLabelValues("task_vault_unstamped").Inc()
@@ -1291,7 +1292,7 @@ func (h *taskEventHandler) ReconcileOnce(ctx context.Context) error {
 		metrics.ReconcilePassesTotal.WithLabelValues("task_vault_mismatch").Inc()
 		glog.Warningf(
 			"event=task_vault_mismatch task_vault=%s seen=%s",
-			h.taskVault, strings.Join(seen, ","),
+			h.vaultMatcher.Vault(), strings.Join(seen, ","),
 		)
 		return nil
 	}
@@ -1302,7 +1303,7 @@ func (h *taskEventHandler) ReconcileOnce(ctx context.Context) error {
 	h.taskStore.PruneSucceededBefore(
 		h.currentDateTime.Now().Time().Add(-taskRerunWindow),
 	)
-	owned := ownedTasks(snapshot, h.taskVault)
+	owned := ownedTasks(snapshot, h.vaultMatcher)
 	c := reconcileCounters{}
 	// Two phases, deliberately. The gather below filters every task and holds
 	// the eligible ones; the drive loop then admits them in admission order.
@@ -1328,7 +1329,7 @@ func (h *taskEventHandler) ReconcileOnce(ctx context.Context) error {
 	metrics.ReconcilePassesTotal.WithLabelValues("ok").Inc()
 	glog.Infof(
 		"event=reconcile evaluated=%d re_driven=%d deferred=%d skipped=%d capped=%d task_vault=%q",
-		c.evaluated, c.redriven, c.deferred, c.skipped, c.capped, h.taskVault,
+		c.evaluated, c.redriven, c.deferred, c.skipped, c.capped, h.vaultMatcher.Vault(),
 	)
 	return nil
 }
@@ -1348,7 +1349,7 @@ const (
 // The mismatch and unstamped outcomes are unconditional: a view that holds
 // tasks but none from this executor's vault means the deployment is
 // misconfigured, and idling would look identical to a healthy quiet fleet.
-func classifyVaults(tasks []lib.Task, taskVault string) (vaultPassOutcome, []string) {
+func classifyVaults(tasks []lib.Task, matcher VaultMatcher) (vaultPassOutcome, []string) {
 	if len(tasks) == 0 {
 		return vaultOutcomeOK, nil
 	}
@@ -1359,7 +1360,7 @@ func classifyVaults(tasks []lib.Task, taskVault string) (vaultPassOutcome, []str
 			continue
 		}
 		distinct[task.Vault] = struct{}{}
-		if task.Vault == taskVault {
+		if matcher.Accepts(task.Vault) {
 			owned = true
 		}
 	}
@@ -1377,11 +1378,11 @@ func classifyVaults(tasks []lib.Task, taskVault string) (vaultPassOutcome, []str
 	return vaultOutcomeOK, seen
 }
 
-// ownedTasks returns the tasks whose stamped vault equals taskVault.
-func ownedTasks(tasks []lib.Task, taskVault string) []lib.Task {
+// ownedTasks returns the tasks whose stamped vault this executor owns.
+func ownedTasks(tasks []lib.Task, matcher VaultMatcher) []lib.Task {
 	owned := make([]lib.Task, 0, len(tasks))
 	for _, task := range tasks {
-		if task.Vault == taskVault {
+		if matcher.Accepts(task.Vault) {
 			owned = append(owned, task)
 		}
 	}
@@ -1712,20 +1713,21 @@ func (h *taskEventHandler) reconcileTask(
 // executor's TASK_VAULT. The Kafka consumer group is shared across every
 // executor deployment — a task's events reach whichever instance owns the
 // partition, not the instance whose vault holds the file — so without this test
-// every instance drives every vault's tasks. A task with no stamped vault is
-// never owned.
+// every instance drives every vault's tasks. Ownership is decided by the vault
+// matcher, not by string equality, so a task stamped with a known alias of this
+// executor's vault is still owned; a task with no stamped vault never is.
 //
 // It is the cheapest and the widest gate in spawnIfNeeded — a foreign task is
 // not this instance's to spawn, whatever path delivered the event — so it runs
 // first, and it is factored out only to keep spawnIfNeeded inside funlen.
 func (h *taskEventHandler) skipForeignVaultTask(task lib.Task) bool {
-	if task.Vault == h.taskVault {
+	if h.vaultMatcher.Accepts(task.Vault) {
 		return false
 	}
 	metrics.TaskEventsTotal.WithLabelValues("skipped_foreign_vault").Inc()
 	glog.V(2).Infof(
 		"skip task %s: foreign vault vault=%s task_vault=%s",
-		task.TaskIdentifier, task.Vault, h.taskVault,
+		task.TaskIdentifier, task.Vault, h.vaultMatcher.Vault(),
 	)
 	return true
 }

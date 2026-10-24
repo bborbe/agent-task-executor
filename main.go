@@ -9,6 +9,7 @@ import (
 	"net/url"
 	"os"
 	"regexp"
+	"strings"
 	"time"
 
 	"github.com/bborbe/cqrs/base"
@@ -53,7 +54,8 @@ type application struct {
 	TopicPrefix                base.TopicPrefix  `required:"false" arg:"topic-prefix"                   env:"TOPIC_PREFIX"                   usage:"Explicit Kafka topic prefix; empty means unprefixed topics"`
 	Namespace                  libk8s.Namespace  `required:"true"  arg:"namespace"                      env:"NAMESPACE"                      usage:"K8s namespace to spawn Jobs in"`
 	VaultName                  string            `required:"true"  arg:"vault-name"                     env:"VAULT_NAME"                     usage:"Obsidian vault name this executor instance serves; Config CRs are resolved by the composed {assignee}-{vaultName} assignee"`
-	TaskVault                  string            `required:"false" arg:"task-vault"                     env:"TASK_VAULT"                     usage:"Vault slug this executor owns tasks for; empty means VAULT_NAME. A task is owned when its stamped vault equals this value"`
+	TaskVault                  string            `required:"false" arg:"task-vault"                     env:"TASK_VAULT"                     usage:"Vault slug this executor owns tasks for; empty means VAULT_NAME. A task is owned when its stamped vault equals this value or is one of its aliases"`
+	VaultAliases               string            `required:"false" arg:"vault-aliases"                  env:"VAULT_ALIASES"                  usage:"Comma-separated vault slugs this executor also owns, in addition to TASK_VAULT; overrides the built-in alias set for this vault. Empty uses the built-in set, which is empty for a vault that is not mid-rename"`
 	GitRestURL                 string            `required:"false" arg:"gitrest-url"                    env:"GITREST_URL"                    usage:"git-rest HTTP API base URL the claim ref client writes leased claim refs through"`
 	GitRestGatewaySecret       string            `required:"false" arg:"gitrest-gateway-secret"         env:"GITREST_GATEWAY_SECRET"         usage:"NAME of the K8s Secret carrying the git-rest gateway secret (data key gateway-secret) — never the secret value; empty disables gateway auth"`
 	BuildGitVersion            string            `required:"false" arg:"build-git-version"              env:"BUILD_GIT_VERSION"              usage:"Build Git version (git describe --tags --always --dirty)"                                                                                                                                                                                                                           default:"dev"`
@@ -111,6 +113,25 @@ func (a *application) effectiveTaskVault() string {
 	return a.VaultName
 }
 
+// resolvedVaultAliases returns the vault slugs this executor owns besides its
+// own: VAULT_ALIASES when set, else the built-in set for its task vault.
+//
+// The built-in set makes the common case zero-config — no deployment has to
+// carry the value — while the override covers a rename the built-in map does not
+// know about yet.
+func (a *application) resolvedVaultAliases() []string {
+	if a.VaultAliases == "" {
+		return handler.DefaultVaultAliases(a.effectiveTaskVault())
+	}
+	aliases := make([]string, 0, 2)
+	for alias := range strings.SplitSeq(a.VaultAliases, ",") {
+		if trimmed := strings.TrimSpace(alias); trimmed != "" {
+			aliases = append(aliases, trimmed)
+		}
+	}
+	return aliases
+}
+
 // validate checks the startup configuration before any client is constructed.
 func (a *application) validate(ctx context.Context) error {
 	if a.JobTTLSecondsAfterFinished < 0 {
@@ -133,6 +154,15 @@ func (a *application) validate(ctx context.Context) error {
 			"task-vault (TASK_VAULT) must match ^[a-z][a-z0-9-]*$ (lowercase letter, then lowercase/digits/hyphens), got %q",
 			a.effectiveTaskVault(),
 		)
+	}
+	for _, alias := range a.resolvedVaultAliases() {
+		if !vaultSlugRegexp.MatchString(alias) {
+			return errors.Errorf(
+				ctx,
+				"vault-aliases (VAULT_ALIASES) entry must match ^[a-z][a-z0-9-]*$ (lowercase letter, then lowercase/digits/hyphens), got %q",
+				alias,
+			)
+		}
 	}
 	if a.ReconcilePassTimeout <= 0 {
 		return errors.Errorf(
@@ -334,6 +364,7 @@ func (a *application) Run(ctx context.Context, sentryClient libsentry.Client) er
 		a.JobFsGroup,
 		taskView,
 		a.effectiveTaskVault(),
+		a.resolvedVaultAliases(),
 		a.ReconcilePassTimeout,
 		a.ReconcileInterval,
 		claimMode,
