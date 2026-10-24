@@ -2,9 +2,11 @@
 
 All notable changes to this project will be documented in this file.
 
-## v0.37.0
+## Unreleased
 
 - fix: **a refused active-job read defers the task instead of exiting the executor.** `ListActiveJobs` and `IsJobActive` returned their error unwrapped, so a single `401 Unauthorized` from `list jobs` propagated `isJobActive` → `spawnIfNeededClaimed` → `spawnIfNeeded` → `ConsumeMessage` → `run failed` and restarted the process for **every** assignee on that executor. Observed 2026-10-24 (Sentry `NUKE-PROD-CG`): one task's lookup was refused while the control plane moved into `agent`, and the whole openclaw executor went down rather than deferring that one task. `401` and `403` are now classified as `jobLookupDeniedError` — the read-path sibling of `spawnJobError` — and suppressed at every read site (`isJobActive`, `checkActiveCurrentJob`, `deferIfAtConcurrencyCap`), leaving the reconcile floor to re-drive the task once the credential or grant is restored. The deferral is silent, so `agent_executor_job_lookup_denied_total{assignee,namespace}` carries the visibility, seeded at 0 on each successful read because the assignee domain comes from Config CRs and cannot be enumerated at init; the log is throttled to one line per assignee/namespace per minute. Every other read error — a `500`, a `404`, a `429` — stays fatal, so a programming fault is not relabelled as an outage.
+
+## v0.37.0
 
 - feat: **every executor owns its vault's canonical `private-` stamp, not just `openclaw`.** `defaultVaultAliases` carried one pair (`openclaw` ↔ `private-agent`) while the store still holds tasks stamped with the canonical slug of the other two vaults, so `personal` and `trading` dropped those keys in `ownedTasks` **before** the spawn path — never driven and never logged as a `foreign vault` skip, which reads as a quiet fleet. Measured 2026-10-24 on the compacted task topic: 176 prod and 182 dev keys stamped `private-personal`, 67 prod and 72 dev stamped `private-trading`, every one of them invisible to the executor that owns its vault; each executor's `event=reconcile` owned-set size matched its short-slug population exactly and excluded the `private-*` one. Both missing pairs are added symmetrically, because an entry present in one direction only re-creates the drop on the other side. A unit test pins all three pairs in both directions plus the negative controls, so the table cannot regress to a partial one.
 
