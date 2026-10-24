@@ -1,7 +1,8 @@
 ---
-status: draft
+status: approved
 spec: [016-bug-claim-only-until-quota]
 created: "2026-10-24T19:34:00Z"
+queued: "2026-10-24T19:46:05Z"
 branch: dark-factory/bug-claim-only-until-quota
 ---
 

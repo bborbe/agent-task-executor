@@ -1,7 +1,13 @@
 ---
-status: draft
+status: completed
 spec: [016-bug-claim-only-until-quota]
+summary: Added PodQuotaLimiter in pkg/spawner with a ResourceQuota PriorityClass scope selector, 30 s cache, ambiguity warning, generated fake and table-driven tests.
+execution_id: agent-task-executor-claim-quota-exec-037-spec-016-pod-quota-limiter
+dark-factory-version: v0.198.7
 created: "2026-10-24T19:34:00Z"
+queued: "2026-10-24T19:45:56Z"
+started: "2026-10-24T19:45:58Z"
+completed: "2026-10-24T19:54:36Z"
 branch: dark-factory/bug-claim-only-until-quota
 ---
 
