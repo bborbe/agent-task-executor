@@ -92,6 +92,41 @@ var _ = Describe("LeaseManager read-back recovery", func() {
 		expectClaimDelta(before, snapshotClaims(), map[string]float64{"conflict": 1})
 	})
 
+	// The recovery is only for our own write. A read-back that shows another
+	// writer must return the original error and leave the claim unheld — adopting
+	// it would hand us a lease someone else holds.
+	It("does not recover a read-back that shows another writer", func() {
+		mgr := newTestManager("self", claim.NewClaimRefClient(fake.URL(), "", ""), job, clock)
+		fake.SetFault(func(req fakeRequest) *fakeFault {
+			if req.Method != http.MethodPut {
+				return nil
+			}
+			return &fakeFault{
+				Status: http.StatusInternalServerError,
+				Apply:  true,
+				// Overwrite our write with another cluster's triple once it is stored,
+				// so the read-back sees a writer that is not us.
+				AfterApply: func() {
+					fake.Seed(
+						"refs/claims/task/other",
+						"0000000000000000000000000000000000000003",
+						"other",
+						"t-other",
+						rfc3339(clock.Now().Add(claim.LeaseDuration)),
+					)
+				},
+			}
+		})
+
+		before := snapshotClaims()
+		held, err := mgr.Claim(ctx, "claims/task/other", "t-mine")
+		Expect(held).To(BeNil())
+		Expect(err).To(HaveOccurred())
+		Expect(stderrors.Is(err, claim.ErrLeaseConflict)).To(BeFalse())
+		Expect(mgr.HeldClaims()).To(BeEmpty())
+		expectClaimDelta(before, snapshotClaims(), map[string]float64{"error": 1})
+	})
+
 	// The other half of the fix: only the post-error read-back escapes the
 	// caller's cancellation. A pre-check listing is not recovery — an
 	// already-expired caller must still be refused, so widening the escape to it
