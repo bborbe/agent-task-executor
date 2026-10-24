@@ -2,7 +2,7 @@
 
 All notable changes to this project will be documented in this file.
 
-## Unreleased
+## v0.35.3
 
 - test: **the reconcile floor's routing decision is pinned against the event path's.** `reconcileTask` has its own eligibility path and re-derives from the in-memory view on every pass, so it never sees the Kafka event the event path filters. It shares `isForeignCluster` and the stage check today, but nothing asserted that: a divergence would let the floor spawn a task the event path refuses, and for a stage-mismatched or pinned task that is a run on the wrong cluster — the duplicate this whole change exists to prevent. Four entries cover the agreeing cases, with a spawn-expected control row so the table cannot pass vacuously by returning zero for every input. No behaviour change.
 
