@@ -4,7 +4,10 @@
 
 package handler
 
-import "github.com/bborbe/agent-task-executor/pkg/claim"
+import (
+	"github.com/bborbe/agent-task-executor/pkg/claim"
+	"github.com/bborbe/agent-task-executor/pkg/spawner"
+)
 
 // HandlerOption customises a taskEventHandler at construction. It replaces the
 // former single-purpose variadic so a new optional dependency does not widen the
@@ -25,5 +28,13 @@ func WithClaimJobControl(control claim.JobControl) HandlerOption {
 func WithVaultAliases(aliases []string) HandlerOption {
 	return func(h *taskEventHandler) {
 		h.vaultMatcher = NewVaultMatcher(h.vaultMatcher.Vault(), aliases)
+	}
+}
+
+// WithPodQuotaLimiter attaches the reader that bounds admission by the pod quota
+// of the agent's priority class. An absent limiter means no quota bound.
+func WithPodQuotaLimiter(limiter spawner.PodQuotaLimiter) HandlerOption {
+	return func(h *taskEventHandler) {
+		h.podQuotaLimiter = limiter
 	}
 }

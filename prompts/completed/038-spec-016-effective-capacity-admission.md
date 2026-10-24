@@ -1,8 +1,13 @@
 ---
-status: approved
+status: completed
 spec: [016-bug-claim-only-until-quota]
+summary: 'Bounded concurrency admission by the smaller of MaxConcurrentJobs and the priority-class pod quota, read via the new WithPodQuotaLimiter option under the per-assignee spawn lock, with the production reader wired in CreateConsumer; captured verbatim (a) deferral line: ''I1024 22:03:55.420194   79571 task_event_handler.go:1089] event=concurrency_cap task=tid-claim-off-1 assignee=claude running=3 cap=3 max=5 quota=3 retry_after=1m0s'' and (b) warning: ''W1024 22:03:55.419854   79571 concurrency_capacity.go:53] event=pod_quota_read_failed namespace=dev assignee=claude priority_class=github-pr-review-agent err=forbidden''.'
+execution_id: agent-task-executor-claim-quota-exec-038-spec-016-effective-capacity-admission
+dark-factory-version: v0.198.7
 created: "2026-10-24T19:34:00Z"
 queued: "2026-10-24T19:46:05Z"
+started: "2026-10-24T19:54:37Z"
+completed: "2026-10-24T20:05:36Z"
 branch: dark-factory/bug-claim-only-until-quota
 ---
 

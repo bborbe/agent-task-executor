@@ -313,6 +313,9 @@ type taskEventHandler struct {
 	// missed, and a spawn for one assignee leaves the others' entries valid.
 	spawnGenMu sync.Mutex
 	spawnGens  map[string]uint64
+	// podQuotaLimiter is the optional pod-capacity reader; nil means no quota
+	// bound. Read only under the per-assignee spawn lock.
+	podQuotaLimiter spawner.PodQuotaLimiter
 }
 
 // lockAssigneeSpawn serializes the count-then-spawn sequence for one assignee and
@@ -327,6 +330,7 @@ type taskEventHandler struct {
 // once admitted 17 Jobs, 15 released admitted 15. Every over-cap Job is then rejected
 // by the agent's ResourceQuota, loops on FailedCreate and burns its full
 // activeDeadlineSeconds while merely queued, before being killed without ever running.
+// Admission is also bounded by the priority-class pod quota, read inside this per-assignee lock.
 //
 // Per-assignee rather than global: a fleet-wide lock would make one agent's spawn
 // latency everyone's. Serializing per assignee costs nothing — spawns are rare
@@ -1022,20 +1026,20 @@ func (h *taskEventHandler) storeSpawnedJob(task lib.Task, jobName string) {
 }
 
 // deferIfAtConcurrencyCap reports whether the agent is already running its
-// configured maximum number of Jobs, and if so registers the task for a
-// deferred respawn instead of spawning now.
-//
-// Deferring rather than skipping is the whole point. Task publication is
-// edge-triggered on vault file changes; being over the cap produces no such
-// change, so a skipped spawn would never be re-driven and the task would sit
-// at in_progress forever, indistinguishable from work in flight.
+// effective capacity — the smaller positive value of MaxConcurrentJobs and the
+// pod quota of the agent's priority class — and if so defers the respawn.
+// Deferring rather than skipping is the whole point: task publication is
+// edge-triggered on vault file changes, so a skipped spawn would never be
+// re-driven and the task would sit at in_progress forever, indistinguishable
+// from work in flight.
 func (h *taskEventHandler) deferIfAtConcurrencyCap(
 	ctx context.Context,
 	task lib.Task,
 	config *pkg.AgentConfiguration,
 	claim *deferredClaim,
 ) (bool, error) {
-	if config == nil || config.MaxConcurrentJobs <= 0 {
+	// Uncapped and limiter-less: no namespace resolution and no active-Job list.
+	if config == nil || (h.podQuotaLimiter == nil && config.MaxConcurrentJobs <= 0) {
 		return false, nil
 	}
 	namespace, err := h.jobNamespaceForTask(ctx, config, task.TaskIdentifier)
@@ -1043,21 +1047,27 @@ func (h *taskEventHandler) deferIfAtConcurrencyCap(
 		metrics.TaskEventsTotal.WithLabelValues("error").Inc()
 		return false, err
 	}
+	quota := h.podQuotaFor(ctx, namespace, config)
+	capacity := effectiveConcurrencyCap(config.MaxConcurrentJobs, quota)
+	if capacity <= 0 {
+		return false, nil
+	}
 	activeSet, err := h.activeJobsFor(ctx, namespace, config.Assignee)
 	if err != nil {
 		metrics.TaskEventsTotal.WithLabelValues("error").Inc()
 		return false, errors.Wrapf(ctx, err, "count active jobs for assignee %s", config.Assignee)
 	}
 	running := len(activeSet)
-	if running < config.MaxConcurrentJobs {
+	if running < capacity {
 		// Log the ADMIT decision, not just the deferral. Without this, an
 		// over-cap spawn leaves no trace and overshoot can only be found by
 		// counting Jobs in the cluster by hand — which is how the 2026-08-15
 		// race went unnoticed until 17 Jobs existed against a cap of 1.
 		// Same V(1) rationale as the deferral log below.
 		glog.V(1).Infof(
-			"event=concurrency_admit task=%s assignee=%s running=%d cap=%d",
-			task.TaskIdentifier, config.Assignee, running, config.MaxConcurrentJobs,
+			"event=concurrency_admit task=%s assignee=%s running=%d cap=%d max=%d quota=%d",
+			task.TaskIdentifier, config.Assignee, running, capacity,
+			config.MaxConcurrentJobs, quota,
 		)
 		return false, nil
 	}
@@ -1077,9 +1087,9 @@ func (h *taskEventHandler) deferIfAtConcurrencyCap(
 	// stays visible to an operator looking — unlike the V(3) skip that hid the
 	// wedge fixed in #12.
 	glog.V(1).Infof(
-		"event=concurrency_cap task=%s assignee=%s running=%d cap=%d retry_after=%s",
-		task.TaskIdentifier, config.Assignee, running, config.MaxConcurrentJobs,
-		concurrencyCapRetryDelay,
+		"event=concurrency_cap task=%s assignee=%s running=%d cap=%d max=%d quota=%d retry_after=%s",
+		task.TaskIdentifier, config.Assignee, running, capacity,
+		config.MaxConcurrentJobs, quota, concurrencyCapRetryDelay,
 	)
 	metrics.TaskEventsTotal.WithLabelValues("deferred_concurrency_cap").Inc()
 	// The bare counter above is kept for continuity; this one carries the
