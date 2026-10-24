@@ -167,7 +167,7 @@ kubectlnukeprod -n agent logs deploy/agent-task-executor-openclaw --since=30m | 
 
 ## Desired Behavior
 
-1. **Effective capacity.** For a task whose Config resolves, the admission bound is the smaller positive value of `MaxConcurrentJobs` and the pod quota that scopes the agent's `priorityClassName`. A zero `MaxConcurrentJobs` means "no declared cap" and does not disable the quota bound. Zero for both means uncapped.
+1. **Effective capacity.** For a task whose Config resolves, the admission bound is the smaller positive value of `MaxConcurrentJobs` and the pod quota that scopes the agent's `priorityClassName`. A zero `MaxConcurrentJobs` means "no declared cap" and does not disable the quota bound. Uncapped is the absence of *both* bounds: a matching quota reporting `hard.pods: 0` is a hard zero that defers every spawn, never an absent quota — the two states are reported separately so the most restrictive configuration cannot fall back to the declared cap and recreate the defect.
 2. **Claim only after admission.** The existing order is preserved: admission is decided before the claim is taken, so a deferred task never holds a lease. No new release path is added.
 3. **Deferral is unchanged.** A task over the bound is parked in the deferred-respawn queue exactly as today: `queued_at` stamped once, retried after 60 s, counted in `TaskEventsTotal{result="deferred_concurrency_cap"}` and `DeferredConcurrencyCapTotal{assignee}`.
 4. **Quota lookup.** The limit is the `hard.pods` of the `ResourceQuota` whose `scopeSelector` matches `PriorityClass In [<priorityClassName>]`. No priority class, no match, or an empty value means no quota bound.
@@ -179,7 +179,7 @@ kubectlnukeprod -n agent logs deploy/agent-task-executor-openclaw --since=30m | 
 - The quota reader is a new optional dependency, attached through the existing `HandlerOption` seam (`pkg/handler/task_event_handler_options.go`), not a new positional parameter and not a new method on `JobSpawner`. `NewTaskEventHandler` keeps its signature, the generated counterfeiter fake is untouched, and every existing test keeps its current behaviour because an absent limiter means "no quota bound".
 - The reader itself lives in `pkg/spawner` and takes the kube client plus the injected clock.
 - `ClaimTotal` labels stay a closed set. Keys, task ids and priority class names are never label values.
-- No new metric is added; the existing `deferred_concurrency_cap` counters carry the signal.
+- No new metric family is added. The deferral signal stays on the existing `deferred_concurrency_cap` counters; the fail-open read path increments the existing `TaskEventsTotal{result="pod_quota_read_failed"}` so a silently inactive bound is alertable rather than log-only.
 - The per-assignee spawn lock still spans count, quota read and spawn.
 - Existing tests pass with their assertions unchanged. The only permitted edits to existing test files are the additions the new dependency requires — a stub or fake gaining one zero-returning method, and a helper gaining one optional argument. No existing expectation may be relaxed to accommodate the change.
 

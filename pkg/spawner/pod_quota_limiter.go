@@ -31,13 +31,19 @@ const podQuotaCacheTTL = 30 * time.Second
 // for one agent priority class.
 type PodQuotaLimiter interface {
 	// PodQuota returns the pod limit of the ResourceQuota whose scopeSelector
-	// matches PriorityClass In [priorityClassName] in namespace. It returns 0
-	// with a nil error when no quota bounds that priority class.
+	// matches PriorityClass In [priorityClassName] in namespace.
+	//
+	// bounded distinguishes "no quota scopes this class" from "the quota admits
+	// zero pods". Without it a quota carrying hard.pods: 0 would be
+	// indistinguishable from an absent one, admission would fall back to the
+	// declared cap, and the executor would claim work the quota can never start —
+	// the exact defect this reader exists to remove, in the most restrictive
+	// configuration.
 	PodQuota(
 		ctx context.Context,
 		namespace libk8s.Namespace,
 		priorityClassName string,
-	) (int, error)
+	) (limit int, bounded bool, err error)
 }
 
 // NewPodQuotaLimiter creates a PodQuotaLimiter backed by the K8s core/v1 API.
@@ -61,10 +67,11 @@ type podQuotaLimiter struct {
 	cache           map[string]cachedPodQuota
 }
 
-// cachedPodQuota is one priority class's limit and the instant it was read.
+// cachedPodQuota is one priority class's answer and the instant it was read.
 type cachedPodQuota struct {
-	limit  int
-	readAt time.Time
+	limit   int
+	bounded bool
+	readAt  time.Time
 }
 
 // PodQuota returns the pod limit of the quota scoping the priority class. An
@@ -75,9 +82,9 @@ func (l *podQuotaLimiter) PodQuota(
 	ctx context.Context,
 	namespace libk8s.Namespace,
 	priorityClassName string,
-) (int, error) {
+) (int, bool, error) {
 	if priorityClassName == "" {
-		return 0, nil
+		return 0, false, nil
 	}
 	cacheKey := namespace.String() + "/" + priorityClassName
 	now := l.currentDateTime.Now().Time()
@@ -86,21 +93,21 @@ func (l *podQuotaLimiter) PodQuota(
 	cached, ok := l.cache[cacheKey]
 	l.mu.Unlock()
 	if ok && now.Sub(cached.readAt) < podQuotaCacheTTL {
-		return cached.limit, nil
+		return cached.limit, cached.bounded, nil
 	}
 
 	quotaList, err := l.kubeClient.CoreV1().
 		ResourceQuotas(namespace.String()).
 		List(ctx, metav1.ListOptions{})
 	if err != nil {
-		return 0, errors.Wrapf(ctx, err, "list resourcequotas in namespace %s", namespace)
+		return 0, false, errors.Wrapf(ctx, err, "list resourcequotas in namespace %s", namespace)
 	}
-	limit := podQuotaFromQuotas(quotaList.Items, priorityClassName)
+	limit, bounded := podQuotaFromQuotas(quotaList.Items, priorityClassName)
 
 	l.mu.Lock()
-	l.cache[cacheKey] = cachedPodQuota{limit: limit, readAt: now}
+	l.cache[cacheKey] = cachedPodQuota{limit: limit, bounded: bounded, readAt: now}
 	l.mu.Unlock()
-	return limit, nil
+	return limit, bounded, nil
 }
 
 // quotaScopesPriorityClass reports whether the quota's scopeSelector limits
@@ -139,12 +146,19 @@ func quotaPodLimit(quota *corev1.ResourceQuota) (int, bool) {
 	return 0, false
 }
 
-// podQuotaFromQuotas returns the smallest positive pods limit among the quotas
-// that scope the priority class, or 0 when none does. More than one contributing
-// quota is ambiguous: the smaller bound is enforced so admission cannot exceed
-// either quota, and the ambiguity is logged once naming every contributor.
-func podQuotaFromQuotas(quotas []corev1.ResourceQuota, priorityClassName string) int {
+// podQuotaFromQuotas returns the smallest pods limit among the quotas that scope
+// the priority class, and whether any such quota bounds it at all. A quota
+// carrying pods: 0 is a hard zero bound — the class may run nothing — and is
+// reported as bounded, never as "no quota". Only a quota with no pods entry is
+// skipped. More than one contributing quota is ambiguous: the smaller bound is
+// enforced so admission cannot exceed either quota, and the ambiguity is logged
+// once naming every contributor.
+func podQuotaFromQuotas(
+	quotas []corev1.ResourceQuota,
+	priorityClassName string,
+) (int, bool) {
 	limit := 0
+	bounded := false
 	contributors := make([]string, 0, len(quotas))
 	for i := range quotas {
 		quota := &quotas[i]
@@ -152,12 +166,13 @@ func podQuotaFromQuotas(quotas []corev1.ResourceQuota, priorityClassName string)
 			continue
 		}
 		podLimit, ok := quotaPodLimit(quota)
-		if !ok || podLimit <= 0 {
+		if !ok {
 			continue
 		}
 		contributors = append(contributors, quota.Name)
-		if limit == 0 || podLimit < limit {
+		if !bounded || podLimit < limit {
 			limit = podLimit
+			bounded = true
 		}
 	}
 	if len(contributors) > 1 {
@@ -168,5 +183,5 @@ func podQuotaFromQuotas(quotas []corev1.ResourceQuota, priorityClassName string)
 			limit,
 		)
 	}
-	return limit
+	return limit, bounded
 }

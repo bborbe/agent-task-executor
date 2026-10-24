@@ -10,7 +10,7 @@ import (
 )
 
 type FakePodQuotaLimiter struct {
-	PodQuotaStub        func(context.Context, k8s.Namespace, string) (int, error)
+	PodQuotaStub        func(context.Context, k8s.Namespace, string) (int, bool, error)
 	podQuotaMutex       sync.RWMutex
 	podQuotaArgsForCall []struct {
 		arg1 context.Context
@@ -19,17 +19,19 @@ type FakePodQuotaLimiter struct {
 	}
 	podQuotaReturns struct {
 		result1 int
-		result2 error
+		result2 bool
+		result3 error
 	}
 	podQuotaReturnsOnCall map[int]struct {
 		result1 int
-		result2 error
+		result2 bool
+		result3 error
 	}
 	invocations      map[string][][]interface{}
 	invocationsMutex sync.RWMutex
 }
 
-func (fake *FakePodQuotaLimiter) PodQuota(arg1 context.Context, arg2 k8s.Namespace, arg3 string) (int, error) {
+func (fake *FakePodQuotaLimiter) PodQuota(arg1 context.Context, arg2 k8s.Namespace, arg3 string) (int, bool, error) {
 	fake.podQuotaMutex.Lock()
 	ret, specificReturn := fake.podQuotaReturnsOnCall[len(fake.podQuotaArgsForCall)]
 	fake.podQuotaArgsForCall = append(fake.podQuotaArgsForCall, struct {
@@ -45,9 +47,9 @@ func (fake *FakePodQuotaLimiter) PodQuota(arg1 context.Context, arg2 k8s.Namespa
 		return stub(arg1, arg2, arg3)
 	}
 	if specificReturn {
-		return ret.result1, ret.result2
+		return ret.result1, ret.result2, ret.result3
 	}
-	return fakeReturns.result1, fakeReturns.result2
+	return fakeReturns.result1, fakeReturns.result2, fakeReturns.result3
 }
 
 func (fake *FakePodQuotaLimiter) PodQuotaCallCount() int {
@@ -56,7 +58,7 @@ func (fake *FakePodQuotaLimiter) PodQuotaCallCount() int {
 	return len(fake.podQuotaArgsForCall)
 }
 
-func (fake *FakePodQuotaLimiter) PodQuotaCalls(stub func(context.Context, k8s.Namespace, string) (int, error)) {
+func (fake *FakePodQuotaLimiter) PodQuotaCalls(stub func(context.Context, k8s.Namespace, string) (int, bool, error)) {
 	fake.podQuotaMutex.Lock()
 	defer fake.podQuotaMutex.Unlock()
 	fake.PodQuotaStub = stub
@@ -69,30 +71,33 @@ func (fake *FakePodQuotaLimiter) PodQuotaArgsForCall(i int) (context.Context, k8
 	return argsForCall.arg1, argsForCall.arg2, argsForCall.arg3
 }
 
-func (fake *FakePodQuotaLimiter) PodQuotaReturns(result1 int, result2 error) {
+func (fake *FakePodQuotaLimiter) PodQuotaReturns(result1 int, result2 bool, result3 error) {
 	fake.podQuotaMutex.Lock()
 	defer fake.podQuotaMutex.Unlock()
 	fake.PodQuotaStub = nil
 	fake.podQuotaReturns = struct {
 		result1 int
-		result2 error
-	}{result1, result2}
+		result2 bool
+		result3 error
+	}{result1, result2, result3}
 }
 
-func (fake *FakePodQuotaLimiter) PodQuotaReturnsOnCall(i int, result1 int, result2 error) {
+func (fake *FakePodQuotaLimiter) PodQuotaReturnsOnCall(i int, result1 int, result2 bool, result3 error) {
 	fake.podQuotaMutex.Lock()
 	defer fake.podQuotaMutex.Unlock()
 	fake.PodQuotaStub = nil
 	if fake.podQuotaReturnsOnCall == nil {
 		fake.podQuotaReturnsOnCall = make(map[int]struct {
 			result1 int
-			result2 error
+			result2 bool
+			result3 error
 		})
 	}
 	fake.podQuotaReturnsOnCall[i] = struct {
 		result1 int
-		result2 error
-	}{result1, result2}
+		result2 bool
+		result3 error
+	}{result1, result2, result3}
 }
 
 func (fake *FakePodQuotaLimiter) Invocations() map[string][][]interface{} {

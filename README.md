@@ -23,7 +23,7 @@ A task can name the cluster that runs it with the optional `cluster:` frontmatte
 
 ## Admission capacity
 
-A cluster admits a task only when the assignee has a free slot, and the number of slots is the **smaller of** the Config's `maxConcurrentJobs` and the pod quota of the agent's priority class (`ResourceQuota` scoped `PriorityClass In [...]`, `status.hard.pods` falling back to `spec.hard`, cached for 30 s). A zero `maxConcurrentJobs` means no declared cap, not an uncapped executor — the quota still bounds it. Because admission happens before the claim is taken, a task over the bound is **never claimed**: it is deferred and a peer cluster can take it immediately.
+A cluster admits a task only when the assignee has a free slot, and the number of slots is the **smaller of** the Config's `maxConcurrentJobs` and the pod quota of the agent's priority class (`ResourceQuota` scoped `PriorityClass In [...]`, `status.hard.pods` falling back to `spec.hard`, cached for 30 s). A zero `maxConcurrentJobs` means no declared cap, not an uncapped executor — the quota still bounds it. A matching quota with `hard.pods: 0` is a hard zero (the class may run nothing) and defers every spawn; it is not treated as an absent quota. Because admission happens before the claim is taken, a task over the bound is **never claimed**: it is deferred and a peer cluster can take it immediately.
 
 A deferral is counted by `agent_executor_task_events_total{result="deferred_concurrency_cap"}` and `agent_executor_deferred_concurrency_cap_total{assignee=...}`. Both `event=concurrency_admit` and `event=concurrency_cap` carry `running=`, `cap=`, `max=` and `quota=`; `cap` is the effective bound and `quota` is 0 when no quota bound applies.
 

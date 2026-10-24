@@ -121,10 +121,13 @@ var _ = Describe("PodQuotaLimiter", func() {
 			}
 			fakeClient = fake.NewClientset(objects...)
 
-			limit, err := newQuotaLimiter(fakeClient, currentDateTime).
+			limit, bounded, err := newQuotaLimiter(fakeClient, currentDateTime).
 				PodQuota(ctx, libk8s.Namespace("test-ns"), priorityClassName)
 			Expect(err).ToNot(HaveOccurred())
 			Expect(limit).To(Equal(expected))
+			// Every zero row above is a no-match row; a matching quota always
+			// reports bounded, including the pods: 0 case covered separately.
+			Expect(bounded).To(Equal(expected > 0))
 		},
 		Entry(
 			"matching priority class returns its pods limit",
@@ -242,11 +245,24 @@ var _ = Describe("PodQuotaLimiter", func() {
 	)
 
 	It("returns zero without an API call for an empty priority class", func() {
-		limit, err := newQuotaLimiter(fakeClient, currentDateTime).
+		limit, bounded, err := newQuotaLimiter(fakeClient, currentDateTime).
 			PodQuota(ctx, libk8s.Namespace("test-ns"), "")
 		Expect(err).ToNot(HaveOccurred())
 		Expect(limit).To(Equal(0))
+		Expect(bounded).To(BeFalse())
 		Expect(fakeClient.Actions()).To(BeEmpty())
+	})
+
+	It("reports a matching quota with pods 0 as a bounded zero, not as no quota", func() {
+		// The regression this pins: treating pods: 0 as "no quota bound" makes
+		// admission fall back to the declared cap and claim work the quota can
+		// never start — the defect the reader exists to remove.
+		fakeClient = fake.NewClientset(newScopedQuota("zero-quota", testPriorityClass, "0"))
+		limit, bounded, err := newQuotaLimiter(fakeClient, currentDateTime).
+			PodQuota(ctx, libk8s.Namespace("test-ns"), testPriorityClass)
+		Expect(err).ToNot(HaveOccurred())
+		Expect(limit).To(Equal(0))
+		Expect(bounded).To(BeTrue())
 	})
 
 	It("takes the smaller limit and logs one ambiguity warning naming both quotas", func() {
@@ -259,7 +275,7 @@ var _ = Describe("PodQuotaLimiter", func() {
 		var limit int
 		out := captureSpawnerLog(func() {
 			var err error
-			limit, err = limiter.PodQuota(ctx, libk8s.Namespace("test-ns"), testPriorityClass)
+			limit, _, err = limiter.PodQuota(ctx, libk8s.Namespace("test-ns"), testPriorityClass)
 			Expect(err).ToNot(HaveOccurred())
 		})
 
@@ -275,17 +291,17 @@ var _ = Describe("PodQuotaLimiter", func() {
 		limiter := newQuotaLimiter(fakeClient, currentDateTime)
 
 		currentDateTime.SetNow(libtimetest.ParseDateTime("2026-10-24T10:00:00Z"))
-		limit, err := limiter.PodQuota(ctx, libk8s.Namespace("test-ns"), testPriorityClass)
+		limit, _, err := limiter.PodQuota(ctx, libk8s.Namespace("test-ns"), testPriorityClass)
 		Expect(err).ToNot(HaveOccurred())
 		Expect(limit).To(Equal(3))
 
 		currentDateTime.SetNow(libtimetest.ParseDateTime("2026-10-24T10:00:10Z"))
-		limit, err = limiter.PodQuota(ctx, libk8s.Namespace("test-ns"), testPriorityClass)
+		limit, _, err = limiter.PodQuota(ctx, libk8s.Namespace("test-ns"), testPriorityClass)
 		Expect(err).ToNot(HaveOccurred())
 		Expect(limit).To(Equal(3))
 
 		currentDateTime.SetNow(libtimetest.ParseDateTime("2026-10-24T10:00:31Z"))
-		limit, err = limiter.PodQuota(ctx, libk8s.Namespace("test-ns"), testPriorityClass)
+		limit, _, err = limiter.PodQuota(ctx, libk8s.Namespace("test-ns"), testPriorityClass)
 		Expect(err).ToNot(HaveOccurred())
 		Expect(limit).To(Equal(3))
 
@@ -308,11 +324,11 @@ var _ = Describe("PodQuotaLimiter", func() {
 		)
 		limiter := newQuotaLimiter(fakeClient, currentDateTime)
 
-		limit, err := limiter.PodQuota(ctx, libk8s.Namespace("test-ns"), testPriorityClass)
+		limit, _, err := limiter.PodQuota(ctx, libk8s.Namespace("test-ns"), testPriorityClass)
 		Expect(err).To(HaveOccurred())
 		Expect(limit).To(Equal(0))
 
-		limit, err = limiter.PodQuota(ctx, libk8s.Namespace("test-ns"), testPriorityClass)
+		limit, _, err = limiter.PodQuota(ctx, libk8s.Namespace("test-ns"), testPriorityClass)
 		Expect(err).ToNot(HaveOccurred())
 		Expect(limit).To(Equal(3))
 

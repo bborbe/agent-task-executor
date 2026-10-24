@@ -137,9 +137,15 @@ falling back to `spec.hard`. It is read at most once per namespace and priority
 class per 30 seconds.
 
 A zero `maxConcurrentJobs` means "no declared cap" and does not disable the
-quota bound; zero for both means uncapped. A failed quota read, a Config with no
-priority class, or no quota scoping that class leaves the declared cap as the
-only bound; a failed read also logs one `event=pod_quota_read_failed` warning.
+quota bound. A failed quota read, a Config with no priority class, or no quota
+scoping that class leaves the declared cap as the only bound; a failed read also
+logs one `event=pod_quota_read_failed` warning.
+
+A matching quota whose `hard.pods` is `0` is a **hard zero**, not an absent
+quota: the class may run nothing, so every spawn for it is deferred. The two
+states are distinct and must stay so — treating a zero limit as "no quota" would
+fall back to the declared cap and claim work the quota can never start, which is
+the defect this bound exists to remove.
 
 Because admission is decided before the claim is taken, a task over the bound is
 **never claimed**: it is deferred and a peer cluster can take it immediately.
