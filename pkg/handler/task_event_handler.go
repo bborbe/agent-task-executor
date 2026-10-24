@@ -314,6 +314,9 @@ type taskEventHandler struct {
 	// missed, and a spawn for one assignee leaves the others' entries valid.
 	spawnGenMu sync.Mutex
 	spawnGens  map[string]uint64
+	// podQuotaLimiter is the optional pod-capacity reader; nil means no quota
+	// bound. Read only under the per-assignee spawn lock.
+	podQuotaLimiter spawner.PodQuotaLimiter
 	// jobLookupDeniedLoggedAt records the last log line emitted per
 	// assignee/namespace for a denied active-job read, so a broken credential
 	// produces one line per interval rather than one per task per pass. The
@@ -334,6 +337,7 @@ type taskEventHandler struct {
 // once admitted 17 Jobs, 15 released admitted 15. Every over-cap Job is then rejected
 // by the agent's ResourceQuota, loops on FailedCreate and burns its full
 // activeDeadlineSeconds while merely queued, before being killed without ever running.
+// Admission is also bounded by the priority-class pod quota, read inside this per-assignee lock.
 //
 // Per-assignee rather than global: a fleet-wide lock would make one agent's spawn
 // latency everyone's. Serializing per assignee costs nothing — spawns are rare
@@ -1043,109 +1047,57 @@ func (h *taskEventHandler) storeSpawnedJob(task lib.Task, jobName string) {
 	h.taskStore.Store(task.TaskIdentifier, stored)
 }
 
-// deferIfAtConcurrencyCap reports whether the agent is already running its
-// configured maximum number of Jobs, and if so registers the task for a
-// deferred respawn instead of spawning now.
+// stampQueueEntry returns the task carrying a queued_at value, writing that
+// value to the vault the first time the task is deferred behind the concurrency
+// cap. queued_at is the moment the FIRST wait began: it is written once and never
+// moved by a later re-deferral, so the field can be read as a queue-entry time.
 //
-// Deferring rather than skipping is the whole point. Task publication is
-// edge-triggered on vault file changes; being over the cap produces no such
-// change, so a skipped spawn would never be re-driven and the task would sit
-// at in_progress forever, indistinguishable from work in flight.
-func (h *taskEventHandler) deferIfAtConcurrencyCap(
-	ctx context.Context,
-	task lib.Task,
-	config *pkg.AgentConfiguration,
-	claim *deferredClaim,
-) (bool, error) {
-	if config == nil || config.MaxConcurrentJobs <= 0 {
-		return false, nil
+// Four cases, in order:
+//
+//   - the task already carries queued_at (a re-deferred in-memory entry) — return
+//     it unchanged and publish nothing.
+//   - the task view already carries queued_at — return a copy carrying it. The
+//     view is the authority here because a duplicate Kafka event can arrive after
+//     the publish but before the controller has written the field; re-stamping
+//     would move the timestamp forward.
+//   - this executor already published queued_at for the task — return a copy
+//     carrying that value and publish nothing. This is the case a missing task
+//     file depends on: both checks above read state only a SUCCESSFUL vault write
+//     updates, so for a task whose file was deleted (or whose write keeps failing)
+//     neither ever becomes true and the deferral would stamp a fresh value on
+//     every retry — once per concurrencyCapRetryDelay, indefinitely. Measured on
+//     nukedev 2026-10-23: one update-frontmatter command per minute for a task id
+//     with no file anywhere, each one a not-found at the controller.
+//   - none of the above — stamp the injected clock's current UTC time, record it,
+//     publish it, and return a copy carrying it.
+//
+// A failed publish is deliberately not retried. The returned copy still carries
+// the value, so the next re-deferral sees it and publishes nothing: that wait
+// reports no queue age rather than publishing a later, wrong one.
+func (h *taskEventHandler) stampQueueEntry(ctx context.Context, task lib.Task) lib.Task {
+	if v, ok := task.Frontmatter.String("queued_at"); ok && v != "" {
+		return task
 	}
-	namespace, err := h.jobNamespaceForTask(ctx, config, task.TaskIdentifier)
-	if err != nil {
-		// Not counted here: the caller counts every error it propagates, and an
-		// increment on both sides would count this failure twice.
-		return false, err
+	if v := h.queuedAtFromView(task.TaskIdentifier); v != "" {
+		return taskWithFrontmatterValue(task, "queued_at", v)
 	}
-	activeSet, err := h.activeJobsFor(ctx, namespace, config.Assignee)
-	if err != nil {
-		// The caller counts the error, not this branch: a refused read is
-		// suppressed rather than propagated, and counting it here would make the
-		// same denial visible on this path and invisible on isJobActive's.
-		return false, wrapJobLookupError(
-			ctx,
-			err,
-			config.Assignee,
-			namespace,
-			"count active jobs for assignee %s",
-			config.Assignee,
+	if v := h.queuedAtStamp(task.TaskIdentifier); v != "" {
+		return taskWithFrontmatterValue(task, "queued_at", v)
+	}
+	queuedAt := h.currentDateTime.Now().UTC().Format("2006-01-02T15:04:05Z07:00")
+	h.recordQueuedAtStamp(task.TaskIdentifier, queuedAt)
+	if err := h.resultPublisher.PublishQueueEntry(ctx, task, queuedAt); err != nil {
+		glog.Warningf(
+			"event=queued_at_publish_failed task=%s queued_at=%s err=%v",
+			task.TaskIdentifier, queuedAt, err,
 		)
-	}
-	running := len(activeSet)
-	if running < config.MaxConcurrentJobs {
-		// Log the ADMIT decision, not just the deferral. Without this, an
-		// over-cap spawn leaves no trace and overshoot can only be found by
-		// counting Jobs in the cluster by hand — which is how the 2026-08-15
-		// race went unnoticed until 17 Jobs existed against a cap of 1.
-		// Same V(1) rationale as the deferral log below.
+	} else {
 		glog.V(1).Infof(
-			"event=concurrency_admit task=%s assignee=%s running=%d cap=%d",
-			task.TaskIdentifier, config.Assignee, running, config.MaxConcurrentJobs,
+			"event=queued_at_written task=%s queued_at=%s",
+			task.TaskIdentifier, queuedAt,
 		)
-		return false, nil
 	}
-	// Cheap pre-check before the side effects below: an evicted claim must not
-	// publish a queued_at or count a deferral. The authoritative check is at the
-	// store, under the same lock as the write.
-	h.deferredMu.Lock()
-	invalid := h.claimInvalidatedLocked(claim)
-	h.deferredMu.Unlock()
-	if invalid {
-		h.recordClaimInvalidated(task)
-		return true, nil
-	}
-	// V(1), not V(0): a capped deferral is an expected steady state and repeats
-	// once per retry interval per waiting task, so V(0) would be a constant
-	// stream during any backlog. V(1) is inside the deployed verbosity, so it
-	// stays visible to an operator looking — unlike the V(3) skip that hid the
-	// wedge fixed in #12.
-	glog.V(1).Infof(
-		"event=concurrency_cap task=%s assignee=%s running=%d cap=%d retry_after=%s",
-		task.TaskIdentifier, config.Assignee, running, config.MaxConcurrentJobs,
-		concurrencyCapRetryDelay,
-	)
-	metrics.TaskEventsTotal.WithLabelValues("deferred_concurrency_cap").Inc()
-	// The bare counter above is kept for continuity; this one carries the
-	// assignee so an alert can exclude an agent that is capped on purpose.
-	metrics.DeferredConcurrencyCapTotal.WithLabelValues(config.Assignee).Inc()
-	task = h.stampQueueEntry(ctx, task)
-	h.deferredMu.Lock()
-	if h.claimInvalidatedLocked(claim) {
-		h.deferredMu.Unlock()
-		h.recordClaimInvalidated(task)
-		// The deferral ends here without re-parking, so the record stamped above
-		// must not outlive it.
-		h.clearQueuedAtStampIfNotDeferred(task.TaskIdentifier)
-		return true, nil
-	}
-	// A claimed replay stores only when nothing is parked: a concurrent fresh
-	// event may have parked a newer snapshot under the same id.
-	if claim != nil {
-		if _, exists := h.deferredRespawns[task.TaskIdentifier]; exists {
-			h.deferredMu.Unlock()
-			// Nothing is parked by this call. The existing entry keeps its own
-			// stamp, so this is a no-op when the task is parked and a clear when
-			// it is not.
-			h.clearQueuedAtStampIfNotDeferred(task.TaskIdentifier)
-			return true, nil
-		}
-	}
-	h.deferredRespawns[task.TaskIdentifier] = deferredEntry{
-		task:       task,
-		config:     *config,
-		retryAfter: h.currentDateTime.Now().Time().Add(concurrencyCapRetryDelay),
-	}
-	h.deferredMu.Unlock()
-	return true, nil
+	return taskWithFrontmatterValue(task, "queued_at", queuedAt)
 }
 
 // queuedAtFromView returns the queued_at the view holds for id, or "".

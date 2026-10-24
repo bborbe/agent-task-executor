@@ -240,6 +240,9 @@ func CreateConsumer(
 		claimMode,
 		claimRefClientFactory,
 		handler.WithVaultAliases(vaultAliases),
+		handler.WithPodQuotaLimiter(
+			spawner.NewPodQuotaLimiter(kubeClient, currentDateTimeGetter),
+		),
 		handler.WithClaimJobControl(
 			handler.NewKubeJobControl(kubeClient, namespace, resolver, view),
 		),
