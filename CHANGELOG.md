@@ -2,7 +2,7 @@
 
 All notable changes to this project will be documented in this file.
 
-## Unreleased
+## v0.37.0
 
 - feat: **every executor owns its vault's canonical `private-` stamp, not just `openclaw`.** `defaultVaultAliases` carried one pair (`openclaw` ↔ `private-agent`) while the store still holds tasks stamped with the canonical slug of the other two vaults, so `personal` and `trading` dropped those keys in `ownedTasks` **before** the spawn path — never driven and never logged as a `foreign vault` skip, which reads as a quiet fleet. Measured 2026-10-24 on the compacted task topic: 176 prod and 182 dev keys stamped `private-personal`, 67 prod and 72 dev stamped `private-trading`, every one of them invisible to the executor that owns its vault; each executor's `event=reconcile` owned-set size matched its short-slug population exactly and excluded the `private-*` one. Both missing pairs are added symmetrically, because an entry present in one direction only re-creates the drop on the other side. A unit test pins all three pairs in both directions plus the negative controls, so the table cannot regress to a partial one.
 
