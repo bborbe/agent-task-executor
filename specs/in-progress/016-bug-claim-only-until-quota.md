@@ -1,8 +1,9 @@
 ---
-status: prompted
+status: verifying
 approved: "2026-10-24T19:27:54Z"
 generating: "2026-10-24T19:30:21Z"
 prompted: "2026-10-24T19:41:26Z"
+verifying: "2026-10-24T20:14:35Z"
 branch: dark-factory/bug-claim-only-until-quota
 ---
 
