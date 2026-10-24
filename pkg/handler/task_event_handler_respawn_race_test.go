@@ -56,6 +56,7 @@ var _ = Describe("respawned-second-success race", func() {
 		taskStore = pkg.NewTaskStore()
 		h = handler.NewTaskEventHandler(
 			fakeSpawner,
+			"dev",
 			base.Branch("prod"),
 			"",
 			true,
@@ -68,8 +69,17 @@ var _ = Describe("respawned-second-success race", func() {
 			testTaskVault,
 			handler.DefaultReconcilePassTimeout,
 			handler.DefaultReconcileInterval,
+			pkg.ClaimModeOff,
+			nil,
 		)
-		watcher = pkg.NewJobWatcher(fake.NewClientset(), "test-ns", taskStore, fakeResultPublisher)
+		watcher = pkg.NewJobWatcher(
+			fake.NewClientset(),
+			"test-ns",
+			pkg.NewEventHandlerConfig(),
+			taskStore,
+			fakeResultPublisher,
+			nil,
+		)
 	})
 
 	buildMsg := func(task lib.Task) *sarama.ConsumerMessage {

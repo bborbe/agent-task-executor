@@ -6,6 +6,8 @@ package claim
 
 import (
 	"context"
+	"sort"
+	stdtime "time"
 
 	"github.com/bborbe/errors"
 	libtime "github.com/bborbe/time"
@@ -46,6 +48,8 @@ func (m *leaseManager) Tick(ctx context.Context) error {
 		return err
 	}
 	m.retryPendingReleases(ctx)
+	m.releaseExpiredHolds(ctx)
+	m.releaseJoblessClaims(ctx)
 	m.recheckRunning(ctx)
 	if err := ctx.Err(); err != nil {
 		return err
@@ -67,7 +71,16 @@ func (m *leaseManager) retryPendingDeletions(ctx context.Context) {
 			continue
 		}
 		if held.pendingDeletionPath == "fence" {
-			m.bestEffortDelete(ctx, key, held.sha)
+			m.bestEffortDelete(ctx, held.key, held.sha)
+			if held.secondKey != "" {
+				m.bestEffortDelete(ctx, held.secondKey, held.secondSha)
+			}
+			glog.Infof(
+				"event=claim_released key=%s task=%s result=fenced sha=%s",
+				held.key,
+				held.taskID,
+				held.sha,
+			)
 		}
 		delete(m.held, key)
 	}
@@ -91,44 +104,185 @@ func (m *leaseManager) evaluateFence(ctx context.Context, now libtime.DateTime) 
 // fenceClaim stops the Job and drops the claim without renewing it.
 func (m *leaseManager) fenceClaim(ctx context.Context, key string, held *heldClaim) {
 	if held.releasePending {
-		m.bestEffortDelete(ctx, key, held.sha)
+		m.bestEffortDelete(ctx, held.key, held.sha)
+		if held.secondKey != "" {
+			m.bestEffortDelete(ctx, held.secondKey, held.secondSha)
+		}
 		delete(m.held, key)
-		countClaim("fenced")
+		countClaimRemoval(held.key, held.taskID, "fenced", held.sha)
 		return
 	}
 	if err := m.jobControl.DeleteJob(ctx, held.taskID); err != nil {
 		countClaim("error")
-		countClaim("fenced")
+		countClaimFencePending(key, held.taskID)
 		held.pendingJobDeletion = true
 		held.pendingDeletionPath = "fence"
 		return
 	}
-	m.bestEffortDelete(ctx, key, held.sha)
+	m.bestEffortDelete(ctx, held.key, held.sha)
+	if held.secondKey != "" {
+		m.bestEffortDelete(ctx, held.secondKey, held.secondSha)
+	}
 	delete(m.held, key)
-	countClaim("fenced")
+	countClaimRemoval(held.key, held.taskID, "fenced", held.sha)
 }
 
 // retryPendingReleases retries the ref DELETE of claims whose release failed.
+// Both refs of a pair are retried in one pass; a 409 on either means that ref
+// is already gone, and the pair is dropped only when both are gone.
 func (m *leaseManager) retryPendingReleases(ctx context.Context) {
 	for _, key := range m.heldKeys() {
 		held, ok := m.held[key]
 		if !ok || !held.releasePending {
 			continue
 		}
-		reqCtx, cancel := m.requestContext(ctx)
-		err := m.refClient.Delete(reqCtx, key, held.sha)
-		cancel()
-		switch {
-		case err == nil:
-			delete(m.held, key)
-			countClaim("released")
-		case errors.Is(err, ErrLeaseConflict):
-			delete(m.held, key)
-			countClaim("already_released")
-		default:
+		primaryResult, err := m.deleteRefWithDeadline(ctx, held.key, held.sha)
+		if err != nil {
 			countClaim("error")
+			continue
 		}
+		if held.secondKey == "" {
+			delete(m.held, key)
+			countClaimRemoval(held.key, held.taskID, primaryResult, held.sha)
+			continue
+		}
+		secondaryResult, err := m.deleteRefWithDeadline(ctx, held.secondKey, held.secondSha)
+		if err != nil {
+			countClaim("error")
+			continue
+		}
+		delete(m.held, key)
+		countClaimRemoval(
+			held.key,
+			held.taskID,
+			pairRemovalResult(primaryResult, secondaryResult),
+			held.sha,
+		)
 	}
+}
+
+// releaseExpiredHolds releases claims whose success-grace hold has run out.
+//
+// ReleaseAfterSuccess sets that hold when a Job succeeds, covering the window in
+// which the vault has not yet absorbed the result. Nothing else would ever end
+// it — no further event arrives for a task that just finished — so this pass is
+// what turns a bounded hold into an actual release. A failed release leaves
+// releasePending set and is retried by retryPendingReleases on the next tick.
+func (m *leaseManager) releaseExpiredHolds(ctx context.Context) {
+	now := m.currentDateTime.Now().Time()
+	for _, key := range m.heldKeys() {
+		held, ok := m.held[key]
+		if !ok || held.holdUntil.Time().IsZero() {
+			continue
+		}
+		if now.Before(held.holdUntil.Time()) {
+			continue
+		}
+		// holdUntil is deliberately NOT cleared here. Clearing it first would leave
+		// a claim with no hold and no releasePending when the release fails — a
+		// failed IsJobRunning read is exactly that — and the claim would then be
+		// renewed forever with nothing left to release it. Leaving it expired means
+		// the next tick tries again, which is the same convergence retryPendingReleases
+		// uses.
+		reqCtx, cancel := m.requestContext(ctx)
+		_ = m.releaseLocked(reqCtx, held)
+		cancel()
+	}
+}
+
+// joblessPassBudget stops one jobless pass from starting further Job checks
+// once this much time has passed since the pass began; a check already
+// started may still run up to RequestTimeout.
+const joblessPassBudget = 10 * libtime.Second
+
+// releaseJoblessClaims releases held claims whose Job has been continuously
+// absent for at least JoblessGrace. Claims owned by another release path keep
+// their own handling.
+func (m *leaseManager) releaseJoblessClaims(ctx context.Context) {
+	now := m.currentDateTime.Now()
+	for _, key := range m.joblessDueKeys(now) {
+		if ctx.Err() != nil {
+			return
+		}
+		if m.currentDateTime.Now().Sub(now) >= joblessPassBudget {
+			return
+		}
+		held, ok := m.held[key]
+		if !ok {
+			continue
+		}
+		held.lastJoblessCheckAt = now
+		checkCtx, cancel := m.requestContext(ctx)
+		running, err := m.jobControl.IsJobRunning(checkCtx, held.taskID)
+		cancel()
+		if err != nil {
+			countClaim("error")
+			continue
+		}
+		if running {
+			held.joblessSince = libtime.DateTime(stdtime.Time{})
+			continue
+		}
+		if held.joblessSince.Time().IsZero() {
+			held.joblessSince = now
+		}
+		if now.Sub(held.joblessSince) < JoblessGrace {
+			continue
+		}
+		m.releaseJoblessClaim(ctx, key, held)
+	}
+}
+
+// joblessDueKeys returns the keys of held claims the jobless pass owns and
+// whose check is due at now. Never-checked claims come first, then the oldest
+// lastJoblessCheckAt; ties keep heldKeys order, which is sorted by key.
+func (m *leaseManager) joblessDueKeys(now libtime.DateTime) []string {
+	keys := make([]string, 0, len(m.held))
+	for _, key := range m.heldKeys() {
+		held := m.held[key]
+		if !joblessEligible(held) {
+			continue
+		}
+		if !held.lastJoblessCheckAt.Time().IsZero() &&
+			now.Sub(held.lastJoblessCheckAt) < JoblessCheckInterval {
+			continue
+		}
+		keys = append(keys, key)
+	}
+	sort.SliceStable(keys, func(i, j int) bool {
+		return m.held[keys[i]].lastJoblessCheckAt.Time().Before(
+			m.held[keys[j]].lastJoblessCheckAt.Time(),
+		)
+	})
+	return keys
+}
+
+// joblessEligible reports whether the jobless release owns this claim. The
+// success hold, a pending release, a pending Job deletion and an unanswered
+// adopted running check each keep their own path.
+func joblessEligible(held *heldClaim) bool {
+	return !held.pendingJobDeletion &&
+		!held.releasePending &&
+		!held.needsRunningCheck &&
+		held.holdUntil.Time().IsZero()
+}
+
+// releaseJoblessClaim releases one claim whose Job is gone, logging and
+// counting the decision once. A failed DELETE keeps the claim with a pending
+// release, which retryPendingReleases handles without counting again.
+func (m *leaseManager) releaseJoblessClaim(
+	ctx context.Context,
+	key string,
+	held *heldClaim,
+) {
+	countClaim("jobless_released")
+	glog.Warningf(
+		"event=claim_jobless_released key=%s task=%s jobless_since=%s",
+		key,
+		held.taskID,
+		held.joblessSince.Time().UTC().Format(stdtime.RFC3339),
+	)
+	m.releaseAfterRunningCheck(ctx, key, held)
 }
 
 // recheckRunning re-asks the Job running check of claims adopted with an
@@ -153,26 +307,38 @@ func (m *leaseManager) recheckRunning(ctx context.Context) {
 	}
 }
 
-// releaseAfterRunningCheck releases a claim whose Job is gone.
+// releaseAfterRunningCheck releases a claim whose Job is gone. Both refs of a
+// pair are deleted; a non-409 failure on either keeps the whole pair pending
+// release.
 func (m *leaseManager) releaseAfterRunningCheck(
 	ctx context.Context,
 	key string,
 	held *heldClaim,
 ) {
-	reqCtx, cancel := m.requestContext(ctx)
-	err := m.refClient.Delete(reqCtx, key, held.sha)
-	cancel()
-	switch {
-	case err == nil:
-		delete(m.held, key)
-		countClaim("released")
-	case errors.Is(err, ErrLeaseConflict):
-		delete(m.held, key)
-		countClaim("already_released")
-	default:
+	primaryResult, err := m.deleteRefWithDeadline(ctx, held.key, held.sha)
+	if err != nil {
 		countClaim("error")
 		held.releasePending = true
+		return
 	}
+	if held.secondKey == "" {
+		delete(m.held, key)
+		countClaimRemoval(held.key, held.taskID, primaryResult, held.sha)
+		return
+	}
+	secondaryResult, err := m.deleteRefWithDeadline(ctx, held.secondKey, held.secondSha)
+	if err != nil {
+		countClaim("error")
+		held.releasePending = true
+		return
+	}
+	delete(m.held, key)
+	countClaimRemoval(
+		held.key,
+		held.taskID,
+		pairRemovalResult(primaryResult, secondaryResult),
+		held.sha,
+	)
 }
 
 // renewDueClaims renews every due claim, one after another. The clock is
@@ -192,7 +358,10 @@ func (m *leaseManager) renewDueClaims(ctx context.Context) {
 	}
 }
 
-// renewClaim sends one renew PUT and applies the outcome.
+// renewClaim renews both refs of a held claim with one deadline and counts one
+// outcome for the claim. A failed primary renew leaves the pair's effective
+// expiry at its previous value even when the secondary write succeeds, so the
+// fence never reads a lease the primary does not have.
 func (m *leaseManager) renewClaim(
 	ctx context.Context,
 	key string,
@@ -201,33 +370,66 @@ func (m *leaseManager) renewClaim(
 ) {
 	newLease := now.Add(LeaseDuration)
 	newLeaseStr := formatLeaseUntil(newLease)
-	reqCtx, cancel := m.requestContext(ctx)
-	sha, err := m.refClient.Put(reqCtx, key, held.sha, m.cluster, held.taskID, newLease)
-	cancel()
 	held.lastRenewAt = now
 	held.renewNextTick = false
+	result := "renewed"
+
+	reqCtx, cancel := m.requestContext(ctx)
+	sha, err := m.refClient.Put(reqCtx, held.key, held.sha, m.cluster, held.taskID, newLease)
+	cancel()
 	switch {
 	case err == nil:
 		held.sha = sha
-		held.leaseUntil = newLease
-		held.leaseUntilStr = newLeaseStr
-		countClaim("renewed")
+	case errors.Is(err, ErrLeaseConflict):
+		m.claimLost(ctx, key, held)
+		return
+	default:
+		var ok bool
+		sha, result, ok = m.renewReadBack(ctx, held, newLeaseStr)
+		if !ok {
+			return
+		}
+		held.sha = sha
+	}
+
+	if held.secondKey == "" {
+		if result == "renewed" || result == "recovered" {
+			held.leaseUntil = newLease
+			held.leaseUntilStr = newLeaseStr
+		}
+		countClaim(result)
+		return
+	}
+
+	reqCtx, cancel = m.requestContext(ctx)
+	secondSha, err := m.refClient.Put(
+		reqCtx,
+		held.secondKey,
+		held.secondSha,
+		m.cluster,
+		held.taskID,
+		newLease,
+	)
+	cancel()
+	switch {
+	case err == nil:
+		held.secondSha = secondSha
+		if result == "renewed" || result == "recovered" {
+			held.leaseUntil = newLease
+			held.leaseUntilStr = newLeaseStr
+		}
+		countClaim(result)
 	case errors.Is(err, ErrLeaseConflict):
 		m.claimLost(ctx, key, held)
 	default:
-		m.renewReadBack(ctx, key, held, newLease, newLeaseStr)
+		held.renewNextTick = true
+		countClaim("renew_failed")
 	}
 }
 
 // claimLost deletes the Job and drops the claim without contacting git-rest.
 func (m *leaseManager) claimLost(ctx context.Context, key string, held *heldClaim) {
-	countClaim("claim_lost")
-	glog.Warningf(
-		"claim lost key=%s task_id=%s sha=%s",
-		key,
-		held.taskID,
-		held.sha,
-	)
+	countClaimRemoval(key, held.taskID, "claim_lost", held.sha)
 	if err := m.jobControl.DeleteJob(ctx, held.taskID); err != nil {
 		countClaim("error")
 		held.pendingJobDeletion = true
@@ -237,33 +439,31 @@ func (m *leaseManager) claimLost(ctx context.Context, key string, held *heldClai
 	delete(m.held, key)
 }
 
-// renewReadBack decides a failed renew from the listed ref, after re-running
-// the fence. A claim fenced in between is not read back.
+// renewReadBack decides a failed primary renew from the listed ref, after
+// re-running the fence. It returns the sha to adopt, the result label the
+// caller must count, and whether the claim is still held. It never updates
+// leaseUntil and never counts.
 func (m *leaseManager) renewReadBack(
 	ctx context.Context,
-	key string,
 	held *heldClaim,
-	newLease libtime.DateTime,
 	newLeaseStr string,
-) {
+) (string, string, bool) {
 	m.evaluateFence(ctx, m.currentDateTime.Now())
-	if _, ok := m.held[key]; !ok {
-		return
+	if _, ok := m.held[held.key]; !ok {
+		return "", "", false
 	}
 	reqCtx, cancel := m.requestContext(ctx)
-	ref, err := m.readBack(reqCtx, key)
+	ref, err := m.readBack(reqCtx, held.key)
 	cancel()
 	switch {
 	case err != nil:
-		countClaim("renew_failed")
+		return held.sha, "renew_failed", true
 	case m.ownTriple(ref, held.taskID, newLeaseStr):
-		held.sha = ref.Sha
-		held.leaseUntil = newLease
-		held.leaseUntilStr = newLeaseStr
-		countClaim("recovered")
+		return ref.Sha, "recovered", true
 	case ref != nil && ref.Sha == held.sha:
-		countClaim("renew_failed")
+		return held.sha, "renew_failed", true
 	default:
-		m.claimLost(ctx, key, held)
+		m.claimLost(ctx, held.key, held)
+		return "", "", false
 	}
 }

@@ -7,7 +7,8 @@ package pkg
 import (
 	"context"
 	"fmt"
-	"sync/atomic"
+	"sort"
+	"sync"
 	"time"
 
 	lib "github.com/bborbe/agent"
@@ -22,13 +23,15 @@ import (
 	"k8s.io/client-go/kubernetes"
 	corev1listers "k8s.io/client-go/listers/core/v1"
 	"k8s.io/client-go/tools/cache"
+
+	agentv1 "github.com/bborbe/agent-task-executor/k8s/apis/agent.benjamin-borbe.de/v1"
 )
 
 //counterfeiter:generate -o ../mocks/job_watcher.go --fake-name FakeJobWatcher . JobWatcher
 
 // JobWatcher watches batch/v1 Jobs and their Pods in the executor's namespace and
-// publishes synthetic failure results for terminal-state objects that belong to
-// spawned tasks.
+// in every namespace a Config names, and publishes synthetic failure results for
+// terminal-state objects that belong to spawned tasks.
 type JobWatcher interface {
 	// Run starts the Job and Pod informers and blocks until ctx is cancelled.
 	Run(ctx context.Context) error
@@ -38,47 +41,226 @@ type JobWatcher interface {
 	// HandlePod processes a single Pod (invoked by the Pod informer event handler
 	// and by unit tests directly).
 	HandlePod(ctx context.Context, pod *corev1.Pod)
-	// PodLister returns the Pod lister backed by the shared informer cache, for
-	// use by the deadline sweeper. The returned lister is safe for concurrent
-	// read access.
-	PodLister() corev1listers.PodLister
+	// PodLister returns the Pod lister backed by namespace's informer cache, or
+	// nil when that namespace is not watched or its cache has not synced. The
+	// returned lister is safe for concurrent read access.
+	PodLister(namespace libk8s.Namespace) corev1listers.PodLister
 }
 
-// NewJobWatcher creates a JobWatcher.
+// NewJobWatcher creates a JobWatcher. The executor namespace is watched
+// unconditionally; the provider supplies the Configs whose resolved
+// jobNamespace values extend that set.
 func NewJobWatcher(
 	kubeClient kubernetes.Interface,
 	namespace libk8s.Namespace,
+	configProvider libk8s.Provider[agentv1.Config],
 	taskStore *TaskStore,
 	publisher ResultPublisher,
+	claimReleaser ClaimReleaser,
 ) JobWatcher {
-	return &jobWatcher{
-		kubeClient: kubeClient,
-		namespace:  namespace,
-		taskStore:  taskStore,
-		publisher:  publisher,
+	w := &jobWatcher{
+		kubeClient:           kubeClient,
+		namespace:            namespace,
+		configProvider:       configProvider,
+		taskStore:            taskStore,
+		publisher:            publisher,
+		claimReleaser:        claimReleaser,
+		newNamespaceInformer: newJobWatcherNamespaceInformer,
 	}
+	w.watched = map[libk8s.Namespace]bool{namespace: true}
+	w.synced = map[libk8s.Namespace]bool{namespace: true}
+	w.informers = map[libk8s.Namespace]jobWatcherNamespaceInformer{}
+	return w
 }
 
 type jobWatcher struct {
-	kubeClient kubernetes.Interface
-	namespace  libk8s.Namespace
-	taskStore  *TaskStore
-	publisher  ResultPublisher
-	podLister  atomic.Pointer[corev1listers.PodLister]
+	kubeClient           kubernetes.Interface
+	namespace            libk8s.Namespace
+	configProvider       libk8s.Provider[agentv1.Config]
+	taskStore            *TaskStore
+	publisher            ResultPublisher
+	claimReleaser        ClaimReleaser
+	mu                   sync.Mutex
+	watched              map[libk8s.Namespace]bool
+	synced               map[libk8s.Namespace]bool
+	informers            map[libk8s.Namespace]jobWatcherNamespaceInformer
+	newNamespaceInformer func(kubernetes.Interface, libk8s.Namespace) (jobWatcherNamespaceInformer, error)
+}
+
+const (
+	jobWatcherResyncPeriod = 5 * time.Minute
+	jobWatcherTaskIDLabel  = "agent.benjamin-borbe.de/task-id"
+)
+
+// jobWatcherNamespaceReresolveInterval is how often the watched namespace set
+// is re-derived from the Configs. It is a package-level variable, not
+// configuration and not an injected clock, so tests can shorten it directly.
+var jobWatcherNamespaceReresolveInterval = 60 * time.Second
+
+// jobWatcherNamespaceInformer is one namespace's Job and Pod informers. It is
+// an interface so the namespace-set tests can count starts and control the
+// cache-sync barrier without an API server.
+type jobWatcherNamespaceInformer interface {
+	Start(ctx context.Context)
+	HasSynced() bool
+	AddJobEventHandler(handler cache.ResourceEventHandler) error
+	AddPodEventHandler(handler cache.ResourceEventHandler) error
+	PodLister() corev1listers.PodLister
+}
+
+type sharedInformerNamespaceInformer struct {
+	factory k8sinformers.SharedInformerFactory
+	job     cache.SharedIndexInformer
+	pod     cache.SharedIndexInformer
+}
+
+func (s *sharedInformerNamespaceInformer) Start(ctx context.Context) {
+	s.factory.Start(ctx.Done())
+}
+
+func (s *sharedInformerNamespaceInformer) HasSynced() bool {
+	return s.job.HasSynced() && s.pod.HasSynced()
+}
+
+func (s *sharedInformerNamespaceInformer) AddJobEventHandler(
+	handler cache.ResourceEventHandler,
+) error {
+	_, err := s.job.AddEventHandler(handler)
+	return err
+}
+
+func (s *sharedInformerNamespaceInformer) AddPodEventHandler(
+	handler cache.ResourceEventHandler,
+) error {
+	_, err := s.pod.AddEventHandler(handler)
+	return err
+}
+
+func (s *sharedInformerNamespaceInformer) PodLister() corev1listers.PodLister {
+	return s.factory.Core().V1().Pods().Lister()
+}
+
+var newJobWatcherNamespaceInformer = func(
+	kubeClient kubernetes.Interface,
+	namespace libk8s.Namespace,
+) (jobWatcherNamespaceInformer, error) {
+	factory := k8sinformers.NewSharedInformerFactoryWithOptions(
+		kubeClient,
+		jobWatcherResyncPeriod,
+		k8sinformers.WithNamespace(namespace.String()),
+		k8sinformers.WithTweakListOptions(func(opts *metav1.ListOptions) {
+			opts.LabelSelector = jobWatcherTaskIDLabel
+		}),
+	)
+	return &sharedInformerNamespaceInformer{
+		factory: factory,
+		job:     factory.Batch().V1().Jobs().Informer(),
+		pod:     factory.Core().V1().Pods().Informer(),
+	}, nil
+}
+
+// resolveJobWatcherNamespaces returns the namespaces the watcher must observe:
+// the executor's own namespace unconditionally, plus the resolved jobNamespace
+// of every Config. Duplicates collapse. A Config whose jobNamespace fails
+// resolution is skipped with an ERROR naming the Config and the rejected value;
+// it spawns no Jobs in that state, and one bad Config must not stop the watcher
+// for every other namespace.
+func resolveJobWatcherNamespaces(
+	ctx context.Context,
+	executorNamespace libk8s.Namespace,
+	cfgs []agentv1.Config,
+) []libk8s.Namespace {
+	seen := map[libk8s.Namespace]struct{}{executorNamespace: {}}
+	for _, cfg := range cfgs {
+		namespace, err := ResolveJobNamespace(ctx, executorNamespace, cfg.Spec.JobNamespace)
+		if err != nil {
+			glog.Errorf("job watcher: skip config %s: %v", cfg.Name, err)
+			continue
+		}
+		seen[namespace] = struct{}{}
+	}
+	namespaces := make([]libk8s.Namespace, 0, len(seen))
+	for namespace := range seen {
+		namespaces = append(namespaces, namespace)
+	}
+	sort.Slice(namespaces, func(i, j int) bool {
+		return namespaces[i].String() < namespaces[j].String()
+	})
+	return namespaces
 }
 
 func (w *jobWatcher) Run(ctx context.Context) error {
-	factory := k8sinformers.NewSharedInformerFactoryWithOptions(
-		w.kubeClient,
-		5*time.Minute,
-		k8sinformers.WithNamespace(string(w.namespace)),
-		k8sinformers.WithTweakListOptions(func(opts *metav1.ListOptions) {
-			opts.LabelSelector = "agent.benjamin-borbe.de/task-id"
-		}),
-	)
-	informer := factory.Batch().V1().Jobs().Informer()
+	if err := w.reconcileNamespaceSet(ctx); err != nil {
+		return err
+	}
+	ticker := time.NewTicker(jobWatcherNamespaceReresolveInterval)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return nil
+		case <-ticker.C:
+			cfgs, err := w.configProvider.Get(ctx)
+			if err != nil {
+				// The Config provider is populated asynchronously and can fail
+				// transiently; the already-running informers keep watching and
+				// the next tick retries. Killing the executor over this is the
+				// worse outcome.
+				glog.Errorf("job watcher: re-resolve namespace set: %v", err)
+				continue
+			}
+			if err := w.startInformersForNamespaces(
+				ctx,
+				resolveJobWatcherNamespaces(ctx, w.namespace, cfgs),
+			); err != nil {
+				// A wiring failure while starting a new namespace's informers
+				// is deterministic and must fail the run, exactly as it does at
+				// startup.
+				return errors.Wrapf(ctx, err, "start informers for re-resolved namespaces")
+			}
+		}
+	}
+}
 
-	_, err := informer.AddEventHandler(cache.ResourceEventHandlerFuncs{
+func (w *jobWatcher) reconcileNamespaceSet(ctx context.Context) error {
+	cfgs, err := w.configProvider.Get(ctx)
+	if err != nil {
+		return errors.Wrapf(ctx, err, "list configs for job watcher namespaces")
+	}
+	return w.startInformersForNamespaces(ctx, resolveJobWatcherNamespaces(ctx, w.namespace, cfgs))
+}
+
+func (w *jobWatcher) startInformersForNamespaces(
+	ctx context.Context,
+	namespaces []libk8s.Namespace,
+) error {
+	for _, namespace := range namespaces {
+		if w.informerStarted(namespace) {
+			continue
+		}
+		if err := w.startNamespaceInformer(ctx, namespace); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (w *jobWatcher) informerStarted(namespace libk8s.Namespace) bool {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	_, ok := w.informers[namespace]
+	return ok
+}
+
+func (w *jobWatcher) startNamespaceInformer(
+	ctx context.Context,
+	namespace libk8s.Namespace,
+) error {
+	informer, err := w.newNamespaceInformer(w.kubeClient, namespace)
+	if err != nil {
+		return errors.Wrapf(ctx, err, "create informers for namespace %s", namespace)
+	}
+	if err := informer.AddJobEventHandler(cache.ResourceEventHandlerFuncs{
 		AddFunc: func(obj interface{}) {
 			job, ok := obj.(*batchv1.Job)
 			if !ok {
@@ -93,13 +275,10 @@ func (w *jobWatcher) Run(ctx context.Context) error {
 			}
 			w.HandleJob(ctx, job)
 		},
-	})
-	if err != nil {
-		return errors.Wrapf(ctx, err, "add job informer event handler")
+	}); err != nil {
+		return errors.Wrapf(ctx, err, "add job event handler for namespace %s", namespace)
 	}
-
-	podInformer := factory.Core().V1().Pods().Informer()
-	_, err = podInformer.AddEventHandler(cache.ResourceEventHandlerFuncs{
+	if err := informer.AddPodEventHandler(cache.ResourceEventHandlerFuncs{
 		AddFunc: func(obj interface{}) {
 			pod, ok := obj.(*corev1.Pod)
 			if !ok {
@@ -114,31 +293,145 @@ func (w *jobWatcher) Run(ctx context.Context) error {
 			}
 			w.HandlePod(ctx, pod)
 		},
-	})
-	if err != nil {
-		return errors.Wrapf(ctx, err, "add pod informer event handler")
+	}); err != nil {
+		return errors.Wrapf(ctx, err, "add pod event handler for namespace %s", namespace)
 	}
-
-	factory.Start(ctx.Done())
-	if !cache.WaitForCacheSync(ctx.Done(), informer.HasSynced, podInformer.HasSynced) {
-		return errors.Errorf(ctx, "timed out waiting for job/pod informer cache sync")
-	}
-	lister := factory.Core().V1().Pods().Lister()
-	w.podLister.Store(&lister)
-	glog.V(2).Infof("job and pod informer started in namespace %s", w.namespace)
-	<-ctx.Done()
+	w.mu.Lock()
+	w.watched[namespace] = true
+	w.synced[namespace] = false
+	w.informers[namespace] = informer
+	w.mu.Unlock()
+	informer.Start(ctx)
+	glog.V(2).Infof("job and pod informers started in namespace %s", namespace)
 	return nil
 }
 
-func (w *jobWatcher) PodLister() corev1listers.PodLister {
-	lister := w.podLister.Load()
-	if lister == nil {
+// namespaceReady reports whether the watcher may handle events for namespace.
+// A namespace no Config names is never ready. Before an informer is started
+// for a watched namespace, the pre-Run seed decides; once it is started, the
+// namespace's own cache-sync state decides.
+func (w *jobWatcher) namespaceReady(namespace libk8s.Namespace) bool {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	if !w.watched[namespace] {
+		return false
+	}
+	informer, ok := w.informers[namespace]
+	if !ok {
+		return w.synced[namespace]
+	}
+	if w.synced[namespace] {
+		return true
+	}
+	if informer.HasSynced() {
+		w.synced[namespace] = true
+		return true
+	}
+	return false
+}
+
+func (w *jobWatcher) PodLister(namespace libk8s.Namespace) corev1listers.PodLister {
+	return w.podListerForNamespace(namespace)
+}
+
+func (w *jobWatcher) podListerForNamespace(
+	namespace libk8s.Namespace,
+) corev1listers.PodLister {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	informer, ok := w.informers[namespace]
+	if !ok {
 		return nil
 	}
-	return *lister
+	if !w.synced[namespace] {
+		if !informer.HasSynced() {
+			return nil
+		}
+		w.synced[namespace] = true
+	}
+	return informer.PodLister()
+}
+
+// releaseClaim releases this executor's held claim for taskID. A nil releaser
+// (claim mode off) is a no-op. ReleaseTaskClaim logs its own failures; the
+// lease loop's retryPendingReleases retries a failed delete on its next tick.
+//
+// A store entry that tracks a NEWER job means this is a stale re-delivery of a
+// superseded Job's terminal event (the informer re-delivers terminal Jobs every
+// ~5 min). Releasing there would delete the claim taken for the job that is
+// still running, leaving it unclaimed for a peer to take over. An absent entry
+// is not stale — after a restart the claim must still be released.
+func (w *jobWatcher) releaseClaim(
+	ctx context.Context,
+	taskID lib.TaskIdentifier,
+	jobName string,
+) {
+	if !w.claimReleaseAllowed(taskID, jobName) {
+		return
+	}
+	w.claimReleaser.ReleaseTaskClaim(ctx, taskID)
+}
+
+// releaseClaimAfterSuccess holds the claim for the success grace window rather
+// than deleting it, so a peer cluster cannot claim the task while this cluster's
+// result is still on its way to the vault. See ReleaseTaskClaimAfterSuccess.
+func (w *jobWatcher) releaseClaimAfterSuccess(
+	ctx context.Context,
+	taskID lib.TaskIdentifier,
+	jobName string,
+	completedAt time.Time,
+) {
+	if !w.claimReleaseAllowed(taskID, jobName) {
+		return
+	}
+	w.claimReleaser.ReleaseTaskClaimAfterSuccess(ctx, taskID, completedAt)
+}
+
+// releaseSucceededJobClaim releases the claim of a succeeded Job, holding it for
+// the success grace window instead of deleting it.
+//
+// A succeeded Job is not yet a finished task: the agent published its result, but
+// the vault learns about it on the controller's own cycle, and until it does a
+// peer cluster still reads the task as eligible with no record that it just ran.
+// Holding the claim across that gap makes the peer's Claim fail rather than
+// running the task a second time. CompletionTime is what the hold is measured
+// from; a Complete Job always has one, and without it the safe fallback is the
+// immediate release rather than an invented timestamp.
+func (w *jobWatcher) releaseSucceededJobClaim(
+	ctx context.Context,
+	taskID lib.TaskIdentifier,
+	job *batchv1.Job,
+) {
+	if job.Status.CompletionTime == nil {
+		w.releaseClaim(ctx, taskID, job.Name)
+		return
+	}
+	w.releaseClaimAfterSuccess(ctx, taskID, job.Name, job.Status.CompletionTime.Time)
+}
+
+// claimReleaseAllowed reports whether this Job's terminal event may release the
+// task's claim at all, and logs why when it may not.
+func (w *jobWatcher) claimReleaseAllowed(
+	taskID lib.TaskIdentifier,
+	jobName string,
+) bool {
+	if w.claimReleaser == nil {
+		return false
+	}
+	if task, ok := w.taskStore.Load(taskID); ok && !w.tracksJob(task, jobName) {
+		glog.V(2).Infof(
+			"skip claim release for task %s: job %s superseded by %s",
+			taskID, jobName, task.Frontmatter.CurrentJob(),
+		)
+		return false
+	}
+	return true
 }
 
 func (w *jobWatcher) HandleJob(ctx context.Context, job *batchv1.Job) {
+	if !w.namespaceReady(libk8s.Namespace(job.Namespace)) {
+		return
+	}
 	taskIDStr, ok := job.Labels["agent.benjamin-borbe.de/task-id"]
 	if !ok || taskIDStr == "" {
 		return
@@ -148,6 +441,7 @@ func (w *jobWatcher) HandleJob(ctx context.Context, job *batchv1.Job) {
 	if IsJobFailed(job) {
 		reason := w.failureReason(job)
 		glog.V(2).Infof("job %s/%s failed (task %s): %s", job.Namespace, job.Name, taskID, reason)
+		w.releaseClaim(ctx, taskID, job.Name)
 		w.handleTerminal(ctx, taskID, job, reason, true)
 		return
 	}
@@ -177,6 +471,7 @@ func (w *jobWatcher) HandleJob(ctx context.Context, job *batchv1.Job) {
 				job.Status.CompletionTime.Time,
 			)
 		}
+		w.releaseSucceededJobClaim(ctx, taskID, job)
 		if task, ok := w.taskStore.Load(taskID); ok {
 			w.handleSucceeded(ctx, taskID, task, job)
 		}
@@ -226,7 +521,7 @@ func (w *jobWatcher) handleSucceeded(
 		// by liveness: if any job for the task is still active, keep the entry;
 		// otherwise the tracked current_job is terminal/gone and the stale
 		// entry is evicted.
-		active, err := w.taskHasActiveJob(ctx, taskID)
+		active, err := w.taskHasActiveJob(ctx, job.Namespace, taskID)
 		if err != nil {
 			glog.Errorf(
 				"check active job for task %s after tracksJob mismatch: %v",
@@ -250,9 +545,10 @@ func (w *jobWatcher) handleSucceeded(
 // terminal, entry pinned to a dead job name, entry must converge).
 func (w *jobWatcher) taskHasActiveJob(
 	ctx context.Context,
+	namespace string,
 	taskID lib.TaskIdentifier,
 ) (bool, error) {
-	jobs, err := w.kubeClient.BatchV1().Jobs(w.namespace.String()).List(ctx, metav1.ListOptions{
+	jobs, err := w.kubeClient.BatchV1().Jobs(namespace).List(ctx, metav1.ListOptions{
 		LabelSelector: "agent.benjamin-borbe.de/task-id=" + string(taskID),
 	})
 	if err != nil {
@@ -325,7 +621,7 @@ func (w *jobWatcher) publishSyntheticFailure(
 	// the tracked job is itself no longer active, in which case the store entry
 	// is stale and must converge (see handleSucceeded).
 	if !w.tracksJob(task, job.Name) {
-		active, err := w.taskHasActiveJob(ctx, taskID)
+		active, err := w.taskHasActiveJob(ctx, job.Namespace, taskID)
 		if err != nil {
 			glog.Errorf(
 				"check active job for task %s after tracksJob mismatch: %v",
@@ -462,6 +758,9 @@ func (w *jobWatcher) backoffFailureReason(job *batchv1.Job, base ZombieReason) s
 // task from the TaskStore — the Job-condition path or the deadline sweeper
 // performs the final delete when terminal state is observed.
 func (w *jobWatcher) HandlePod(ctx context.Context, pod *corev1.Pod) {
+	if !w.namespaceReady(libk8s.Namespace(pod.Namespace)) {
+		return
+	}
 	taskIDStr, ok := pod.Labels["agent.benjamin-borbe.de/task-id"]
 	if !ok || taskIDStr == "" {
 		return
@@ -572,7 +871,7 @@ func hasNonZeroTerminatedContainer(pod *corev1.Pod) bool {
 func (w *jobWatcher) terminalPodDetail(
 	job *batchv1.Job,
 ) (terminatedReason string, exitCode int32, ok bool) {
-	lister := w.PodLister()
+	lister := w.PodLister(libk8s.Namespace(job.Namespace))
 	if lister == nil {
 		return "", 0, false
 	}

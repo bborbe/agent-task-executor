@@ -140,16 +140,24 @@ type ConfigSpec struct {
 	ConfigMapItems []ConfigMapItem `json:"configMapItems,omitempty"`
 	// PriorityClassName is stamped on Job PodTemplates and on a service StatefulSet pod template.
 	PriorityClassName string `json:"priorityClassName,omitempty"`
+	// JobNamespace is the namespace the executor creates this Config's Jobs in.
+	// Empty (the default) means the executor's own namespace, so every Config that
+	// does not set it behaves exactly as before. A value equal to the executor's
+	// own namespace is rejected at spawn time: a Config may never opt out of
+	// isolation by naming the executor namespace. The namespace must already exist
+	// and already hold this Config's PVCs and Secrets before the field is set.
+	JobNamespace string `json:"jobNamespace,omitempty"`
 	// MaxConcurrentJobs caps how many Jobs this agent may run at once. Spawns
 	// beyond the cap are deferred and retried, never dropped. 0 (the default)
 	// means unlimited, preserving existing behaviour for every agent that does
 	// not set it.
 	MaxConcurrentJobs int `json:"maxConcurrentJobs,omitempty"`
 	// RerunOnLostClaim decides what happens to this agent's task after another
-	// executor takes over the claim this cluster stopped renewing. True or unset
-	// re-dispatches the task; false parks it at phase human_review for a person
-	// to decide. Pointer-typed so "unset" is distinguishable from false, and
-	// unset reads as true so every existing Config keeps re-dispatching.
+	// executor takes over the claim this cluster stopped renewing. True
+	// re-dispatches the task; false or unset parks it at phase human_review for
+	// a person to decide. Pointer-typed so "unset" is distinguishable from
+	// false, and unset reads as false so a Config that predates the field does
+	// not silently re-run work its author never opted into re-running.
 	// Independent of max_triggers and spec.retries.
 	RerunOnLostClaim *bool `json:"rerunOnLostClaim,omitempty"`
 	// Trigger declares the per-agent phase and status conditions under which the executor spawns a Job.
@@ -269,6 +277,7 @@ func (s ConfigSpec) Equal(o ConfigSpec) bool {
 		s.ConfigMapMountPath == o.ConfigMapMountPath &&
 		reflect.DeepEqual(s.ConfigMapItems, o.ConfigMapItems) &&
 		s.PriorityClassName == o.PriorityClassName &&
+		s.JobNamespace == o.JobNamespace &&
 		s.MaxConcurrentJobs == o.MaxConcurrentJobs &&
 		reflect.DeepEqual(s.RerunOnLostClaim, o.RerunOnLostClaim) &&
 		reflect.DeepEqual(s.Env, o.Env) &&

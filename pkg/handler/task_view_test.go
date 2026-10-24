@@ -155,6 +155,92 @@ var _ = Describe("TaskView", func() {
 		Expect(view.Ready()).To(BeTrue())
 	})
 
+	DescribeTable(
+		"retains a body only while the task could still be spawned",
+		func(frontmatter lib.TaskFrontmatter, retained bool) {
+			view := newTestTaskView(libkafka.PartitionOffsets{0: 0})
+			Expect(view.CaptureHighWaterMarks(ctx)).To(Succeed())
+
+			task := lib.Task{
+				TaskIdentifier: "tid",
+				Frontmatter:    frontmatter,
+				Content:        "the body",
+			}
+			Expect(view.ConsumeMessage(ctx, taskEventMessage(0, 0, "tid", task))).To(Succeed())
+
+			stored, ok := view.Get("tid")
+			Expect(ok).To(BeTrue())
+			if retained {
+				Expect(stored.Content).To(Equal(lib.TaskContent("the body")))
+				return
+			}
+			Expect(
+				stored.Content,
+			).To(BeEmpty(), "a task that can never spawn must not retain its body")
+			Expect(
+				stored.Frontmatter,
+			).To(Equal(frontmatter), "frontmatter stays: the skips read it")
+		},
+		// Every member of terminalPhases must drop its body.
+		Entry("done", lib.TaskFrontmatter{"phase": "done", "status": "completed"}, false),
+		Entry("human_review", lib.TaskFrontmatter{"phase": "human_review"}, false),
+		// Everything that can still spawn keeps it, including the conservative
+		// fallbacks: an absent or unrecognised phase must retain, never empty a
+		// body that a spawn could need.
+		Entry("execution", lib.TaskFrontmatter{"phase": "execution"}, true),
+		Entry("planning", lib.TaskFrontmatter{"phase": "planning"}, true),
+		Entry("no phase", lib.TaskFrontmatter{"status": "in_progress"}, true),
+		Entry("unknown phase", lib.TaskFrontmatter{"phase": "not-a-phase"}, true),
+	)
+
+	It(
+		"drops the body when the same task later reaches a terminal phase, and restores it on reopen",
+		func() {
+			view := newTestTaskView(libkafka.PartitionOffsets{0: 0})
+			Expect(view.CaptureHighWaterMarks(ctx)).To(Succeed())
+
+			live := lib.Task{
+				TaskIdentifier: "tid-a",
+				Frontmatter:    lib.TaskFrontmatter{"phase": "execution"},
+				Content:        "the body",
+			}
+			Expect(view.ConsumeMessage(ctx, taskEventMessage(0, 0, "tid-a", live))).To(Succeed())
+			stored, _ := view.Get("tid-a")
+			Expect(stored.Content).To(Equal(lib.TaskContent("the body")))
+
+			done := live
+			done.Frontmatter = lib.TaskFrontmatter{"phase": "done", "status": "completed"}
+			Expect(view.ConsumeMessage(ctx, taskEventMessage(0, 1, "tid-a", done))).To(Succeed())
+			stored, _ = view.Get("tid-a")
+			Expect(stored.Content).To(BeEmpty())
+
+			Expect(view.ConsumeMessage(ctx, taskEventMessage(0, 2, "tid-a", live))).To(Succeed())
+			stored, _ = view.Get("tid-a")
+			Expect(stored.Content).To(Equal(lib.TaskContent("the body")))
+		},
+	)
+
+	It("reports how many bodies it retains when it becomes ready", func() {
+		view := newTestTaskView(libkafka.PartitionOffsets{0: 2})
+
+		out := captureStderr(func() {
+			Expect(view.CaptureHighWaterMarks(ctx)).To(Succeed())
+			Expect(view.ConsumeMessage(ctx, taskEventMessage(0, 0, "live", lib.Task{
+				TaskIdentifier: "live",
+				Frontmatter:    lib.TaskFrontmatter{"phase": "execution"},
+				Content:        "body",
+			}))).To(Succeed())
+			Expect(view.ConsumeMessage(ctx, taskEventMessage(0, 1, "done", lib.Task{
+				TaskIdentifier: "done",
+				Frontmatter:    lib.TaskFrontmatter{"phase": "done"},
+				Content:        "body",
+			}))).To(Succeed())
+		})
+
+		Expect(out).To(ContainSubstring("tasks=2"))
+		Expect(out).To(ContainSubstring("retained_bodies=1"))
+	})
+
 	It("keeps applying every partition after ready", func() {
 		view := newTestTaskView(libkafka.PartitionOffsets{
 			0: 1,
@@ -221,6 +307,7 @@ var _ = Describe("TaskView", func() {
 
 		Expect(strings.Count(out, "event=task_view_ready")).To(Equal(1))
 		Expect(out).To(ContainSubstring("tasks=0"))
+		Expect(out).To(ContainSubstring("retained_bodies=0"))
 		Expect(out).To(ContainSubstring("partitions=1"))
 	})
 

@@ -16,6 +16,7 @@ import (
 	lib "github.com/bborbe/agent"
 	"github.com/bborbe/cqrs/base"
 	"github.com/bborbe/errors"
+	libk8s "github.com/bborbe/k8s"
 	libtime "github.com/bborbe/time"
 	"github.com/bborbe/vault-cli/pkg/domain"
 	. "github.com/onsi/ginkgo/v2"
@@ -58,6 +59,7 @@ var _ = Describe("TaskEventHandler reconcile loop", func() {
 		currentDateTime = libtime.NewCurrentDateTime()
 		h = handler.NewTaskEventHandler(
 			fakeSpawner,
+			"dev",
 			base.Branch("prod"),
 			"",
 			true,
@@ -70,6 +72,8 @@ var _ = Describe("TaskEventHandler reconcile loop", func() {
 			testTaskVault,
 			handler.DefaultReconcilePassTimeout,
 			handler.DefaultReconcileInterval,
+			pkg.ClaimModeOff,
+			nil,
 		)
 	})
 
@@ -117,6 +121,7 @@ var _ = Describe("TaskEventHandler reconcile loop", func() {
 		untaggedResolver := &mocks.FakeConfigResolver{}
 		untaggedHandler := handler.NewTaskEventHandler(
 			fakeSpawner,
+			"dev",
 			base.Branch("prod"),
 			"sun",
 			true,
@@ -129,6 +134,8 @@ var _ = Describe("TaskEventHandler reconcile loop", func() {
 			testTaskVault,
 			handler.DefaultReconcilePassTimeout,
 			handler.DefaultReconcileInterval,
+			pkg.ClaimModeOff,
+			nil,
 		)
 		fakeView.SnapshotReturns([]lib.Task{eligibleTask(domain.TaskPhasePlanning)})
 		fakeSpawner.IsJobActiveReturns(false, nil)
@@ -377,6 +384,30 @@ var _ = Describe("TaskEventHandler reconcile loop", func() {
 				"stage":    "prod",
 			},
 		}, nil),
+		// The entry above passes because human_review is absent from the default
+		// trigger set, so it never exercises the terminal guard. This one makes the
+		// Config list the terminal phase, which is the only shape that can reach a
+		// spawn: without the IsTerminal check in reconcileTask the floor would drive
+		// it, and the view — which retains no body for a terminal task — would hand
+		// the agent an empty task file.
+		Entry("phase done listed in the Config's trigger.phases (terminal)", lib.Task{
+			TaskIdentifier: "tid-a",
+			Frontmatter: lib.TaskFrontmatter{
+				"status":   "in_progress",
+				"phase":    string(domain.TaskPhaseDone),
+				"assignee": "claude",
+				"stage":    "prod",
+			},
+		}, func() {
+			fakeResolver.ResolveReturns(pkg.AgentConfiguration{
+				Assignee: "claude",
+				Image:    "my-image:latest",
+				Trigger: &agentv1.Trigger{
+					Phases:   domain.TaskPhases{domain.TaskPhaseDone},
+					Statuses: domain.TaskStatuses{domain.TaskStatusInProgress},
+				},
+			}, nil)
+		}),
 		Entry("empty assignee (assignee key absent)", lib.Task{
 			TaskIdentifier: "tid-a",
 			Frontmatter: lib.TaskFrontmatter{
@@ -460,7 +491,7 @@ var _ = Describe("TaskEventHandler reconcile loop", func() {
 		fakeSpawner.IsJobActiveReturns(false, nil)
 		running := 0
 		fakeSpawner.ListActiveJobsStub = func(
-			context.Context, string,
+			context.Context, libk8s.Namespace, string,
 		) (map[lib.TaskIdentifier]bool, error) {
 			return activeJobs(running), nil
 		}
@@ -558,6 +589,7 @@ var _ = Describe("TaskEventHandler reconcile loop", func() {
 			}
 			fakeSpawner.ListActiveJobsStub = func(
 				_ context.Context,
+				_ libk8s.Namespace,
 				_ string,
 			) (map[lib.TaskIdentifier]bool, error) {
 				time.Sleep(20 * time.Millisecond)
@@ -914,6 +946,7 @@ var _ = Describe("TaskEventHandler reconcile loop", func() {
 		newTimedHandler := func(passTimeout, interval time.Duration) handler.TaskEventHandler {
 			return handler.NewTaskEventHandler(
 				fakeSpawner,
+				"dev",
 				base.Branch("prod"),
 				"",
 				true,
@@ -926,6 +959,8 @@ var _ = Describe("TaskEventHandler reconcile loop", func() {
 				testTaskVault,
 				passTimeout,
 				interval,
+				pkg.ClaimModeOff,
+				nil,
 			)
 		}
 
@@ -934,6 +969,7 @@ var _ = Describe("TaskEventHandler reconcile loop", func() {
 			var remaining time.Duration
 			fakeSpawner.ListActiveJobsStub = func(
 				listCtx context.Context,
+				_ libk8s.Namespace,
 				_ string,
 			) (map[lib.TaskIdentifier]bool, error) {
 				deadline, ok := listCtx.Deadline()
@@ -984,6 +1020,7 @@ var _ = Describe("TaskEventHandler reconcile loop", func() {
 		}
 		fakeSpawner.ListActiveJobsStub = func(
 			_ context.Context,
+			_ libk8s.Namespace,
 			assignee string,
 		) (map[lib.TaskIdentifier]bool, error) {
 			if assignee == "codex" {
@@ -1068,6 +1105,7 @@ var _ = Describe("TaskEventHandler reconcile loop", func() {
 		}
 		fakeSpawner.ListActiveJobsStub = func(
 			_ context.Context,
+			_ libk8s.Namespace,
 			assignee string,
 		) (map[lib.TaskIdentifier]bool, error) {
 			if assignee == "codex" {
@@ -1144,7 +1182,7 @@ var _ = Describe("TaskEventHandler reconcile loop", func() {
 				},
 				nil,
 			)
-			fakeSpawner.ListActiveJobsStub = func(_ context.Context, _ string) (map[lib.TaskIdentifier]bool, error) {
+			fakeSpawner.ListActiveJobsStub = func(_ context.Context, _ libk8s.Namespace, _ string) (map[lib.TaskIdentifier]bool, error) {
 				if fakeSpawner.ListActiveJobsCallCount() == 1 {
 					// The other Job finishes while the pass is still running.
 					currentDateTime.SetNow(libtime.DateTime(start.Add(11 * time.Second)))
@@ -1170,7 +1208,7 @@ var _ = Describe("TaskEventHandler reconcile loop", func() {
 			}, nil
 		}
 		var claudeLists atomic.Int64
-		fakeSpawner.ListActiveJobsStub = func(_ context.Context, assignee string) (map[lib.TaskIdentifier]bool, error) {
+		fakeSpawner.ListActiveJobsStub = func(_ context.Context, _ libk8s.Namespace, assignee string) (map[lib.TaskIdentifier]bool, error) {
 			if assignee == "claude" {
 				claudeLists.Add(1)
 				return map[lib.TaskIdentifier]bool{"tid-x": true}, nil
@@ -1253,6 +1291,7 @@ var _ = Describe("TaskEventHandler reconcile loop", func() {
 			liveSpawner.IsJobActiveReturns(false, nil)
 			liveHandler := handler.NewTaskEventHandler(
 				liveSpawner,
+				"dev",
 				base.Branch("prod"),
 				"",
 				true,
@@ -1265,6 +1304,8 @@ var _ = Describe("TaskEventHandler reconcile loop", func() {
 				testTaskVault,
 				handler.DefaultReconcilePassTimeout,
 				handler.DefaultReconcileInterval,
+				pkg.ClaimModeOff,
+				nil,
 			)
 			owned := eligibleTask(domain.TaskPhaseExecution)
 			owned.TaskIdentifier = "tid-owned"

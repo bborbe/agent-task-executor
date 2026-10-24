@@ -19,6 +19,7 @@ import (
 	lib "github.com/bborbe/agent"
 	"github.com/bborbe/cqrs/base"
 	"github.com/bborbe/errors"
+	libk8s "github.com/bborbe/k8s"
 	libtime "github.com/bborbe/time"
 	"github.com/bborbe/vault-cli/pkg/domain"
 	. "github.com/onsi/ginkgo/v2"
@@ -81,6 +82,7 @@ var _ = Describe("TaskEventHandler", func() {
 		currentDateTime = libtime.NewCurrentDateTime()
 		h = handler.NewTaskEventHandler(
 			fakeSpawner,
+			"dev",
 			base.Branch("prod"),
 			"",
 			true,
@@ -93,6 +95,8 @@ var _ = Describe("TaskEventHandler", func() {
 			testTaskVault,
 			handler.DefaultReconcilePassTimeout,
 			handler.DefaultReconcileInterval,
+			pkg.ClaimModeOff,
+			nil,
 		)
 	})
 
@@ -362,6 +366,7 @@ var _ = Describe("TaskEventHandler", func() {
 			)
 			fakeSpawner.ListActiveJobsStub = func(
 				_ context.Context,
+				_ libk8s.Namespace,
 				_ string,
 			) (map[lib.TaskIdentifier]bool, error) {
 				// Widen the count→spawn window deliberately. The real race is a
@@ -1006,6 +1011,7 @@ var _ = Describe("TaskEventHandler", func() {
 				)
 				clusterHandler = handler.NewTaskEventHandler(
 					clusterSpawner,
+					"dev",
 					base.Branch("prod"),
 					"nukedev",
 					true,
@@ -1018,6 +1024,8 @@ var _ = Describe("TaskEventHandler", func() {
 					testTaskVault,
 					handler.DefaultReconcilePassTimeout,
 					handler.DefaultReconcileInterval,
+					pkg.ClaimModeOff,
+					nil,
 				)
 			})
 			buildClusterTask := func(cluster string) lib.Task {
@@ -1059,6 +1067,7 @@ var _ = Describe("TaskEventHandler", func() {
 			newHandler := func(runUntagged bool) handler.TaskEventHandler {
 				return handler.NewTaskEventHandler(
 					untaggedSpawner,
+					"dev",
 					base.Branch("prod"),
 					"sun",
 					true,
@@ -1071,6 +1080,8 @@ var _ = Describe("TaskEventHandler", func() {
 					testTaskVault,
 					handler.DefaultReconcilePassTimeout,
 					handler.DefaultReconcileInterval,
+					pkg.ClaimModeOff,
+					nil,
 				)
 			}
 			buildTask := func(cluster string) lib.Task {
@@ -1135,6 +1146,7 @@ var _ = Describe("TaskEventHandler", func() {
 			) handler.TaskEventHandler {
 				return handler.NewTaskEventHandler(
 					poolSpawner,
+					"dev",
 					branch,
 					cluster,
 					true,
@@ -1147,6 +1159,8 @@ var _ = Describe("TaskEventHandler", func() {
 					testTaskVault,
 					handler.DefaultReconcilePassTimeout,
 					handler.DefaultReconcileInterval,
+					pkg.ClaimModeOff,
+					nil,
 				)
 			}
 			buildPoolTask := func(stage, cluster string) lib.Task {
@@ -1393,6 +1407,7 @@ var _ = Describe("TaskEventHandler", func() {
 				)
 				stageHandler = handler.NewTaskEventHandler(
 					stageSpawner,
+					"dev",
 					base.Branch("dev"),
 					"sun",
 					false,
@@ -1405,6 +1420,8 @@ var _ = Describe("TaskEventHandler", func() {
 					testTaskVault,
 					handler.DefaultReconcilePassTimeout,
 					handler.DefaultReconcileInterval,
+					pkg.ClaimModeOff,
+					nil,
 				)
 			})
 			It("spawns a cluster task without a stage field on a dev-branch executor", func() {
@@ -1433,6 +1450,7 @@ var _ = Describe("TaskEventHandler", func() {
 			)
 			localHandler := handler.NewTaskEventHandler(
 				localSpawner,
+				"dev",
 				base.Branch("dev"),
 				"",
 				true,
@@ -1445,6 +1463,8 @@ var _ = Describe("TaskEventHandler", func() {
 				testTaskVault,
 				handler.DefaultReconcilePassTimeout,
 				handler.DefaultReconcileInterval,
+				pkg.ClaimModeOff,
+				nil,
 			)
 			task := lib.Task{
 				TaskIdentifier: lib.TaskIdentifier("tid-stage-3"),
@@ -1486,6 +1506,7 @@ var _ = Describe("TaskEventHandler", func() {
 			)
 			localHandler := handler.NewTaskEventHandler(
 				localSpawner,
+				"dev",
 				base.Branch("dev"),
 				"",
 				true,
@@ -1498,6 +1519,8 @@ var _ = Describe("TaskEventHandler", func() {
 				testTaskVault,
 				handler.DefaultReconcilePassTimeout,
 				handler.DefaultReconcileInterval,
+				pkg.ClaimModeOff,
+				nil,
 			)
 			task := lib.Task{
 				TaskIdentifier: lib.TaskIdentifier("tid-stage-4"),

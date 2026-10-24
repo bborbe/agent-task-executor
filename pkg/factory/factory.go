@@ -25,6 +25,7 @@ import (
 
 	agentv1 "github.com/bborbe/agent-task-executor/k8s/apis/agent.benjamin-borbe.de/v1"
 	pkg "github.com/bborbe/agent-task-executor/pkg"
+	"github.com/bborbe/agent-task-executor/pkg/claim"
 	"github.com/bborbe/agent-task-executor/pkg/handler"
 	"github.com/bborbe/agent-task-executor/pkg/probe"
 	"github.com/bborbe/agent-task-executor/pkg/spawner"
@@ -56,14 +57,61 @@ func CreateServiceReconcileLoop(
 	return spawner.NewServiceReconcileLoop(provider, resolver, reconciler, interval)
 }
 
-// CreateJobWatcher creates a JobWatcher that reacts to terminal batch/v1 Job states.
+// CreateJobWatcher creates a JobWatcher that reacts to terminal batch/v1 Job
+// states in the executor's namespace and in every namespace a Config names.
 func CreateJobWatcher(
 	kubeClient kubernetes.Interface,
 	namespace libk8s.Namespace,
+	configProvider libk8s.Provider[agentv1.Config],
 	taskStore *pkg.TaskStore,
 	publisher pkg.ResultPublisher,
+	claimReleaser pkg.ClaimReleaser,
 ) pkg.JobWatcher {
-	return pkg.NewJobWatcher(kubeClient, namespace, taskStore, publisher)
+	return pkg.NewJobWatcher(
+		kubeClient,
+		namespace,
+		configProvider,
+		taskStore,
+		publisher,
+		claimReleaser,
+	)
+}
+
+// CreateClaimLifecycleRunFuncs returns the run funcs that keep the lease
+// manager's claims alive: startup recovery re-adopts the claims this cluster
+// held before a restart, then the loop renews a held claim while its Job runs,
+// fences a claim whose renewals fail, and retries a release an end point could
+// not deliver. Whether a manager exists at all is decided at boot in main, so
+// this factory only wires the manager it is given.
+//
+// Every func returned here MUST block until ctx is done. service.Run wraps them
+// in run.CancelOnFirstFinishWait, which cancels the whole service as soon as any
+// one of them returns — so a one-shot step that returns once its work is done
+// takes the lease loop, the HTTP server and the cron down with it. v0.30.2
+// shipped exactly that and crash-looped all three clusters with a clean exit 0.
+func CreateClaimLifecycleRunFuncs(
+	manager claim.LeaseManager,
+	viewReady func() bool,
+) []run.Func {
+	return []run.Func{CreateClaimRecoverFunc(manager, viewReady), manager.Run}
+}
+
+// CreateClaimRecoverFunc returns the startup step that re-adopts the claims this
+// cluster held before a restart. Without it a replaced pod starts with an empty
+// held set: nothing renews and nothing fences the Jobs it was running, so their
+// leases lapse, another cluster takes the work over, and the original Job keeps
+// running to its natural end — the duplicate this whole mechanism exists to
+// prevent. Every rollout replaces a pod, so this is not a rare path.
+//
+// The retry policy, the never-fail-the-boot rule and the wait that keeps the run
+// group alive all live in claim.RunClaimRecovery; this factory only wires it.
+func CreateClaimRecoverFunc(
+	manager claim.LeaseManager,
+	viewReady func() bool,
+) run.Func {
+	return func(ctx context.Context) error {
+		return claim.RunClaimRecovery(ctx, manager, viewReady)
+	}
 }
 
 // CreateZombieSweeper creates a deadline sweeper that classifies stuck tasks as
@@ -120,6 +168,17 @@ func CreateConfigResolver(
 	return pkg.NewConfigResolver(handler, branch, vaultName)
 }
 
+// CreateClaimRefClientFactory returns the lazily-invoked constructor for the
+// git-rest claim ref client. The initiator is the executor's own identity, so
+// git-rest's auth-failure logs name this component.
+func CreateClaimRefClientFactory(
+	baseURL, gatewaySecret string,
+) handler.ClaimRefClientFactory {
+	return func() claim.ClaimRefClient {
+		return claim.NewClaimRefClient(baseURL, gatewaySecret, "agent-task-executor")
+	}
+}
+
 // CreateConsumer wires together all components and returns a Kafka Consumer that
 // reads task events and spawns K8s Jobs for qualifying tasks, along with the
 // TaskEventHandler so callers can wire RunDeferredRespawnLoop.
@@ -147,7 +206,9 @@ func CreateConsumer(
 	taskVault string,
 	reconcilePassTimeout time.Duration,
 	reconcileInterval time.Duration,
-) (libkafka.Consumer, handler.TaskEventHandler) {
+	claimMode pkg.ClaimMode,
+	claimRefClientFactory handler.ClaimRefClientFactory,
+) (libkafka.Consumer, handler.ClaimLifecycleEventHandler) {
 	jobSpawner := spawner.NewJobSpawner(
 		kubeClient,
 		namespace,
@@ -162,6 +223,7 @@ func CreateConsumer(
 	)
 	taskEventHandler := handler.NewTaskEventHandler(
 		jobSpawner,
+		namespace,
 		branch,
 		cluster,
 		stageFilter,
@@ -174,6 +236,9 @@ func CreateConsumer(
 		taskVault,
 		reconcilePassTimeout,
 		reconcileInterval,
+		claimMode,
+		claimRefClientFactory,
+		handler.NewKubeJobControl(kubeClient, namespace, resolver, view),
 	)
 	topic := lib.TaskV1SchemaID.EventTopic(topicPrefix)
 	offsetManager := libkafka.NewSaramaOffsetManager(

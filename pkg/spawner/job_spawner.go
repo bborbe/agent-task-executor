@@ -6,6 +6,7 @@ package spawner
 
 import (
 	"context"
+	"strings"
 
 	lib "github.com/bborbe/agent"
 	"github.com/bborbe/errors"
@@ -47,22 +48,38 @@ type JobSpawner interface {
 	// Returns the job name even when the job already exists (idempotent).
 	SpawnJob(ctx context.Context, task lib.Task, config pkg.AgentConfiguration) (string, error)
 	// IsJobActive returns true if an active (not completed/failed) K8s Job exists
-	// for the given task identifier. Uses the agent.benjamin-borbe.de/task-id
-	// label set by SpawnJob.
-	IsJobActive(ctx context.Context, taskIdentifier lib.TaskIdentifier) (bool, error)
+	// for the given task identifier in namespace. Uses the
+	// agent.benjamin-borbe.de/task-id label set by SpawnJob.
+	IsJobActive(
+		ctx context.Context,
+		namespace k8s.Namespace,
+		taskIdentifier lib.TaskIdentifier,
+	) (bool, error)
 	// CountActiveJobs returns the number of non-terminal K8s Jobs currently
-	// running for the given assignee. Uses the agent.benjamin-borbe.de/assignee
-	// label set by SpawnJob. Jobs spawned before that label existed are not
-	// counted, so the cap under-counts during the rollout and never over-counts.
-	CountActiveJobs(ctx context.Context, assignee string) (int, error)
+	// running for the given assignee in namespace. Uses the
+	// agent.benjamin-borbe.de/assignee label set by SpawnJob. Jobs spawned before
+	// that label existed are not counted, so the cap under-counts during the
+	// rollout and never over-counts.
+	CountActiveJobs(ctx context.Context, namespace k8s.Namespace, assignee string) (int, error)
 	// ListActiveJobs returns the set of task identifiers that currently have an
-	// active (not completed/failed) Job for the assignee, from ONE list call.
-	// IsJobActive and CountActiveJobs are both answered from it, so a reconcile
-	// pass that evaluates N tasks costs one call per assignee instead of 2N.
+	// active (not completed/failed) Job for the assignee in namespace, from ONE
+	// list call. IsJobActive and CountActiveJobs are both answered from it, so a
+	// reconcile pass that evaluates N tasks costs one call per assignee instead
+	// of 2N.
 	// Added 2026-10-19: the per-task path issued two list calls each, and a pass
 	// over ~70 eligible tasks consumed its whole budget in client-go's default
 	// 5 QPS rate limiter before reaching the spawn.
-	ListActiveJobs(ctx context.Context, assignee string) (map[lib.TaskIdentifier]bool, error)
+	ListActiveJobs(
+		ctx context.Context,
+		namespace k8s.Namespace,
+		assignee string,
+	) (map[lib.TaskIdentifier]bool, error)
+	// JobExists reports whether a Job with this name still exists in namespace.
+	// It answers the question IsJobActive cannot: a Job that finished and was
+	// garbage-collected is gone from here, while one another cluster created was
+	// never here at all. The spawn guard uses it to tell a live foreign Job from
+	// a stale entry in this executor's own store.
+	JobExists(ctx context.Context, namespace k8s.Namespace, jobName string) (bool, error)
 }
 
 // NewJobSpawner creates a new JobSpawner backed by the K8s batch/v1 API.
@@ -117,6 +134,11 @@ func (s *jobSpawner) SpawnJob(
 	task lib.Task,
 	config pkg.AgentConfiguration,
 ) (string, error) {
+	jobNamespace, err := pkg.ResolveJobNamespace(ctx, s.namespace, config.JobNamespace)
+	if err != nil {
+		return "", err
+	}
+
 	assignee := task.Frontmatter.Assignee().String()
 	now := s.currentDateTimeGetter.Now()
 	jobName := jobNameFromTask(assignee, task.TaskIdentifier, now)
@@ -147,7 +169,7 @@ func (s *jobSpawner) SpawnJob(
 
 	objectMetaBuilder := k8s.NewObjectMetaBuilder()
 	objectMetaBuilder.SetName(k8s.Name(jobName))
-	objectMetaBuilder.SetNamespace(s.namespace)
+	objectMetaBuilder.SetNamespace(jobNamespace)
 
 	jobBuilder := k8s.NewJobBuilder()
 	jobBuilder.SetObjectMetaBuild(objectMetaBuilder)
@@ -173,34 +195,46 @@ func (s *jobSpawner) SpawnJob(
 	}
 	applyActiveDeadlineSeconds(config, jobName, task.TaskIdentifier, job)
 
-	_, err = s.kubeClient.BatchV1().
-		Jobs(s.namespace.String()).
+	if err := s.createJob(ctx, jobNamespace, job, jobName, task.TaskIdentifier, config.Image); err != nil {
+		return "", err
+	}
+	return jobName, nil
+}
+
+// createJob submits the built Job to the resolved namespace. An AlreadyExists
+// response is treated as success, keeping the spawn idempotent across
+// concurrent callers and retries.
+func (s *jobSpawner) createJob(
+	ctx context.Context,
+	jobNamespace k8s.Namespace,
+	job *batchv1.Job,
+	jobName string,
+	taskID lib.TaskIdentifier,
+	image string,
+) error {
+	_, err := s.kubeClient.BatchV1().
+		Jobs(jobNamespace.String()).
 		Create(ctx, job, metav1.CreateOptions{})
 	if err != nil {
 		if k8serrors.IsAlreadyExists(err) {
 			glog.V(2).
-				Infof("job %s already exists for task %s, treating as success", jobName, task.TaskIdentifier)
-			return jobName, nil
+				Infof("job %s already exists for task %s, treating as success", jobName, taskID)
+			return nil
 		}
-		return "", errors.Wrapf(
-			ctx,
-			err,
-			"create job %s for task %s failed",
-			jobName,
-			task.TaskIdentifier,
-		)
+		return errors.Wrapf(ctx, err, "create job %s for task %s failed", jobName, taskID)
 	}
 	glog.V(2).
-		Infof("created job %s for task %s with image %s", jobName, task.TaskIdentifier, config.Image)
-	return jobName, nil
+		Infof("created job %s for task %s with image %s", jobName, taskID, image)
+	return nil
 }
 
 func (s *jobSpawner) IsJobActive(
 	ctx context.Context,
+	namespace k8s.Namespace,
 	taskIdentifier lib.TaskIdentifier,
 ) (bool, error) {
 	labelSelector := taskIDLabelKey + "=" + string(taskIdentifier)
-	jobs, err := s.kubeClient.BatchV1().Jobs(s.namespace.String()).List(ctx, metav1.ListOptions{
+	jobs, err := s.kubeClient.BatchV1().Jobs(namespace.String()).List(ctx, metav1.ListOptions{
 		LabelSelector: labelSelector,
 	})
 	if err != nil {
@@ -227,10 +261,40 @@ func (s *jobSpawner) IsJobActive(
 	return false, nil
 }
 
+// JobExists reports whether the named Job still exists in this namespace.
+//
+// A Get rather than a list, because the caller already knows the name, and it
+// runs only for a task whose frontmatter names a Job this cluster does not
+// consider active — a rare, transient state. NotFound is a plain false; any
+// other error is returned so the caller can keep suppressing rather than risk
+// spawning a duplicate on a failed read.
+func (s *jobSpawner) JobExists(
+	ctx context.Context,
+	namespace k8s.Namespace,
+	jobName string,
+) (bool, error) {
+	if jobName == "" {
+		return false, nil
+	}
+	_, err := s.kubeClient.BatchV1().Jobs(namespace.String()).
+		Get(ctx, jobName, metav1.GetOptions{})
+	if err == nil {
+		return true, nil
+	}
+	if k8serrors.IsNotFound(err) {
+		return false, nil
+	}
+	return false, errors.Wrapf(ctx, err, "get job %s", jobName)
+}
+
 // CountActiveJobs returns how many non-terminal Jobs are running for the assignee.
 // Terminal detection matches IsJobActive exactly — conditions first, counters as a
 // fallback — so the two cannot disagree about whether a Job has finished.
-func (s *jobSpawner) CountActiveJobs(ctx context.Context, assignee string) (int, error) {
+func (s *jobSpawner) CountActiveJobs(
+	ctx context.Context,
+	namespace k8s.Namespace,
+	assignee string,
+) (int, error) {
 	if assignee == "" {
 		// Not an error: an unlabelled agent simply has nothing to count. Warn
 		// loudly though, because reaching here with a cap configured means the
@@ -240,7 +304,7 @@ func (s *jobSpawner) CountActiveJobs(ctx context.Context, assignee string) (int,
 		return 0, nil
 	}
 	labelSelector := assigneeLabelKey + "=" + assignee
-	jobs, err := s.kubeClient.BatchV1().Jobs(s.namespace.String()).List(ctx, metav1.ListOptions{
+	jobs, err := s.kubeClient.BatchV1().Jobs(namespace.String()).List(ctx, metav1.ListOptions{
 		LabelSelector: labelSelector,
 	})
 	if err != nil {
@@ -272,6 +336,7 @@ func (s *jobSpawner) CountActiveJobs(ctx context.Context, assignee string) (int,
 // whether a Job has finished.
 func (s *jobSpawner) ListActiveJobs(
 	ctx context.Context,
+	namespace k8s.Namespace,
 	assignee string,
 ) (map[lib.TaskIdentifier]bool, error) {
 	active := make(map[lib.TaskIdentifier]bool)
@@ -283,7 +348,7 @@ func (s *jobSpawner) ListActiveJobs(
 		return active, nil
 	}
 	labelSelector := assigneeLabelKey + "=" + assignee
-	jobs, err := s.kubeClient.BatchV1().Jobs(s.namespace.String()).List(ctx, metav1.ListOptions{
+	jobs, err := s.kubeClient.BatchV1().Jobs(namespace.String()).List(ctx, metav1.ListOptions{
 		LabelSelector: labelSelector,
 	})
 	if err != nil {
@@ -593,8 +658,12 @@ func taskTypeString(f lib.TaskFrontmatter) string {
 // taskID8 is the first 8 chars of the task UUID, included to prevent name collisions
 // between concurrent spawns of different tasks sharing the same assignee and second.
 // If assignee is empty, "agent" is used as the default prefix.
-// Job names are DNS-compliant (<=63 chars, [a-z0-9]([-a-z0-9]*[a-z0-9])?).
-// Assignees should be short lowercase strings (e.g. "claude", "backtest-agent").
+// The whole name is lowercased because task identifiers may be uppercase UUIDs
+// and Kubernetes rejects a metadata.name that is not a lowercase RFC 1123 label
+// ([a-z0-9]([-a-z0-9]*[a-z0-9])?). Job names are DNS-compliant
+// (<=63 chars, [a-z0-9]([-a-z0-9]*[a-z0-9])?).
+// Assignees should be short strings (e.g. "claude", "backtest-agent") so the
+// name stays within 63 chars.
 func jobNameFromTask(assignee string, taskID lib.TaskIdentifier, now libtime.DateTime) string {
 	if assignee == "" {
 		assignee = "agent"
@@ -603,7 +672,7 @@ func jobNameFromTask(assignee string, taskID lib.TaskIdentifier, now libtime.Dat
 	if len(id) > 8 {
 		id = id[:8]
 	}
-	return assignee + "-" + id + "-" + now.UTC().Format("20060102150405")
+	return strings.ToLower(assignee + "-" + id + "-" + now.UTC().Format("20060102150405"))
 }
 
 // buildJobEnvBuilder constructs the env var set for the spawned Job's container.

@@ -31,7 +31,7 @@ spec:
 | Component | Uses | For |
 |-----------|------|-----|
 | Controller | `spec.assignee`, `spec.heartbeat`, `spec.taskType`, `spec.taskTypes` | Match tasks, enforce heartbeat |
-| Job Creator | `spec.image`, `spec.resources`, `spec.env`, `spec.secretName`, `spec.volumeClaim`, `spec.volumeMountPath` | Spawn K8s Job with correct image/limits/env/secret/volume |
+| Job Creator | `spec.image`, `spec.resources`, `spec.env`, `spec.secretName`, `spec.volumeClaim`, `spec.volumeMountPath`, `spec.jobNamespace` | Spawn K8s Job with correct image/limits/env/secret/volume |
 | Service Reconciler | `spec.type`, `spec.image`, `spec.resources`, `spec.env`, `spec.secretName`, `spec.volumeMountPath`, `spec.priorityClassName` | Reconcile a long-running StatefulSet for a `type: service` agent |
 
 ## Fields
@@ -49,14 +49,19 @@ spec:
 | `spec.volumeClaim` | no | Name of an existing PVC mounted into the container |
 | `spec.volumeMountPath` | conditional | Container path for `volumeClaim` mount — required when `volumeClaim` is set |
 | `spec.priorityClassName` | no | — | Kubernetes PriorityClass name to stamp onto the pod templates of every workload this Config causes — spawned Job PodTemplates and the service StatefulSet's pod template. When set, a matching `ResourceQuota` scoped to this class enforces the concurrent pod cap. Absent means no PriorityClass (unbounded concurrency, pre-spec-013 behavior). |
+| `spec.jobNamespace` | no | Namespace the executor creates this Config's Jobs in. Empty (the default) means the executor namespace — the Job lands beside the executor exactly as before, so an unset field is a no-op on deploy. A value equal to the executor namespace is rejected at spawn time with an ERROR log and no Job is created, so a Config can never opt out of isolation by naming the executor namespace. The namespace must already exist and already hold this Config's PVCs and Secrets before the field is set. Value syntax: a DNS-1123 label — lowercase alphanumerics and `-`, starting and ending alphanumeric, at most 63 characters (`^[a-z0-9]([-a-z0-9]*[a-z0-9])?$`, `maxLength: 63`). Anything else is rejected at admission, e.g. `Dev_Sandbox`. |
 | `spec.trigger` | no | Per-agent trigger conditions (optional nested object with `phases` and `statuses` lists). When absent or empty, defaults apply: phases `[planning, in_progress, ai_review]` and statuses `[in_progress]`. |
 | `spec.trigger.phases` | no | Task phases that allow spawning. Valid values: `todo`, `planning`, `in_progress`, `ai_review`, `human_review`, `done`. Empty or absent means default phases apply. |
 | `spec.trigger.statuses` | no | Task statuses that allow spawning. Valid values: `todo`, `in_progress`, `backlog`, `completed`, `hold`, `aborted`. Empty or absent means default statuses apply. |
-| `spec.rerunOnLostClaim` | no | Whether to run the task again after another executor takes over this agent's expired claim. Default `true`: re-dispatch the task. `false` parks it at phase `human_review` for a person to decide — use it for agents whose second run has external side effects or is expensive. Independent of `max_triggers` and `spec.retries`; unset means `true`. |
+| `spec.rerunOnLostClaim` | no | Whether to run the task again after another executor takes over this agent's expired claim. Default `false`: park the task at phase `human_review` for a person to decide. Set `true` to re-dispatch it instead — appropriate for agents whose second run is cheap and idempotent. Independent of `max_triggers` and `spec.retries`; unset means `false`. Takes effect only when the executor runs `CLAIM_MODE=on`: a shadow-mode executor takes the claim without ever blocking a dispatch, so it re-dispatches regardless of this field. |
 
 If `spec.trigger` is omitted, or if `trigger.phases` / `trigger.statuses` are absent or empty, the executor applies its built-in defaults (phases: `planning`, `in_progress`, `ai_review`; statuses: `in_progress`). There is no way to configure a Config that triggers on nothing — an empty list is equivalent to the field being absent.
 
 With a per-vault executor, each instance serves one Obsidian vault: it learns its vault from the required `VAULT_NAME` environment variable and resolves Config CRs by the composed `{assignee}-{vaultName}` key. Config CR names follow the `{assignee}-{vault}` convention. A Config CR whose assignee is the plain value without the vault suffix never matches, so unmatched tasks keep the existing unknown-assignee skip behavior.
+
+## Job and Pod Observation
+
+The executor's Job watcher observes Jobs and Pods in the executor's own namespace plus every distinct `spec.jobNamespace` named by a Config. The watched set is re-resolved every 60 seconds from the Configs, so a Config that starts naming a new namespace is observed without an executor restart. A namespace that a Config stops naming is not un-watched: its informer keeps running until restart. A namespace no Config names is never watched, and the executor requests no RBAC beyond what it already holds.
 
 ## Properties
 

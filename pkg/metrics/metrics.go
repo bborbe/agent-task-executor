@@ -101,6 +101,39 @@ var ClaimMismatchTotal = promauto.NewCounter(
 	},
 )
 
+// ClaimKeyFallbackTotal counts pr-review tasks whose body carried no usable
+// pull-request URL, so their claim fell back to the repository key.
+var ClaimKeyFallbackTotal = promauto.NewCounter(prometheus.CounterOpts{
+	Name: "executor_claim_key_fallback_total",
+	Help: "Total number of pr-review claim keys that fell back to the repository key.",
+})
+
+// ParkedLostClaimTotal counts tasks parked at phase human_review after another
+// executor took over their claim, labelled by outcome. The unset default parks,
+// so an unexpected fleet-wide park must be alertable from a metric rather than
+// only visible by grepping for the log line.
+var ParkedLostClaimTotal = promauto.NewCounterVec(prometheus.CounterOpts{
+	Name: "executor_parked_lost_claim_total",
+	Help: "Total number of tasks parked at human_review after a lost claim, by outcome.",
+}, []string{"result"})
+
+// TaskRerunsTotal counts spawns of a task whose previous Job succeeded inside
+// the re-run window. A re-run is a task that ran again after succeeding, which
+// is what a claim regression looks like on live data.
+//
+// Scoped to this executor's own store: a task whose first success ran on
+// another cluster is not recorded here and is not counted, so the counter
+// under-reports cross-cluster re-runs. Those stay visible through
+// ClaimTotal{result=~"taken_over|adopted"}. The Prometheus `cluster` external
+// label distinguishes the clusters that do report.
+var TaskRerunsTotal = promauto.NewCounterVec(
+	prometheus.CounterOpts{
+		Name: "executor_task_reruns_total",
+		Help: "Total number of task spawns after a success inside the re-run window.",
+	},
+	[]string{"task_type"},
+)
+
 // DeferredConcurrencyCapTotal counts tasks deferred because their assignee was
 // already at its configured concurrency cap, labelled by that assignee. The
 // bare TaskEventsTotal{result="deferred_concurrency_cap"} counter says a
@@ -144,8 +177,10 @@ func init() {
 	TaskEventsTotal.WithLabelValues("skipped_active_job").Add(0)
 	TaskEventsTotal.WithLabelValues("skipped_recent_success").Add(0)
 	TaskEventsTotal.WithLabelValues("skipped_stage").Add(0)
+	TaskEventsTotal.WithLabelValues("pin_outside_pool").Add(0)
 	TaskEventsTotal.WithLabelValues("skipped_foreign_cluster").Add(0)
 	TaskEventsTotal.WithLabelValues("skipped_foreign_vault").Add(0)
+	TaskEventsTotal.WithLabelValues("skipped_view_not_ready").Add(0)
 	TaskEventsTotal.WithLabelValues("skipped_untagged").Add(0)
 	TaskEventsTotal.WithLabelValues("skipped_trigger_cap").Add(0)
 	TaskEventsTotal.WithLabelValues("error").Add(0)
@@ -153,9 +188,11 @@ func init() {
 	TaskEventsTotal.WithLabelValues("spawn_suppressed_terminal_phase").Add(0)
 	TaskEventsTotal.WithLabelValues("unknown_phase").Add(0)
 	TaskEventsTotal.WithLabelValues("respawn_grace_window").Add(0)
+	TaskEventsTotal.WithLabelValues("skipped_foreign_job").Add(0)
 	TaskEventsTotal.WithLabelValues("respawn_after_grace_window").Add(0)
 	TaskEventsTotal.WithLabelValues("deferred_concurrency_cap").Add(0)
 	TaskEventsTotal.WithLabelValues("deferred_claim_invalidated").Add(0)
+	TaskEventsTotal.WithLabelValues("deferred_respawn_spawn_failed").Add(0)
 	// Pre-initialise every reconcile outcome so rate() sees a 0 series rather
 	// than no data — an absent series makes `rate(...)==0` skip silently and the
 	// "backstop never succeeds" alert never fire.
@@ -167,6 +204,10 @@ func init() {
 		"task_vault_unstamped",
 	} {
 		ReconcilePassesTotal.WithLabelValues(result).Add(0)
+	}
+	ClaimKeyFallbackTotal.Add(0)
+	for _, result := range []string{"parked", "failed"} {
+		ParkedLostClaimTotal.WithLabelValues(result).Add(0)
 	}
 	// Pre-initialise the closed claim result set so every series is visible
 	// before any claim activity.
@@ -184,6 +225,7 @@ func init() {
 		"already_released",
 		"adopted",
 		"error",
+		"jobless_released",
 	} {
 		ClaimTotal.WithLabelValues(result).Add(0)
 	}

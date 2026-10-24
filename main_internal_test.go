@@ -6,11 +6,16 @@ package main
 
 import (
 	"context"
+	"os"
 	"reflect"
+	"strings"
+	"testing"
 	"time"
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
+
+	"github.com/bborbe/agent-task-executor/pkg"
 )
 
 // This file is `package main` (internal) and declares specs without a
@@ -22,6 +27,139 @@ import (
 //
 // Adding a main_suite_test.go here would be a bug, not a fix — a second
 // RunSpecs in the same binary would re-run the whole suite.
+
+// TestParseClaimModeFromEnv is a plain Go test rather than a Ginkgo spec: the
+// specs declared in this internal test package are not discovered by the
+// package-external suite, so behaviour that must actually run is tested here.
+// unsetClaimModeEnv removes CLAIM_MODE for one test and restores whatever value
+// the process held before, so a case cannot leak its environment into the rest
+// of the package's tests.
+func unsetClaimModeEnv(t *testing.T) {
+	t.Helper()
+	prior, present := os.LookupEnv(claimModeEnv)
+	if err := os.Unsetenv(claimModeEnv); err != nil {
+		t.Fatalf("unset %s: %v", claimModeEnv, err)
+	}
+	t.Cleanup(func() {
+		if present {
+			_ = os.Setenv(claimModeEnv, prior)
+			return
+		}
+		_ = os.Unsetenv(claimModeEnv)
+	})
+}
+
+func TestParseClaimModeFromEnv(t *testing.T) {
+	t.Run("unset variable is off", func(t *testing.T) {
+		unsetClaimModeEnv(t)
+		if _, present := os.LookupEnv(claimModeEnv); present {
+			t.Fatalf("expected %s to be unset", claimModeEnv)
+		}
+		mode, err := parseClaimModeFromEnv(context.Background())
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if mode != pkg.ClaimModeOff {
+			t.Fatalf("expected %q, got %q", pkg.ClaimModeOff, mode)
+		}
+	})
+
+	t.Run("explicitly empty variable is invalid", func(t *testing.T) {
+		t.Setenv(claimModeEnv, "")
+		_, err := parseClaimModeFromEnv(context.Background())
+		if err == nil {
+			t.Fatal("expected an error")
+		}
+		if !strings.Contains(err.Error(), "off|shadow|on") {
+			t.Fatalf("expected accepted set in message, got %q", err.Error())
+		}
+	})
+
+	t.Run("uppercase ON is invalid", func(t *testing.T) {
+		t.Setenv(claimModeEnv, "ON")
+		_, err := parseClaimModeFromEnv(context.Background())
+		if err == nil {
+			t.Fatal("expected an error")
+		}
+		if !strings.Contains(err.Error(), "ON") {
+			t.Fatalf("expected rejected value in message, got %q", err.Error())
+		}
+	})
+}
+
+// TestValidateClaimTransport pins the startup gate: off validates nothing
+// (it reads no secret and builds no client), while a claim-taking mode refuses
+// to start without a git-rest URL rather than failing on its first dispatch.
+func TestValidateClaimTransport(t *testing.T) {
+	ctx := context.Background()
+
+	for _, tc := range []struct {
+		name    string
+		mode    pkg.ClaimMode
+		url     string
+		cluster string
+		want    string
+	}{
+		{"off needs no url", pkg.ClaimModeOff, "", "", ""},
+		{"off ignores a set url", pkg.ClaimModeOff, "http://git-rest", "self", ""},
+		{"shadow requires a url", pkg.ClaimModeShadow, "", "self", "GITREST_URL"},
+		{"shadow accepts a url", pkg.ClaimModeShadow, "http://git-rest", "self", ""},
+		{"on requires a url", pkg.ClaimModeOn, "", "self", "GITREST_URL"},
+		{"on accepts a url and a cluster", pkg.ClaimModeOn, "http://git-rest", "self", ""},
+		{"zero value needs no url", pkg.ClaimMode(""), "", "", ""},
+		{"shadow accepts https", pkg.ClaimModeShadow, "https://git-rest", "self", ""},
+		{"shadow rejects a url with no scheme", pkg.ClaimModeShadow, "git-rest", "self", "GITREST_URL"},
+		{"shadow rejects a url with no host", pkg.ClaimModeShadow, "http://", "self", "GITREST_URL"},
+		{"shadow rejects a port with no host", pkg.ClaimModeShadow, "http://:9090", "self", "must carry a host"},
+		{"shadow rejects a non-http scheme", pkg.ClaimModeShadow, "ftp://git-rest", "self", "http or https"},
+		{"shadow redacts url userinfo", pkg.ClaimModeShadow, "ftp://u:s3cret@git-rest", "self", "http or https"},
+		{"shadow rejects an unparseable url", pkg.ClaimModeShadow, "http://git-rest:bad port", "self", "not a valid URL"},
+		{"shadow requires a cluster", pkg.ClaimModeShadow, "http://git-rest", "", "CLUSTER"},
+		{"on requires a cluster", pkg.ClaimModeOn, "http://git-rest", "", "CLUSTER"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			a := &application{GitRestURL: tc.url, Cluster: tc.cluster}
+			err := a.validateClaimTransport(ctx, tc.mode)
+			if tc.want == "" && err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if tc.want != "" && err == nil {
+				t.Fatal("expected an error")
+			}
+			if tc.want != "" && !strings.Contains(err.Error(), tc.want) {
+				t.Fatalf("expected the error to contain %q, got %q", tc.want, err.Error())
+			}
+			// A URL carrying userinfo must never reach the error string.
+			if err != nil && strings.Contains(err.Error(), "s3cret") {
+				t.Fatalf("error leaked the URL userinfo: %q", err.Error())
+			}
+		})
+	}
+}
+
+// TestClaimTransportFieldTags pins the env names the claim transport reads, and
+// that the gateway setting carries a Secret NAME rather than a value.
+func TestClaimTransportFieldTags(t *testing.T) {
+	typ := reflect.TypeOf(application{})
+	for _, tc := range []struct{ field, env, arg string }{
+		{"GitRestURL", "GITREST_URL", "gitrest-url"},
+		{"GitRestGatewaySecret", "GITREST_GATEWAY_SECRET", "gitrest-gateway-secret"},
+	} {
+		f, ok := typ.FieldByName(tc.field)
+		if !ok {
+			t.Fatalf("field %s missing", tc.field)
+		}
+		if got := f.Tag.Get("env"); got != tc.env {
+			t.Fatalf("%s env = %q, want %q", tc.field, got, tc.env)
+		}
+		if got := f.Tag.Get("arg"); got != tc.arg {
+			t.Fatalf("%s arg = %q, want %q", tc.field, got, tc.arg)
+		}
+		if got := f.Tag.Get("required"); got != "false" {
+			t.Fatalf("%s must stay optional, got required=%q", tc.field, got)
+		}
+	}
+}
 
 var _ = Describe("application struct field guards", func() {
 	Describe("VaultName field", func() {

@@ -6,6 +6,7 @@ package handler
 
 import (
 	"context"
+	stderrors "errors"
 	"sort"
 	"time"
 
@@ -59,6 +60,10 @@ func sortDeferredByAdmissionPriority(replays []deferredReplay) {
 // results in a spawn (spec 037 AC #6: "recorded each time the follow-up evaluation
 // results in a spawn"); evaluations that no-op (active job already, trigger cap hit,
 // terminal phase) do not increment the metric.
+//
+// A failed Job create is logged, counted and skipped rather than returned: one
+// rejected Job must not exit the process and starve every other due entry. The
+// skipped entry is not re-parked; the reconcile floor re-drives the task.
 func (h *taskEventHandler) evalDeferredRespawns(ctx context.Context) error {
 	now := h.currentDateTime.Now().Time()
 
@@ -94,13 +99,38 @@ func (h *taskEventHandler) evalDeferredRespawns(ctx context.Context) error {
 		entry := replay.entry
 		spawned, err := h.spawnIfNeededClaimed(ctx, entry.task, &entry.config, &replay.claim)
 		if err != nil {
+			// A single failed Job create (e.g. a Job the API server rejects) must
+			// not exit the process and starve every other due entry. The entry is
+			// not re-parked; the reconcile floor re-drives the task. Every other
+			// error stays fatal.
+			var spawnErr *spawnJobError
+			if stderrors.As(err, &spawnErr) {
+				glog.Warningf(
+					"event=deferred_respawn_spawn_failed task=%s err=%v",
+					entry.task.TaskIdentifier, err,
+				)
+				metrics.TaskEventsTotal.WithLabelValues("deferred_respawn_spawn_failed").Inc()
+				// The entry was removed during collection and no spawn replaced
+				// it, so the queued_at record must not outlive the deferral.
+				h.clearQueuedAtStampIfNotDeferred(entry.task.TaskIdentifier)
+				continue
+			}
 			return errors.Wrapf(
 				ctx, err, "deferred respawn for task %s", entry.task.TaskIdentifier,
 			)
 		}
 		if !spawned {
+			// A skip branch (foreign vault, suppressed current job, active job,
+			// recently succeeded, capped redrive, trigger budget) ended the
+			// deferral without a spawn. Clear only if nothing re-parked it: a
+			// re-parked entry is still waiting and needs its record.
+			h.clearQueuedAtStampIfNotDeferred(entry.task.TaskIdentifier)
 			continue
 		}
+		// The task is no longer waiting behind the cap, so the queued_at record
+		// has served its purpose. Dropping it keeps the map bounded by the
+		// deferred working set.
+		h.clearQueuedAtStampIfNotDeferred(entry.task.TaskIdentifier)
 		jobStartedAt, _ := entry.task.Frontmatter.JobStartedAt()
 		elapsed := now.Sub(jobStartedAt)
 		glog.V(1).Infof(
@@ -123,6 +153,7 @@ func (h *taskEventHandler) evalDeferredRespawns(ctx context.Context) error {
 func (h *taskEventHandler) removeDeferredEntry(id lib.TaskIdentifier) {
 	h.deferredMu.Lock()
 	delete(h.deferredRespawns, id)
+	delete(h.queuedAtStamps, id)
 	h.deferredEpochs[id]++
 	h.deferredMu.Unlock()
 }

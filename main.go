@@ -6,6 +6,7 @@ package main
 
 import (
 	"context"
+	"net/url"
 	"os"
 	"regexp"
 	"time"
@@ -46,13 +47,15 @@ type application struct {
 	KafkaBrokers               string            `required:"true"  arg:"kafka-brokers"                  env:"KAFKA_BROKERS"                  usage:"comma-separated Kafka broker addresses"`
 	Branch                     base.Branch       `required:"true"  arg:"branch"                         env:"BRANCH"                         usage:"Kafka topic prefix branch (develop/live)"`
 	Cluster                    string            `required:"false" arg:"cluster"                        env:"CLUSTER"                        usage:"Name of the cluster this executor runs in (e.g. nukedev, nukeprod, sun); tasks whose cluster frontmatter names another cluster are skipped. Empty runs only tasks without a cluster field"`
-	StageFilter                bool              `required:"false" arg:"stage-filter"                   env:"STAGE_FILTER"                   usage:"Skip tasks whose stage frontmatter (default prod) differs from BRANCH; set false on a cluster whose controller already scopes tasks by cluster (sun), so its tasks need no stage field"                                                                                             default:"true"`
+	StageFilter                bool              `required:"false" arg:"stage-filter"                   env:"STAGE_FILTER"                   usage:"Skip tasks whose stage frontmatter (default prod) differs from BRANCH; keep true on every pool member, sun included, because false runs tasks of every stage. A task pinned to this cluster whose stage is outside its pool is logged as event=pin_outside_pool"                    default:"true"`
 	RunUntagged                bool              `required:"false" arg:"run-untagged"                   env:"RUN_UNTAGGED"                   usage:"Run tasks without a cluster frontmatter field; set false on a cluster whose controller publishes no untagged tasks (sun, PUBLISH_UNTAGGED=false), so an untagged task never runs there"                                                                                             default:"true"`
 	ConsumerGroup              string            `required:"false" arg:"consumer-group"                 env:"CONSUMER_GROUP"                 usage:"Kafka consumer group for the task event topic; give each cluster its own group so every cluster sees every event"                                                                                                                                                                   default:"agent-task-executor"`
 	TopicPrefix                base.TopicPrefix  `required:"false" arg:"topic-prefix"                   env:"TOPIC_PREFIX"                   usage:"Explicit Kafka topic prefix; empty means unprefixed topics"`
 	Namespace                  libk8s.Namespace  `required:"true"  arg:"namespace"                      env:"NAMESPACE"                      usage:"K8s namespace to spawn Jobs in"`
 	VaultName                  string            `required:"true"  arg:"vault-name"                     env:"VAULT_NAME"                     usage:"Obsidian vault name this executor instance serves; Config CRs are resolved by the composed {assignee}-{vaultName} assignee"`
 	TaskVault                  string            `required:"false" arg:"task-vault"                     env:"TASK_VAULT"                     usage:"Vault slug this executor owns tasks for; empty means VAULT_NAME. A task is owned when its stamped vault equals this value"`
+	GitRestURL                 string            `required:"false" arg:"gitrest-url"                    env:"GITREST_URL"                    usage:"git-rest HTTP API base URL the claim ref client writes leased claim refs through"`
+	GitRestGatewaySecret       string            `required:"false" arg:"gitrest-gateway-secret"         env:"GITREST_GATEWAY_SECRET"         usage:"NAME of the K8s Secret carrying the git-rest gateway secret (data key gateway-secret) — never the secret value; empty disables gateway auth"`
 	BuildGitVersion            string            `required:"false" arg:"build-git-version"              env:"BUILD_GIT_VERSION"              usage:"Build Git version (git describe --tags --always --dirty)"                                                                                                                                                                                                                           default:"dev"`
 	BuildGitCommit             string            `required:"false" arg:"build-git-commit"               env:"BUILD_GIT_COMMIT"               usage:"Build Git commit hash"                                                                                                                                                                                                                                                              default:"none"`
 	BuildDate                  *libtime.DateTime `required:"false" arg:"build-date"                     env:"BUILD_DATE"                     usage:"Build timestamp (RFC3339)"`
@@ -87,6 +90,16 @@ type application struct {
 // {assignee}-{vaultName} lookup key depends on a well-formed vault slug — a
 // malformed value would silently never match a Config CR.
 var vaultSlugRegexp = regexp.MustCompile(`^[a-z][a-z0-9-]*$`)
+
+// claimModeEnv is the environment variable carrying the executor's claim mode.
+const claimModeEnv = "CLAIM_MODE"
+
+// parseClaimModeFromEnv reads CLAIM_MODE, distinguishing an absent variable
+// (off) from an explicitly empty one (invalid).
+func parseClaimModeFromEnv(ctx context.Context) (pkg.ClaimMode, error) {
+	value, present := os.LookupEnv(claimModeEnv)
+	return pkg.ParseClaimMode(ctx, value, present)
+}
 
 // effectiveTaskVault returns TASK_VAULT, defaulting to VAULT_NAME when unset.
 // VAULT_NAME keeps its meaning for Config CR resolution; this setting only
@@ -138,6 +151,63 @@ func (a *application) validate(ctx context.Context) error {
 	return nil
 }
 
+// validateClaimTransport checks the settings the claim transport needs, in the
+// modes that take a claim. off builds no client and reads no secret, so its
+// transport settings stay unused and unvalidated — but a claim-taking mode with
+// no git-rest URL would otherwise fail on its first dispatch instead of here.
+func (a *application) validateClaimTransport(
+	ctx context.Context,
+	claimMode pkg.ClaimMode,
+) error {
+	if !claimMode.TakesClaim() {
+		return nil
+	}
+	if a.GitRestURL == "" {
+		return errors.Errorf(
+			ctx,
+			"gitrest-url (GITREST_URL) must be set when CLAIM_MODE is %q",
+			claimMode,
+		)
+	}
+	// A non-empty but malformed URL would otherwise pass startup and fail on the
+	// first claim, which is the failure this function exists to prevent.
+	parsed, err := url.Parse(a.GitRestURL)
+	if err != nil {
+		// Never echo the raw value: a malformed URL can still carry userinfo.
+		return errors.Errorf(ctx, "gitrest-url (GITREST_URL) is not a valid URL")
+	}
+	// Drop userinfo before the value reaches an error string or a log line.
+	parsed.User = nil
+	// Redacted() masks the password but keeps path and query, so report only the
+	// parts that cannot carry a token.
+	if parsed.Scheme != "http" && parsed.Scheme != "https" {
+		return errors.Errorf(
+			ctx,
+			"gitrest-url (GITREST_URL) must use http or https, got scheme %q",
+			parsed.Scheme,
+		)
+	}
+	// Hostname() is empty for a port-only authority such as "http://:9090",
+	// which Host alone would accept and the claim client could not use.
+	if parsed.Hostname() == "" {
+		return errors.Errorf(
+			ctx,
+			"gitrest-url (GITREST_URL) must carry a host, got host %q",
+			parsed.Hostname(),
+		)
+	}
+	// The claim ref key is scoped by cluster and the lease manager refuses an
+	// empty one, so a claim-taking mode with no CLUSTER could never take a claim.
+	if a.Cluster == "" {
+		return errors.Errorf(
+			ctx,
+			"cluster (CLUSTER) must be set when CLAIM_MODE is %q",
+			claimMode,
+		)
+	}
+	return nil
+}
+
 //nolint:funlen // Initialization sequence; wiring is linear with no branching.
 func (a *application) Run(ctx context.Context, sentryClient libsentry.Client) error {
 	if err := a.validate(ctx); err != nil {
@@ -146,6 +216,14 @@ func (a *application) Run(ctx context.Context, sentryClient libsentry.Client) er
 	libmetrics.NewBuildInfoMetrics().SetBuildInfo(a.BuildGitVersion, a.BuildGitCommit, a.BuildDate)
 	glog.V(1).
 		Infof("agent-task-executor started version=%s commit=%s", a.BuildGitVersion, a.BuildGitCommit)
+
+	claimMode, err := parseClaimModeFromEnv(ctx)
+	if err != nil {
+		return errors.Wrapf(ctx, err, "parse claim mode")
+	}
+	if err := a.validateClaimTransport(ctx, claimMode); err != nil {
+		return err
+	}
 
 	kubeConfig, err := rest.InClusterConfig()
 	if err != nil {
@@ -194,16 +272,28 @@ func (a *application) Run(ctx context.Context, sentryClient libsentry.Client) er
 
 	resultPublisher := pkg.NewResultPublisher(syncProducer, a.TopicPrefix, currentDateTimeGetter)
 	taskStore := pkg.NewTaskStore()
-	jobWatcher := factory.CreateJobWatcher(kubeClient, a.Namespace, taskStore, resultPublisher)
 
-	zombieSweeper := factory.CreateZombieSweeper(
-		jobWatcher,
-		a.Namespace,
-		taskStore,
-		resultPublisher,
-		eventHandlerConfig,
-		currentDateTimeGetter,
-	)
+	// The git-rest gateway secret is read by NAME from K8s (never logged, never
+	// in env) so the claim ref client can authenticate to git-rest without secret
+	// material entering the Deployment manifest (spec 005 Security). It is read
+	// only in the modes that take a claim: off builds no client, so it must not
+	// read a secret it will never use.
+	var claimRefClientFactory handler.ClaimRefClientFactory
+	if claimMode.TakesClaim() {
+		gitRestGatewaySecretValue, err := pkg.ReadGitRestGatewaySecret(
+			ctx,
+			kubeClient,
+			a.Namespace,
+			a.GitRestGatewaySecret,
+		)
+		if err != nil {
+			return errors.Wrapf(ctx, err, "read git-rest gateway secret")
+		}
+		claimRefClientFactory = factory.CreateClaimRefClientFactory(
+			a.GitRestURL,
+			gitRestGatewaySecretValue,
+		)
+	}
 
 	healthcheckRunner := factory.CreateHealthcheckRunner(
 		eventHandlerConfig,
@@ -246,10 +336,37 @@ func (a *application) Run(ctx context.Context, sentryClient libsentry.Client) er
 		a.effectiveTaskVault(),
 		a.ReconcilePassTimeout,
 		a.ReconcileInterval,
+		claimMode,
+		claimRefClientFactory,
 	)
 
-	return service.Run(
-		ctx,
+	// Built after the handler: a terminal Job releases the claim taken before it
+	// was created, so the watcher needs the handler's release handle.
+	jobWatcher := factory.CreateJobWatcher(
+		kubeClient,
+		a.Namespace,
+		eventHandlerConfig,
+		taskStore,
+		resultPublisher,
+		taskEventHandler,
+	)
+
+	zombieSweeper := factory.CreateZombieSweeper(
+		jobWatcher,
+		a.Namespace,
+		taskStore,
+		resultPublisher,
+		eventHandlerConfig,
+		currentDateTimeGetter,
+	)
+
+	// The lease loop is one more run func: a claim taken at dispatch must be
+	// renewed while its Job runs and retried when a release fails. off adds
+	// nothing, because no lease manager is constructed in that mode. The mode
+	// decision lives here at boot, not in the factory.
+	runFuncs := make([]run.Func, 0, 11)
+	runFuncs = append(
+		runFuncs,
 		func(ctx context.Context) error {
 			return connector.Listen(ctx, a.Namespace, resourceEventHandler)
 		},
@@ -263,6 +380,25 @@ func (a *application) Run(ctx context.Context, sentryClient libsentry.Client) er
 		a.createHTTPServer(eventHandlerConfig, healthcheckRunner),
 		healthcheckCron.Run,
 	)
+	if claimMode.TakesClaim() {
+		manager, managerErr := taskEventHandler.ClaimLeaseManager(ctx)
+		switch {
+		case managerErr != nil:
+			// Not fatal: a manager that cannot be built takes no claim, so there
+			// is nothing to renew, and the mode's own dispatch decision (shadow
+			// proceeds, on fails closed) stays authoritative. Killing the
+			// executor here would stop every task on the cluster over a claim
+			// fault the mode already tolerates.
+			glog.Warningf("claim lease loop disabled: %v", managerErr)
+		case manager != nil:
+			runFuncs = append(
+				runFuncs,
+				factory.CreateClaimLifecycleRunFuncs(manager, taskView.Ready)...,
+			)
+		}
+	}
+
+	return service.Run(ctx, runFuncs...)
 }
 
 func (a *application) createHTTPServer(
