@@ -21,6 +21,14 @@ A task can name the cluster that runs it with the optional `cluster:` frontmatte
 
 - `STAGE_FILTER` (default `true`): skip tasks whose `stage` frontmatter (default `prod`) differs from `BRANCH`. A task whose `cluster` names this executor while its `stage` sits outside this executor's pool can never run here: it is logged as `event=pin_outside_pool` and counted as `agent_executor_task_events_total{result="pin_outside_pool"}` instead of `skipped_stage`, so a dead pin surfaces instead of stalling invisibly. A task with no `cluster` is a plain stage skip and keeps counting as `skipped_stage`. Keep this `true` on every pool member, sun included — a cluster that sets it to `false` runs tasks of every stage rather than filtering them.
 
+## Admission capacity
+
+A cluster admits a task only when the assignee has a free slot, and the number of slots is the **smaller of** the Config's `maxConcurrentJobs` and the pod quota of the agent's priority class (`ResourceQuota` scoped `PriorityClass In [...]`, `status.hard.pods` falling back to `spec.hard`, cached for 30 s). A zero `maxConcurrentJobs` means no declared cap, not an uncapped executor — the quota still bounds it. A matching quota with `hard.pods: 0` is a hard zero (the class may run nothing) and defers every spawn; it is not treated as an absent quota. Because admission happens before the claim is taken, a task over the bound is **never claimed**: it is deferred and a peer cluster can take it immediately.
+
+A deferral is counted by `agent_executor_task_events_total{result="deferred_concurrency_cap"}` and `agent_executor_deferred_concurrency_cap_total{assignee=...}`. Both `event=concurrency_admit` and `event=concurrency_cap` carry `running=`, `cap=`, `max=` and `quota=`; `cap` is the effective bound and `quota` is 0 when no quota bound applies.
+
+A denied quota read — for example before the executor's Role gains the `resourcequotas` grant — degrades to the declared cap and logs `event=pod_quota_read_failed`, so shipping the executor before the RBAC change is safe.
+
 ## Reconcile loop configuration
 
 The reconcile loop re-derives running tasks from the in-memory task view and
