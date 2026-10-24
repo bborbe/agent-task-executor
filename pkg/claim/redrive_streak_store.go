@@ -43,6 +43,13 @@ type RedriveStreakStore interface {
 	// Count returns how many streak refs taskID has at phase. Refs at other
 	// phases and refs whose key does not parse are not counted.
 	Count(ctx context.Context, taskID string, phase string) (int, error)
+	// Snapshot returns every parsed streak ref as taskID → phase component →
+	// count, from ONE list call over the whole streak prefix. The reconcile pass
+	// reads it once and answers every candidate's cap check from the result;
+	// Count issues one list per task, which is what put a pass over a large
+	// candidate set over its budget (see handler/redrive_streak_cache.go).
+	// Keys are normalized with RedriveStreakPhaseComponent.
+	Snapshot(ctx context.Context) (map[string]map[string]int, error)
 	// Record appends one spawn of taskID at phase, then deletes the task's
 	// refs at every other phase. A 409 create is retried on the next free
 	// number at most redriveStreakMaxCreateAttempts times.
@@ -65,9 +72,10 @@ type redriveStreakStore struct {
 	currentDateTime libtime.CurrentDateTimeGetter
 }
 
-// redriveStreakPhaseComponent maps an empty phase to the frozen "none"
-// component; every other value is used verbatim.
-func redriveStreakPhaseComponent(phase string) string {
+// RedriveStreakPhaseComponent maps an empty phase to the frozen "none"
+// component; every other value is used verbatim. Exported so a caller reading a
+// Snapshot keys it exactly the way Count does.
+func RedriveStreakPhaseComponent(phase string) string {
 	if phase == "" {
 		return RedriveStreakPhaseNone
 	}
@@ -99,7 +107,7 @@ func (s *redriveStreakStore) Count(
 	taskID string,
 	phase string,
 ) (int, error) {
-	component := redriveStreakPhaseComponent(phase)
+	component := RedriveStreakPhaseComponent(phase)
 	if err := validateClaimComponent(ctx, "task id", taskID); err != nil {
 		return 0, err
 	}
@@ -121,6 +129,39 @@ func (s *redriveStreakStore) Count(
 	return count, nil
 }
 
+// Snapshot returns every parsed streak ref under the streak prefix, counted per
+// task and phase component, from one list call.
+//
+// The reconcile pass needs the streak of every candidate it is about to drive.
+// Count answers that with one list per task, so a pass with N candidates made N
+// git-rest round-trips and spent its whole budget on them — measured on dev
+// 2026-10-24: trading aborted every pass at 45 s having driven 16 of its 16
+// candidates, openclaw every second pass at 30, while a pass with 4 candidates
+// completed in a second. One prefix list answers the same question for all of
+// them, which is the same trade ListActiveJobs makes for Jobs.
+//
+// Refs whose key does not parse are skipped, exactly as Count skips them.
+func (s *redriveStreakStore) Snapshot(ctx context.Context) (map[string]map[string]int, error) {
+	refs, err := s.refClient.List(ctx, RedriveStreakPrefix)
+	if err != nil {
+		return nil, errors.Wrapf(ctx, err, "list all redrive streak refs")
+	}
+	counts := make(map[string]map[string]int, len(refs))
+	for _, ref := range refs {
+		taskID, phase, _, ok := parseRedriveStreakRef(ref.Ref)
+		if !ok {
+			continue
+		}
+		phases, found := counts[taskID]
+		if !found {
+			phases = make(map[string]int, 1)
+			counts[taskID] = phases
+		}
+		phases[phase]++
+	}
+	return counts, nil
+}
+
 // Record appends one spawn of taskID at phase, then deletes the task's refs at
 // every other phase.
 func (s *redriveStreakStore) Record(
@@ -128,7 +169,7 @@ func (s *redriveStreakStore) Record(
 	taskID string,
 	phase string,
 ) error {
-	component := redriveStreakPhaseComponent(phase)
+	component := RedriveStreakPhaseComponent(phase)
 	if err := validateClaimComponent(ctx, "task id", taskID); err != nil {
 		return err
 	}

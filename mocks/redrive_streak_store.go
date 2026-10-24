@@ -49,6 +49,19 @@ type FakeRedriveStreakStore struct {
 	recordReturnsOnCall map[int]struct {
 		result1 error
 	}
+	SnapshotStub        func(context.Context) (map[string]map[string]int, error)
+	snapshotMutex       sync.RWMutex
+	snapshotArgsForCall []struct {
+		arg1 context.Context
+	}
+	snapshotReturns struct {
+		result1 map[string]map[string]int
+		result2 error
+	}
+	snapshotReturnsOnCall map[int]struct {
+		result1 map[string]map[string]int
+		result2 error
+	}
 	invocations      map[string][][]interface{}
 	invocationsMutex sync.RWMutex
 }
@@ -242,6 +255,70 @@ func (fake *FakeRedriveStreakStore) RecordReturnsOnCall(i int, result1 error) {
 	fake.recordReturnsOnCall[i] = struct {
 		result1 error
 	}{result1}
+}
+
+func (fake *FakeRedriveStreakStore) Snapshot(arg1 context.Context) (map[string]map[string]int, error) {
+	fake.snapshotMutex.Lock()
+	ret, specificReturn := fake.snapshotReturnsOnCall[len(fake.snapshotArgsForCall)]
+	fake.snapshotArgsForCall = append(fake.snapshotArgsForCall, struct {
+		arg1 context.Context
+	}{arg1})
+	stub := fake.SnapshotStub
+	fakeReturns := fake.snapshotReturns
+	fake.recordInvocation("Snapshot", []interface{}{arg1})
+	fake.snapshotMutex.Unlock()
+	if stub != nil {
+		return stub(arg1)
+	}
+	if specificReturn {
+		return ret.result1, ret.result2
+	}
+	return fakeReturns.result1, fakeReturns.result2
+}
+
+func (fake *FakeRedriveStreakStore) SnapshotCallCount() int {
+	fake.snapshotMutex.RLock()
+	defer fake.snapshotMutex.RUnlock()
+	return len(fake.snapshotArgsForCall)
+}
+
+func (fake *FakeRedriveStreakStore) SnapshotCalls(stub func(context.Context) (map[string]map[string]int, error)) {
+	fake.snapshotMutex.Lock()
+	defer fake.snapshotMutex.Unlock()
+	fake.SnapshotStub = stub
+}
+
+func (fake *FakeRedriveStreakStore) SnapshotArgsForCall(i int) context.Context {
+	fake.snapshotMutex.RLock()
+	defer fake.snapshotMutex.RUnlock()
+	argsForCall := fake.snapshotArgsForCall[i]
+	return argsForCall.arg1
+}
+
+func (fake *FakeRedriveStreakStore) SnapshotReturns(result1 map[string]map[string]int, result2 error) {
+	fake.snapshotMutex.Lock()
+	defer fake.snapshotMutex.Unlock()
+	fake.SnapshotStub = nil
+	fake.snapshotReturns = struct {
+		result1 map[string]map[string]int
+		result2 error
+	}{result1, result2}
+}
+
+func (fake *FakeRedriveStreakStore) SnapshotReturnsOnCall(i int, result1 map[string]map[string]int, result2 error) {
+	fake.snapshotMutex.Lock()
+	defer fake.snapshotMutex.Unlock()
+	fake.SnapshotStub = nil
+	if fake.snapshotReturnsOnCall == nil {
+		fake.snapshotReturnsOnCall = make(map[int]struct {
+			result1 map[string]map[string]int
+			result2 error
+		})
+	}
+	fake.snapshotReturnsOnCall[i] = struct {
+		result1 map[string]map[string]int
+		result2 error
+	}{result1, result2}
 }
 
 func (fake *FakeRedriveStreakStore) Invocations() map[string][][]interface{} {

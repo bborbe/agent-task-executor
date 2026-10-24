@@ -117,7 +117,7 @@ func (h *taskEventHandler) redriveStreakCapped(ctx context.Context, task lib.Tas
 			id, phase, err,
 		)
 	} else if store != nil {
-		stored, storeErr := store.Count(ctx, string(id), phase)
+		stored, storeErr := h.redriveStreakCount(ctx, store, string(id), phase)
 		switch {
 		case storeErr != nil:
 			glog.Warningf(
@@ -133,6 +133,22 @@ func (h *taskEventHandler) redriveStreakCapped(ctx context.Context, task lib.Tas
 	}
 	h.signalRedriveCapped(id, count, phase)
 	return true
+}
+
+// redriveStreakCount answers one task's stored streak count. Inside a reconcile
+// pass the count comes from the pass's single prefix snapshot; everywhere else
+// it is read live for the task, so the Kafka consumer and the deferred-respawn
+// loop never read a count this pass froze before a spawn recorded a new one.
+func (h *taskEventHandler) redriveStreakCount(
+	ctx context.Context,
+	store claim.RedriveStreakStore,
+	taskID string,
+	phase string,
+) (int, error) {
+	if cache := redriveStreakCacheFrom(ctx); cache != nil {
+		return cache.count(ctx, store, taskID, phase)
+	}
+	return store.Count(ctx, taskID, phase)
 }
 
 // taskPhaseString returns the task's phase as a string, or "" when it carries

@@ -1275,6 +1275,12 @@ func (h *taskEventHandler) ReconcileOnce(ctx context.Context) error {
 	// One `list jobs` per assignee for the whole pass, instead of two per task.
 	// Scoped to passCtx so the event path never reads a frozen snapshot.
 	passCtx = withJobCache(passCtx)
+	// One `list refs` of the whole streak prefix for the pass, instead of one
+	// per candidate. Also scoped to passCtx: the Kafka consumer and the
+	// deferred-respawn loop must keep reading live streaks, because a spawn
+	// records a new one. Fetched lazily, so a pass with no candidates pays
+	// nothing. See redrive_streak_cache.go for the measurement.
+	passCtx = withRedriveStreakCache(passCtx)
 
 	if !h.view.Ready() {
 		metrics.ReconcilePassesTotal.WithLabelValues("view_not_ready").Inc()
