@@ -48,6 +48,11 @@ var _ libkafka.MessageHandler = &recordingHandler{}
 // This is a live-broker test: it needs a reachable Kafka (KAFKA_BROKERS) and is
 // skipped without one, the same way pkg/envtest skips without KUBEBUILDER_ASSETS.
 //
+// Prerequisites beyond reachability: the credentials need CreateTopics and
+// DeleteTopics ACLs, because the spec creates a uniquely-named topic with
+// ReplicationFactor 1 and deletes it on the way out. A crash between the two
+// leaves an agent-task-executor-group-isolation-* topic behind on the broker.
+//
 // It encodes the failure that motivated per-deployment consumer groups: the task
 // event topic has ONE partition, so a single shared group hands the whole topic to
 // ONE member. That member filters by assignee, skips what it cannot run, and
@@ -63,6 +68,12 @@ var _ = Describe("two consumer groups on one topic", func() {
 		config := sarama.NewConfig()
 		config.Version = sarama.V2_1_0_0
 		config.Consumer.Offsets.Initial = sarama.OffsetOldest
+		// NewSyncProducerFromClient validates this: sarama leaves
+		// Producer.Return.Successes disabled, and a SyncProducer built from a
+		// client that disables it fails with a ConfigurationError. Without this
+		// line the spec can never pass on a real broker — and because it Skips
+		// when KAFKA_BROKERS is unset, CI would never have shown it.
+		config.Producer.Return.Successes = true
 
 		client, err := sarama.NewClient(strings.Split(brokers, ","), config)
 		Expect(err).To(BeNil())
@@ -99,6 +110,10 @@ var _ = Describe("two consumer groups on one topic", func() {
 
 		groupA := &recordingHandler{}
 		groupB := &recordingHandler{}
+		// Join both consumers before the deferred DeleteTopic runs, so cleanup is
+		// deterministic and a failing Eventually cannot leave a goroutine reading
+		// a topic that is being deleted underneath it.
+		var wg sync.WaitGroup
 		start := func(group string, handler *recordingHandler) {
 			consumer := libkafka.NewOffsetConsumerHighwaterMarks(
 				client,
@@ -113,7 +128,9 @@ var _ = Describe("two consumer groups on one topic", func() {
 				run.NewTrigger(),
 				log.DefaultSamplerFactory,
 			)
-			go func() { _ = consumer.Consume(ctx) }()
+			wg.Go(func() {
+				_ = consumer.Consume(ctx)
+			})
 		}
 		start(string(topic)+"-a", groupA)
 		start(string(topic)+"-b", groupB)
@@ -126,5 +143,8 @@ var _ = Describe("two consumer groups on one topic", func() {
 		Expect(groupB.Seen()).To(ConsistOf(
 			"event-0", "event-1", "event-2", "event-3", "event-4",
 		))
+
+		cancel()
+		wg.Wait()
 	})
 })
