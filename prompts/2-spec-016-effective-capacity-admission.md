@@ -22,7 +22,7 @@ Make `deferIfAtConcurrencyCap` admit only what the cluster can actually start: t
 </objective>
 
 <context>
-Read `CLAUDE.md` for project conventions.
+Read `docs/claim-lease-protocol.md` (§ Constants, § Claim state machine) for the protocol vocabulary these comments use.
 
 Read these files before changing anything:
 - `pkg/handler/task_event_handler.go` — `spawnIfNeededClaimed` (the per-assignee spawn lock is taken before `deferIfAtConcurrencyCap`, so the lock already spans count, quota read and spawn), `deferIfAtConcurrencyCap`, and the `taskEventHandler` struct.
@@ -112,7 +112,7 @@ event=concurrency_cap task=%s assignee=%s running=%d cap=%d max=%d quota=%d retr
 
    `max` is always `config.MaxConcurrentJobs` (the declared value, including 0) and `quota` is always the raw value `podQuotaFor` returned (including 0). Do not reorder the deferral side effects.
 
-5. Update the doc comment on `deferIfAtConcurrencyCap` and the paragraph in `lockAssigneeSpawn`'s comment that says over-cap Jobs are "rejected by the agent's ResourceQuota": state that admission is now bounded by the smaller of the declared cap and the quota, and that the quota is read inside this same per-assignee lock. Do not change the lock itself.
+5. Update the doc comment on `deferIfAtConcurrencyCap`. In `lockAssigneeSpawn`'s comment, the paragraph that says over-cap Jobs are "rejected by the agent's ResourceQuota" is a dated incident record ("Measured in prod on 2026-08-15 … 36 tasks released at once admitted 17 Jobs") — **append one sentence after it**, do not rewrite it: admission is now additionally bounded by the pod quota of the agent's priority class, read inside this same per-assignee lock. Do not change the lock itself.
 
 6. Wire the production reader in `pkg/factory/factory.go` inside `CreateConsumer`, after the existing `handler.WithVaultAliases(vaultAliases)` option:
 
@@ -128,13 +128,15 @@ handler.WithPodQuotaLimiter(
 
 8. Add `pkg/handler/concurrency_capacity_internal_test.go` (`package handler`, plain Go table test, no Ginkgo) covering `effectiveConcurrencyCap`: `(0,0)→0`, `(0,3)→3`, `(5,0)→5`, `(5,8)→5`, `(5,3)→3`, `(-1,3)→3`, `(5,-1)→5`.
 
-9. Add `pkg/handler/task_event_handler_quota_admission_test.go` (`package handler_test`, Ginkgo). Build each fixture with `newClaimHarness(pkg.ClaimModeOn, handler.WithPodQuotaLimiter(limiter))` where `limiter := new(mocks.FakePodQuotaLimiter)`; override the resolver with `pkg.AgentConfiguration{Assignee: "claude", Image: "img", MaxConcurrentJobs: <max>, PriorityClassName: "github-pr-review-agent", RerunOnLostClaim: claimBoolPtr(true)}`; set `h.client.PutReturns("sha-1", nil)` and `h.client.ListReturns(nil, nil)` so a wrongly-admitted task really would take a claim. Drive every fixture through `h.consume(qualifyingClaimTask())` and set the active set with `h.spawner.ListActiveJobsReturns(activeJobs(n), nil)`. Cover:
+9. Add `pkg/handler/task_event_handler_quota_admission_test.go` (`package handler_test`, Ginkgo). Build each fixture with `newClaimHarness(pkg.ClaimModeOn, handler.WithPodQuotaLimiter(limiter))` where `limiter := new(mocks.FakePodQuotaLimiter)`; override the resolver with `h.resolver.ResolveReturns(pkg.AgentConfiguration{Assignee: "claude", Image: "img", MaxConcurrentJobs: <max>, PriorityClassName: "github-pr-review-agent", RerunOnLostClaim: claimBoolPtr(true)}, nil)`; set `h.client.PutReturns("sha-1", nil)` and `h.client.ListReturns(nil, nil)` so a wrongly-admitted task really would take a claim. Drive every fixture through `h.consume(qualifyingClaimTask())` and set the active set with `h.spawner.ListActiveJobsReturns(activeJobs(n), nil)`. Cover:
    - AC1: `max=5`, quota `3`, active `3` — `consume` returns nil; `SpawnJobCallCount()==0`; `dispatchPutCount(h)==0`; `TaskEventsTotal{result="deferred_concurrency_cap"}` rises by 1; `DeferredConcurrencyCapTotal{assignee="claude"}` rises by 1.
    - AC2: quota `8`, `max=5` — active `5` defers (no spawn, no dispatch PUT); active `4` spawns (`SpawnJobCallCount()==1`, `dispatchPutCount(h)==1`).
    - AC3: limiter returns `(0, nil)`, `max=5` — active `4` spawns; active `5` defers.
    - AC4: `max=0`, quota `3` — active `3` defers; active `2` spawns.
    - AC5: limiter returns `(0, stderrors.New("forbidden"))`, `max=5`, active `4` — the spawn proceeds and the captured output contains exactly one `event=pod_quota_read_failed` line (`strings.Count`). Wrap AC2's admit fixture (successful read, `(8, nil)`) in `capturePinReportLog` too and assert `strings.Count(out, "event=pod_quota_read_failed") == 0`.
    - AC8: wrap the AC1 fixture in `capturePinReportLog` and assert the output matches `event=concurrency_cap .*running=3 cap=3 max=5 quota=3`. Also assert AC2's admit fixture matches `event=concurrency_admit .*running=4 cap=5 max=5 quota=8`.
+   - AC5b (no priority class): `PriorityClassName: ""` with a limiter attached and `max=5`, active `4` — the spawn is admitted under `max`, and `limiter.PodQuotaCallCount() == 0` (the reader is never asked).
+   - A negative returned limit: limiter returns `(-1, nil)`, `max=5`, active `4` — the spawn is admitted, i.e. the negative is treated as 0 and does not block.
    Metric assertions are deltas via `testutil.ToFloat64`, never absolute values (the counters are package-global).
 10. In the completion report, quote verbatim (a) the `event=concurrency_cap ... running=3 cap=3 max=5 quota=3` line captured by the AC8 spec and (b) the `event=pod_quota_read_failed` warning captured by the AC5 spec.
 11. Before finishing, re-run `<verification>` and walk each acceptance criterion of this prompt against the change.
@@ -157,7 +159,7 @@ handler.WithPodQuotaLimiter(
 ```
 ROOTDIR=/workspace make test
 ROOTDIR=/workspace make precommit
-go test -mod=mod ./pkg/handler/ -run TestHandler -count=1
+go test -mod=mod ./pkg/handler/ -run 'TestHandler|TestEffectiveConcurrencyCap' -count=1
 ```
 All three must exit 0.
 </verification>

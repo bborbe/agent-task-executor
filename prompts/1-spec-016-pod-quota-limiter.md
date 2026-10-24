@@ -13,7 +13,7 @@ branch: dark-factory/bug-claim-only-until-quota
 - Two quotas matching the same priority class report the smaller limit and log one warning naming both.
 - Reads are cached for 30 seconds per namespace and priority class, so admission does not pay a list call per task.
 - A failed or forbidden read returns an error and is never cached, so the next admission retries.
-- A generated test fake for the new interface exists for the handler to consume in the next prompt.
+- Nothing uses the new reader yet; the next change wires it into admission.
 - No behaviour changes anywhere: nothing calls the new component until the next prompt wires it in.
 </summary>
 
@@ -22,14 +22,14 @@ Add a `PodQuotaLimiter` to `pkg/spawner` that answers "how many pods may this ag
 </objective>
 
 <context>
-Read `CLAUDE.md` for project conventions.
+Read `docs/claim-lease-protocol.md` (§ Constants, § Claim state machine) for the protocol vocabulary this package's comments use.
 
 Read these files before writing code:
-- `pkg/spawner/job_spawner.go` — the package's interface + `New*` constructor + private struct pattern, its `libk8s "github.com/bborbe/k8s"` usage, and its `errors.Wrapf(ctx, err, "...")` style.
+- `pkg/spawner/job_spawner.go` — the package's interface + `New*` constructor + private struct pattern, its `k8s "github.com/bborbe/k8s"` alias (spelled `libk8s` in `pkg/handler/job_cache.go` and `job_namespace.go`), and its `errors.Wrapf(ctx, err, "...")` style.
 - `pkg/spawner/spawner_suite_test.go` — the Ginkgo entry point and the `//go:generate` directive for this package.
 - `pkg/spawner/job_spawner_test.go` — how this package's tests build `fake.NewClientset()`, set the injected clock with `currentDateTime.SetNow(libtimetest.ParseDateTime("..."))`, and assert with Gomega.
 - `pkg/handler/task_event_handler_pin_outside_pool_test.go` — `capturePinReportLog`, the glog capture pattern (`flag.Set("logtostderr", "true")`, `os.Stderr` pipe, `glog.Flush()`). Copy that shape into the spawner test file; it is the only existing log-capture exemplar.
-- `pkg/handler/job_cache.go` — the existing 30 s / generation-keyed cache in this codebase; the new cache follows the same "read at most once per window" reasoning, but lives in the reader, not on the handler.
+- `pkg/handler/job_cache.go` — the existing 10 s / generation-keyed cache in this codebase; the new quota cache follows the same "read at most once per window" reasoning at 30 s (spec DB 5), but lives in the reader, not on the handler.
 
 Verified library facts (already grepped from the module cache — use these exact symbols):
 - `corev1 "k8s.io/api/core/v1"` provides `ResourceQuota`, `ResourceQuotaList`, `ResourceQuotaScopePriorityClass` (value `"PriorityClass"`), `ScopeSelectorOpIn` (value `"In"`), `ScopedResourceSelectorRequirement{ScopeName, Operator, Values}`, `ResourceQuota.Spec.ScopeSelector *ScopeSelector` with `MatchExpressions []ScopedResourceSelectorRequirement`, `ResourceQuota.Status.Hard ResourceList` and `ResourceQuota.Spec.Hard ResourceList`, and `ResourcePods ResourceName = "pods"`.
@@ -97,7 +97,9 @@ event=pod_quota_ambiguous priority_class=%s quotas=%s using=%d
    - two matching quotas with `pods: 5` and `pods: 3` return 3, and `captureSpawnerLog` output contains exactly one `event=pod_quota_ambiguous` line whose text names both quota object names and `using=3` (do not assert the order the two names appear in — the fake client's list order is not part of the contract);
    - no quota at all returns 0 with a nil error;
    - an empty priority class returns 0 with a nil error and `len(fakeClient.Actions()) == 0` (no API call);
-   - a quota whose `Status.Hard` is empty and whose `Spec.Hard` carries `pods: 2` returns 2.
+   - a quota whose `Status.Hard` is empty and whose `Spec.Hard` carries `pods: 2` returns 2;
+   - a quota built from the **literal strings** `ScopeName: "PriorityClass"`, `Operator: "In"` (not the `corev1` constants) with `pods: 4` returns 4 — this pins the constant values themselves, so an implementation that compared against the wrong library constant fails on one side only;
+   - a quota scoped `PriorityClass NotIn ["github-pr-review-agent"]` returns 0 (only the `In` operator matches).
 6. Add a caching spec to the same file: one matching quota, `currentDateTime.SetNow(t0)`; call `PodQuota` at `t0`, at `t0+10s`, and at `t0+31s`; every call returns 3; count the list actions with a helper that filters `fakeClient.Actions()` on `action.Matches("list", "resourcequotas")` and assert exactly 2 across the three calls.
 7. Add an error spec: prepend a reactor that counts calls and fails only the FIRST list with `(true, nil, stderrors.New("forbidden"))` (subsequent calls fall through with `(false, nil, nil)` to the object tracker). Assert the first `PodQuota` returns a non-nil error, the second `PodQuota` returns 3 with a nil error, and the list counter reads 2 — the failed read was not cached.
 8. Generate the fake for the new interface from the repository root:

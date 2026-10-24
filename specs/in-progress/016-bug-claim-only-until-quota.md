@@ -210,7 +210,9 @@ kubectlnukeprod -n agent logs deploy/agent-task-executor-openclaw --since=30m | 
 |---|---|---|---|---|
 | 1 | Quota reader in `pkg/spawner`: priority-class selector, `hard.pods` extraction, 30 s cache, table tests | 4, 5 | 6, 7 | — |
 | 2 | Effective-capacity admission in the handler: the limiter option, `min(declared, quota)`, decision-line fields, admission tests | 1, 2, 3, 6 | 1, 2, 3, 4, 5, 8 | prompt 1 |
-| 3 | Protocol doc, README, CHANGELOG, and the post-deploy rung | — | 9, 10, 11, 12 | prompt 2 |
+| 3 | Protocol doc, README, CHANGELOG | — | 9, 10, 11 | prompt 2 |
+
+AC 12 is the operator's post-deploy rung and is deliberately carried by no prompt — it runs after the release, on the cluster, not in a container.
 
 Rationale: prompt 1 is a self-contained read-only k8s query with its own tests; prompt 2 consumes it and owns the behaviour change; prompt 3 is prose plus the operator's rung. The `bborbe/agent` Helm grant that makes the quota read live is a separate change in that repo's own pipeline (YAML → direct edit, not a prompt) and is deliberately outside this repo's prompts.
 

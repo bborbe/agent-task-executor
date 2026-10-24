@@ -19,7 +19,7 @@ Document the new admission rule and record the change in the changelog, so an op
 </objective>
 
 <context>
-Read `CLAUDE.md` for project conventions.
+Read `docs/claim-lease-protocol.md` in full first — it is the document this prompt extends, and its § Constants and § Claim state machine are the vocabulary the new section must use.
 
 Read these files before editing:
 - `docs/claim-lease-protocol.md` — in particular `## Claim state machine`, which defines the held state and already says the fence and takeover rules exist to bound a running holder. The new section must sit directly after `## Claim state machine` and before `## Fence`.
