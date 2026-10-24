@@ -61,21 +61,49 @@ var _ = Describe("VaultMatcher", func() {
 			m := handler.NewVaultMatcher("trading", handler.DefaultVaultAliases("trading"))
 			Expect(m.Accepts("private-agent")).To(BeFalse())
 		})
+
+		It("still drops a trading stamp on a personal executor", func() {
+			m := handler.NewVaultMatcher("personal", handler.DefaultVaultAliases("personal"))
+			Expect(m.Accepts("trading")).To(BeFalse())
+			Expect(m.Accepts("private-trading")).To(BeFalse())
+		})
+
+		It("still drops a personal stamp on a trading executor", func() {
+			m := handler.NewVaultMatcher("trading", handler.DefaultVaultAliases("trading"))
+			Expect(m.Accepts("personal")).To(BeFalse())
+			Expect(m.Accepts("private-personal")).To(BeFalse())
+		})
 	})
 
 	Describe("DefaultVaultAliases", func() {
 		It("returns nil for a vault that is not mid-rename", func() {
-			Expect(handler.DefaultVaultAliases("trading")).To(BeNil())
-			Expect(handler.DefaultVaultAliases("personal")).To(BeNil())
+			Expect(handler.DefaultVaultAliases("shared")).To(BeNil())
+			Expect(handler.DefaultVaultAliases("")).To(BeNil())
 		})
 
-		It("returns the same set for both ends of the pair", func() {
-			Expect(handler.DefaultVaultAliases("openclaw")).To(
-				ConsistOf("openclaw", "private-agent"),
-			)
-			Expect(handler.DefaultVaultAliases("private-agent")).To(
-				ConsistOf("openclaw", "private-agent"),
-			)
-		})
+		// Every pair the fleet stamps both ways. An entry present in one direction
+		// only re-creates the drop on the other side, which is the whole bug.
+		pairs := [][2]string{
+			{"openclaw", "private-agent"},
+			{"personal", "private-personal"},
+			{"trading", "private-trading"},
+		}
+		for _, pair := range pairs {
+			bare, canonical := pair[0], pair[1]
+			It("returns the same set for both ends of the "+bare+" pair", func() {
+				Expect(handler.DefaultVaultAliases(bare)).To(ConsistOf(bare, canonical))
+				Expect(handler.DefaultVaultAliases(canonical)).To(ConsistOf(bare, canonical))
+			})
+
+			It("admits "+canonical+" on the "+bare+" executor and back", func() {
+				forward := handler.NewVaultMatcher(bare, handler.DefaultVaultAliases(bare))
+				Expect(forward.Accepts(canonical)).To(BeTrue())
+				backward := handler.NewVaultMatcher(
+					canonical,
+					handler.DefaultVaultAliases(canonical),
+				)
+				Expect(backward.Accepts(bare)).To(BeTrue())
+			})
+		}
 	})
 })
