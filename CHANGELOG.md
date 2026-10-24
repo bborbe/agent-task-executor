@@ -2,6 +2,10 @@
 
 All notable changes to this project will be documented in this file.
 
+## Unreleased
+
+- test: **`skipped_untagged` is now asserted, the last of the four routing results without coverage.** The other three — `pin_outside_pool`, `skipped_stage` and `skipped_foreign_cluster` — are already pinned in the same file; `skipped_untagged` was not, so a regression reporting a claims-off untagged skip as `skipped_stage` would have passed every existing spec. `RUN_UNTAGGED=false` is the guard that keeps a pool member out of the untagged set until claims are on, and the `result` label is how a mis-set pool flag becomes findable — reported as a stage mismatch, nobody looking for it would find it. No behaviour change.
+
 ## v0.35.1
 
 - test: **the stage × cluster routing contract is pinned.** No behaviour change: a task naming a different `cluster:` is skipped, and a task with no `cluster:` is eligible on every cluster whose `stage` matches its `BRANCH` — that is already what the executor does. It is pinned now because the claims rollout depends on it and nothing tested it. A 20-entry table covers dev / prod / absent stage × no-pin / pin-self / pin-other across dev, prod and sun executors, plus the `RUN_UNTAGGED=false` rows that keep a pool member out of the untagged set while claims are off — with claims off, an untagged task eligible on two clusters is a duplicate run, so that guard stays until the assigner is retired.
