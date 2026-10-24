@@ -2,7 +2,7 @@
 
 All notable changes to this project will be documented in this file.
 
-## Unreleased
+## v0.36.0
 
 - feat: **an executor owns a task stamped with a known alias of its vault, not only its exact name.** One Obsidian vault is stamped under two slugs while a rename is in flight across clusters, so plain equality made every cluster that disagreed silently drop the other's tasks — logged as `skipped_foreign_vault`, indistinguishable from a quiet fleet. `VaultMatcher` replaces the three `task.Vault == taskVault` comparisons (`skipForeignVaultTask`, `classifyVaults`, `ownedTasks`), so the event path and the reconcile floor reach the same verdict; wiring only the event path would leave the backstop blind while every test still passed. The accepted set comes from a built-in map keyed by the executor's own vault (`openclaw` ↔ `private-agent`), overridable per deployment by `VAULT_ALIASES`. It is never a shared global list — that would let each executor admit the others' vaults, the same bug in the opposite direction — so both negative directions are tested: a `trading` stamp is still dropped by the `openclaw` executor, and a `private-agent` stamp by the `trading` one.
 
