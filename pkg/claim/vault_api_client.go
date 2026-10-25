@@ -138,9 +138,11 @@ type vaultAPIClaimClient struct {
 	gatewayInitiator string
 }
 
-// claimRequestBody is the acquire/renew body. Every field is always
-// serialised; the server refuses unknown fields, so this struct is the whole
-// vocabulary.
+// claimRequestBody is the acquire/renew/release body. The omitempty tags are
+// load-bearing, not tidiness: the routes share one struct, and the server
+// REFUSES an acquire that carries a lease_token (400 unexpected_lease_token)
+// just as a release must not carry a holder. Omitting the empty fields is what
+// keeps each route's body to its own vocabulary.
 type claimRequestBody struct {
 	Holder     string `json:"holder,omitempty"`
 	TTLSeconds int    `json:"ttl_seconds,omitempty"`
@@ -312,14 +314,27 @@ func (c *vaultAPIClaimClient) doPath(
 // be a server-side 404 that reads like a missing task.
 var ErrClaimTargetInvalid = stderrors.New("claim target invalid")
 
-func (t ClaimTarget) renewPath() string { return t.path() + "/renew" }
+// renewPath returns the renew route, or "" when the target is not addressable.
+// It must NOT be written as path() + "/renew": for an empty ClaimTarget path()
+// is "", so that spelling yields the non-empty "/renew", the empty-path guard
+// in doPath never fires, and the client would send a request to baseURL+"/renew"
+// instead of refusing locally.
+func (t ClaimTarget) renewPath() string {
+	if p := t.path(); p != "" {
+		return p + "/renew"
+	}
+	return ""
+}
 
 // describe renders the target for a log line or error, never as a path.
 func (t ClaimTarget) describe() string {
 	if t.TaskID != "" {
 		return "task " + t.TaskID
 	}
-	return "repo " + t.Owner + "/" + t.Repo
+	if t.Owner != "" || t.Repo != "" {
+		return "repo " + t.Owner + "/" + t.Repo
+	}
+	return "no target"
 }
 
 // heldError decodes a 409 claim_held body into a *ClaimHeldError.

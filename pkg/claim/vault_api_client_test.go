@@ -186,13 +186,84 @@ var _ = Describe("VaultAPIClaimClient", func() {
 	})
 
 	Context("an unaddressable target", func() {
-		It("is refused locally, without a request", func() {
+		It("is refused locally by Acquire, without a request", func() {
 			_, err := client.Acquire(ctx, claim.ClaimTarget{}, "holder-a", 120)
 			Expect(err).NotTo(BeNil())
 			Expect(stderrors.Is(err, claim.ErrClaimTargetInvalid)).To(BeTrue())
-			// An empty path segment would reach the server as a 404 that reads
-			// like a missing task, which is the confusion this refusal prevents.
 			Expect(lastMethod).To(Equal(""))
+		})
+
+		// The regression this case exists for: renewPath() was path()+"/renew",
+		// which for an empty target is "/renew" — non-empty, so the guard never
+		// fired and the client posted to baseURL+"/renew" instead of refusing.
+		It("is refused locally by Renew, without a request", func() {
+			_, err := client.Renew(ctx, claim.ClaimTarget{}, "tok-1", 60)
+			Expect(err).NotTo(BeNil())
+			Expect(stderrors.Is(err, claim.ErrClaimTargetInvalid)).To(BeTrue())
+			Expect(lastMethod).To(Equal(""))
+			Expect(lastPath).To(Equal(""))
+		})
+
+		It("is refused locally by Release, without a request", func() {
+			err := client.Release(ctx, claim.ClaimTarget{}, "tok-1")
+			Expect(err).NotTo(BeNil())
+			Expect(stderrors.Is(err, claim.ErrClaimTargetInvalid)).To(BeTrue())
+			Expect(lastMethod).To(Equal(""))
+		})
+
+		It("is refused locally by Read, without a request", func() {
+			_, err := client.Read(ctx, claim.ClaimTarget{})
+			Expect(err).NotTo(BeNil())
+			Expect(stderrors.Is(err, claim.ErrClaimTargetInvalid)).To(BeTrue())
+			Expect(lastMethod).To(Equal(""))
+		})
+	})
+
+	Context("a repository target", func() {
+		It("addresses renew, release and read by owner and repo", func() {
+			status = http.StatusOK
+			body = `{"scope":"repo","id":"bborbe/nuke","holder":"holder-a",` +
+				`"lease_until":"2026-10-25T20:00:00Z","renew_before":"2026-10-25T19:59:00Z",` +
+				`"lease_token":"tok-1"}`
+			_, err := client.Renew(ctx, claim.RepoClaim("bborbe", "nuke"), "tok-1", 60)
+			Expect(err).To(BeNil())
+			Expect(lastPath).To(Equal("/api/v1/repos/bborbe/nuke/claim/renew"))
+
+			status = http.StatusNoContent
+			body = ""
+			Expect(client.Release(ctx, claim.RepoClaim("bborbe", "nuke"), "tok-1")).To(BeNil())
+			Expect(lastPath).To(Equal("/api/v1/repos/bborbe/nuke/claim"))
+
+			status = http.StatusOK
+			body = `{"scope":"repo","id":"bborbe/nuke","holder":"holder-a",` +
+				`"lease_until":"2026-10-25T20:00:00Z","renew_before":"2026-10-25T19:59:00Z",` +
+				`"lease_token":"tok-1"}`
+			_, err = client.Read(ctx, claim.RepoClaim("bborbe", "nuke"))
+			Expect(err).To(BeNil())
+			Expect(lastMethod).To(Equal(http.MethodGet))
+		})
+	})
+
+	Context("a malformed response", func() {
+		It("fails on a body that is not JSON", func() {
+			status = http.StatusOK
+			body = `not json at all`
+
+			_, err := client.Read(ctx, claim.TaskClaim("t-1"))
+			Expect(err).NotTo(BeNil())
+		})
+
+		// A zero LeaseUntil would read as "already expired" to a caller
+		// comparing against the clock, so a bad timestamp must fail loudly
+		// rather than silently become the zero value.
+		It("fails on an unparsable lease_until", func() {
+			status = http.StatusOK
+			body = `{"scope":"task","id":"t-1","holder":"holder-a",` +
+				`"lease_until":"not-a-timestamp","renew_before":"2026-10-25T19:59:00Z",` +
+				`"lease_token":"tok-1"}`
+
+			_, err := client.Read(ctx, claim.TaskClaim("t-1"))
+			Expect(err).NotTo(BeNil())
 		})
 	})
 })
