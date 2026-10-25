@@ -59,7 +59,7 @@ var _ = Describe("VaultAPIClaimClient", func() {
 		})
 
 		It("posts the holder and TTL to the task's claim route", func() {
-			acquired, err := client.Acquire(ctx, claim.TaskClaim("t-1"), "holder-a", 120)
+			acquired, err := client.Acquire(ctx, claim.NewTaskClaim("t-1"), "holder-a", 120)
 			Expect(err).To(BeNil())
 			Expect(acquired).NotTo(BeNil())
 			Expect(acquired.LeaseToken).To(Equal("tok-1"))
@@ -77,14 +77,14 @@ var _ = Describe("VaultAPIClaimClient", func() {
 		})
 
 		It("sends the gateway headers", func() {
-			_, err := client.Acquire(ctx, claim.TaskClaim("t-1"), "holder-a", 120)
+			_, err := client.Acquire(ctx, claim.NewTaskClaim("t-1"), "holder-a", 120)
 			Expect(err).To(BeNil())
 			Expect(lastHeader.Get("X-Gateway-Secret")).To(Equal("secret-value"))
 			Expect(lastHeader.Get("X-Gateway-Initator")).To(Equal("agent-task-executor"))
 		})
 
 		It("addresses a repository claim by owner and repo", func() {
-			_, err := client.Acquire(ctx, claim.RepoClaim("bborbe", "nuke"), "holder-a", 120)
+			_, err := client.Acquire(ctx, claim.NewRepoClaim("bborbe", "nuke"), "holder-a", 120)
 			Expect(err).To(BeNil())
 			Expect(lastPath).To(Equal("/api/v1/repos/bborbe/nuke/claim"))
 		})
@@ -94,7 +94,7 @@ var _ = Describe("VaultAPIClaimClient", func() {
 			body = `{"error":"claim_held","holder":"holder-b",` +
 				`"lease_until":"2026-10-25T19:56:34Z"}`
 
-			_, err := client.Acquire(ctx, claim.TaskClaim("t-1"), "holder-a", 120)
+			_, err := client.Acquire(ctx, claim.NewTaskClaim("t-1"), "holder-a", 120)
 			Expect(err).NotTo(BeNil())
 			Expect(stderrors.Is(err, claim.ErrClaimHeld)).To(BeTrue())
 
@@ -108,7 +108,7 @@ var _ = Describe("VaultAPIClaimClient", func() {
 			status = http.StatusInternalServerError
 			body = `{"error":"boom","lease_token":"secret-token"}`
 
-			_, err := client.Acquire(ctx, claim.TaskClaim("t-1"), "holder-a", 120)
+			_, err := client.Acquire(ctx, claim.NewTaskClaim("t-1"), "holder-a", 120)
 			Expect(err).NotTo(BeNil())
 			Expect(err.Error()).NotTo(ContainSubstring("secret-token"))
 			Expect(err.Error()).To(ContainSubstring("500"))
@@ -122,7 +122,7 @@ var _ = Describe("VaultAPIClaimClient", func() {
 				`"lease_until":"2026-10-25T20:00:00Z","renew_before":"2026-10-25T19:59:00Z",` +
 				`"lease_token":"tok-1"}`
 
-			renewed, err := client.Renew(ctx, claim.TaskClaim("t-1"), "tok-1", 60)
+			renewed, err := client.Renew(ctx, claim.NewTaskClaim("t-1"), "tok-1", 60)
 			Expect(err).To(BeNil())
 			Expect(renewed.LeaseToken).To(Equal("tok-1"))
 			Expect(lastPath).To(Equal("/api/v1/tasks/t-1/claim/renew"))
@@ -133,7 +133,7 @@ var _ = Describe("VaultAPIClaimClient", func() {
 			status = http.StatusConflict
 			body = `{"error":"lease_lost"}`
 
-			_, err := client.Renew(ctx, claim.TaskClaim("t-1"), "stale", 60)
+			_, err := client.Renew(ctx, claim.NewTaskClaim("t-1"), "stale", 60)
 			Expect(err).NotTo(BeNil())
 			Expect(stderrors.Is(err, claim.ErrLeaseLost)).To(BeTrue())
 		})
@@ -144,7 +144,7 @@ var _ = Describe("VaultAPIClaimClient", func() {
 			status = http.StatusNoContent
 			body = ""
 
-			Expect(client.Release(ctx, claim.TaskClaim("t-1"), "tok-1")).To(BeNil())
+			Expect(client.Release(ctx, claim.NewTaskClaim("t-1"), "tok-1")).To(BeNil())
 			Expect(lastMethod).To(Equal(http.MethodDelete))
 			Expect(lastPath).To(Equal("/api/v1/tasks/t-1/claim"))
 			// A token sent as a header answers 400 invalid_body, so the body
@@ -156,7 +156,7 @@ var _ = Describe("VaultAPIClaimClient", func() {
 			status = http.StatusConflict
 			body = `{"error":"lease_lost"}`
 
-			err := client.Release(ctx, claim.TaskClaim("t-1"), "stale")
+			err := client.Release(ctx, claim.NewTaskClaim("t-1"), "stale")
 			Expect(err).NotTo(BeNil())
 			Expect(stderrors.Is(err, claim.ErrLeaseLost)).To(BeTrue())
 		})
@@ -169,7 +169,7 @@ var _ = Describe("VaultAPIClaimClient", func() {
 				`"lease_until":"2026-10-25T19:56:34Z","renew_before":"2026-10-25T19:55:34Z",` +
 				`"lease_token":"tok-1"}`
 
-			read, err := client.Read(ctx, claim.TaskClaim("t-1"))
+			read, err := client.Read(ctx, claim.NewTaskClaim("t-1"))
 			Expect(err).To(BeNil())
 			Expect(read.Holder).To(Equal("holder-a"))
 			Expect(lastMethod).To(Equal(http.MethodGet))
@@ -179,7 +179,7 @@ var _ = Describe("VaultAPIClaimClient", func() {
 			status = http.StatusNotFound
 			body = `{"error":"claim_free"}`
 
-			_, err := client.Read(ctx, claim.TaskClaim("t-1"))
+			_, err := client.Read(ctx, claim.NewTaskClaim("t-1"))
 			Expect(err).NotTo(BeNil())
 			Expect(stderrors.Is(err, claim.ErrClaimFree)).To(BeTrue())
 		})
@@ -225,20 +225,20 @@ var _ = Describe("VaultAPIClaimClient", func() {
 			body = `{"scope":"repo","id":"bborbe/nuke","holder":"holder-a",` +
 				`"lease_until":"2026-10-25T20:00:00Z","renew_before":"2026-10-25T19:59:00Z",` +
 				`"lease_token":"tok-1"}`
-			_, err := client.Renew(ctx, claim.RepoClaim("bborbe", "nuke"), "tok-1", 60)
+			_, err := client.Renew(ctx, claim.NewRepoClaim("bborbe", "nuke"), "tok-1", 60)
 			Expect(err).To(BeNil())
 			Expect(lastPath).To(Equal("/api/v1/repos/bborbe/nuke/claim/renew"))
 
 			status = http.StatusNoContent
 			body = ""
-			Expect(client.Release(ctx, claim.RepoClaim("bborbe", "nuke"), "tok-1")).To(BeNil())
+			Expect(client.Release(ctx, claim.NewRepoClaim("bborbe", "nuke"), "tok-1")).To(BeNil())
 			Expect(lastPath).To(Equal("/api/v1/repos/bborbe/nuke/claim"))
 
 			status = http.StatusOK
 			body = `{"scope":"repo","id":"bborbe/nuke","holder":"holder-a",` +
 				`"lease_until":"2026-10-25T20:00:00Z","renew_before":"2026-10-25T19:59:00Z",` +
 				`"lease_token":"tok-1"}`
-			_, err = client.Read(ctx, claim.RepoClaim("bborbe", "nuke"))
+			_, err = client.Read(ctx, claim.NewRepoClaim("bborbe", "nuke"))
 			Expect(err).To(BeNil())
 			Expect(lastMethod).To(Equal(http.MethodGet))
 		})
@@ -249,7 +249,7 @@ var _ = Describe("VaultAPIClaimClient", func() {
 			status = http.StatusOK
 			body = `not json at all`
 
-			_, err := client.Read(ctx, claim.TaskClaim("t-1"))
+			_, err := client.Read(ctx, claim.NewTaskClaim("t-1"))
 			Expect(err).NotTo(BeNil())
 		})
 
@@ -262,8 +262,114 @@ var _ = Describe("VaultAPIClaimClient", func() {
 				`"lease_until":"not-a-timestamp","renew_before":"2026-10-25T19:59:00Z",` +
 				`"lease_token":"tok-1"}`
 
-			_, err := client.Read(ctx, claim.TaskClaim("t-1"))
+			_, err := client.Read(ctx, claim.NewTaskClaim("t-1"))
 			Expect(err).NotTo(BeNil())
+		})
+
+		// A response missing lease_token cannot be renewed or released, so it is
+		// schema drift and must fail rather than yield a half-usable Claim.
+		It("fails when lease_token is absent", func() {
+			status = http.StatusOK
+			body = `{"scope":"task","id":"t-1","holder":"holder-a",` +
+				`"lease_until":"2026-10-25T19:56:34Z","renew_before":"2026-10-25T19:55:34Z"}`
+
+			_, err := client.Read(ctx, claim.NewTaskClaim("t-1"))
+			Expect(err).NotTo(BeNil())
+		})
+
+		It("fails when lease_until is absent", func() {
+			status = http.StatusOK
+			body = `{"scope":"task","id":"t-1","holder":"holder-a","lease_token":"tok-1"}`
+
+			_, err := client.Read(ctx, claim.NewTaskClaim("t-1"))
+			Expect(err).NotTo(BeNil())
+		})
+	})
+
+	Context("an unparsable held body", func() {
+		// A zero LeaseUntil reads as "already expired", the opposite of held,
+		// so a malformed timestamp must fail rather than fall back silently.
+		It("fails instead of returning a zero lease", func() {
+			status = http.StatusConflict
+			body = `{"error":"claim_held","holder":"holder-b","lease_until":"nonsense"}`
+
+			_, err := client.Acquire(ctx, claim.NewTaskClaim("t-1"), "holder-a", 120)
+			Expect(err).NotTo(BeNil())
+		})
+	})
+
+	Context("an unexpected status", func() {
+		It("exposes the status code on Renew, Release and Read", func() {
+			status = http.StatusBadGateway
+			body = `{"error":"upstream"}`
+
+			_, err := client.Renew(ctx, claim.NewTaskClaim("t-1"), "tok-1", 60)
+			var renewErr *claim.StatusError
+			Expect(stderrors.As(err, &renewErr)).To(BeTrue())
+			Expect(renewErr.Status).To(Equal(http.StatusBadGateway))
+			Expect(renewErr.Retryable()).To(BeTrue())
+
+			err = client.Release(ctx, claim.NewTaskClaim("t-1"), "tok-1")
+			var releaseErr *claim.StatusError
+			Expect(stderrors.As(err, &releaseErr)).To(BeTrue())
+			Expect(releaseErr.Status).To(Equal(http.StatusBadGateway))
+
+			_, err = client.Read(ctx, claim.NewTaskClaim("t-1"))
+			var readErr *claim.StatusError
+			Expect(stderrors.As(err, &readErr)).To(BeTrue())
+			Expect(readErr.Status).To(Equal(http.StatusBadGateway))
+		})
+
+		It("marks a 4xx as not retryable", func() {
+			status = http.StatusBadRequest
+			body = `{"error":"invalid_body"}`
+
+			_, err := client.Read(ctx, claim.NewTaskClaim("t-1"))
+			var readErr *claim.StatusError
+			Expect(stderrors.As(err, &readErr)).To(BeTrue())
+			Expect(readErr.Retryable()).To(BeFalse())
+		})
+	})
+
+	Context("an ambiguous target", func() {
+		// Both forms set is a caller bug; picking the task silently would act on
+		// a different object than the one named.
+		It("is refused locally rather than resolved to the task", func() {
+			ambiguous := claim.ClaimTarget{TaskID: "t-1", Owner: "bborbe", Repo: "nuke"}
+
+			_, err := client.Acquire(ctx, ambiguous, "holder-a", 120)
+			Expect(err).NotTo(BeNil())
+			Expect(stderrors.Is(err, claim.ErrClaimTargetInvalid)).To(BeTrue())
+			Expect(lastMethod).To(Equal(""))
+		})
+	})
+
+	Context("an empty gateway secret", func() {
+		It("sends no auth headers", func() {
+			noAuth := claim.NewVaultAPIClaimClient(server.URL, "", "")
+			status = http.StatusOK
+			body = `{"scope":"task","id":"t-1","holder":"holder-a",` +
+				`"lease_until":"2026-10-25T19:56:34Z","renew_before":"2026-10-25T19:55:34Z",` +
+				`"lease_token":"tok-1"}`
+
+			_, err := noAuth.Read(ctx, claim.NewTaskClaim("t-1"))
+			Expect(err).To(BeNil())
+			Expect(lastHeader.Get("X-Gateway-Secret")).To(BeEmpty())
+			Expect(lastHeader.Get("X-Gateway-Initator")).To(BeEmpty())
+		})
+	})
+
+	Context("a baseURL with a trailing slash", func() {
+		It("does not double the slash in the path", func() {
+			slashed := claim.NewVaultAPIClaimClient(server.URL+"/", "s", "i")
+			status = http.StatusOK
+			body = `{"scope":"task","id":"t-1","holder":"holder-a",` +
+				`"lease_until":"2026-10-25T19:56:34Z","renew_before":"2026-10-25T19:55:34Z",` +
+				`"lease_token":"tok-1"}`
+
+			_, err := slashed.Read(ctx, claim.NewTaskClaim("t-1"))
+			Expect(err).To(BeNil())
+			Expect(lastPath).To(Equal("/api/v1/tasks/t-1/claim"))
 		})
 	})
 })

@@ -9,6 +9,7 @@ import (
 	"context"
 	"encoding/json"
 	stderrors "errors"
+	"fmt"
 	"io"
 	"net/http"
 	"net/url"
@@ -19,6 +20,12 @@ import (
 	libtime "github.com/bborbe/time"
 	"github.com/golang/glog"
 )
+
+// maxResponseBytes caps a response body read. A claim body is a few hundred
+// bytes; the cap exists so a misbehaving API, or a proxy returning an HTML
+// error page, cannot stream an unbounded value into memory. It matches the
+// 10 MiB cap ref_client.go applies to every read.
+const maxResponseBytes = 10 * 1024 * 1024
 
 // Typed-claim errors. Each names a distinct server answer, so a caller can act
 // on them without parsing a body: a held claim is retryable later, a lost
@@ -32,7 +39,28 @@ var (
 	// ErrLeaseLost is returned by Renew when the token is no longer current.
 	// The caller must re-acquire rather than retry the renew.
 	ErrLeaseLost = stderrors.New("lease lost")
+	// ErrClaimTargetInvalid is returned when a ClaimTarget names neither a task
+	// nor a repository, or names both. It is refused locally: sending an empty
+	// path segment would be a server-side 404 that reads like a missing task,
+	// and an ambiguous target would silently act on one of two objects.
+	ErrClaimTargetInvalid = stderrors.New("claim target invalid")
 )
+
+// StatusError is returned for a status no route-specific branch claims. It
+// exposes the code as a field so a caller can tell a retryable 5xx from a
+// terminal 4xx without parsing the message.
+type StatusError struct {
+	Action string
+	Target string
+	Status int
+}
+
+func (e *StatusError) Error() string {
+	return fmt.Sprintf("%s %s answered %d", e.Action, e.Target, e.Status)
+}
+
+// Retryable reports whether the status suggests a transient failure.
+func (e *StatusError) Retryable() bool { return e.Status >= 500 }
 
 // ClaimHeldError names the holder of a claim that could not be acquired.
 // It wraps ErrClaimHeld so callers can test with errors.Is and still report
@@ -51,7 +79,8 @@ func (e *ClaimHeldError) Unwrap() error { return ErrClaimHeld }
 
 // ClaimTarget is what a claim is held ON: a task identifier or a repository.
 // It is the typed replacement for git-rest's free-form ref key — a caller
-// never spells a path.
+// never spells a path. Exactly one addressing form must be set; a target that
+// sets both, or neither, is refused rather than silently resolved.
 type ClaimTarget struct {
 	// TaskID addresses a task claim. Mutually exclusive with Owner/Repo.
 	TaskID string
@@ -60,16 +89,24 @@ type ClaimTarget struct {
 	Repo  string
 }
 
-// TaskClaim returns a target addressed by task identifier.
-func TaskClaim(taskID string) ClaimTarget { return ClaimTarget{TaskID: taskID} }
+// NewTaskClaim returns a target addressed by task identifier.
+func NewTaskClaim(taskID string) ClaimTarget { return ClaimTarget{TaskID: taskID} }
 
-// RepoClaim returns a target addressed by repository.
-func RepoClaim(owner, repo string) ClaimTarget { return ClaimTarget{Owner: owner, Repo: repo} }
+// NewRepoClaim returns a target addressed by repository.
+func NewRepoClaim(owner, repo string) ClaimTarget {
+	return ClaimTarget{Owner: owner, Repo: repo}
+}
+
+// isRepo reports whether this target names a repository rather than a task.
+func (t ClaimTarget) isRepo() bool { return t.Owner != "" || t.Repo != "" }
 
 // path returns the vault-api path for this target, or "" when the target is
-// not addressable. An unaddressable target is refused locally rather than sent
-// to the server as an empty path segment.
+// not addressable. An ambiguous target (both forms set) is NOT addressable:
+// picking one silently would act on a different object than the caller named.
 func (t ClaimTarget) path() string {
+	if t.TaskID != "" && t.isRepo() {
+		return ""
+	}
 	if t.TaskID != "" {
 		return "/api/v1/tasks/" + url.PathEscape(t.TaskID) + "/claim"
 	}
@@ -77,6 +114,32 @@ func (t ClaimTarget) path() string {
 		return "/api/v1/repos/" + url.PathEscape(t.Owner) + "/" + url.PathEscape(t.Repo) + "/claim"
 	}
 	return ""
+}
+
+// renewPath returns the renew route, or "" when the target is not addressable.
+// It must NOT be written as path() + "/renew": for an empty ClaimTarget path()
+// is "", so that spelling yields the non-empty "/renew", the empty-path guard
+// never fires, and the client would send a request to baseURL+"/renew" instead
+// of refusing locally.
+func (t ClaimTarget) renewPath() string {
+	if p := t.path(); p != "" {
+		return p + "/renew"
+	}
+	return ""
+}
+
+// describe renders the target for a log line or error, never as a path.
+func (t ClaimTarget) describe() string {
+	if t.TaskID != "" && t.isRepo() {
+		return "ambiguous target (task " + t.TaskID + ", repo " + t.Owner + "/" + t.Repo + ")"
+	}
+	if t.TaskID != "" {
+		return "task " + t.TaskID
+	}
+	if t.isRepo() {
+		return "repo " + t.Owner + "/" + t.Repo
+	}
+	return "no target"
 }
 
 // Claim is the server's view of a held lease.
@@ -183,18 +246,17 @@ func (c *vaultAPIClaimClient) Acquire(
 	ttlSeconds int,
 ) (*Claim, error) {
 	body := claimRequestBody{Holder: holder, TTLSeconds: ttlSeconds}
-	resp, err := c.do(ctx, http.MethodPost, target, body)
+	status, raw, err := c.do(ctx, http.MethodPost, target, body)
 	if err != nil {
 		return nil, err
 	}
-	defer resp.Body.Close()
-	if resp.StatusCode == http.StatusConflict {
-		return nil, c.heldError(ctx, resp.Body)
+	if status == http.StatusConflict {
+		return nil, heldError(ctx, raw)
 	}
-	if resp.StatusCode != http.StatusCreated {
-		return nil, c.statusError(ctx, "acquire", target, resp)
+	if status != http.StatusCreated {
+		return nil, statusError("acquire", target, status)
 	}
-	return decodeClaim(ctx, resp.Body)
+	return decodeClaim(ctx, raw)
 }
 
 // Renew extends an existing lease.
@@ -205,18 +267,17 @@ func (c *vaultAPIClaimClient) Renew(
 	ttlSeconds int,
 ) (*Claim, error) {
 	body := claimRequestBody{LeaseToken: leaseToken, TTLSeconds: ttlSeconds}
-	resp, err := c.doPath(ctx, http.MethodPost, target.renewPath(), target, body)
+	status, raw, err := c.doPath(ctx, http.MethodPost, target.renewPath(), target, body)
 	if err != nil {
 		return nil, err
 	}
-	defer resp.Body.Close()
-	if resp.StatusCode == http.StatusConflict {
+	if status == http.StatusConflict {
 		return nil, errors.Wrapf(ctx, ErrLeaseLost, "renew %s", target.describe())
 	}
-	if resp.StatusCode != http.StatusOK {
-		return nil, c.statusError(ctx, "renew", target, resp)
+	if status != http.StatusOK {
+		return nil, statusError("renew", target, status)
 	}
-	return decodeClaim(ctx, resp.Body)
+	return decodeClaim(ctx, raw)
 }
 
 // Release drops the claim.
@@ -226,178 +287,171 @@ func (c *vaultAPIClaimClient) Release(
 	leaseToken string,
 ) error {
 	body := claimRequestBody{LeaseToken: leaseToken}
-	resp, err := c.do(ctx, http.MethodDelete, target, body)
+	status, _, err := c.do(ctx, http.MethodDelete, target, body)
 	if err != nil {
 		return err
 	}
-	defer resp.Body.Close()
-	if resp.StatusCode == http.StatusConflict {
+	if status == http.StatusConflict {
 		return errors.Wrapf(ctx, ErrLeaseLost, "release %s", target.describe())
 	}
-	if resp.StatusCode != http.StatusNoContent {
-		return c.statusError(ctx, "release", target, resp)
+	if status != http.StatusNoContent {
+		return statusError("release", target, status)
 	}
 	return nil
 }
 
 // Read returns the current claim.
 func (c *vaultAPIClaimClient) Read(ctx context.Context, target ClaimTarget) (*Claim, error) {
-	resp, err := c.do(ctx, http.MethodGet, target, nil)
+	status, raw, err := c.do(ctx, http.MethodGet, target, nil)
 	if err != nil {
 		return nil, err
 	}
-	defer resp.Body.Close()
-	if resp.StatusCode == http.StatusNotFound {
+	if status == http.StatusNotFound {
 		return nil, errors.Wrapf(ctx, ErrClaimFree, "read %s", target.describe())
 	}
-	if resp.StatusCode != http.StatusOK {
-		return nil, c.statusError(ctx, "read", target, resp)
+	if status != http.StatusOK {
+		return nil, statusError("read", target, status)
 	}
-	return decodeClaim(ctx, resp.Body)
+	return decodeClaim(ctx, raw)
 }
 
-// do issues one request. pathOverride is used by Renew, whose route differs
-// from the target's own path.
+// do issues one request against the target's own path.
 func (c *vaultAPIClaimClient) do(
 	ctx context.Context,
 	method string,
 	target ClaimTarget,
 	body any,
-) (*http.Response, error) {
-	path := target.path()
-	if path == "" {
-		return nil, errors.Wrapf(ctx, ErrClaimTargetInvalid, "claim target %s", target.describe())
-	}
-	return c.doPath(ctx, method, path, target, body)
+) (int, []byte, error) {
+	return c.doPath(ctx, method, target.path(), target, body)
 }
 
+// doPath issues one request and RETURNS THE BODY BYTES, not the response.
+//
+// ⚠️ This shape is deliberate and was a bug once. A per-request timeout
+// context controls the entire lifetime of the request AND its response body,
+// so returning *http.Response to a caller that reads it after this function
+// returns means the deferred cancel() has already fired — every body not
+// already buffered by the transport then fails with context.Canceled. Reading
+// here, inside the context's lifetime, is what makes the cancel safe. A
+// httptest server cannot reproduce the failure, because it buffers small
+// bodies before Do returns; the bug would only have appeared in production.
 func (c *vaultAPIClaimClient) doPath(
 	ctx context.Context,
 	method string,
 	path string,
 	target ClaimTarget,
 	body any,
-) (*http.Response, error) {
+) (int, []byte, error) {
 	if path == "" {
-		return nil, errors.Wrapf(ctx, ErrClaimTargetInvalid, "claim target %s", target.describe())
+		return 0, nil, errors.Wrapf(
+			ctx,
+			ErrClaimTargetInvalid,
+			"claim target %s",
+			target.describe(),
+		)
 	}
 	ctx, cancel := context.WithTimeout(ctx, RequestTimeout.Duration())
 	defer cancel()
+
 	var reader io.Reader
 	if body != nil {
 		encoded, err := json.Marshal(body)
 		if err != nil {
-			return nil, errors.Wrapf(ctx, err, "marshal %s body", target.describe())
+			return 0, nil, errors.Wrapf(ctx, err, "marshal %s body", target.describe())
 		}
 		reader = bytes.NewReader(encoded)
 	}
 	req, err := http.NewRequestWithContext(ctx, method, c.baseURL+path, reader)
 	if err != nil {
-		return nil, errors.Wrapf(ctx, err, "create %s request for %s", method, target.describe())
+		return 0, nil, errors.Wrapf(ctx, err, "create %s request for %s", method, target.describe())
 	}
 	if body != nil {
 		req.Header.Set("Content-Type", "application/json")
 	}
 	c.setAuthHeaders(req)
+
 	resp, err := c.httpClient.Do(req)
 	if err != nil {
-		return nil, errors.Wrapf(ctx, err, "%s %s", method, target.describe())
+		return 0, nil, errors.Wrapf(ctx, err, "%s %s", method, target.describe())
 	}
+	defer resp.Body.Close()
 	glog.V(3).Infof(
 		"vault-api claim %s %s status=%d", method, target.describe(), resp.StatusCode,
 	)
-	return resp, nil
+
+	// LimitReader at cap+1 so an oversized body is detected rather than
+	// silently truncated into a parse error that names the wrong cause.
+	raw, err := io.ReadAll(io.LimitReader(resp.Body, maxResponseBytes+1))
+	if err != nil {
+		return resp.StatusCode, nil, errors.Wrapf(ctx, err, "read %s response", target.describe())
+	}
+	if len(raw) > maxResponseBytes {
+		return resp.StatusCode, nil, errors.Wrapf(
+			ctx,
+			stderrors.New("response too large"),
+			"%s %s exceeded %d bytes",
+			method,
+			target.describe(),
+			maxResponseBytes,
+		)
+	}
+	return resp.StatusCode, raw, nil
 }
 
-// ErrClaimTargetInvalid is returned when a ClaimTarget names neither a task
-// nor a repository. It is refused locally: sending an empty path segment would
-// be a server-side 404 that reads like a missing task.
-var ErrClaimTargetInvalid = stderrors.New("claim target invalid")
-
-// renewPath returns the renew route, or "" when the target is not addressable.
-// It must NOT be written as path() + "/renew": for an empty ClaimTarget path()
-// is "", so that spelling yields the non-empty "/renew", the empty-path guard
-// in doPath never fires, and the client would send a request to baseURL+"/renew"
-// instead of refusing locally.
-func (t ClaimTarget) renewPath() string {
-	if p := t.path(); p != "" {
-		return p + "/renew"
-	}
-	return ""
-}
-
-// describe renders the target for a log line or error, never as a path.
-func (t ClaimTarget) describe() string {
-	if t.TaskID != "" {
-		return "task " + t.TaskID
-	}
-	if t.Owner != "" || t.Repo != "" {
-		return "repo " + t.Owner + "/" + t.Repo
-	}
-	return "no target"
-}
-
-// heldError decodes a 409 claim_held body into a *ClaimHeldError.
-func (c *vaultAPIClaimClient) heldError(
-	ctx context.Context,
-	body io.Reader,
-) error {
+// heldError decodes a 409 claim_held body into a *ClaimHeldError. An
+// unparsable lease_until FAILS rather than leaving the zero value: a zero
+// LeaseUntil reads as "already expired" to any caller comparing against the
+// clock, which is the opposite of what a held claim means.
+func heldError(ctx context.Context, raw []byte) error {
 	var parsed errorResponseBody
-	if err := json.NewDecoder(body).Decode(&parsed); err != nil {
+	if err := json.Unmarshal(raw, &parsed); err != nil {
 		return errors.Wrapf(ctx, ErrClaimHeld, "decode held body")
 	}
-	held := &ClaimHeldError{Holder: parsed.Holder}
-	if parsed.LeaseUntil != "" {
-		if until, err := libtime.ParseDateTime(ctx, parsed.LeaseUntil); err == nil {
-			held.LeaseUntil = *until
-		}
+	until, err := libtime.ParseDateTime(ctx, parsed.LeaseUntil)
+	if err != nil {
+		return errors.Wrapf(ctx, err, "parse held lease_until %q", parsed.LeaseUntil)
 	}
-	return held
+	return &ClaimHeldError{Holder: parsed.Holder, LeaseUntil: *until}
 }
 
-// statusError builds an error naming the method, the target and the status.
-// The body is not echoed: a server body can carry a holder or a token.
-func (c *vaultAPIClaimClient) statusError(
-	ctx context.Context,
-	action string,
-	target ClaimTarget,
-	resp *http.Response,
-) error {
-	return errors.Wrapf(
-		ctx,
-		stderrors.New("unexpected status"),
-		"%s %s answered %d",
-		action,
-		target.describe(),
-		resp.StatusCode,
-	)
+// statusError builds a *StatusError naming the action, the target and the
+// status. The body is not echoed: a server body can carry a holder or a token.
+func statusError(action string, target ClaimTarget, status int) error {
+	return &StatusError{Action: action, Target: target.describe(), Status: status}
 }
 
-// decodeClaim turns a claim response body into a Claim.
-func decodeClaim(ctx context.Context, body io.Reader) (*Claim, error) {
+// decodeClaim turns a claim response body into a Claim. Both lease_until and
+// lease_token are REQUIRED: a response that omits either is schema drift or a
+// truncated body, and returning a Claim with a zero lease or an empty token
+// would hand the caller something that cannot be renewed or released.
+func decodeClaim(ctx context.Context, raw []byte) (*Claim, error) {
 	var parsed claimResponseBody
-	if err := json.NewDecoder(body).Decode(&parsed); err != nil {
+	if err := json.Unmarshal(raw, &parsed); err != nil {
 		return nil, errors.Wrapf(ctx, err, "decode claim response")
+	}
+	if parsed.LeaseUntil == "" {
+		return nil, errors.Wrapf(ctx, stderrors.New("missing lease_until"), "decode claim response")
+	}
+	if parsed.LeaseToken == "" {
+		return nil, errors.Wrapf(ctx, stderrors.New("missing lease_token"), "decode claim response")
+	}
+	until, err := libtime.ParseDateTime(ctx, parsed.LeaseUntil)
+	if err != nil {
+		return nil, errors.Wrapf(ctx, err, "parse lease_until %q", parsed.LeaseUntil)
 	}
 	result := &Claim{
 		Scope:      parsed.Scope,
 		ID:         parsed.ID,
 		Holder:     parsed.Holder,
+		LeaseUntil: *until,
 		LeaseToken: parsed.LeaseToken,
 	}
-	if parsed.LeaseUntil != "" {
-		if until, err := libtime.ParseDateTime(ctx, parsed.LeaseUntil); err == nil {
-			result.LeaseUntil = *until
-		} else {
-			return nil, errors.Wrapf(ctx, err, "parse lease_until %q", parsed.LeaseUntil)
-		}
-	}
 	if parsed.RenewBefore != "" {
-		if before, err := libtime.ParseDateTime(ctx, parsed.RenewBefore); err == nil {
-			result.RenewBefore = *before
-		} else {
+		before, err := libtime.ParseDateTime(ctx, parsed.RenewBefore)
+		if err != nil {
 			return nil, errors.Wrapf(ctx, err, "parse renew_before %q", parsed.RenewBefore)
 		}
+		result.RenewBefore = *before
 	}
 	return result, nil
 }
