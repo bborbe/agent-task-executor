@@ -20,11 +20,13 @@ import (
 	libtime "github.com/bborbe/time"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
+	"github.com/prometheus/client_golang/prometheus/testutil"
 
 	"github.com/bborbe/agent-task-executor/mocks"
 	pkg "github.com/bborbe/agent-task-executor/pkg"
 	"github.com/bborbe/agent-task-executor/pkg/claim"
 	"github.com/bborbe/agent-task-executor/pkg/handler"
+	"github.com/bborbe/agent-task-executor/pkg/metrics"
 )
 
 // sharedClaimRefTransport is an in-memory git-rest stand-in that several
@@ -222,8 +224,8 @@ var _ = Describe("redrive streak persistence", func() {
 		})
 		Expect(flag.Set("v", "0")).To(Succeed())
 		Expect(out).To(ContainSubstring(fmt.Sprintf(
-			"event=redrive_capped task=%s streak=3 cap=3 phase=%q",
-			task.TaskIdentifier, "execution",
+			"event=redrive_capped task=%s task_type=%s streak=3 cap=3 phase=%q",
+			task.TaskIdentifier, "", "execution",
 		)))
 
 		Expect(a.consume(task)).To(Succeed())
@@ -348,5 +350,109 @@ var _ = Describe("redrive streak persistence", func() {
 		Expect(client.PutCallCount()).To(Equal(0))
 		Expect(client.ListCallCount()).To(Equal(0))
 		Expect(client.DeleteCallCount()).To(Equal(0))
+	})
+
+	It("labels a capped spawn by its task type and phase", func() {
+		transport := newSharedClaimRefTransport()
+		client := new(mocks.FakeClaimRefClient)
+		transport.attach(client)
+		a := newRedriveHarness(pkg.ClaimModeShadow, client)
+		task := redriveTask("tid-redrive-labels")
+
+		for i := 0; i < 3; i++ {
+			Expect(a.consume(task)).To(Succeed())
+		}
+
+		before := testutil.ToFloat64(
+			metrics.RedriveCappedTotal.WithLabelValues("", "execution"),
+		)
+		Expect(a.consume(task)).To(Succeed())
+		Expect(testutil.ToFloat64(
+			metrics.RedriveCappedTotal.WithLabelValues("", "execution"),
+		)).To(Equal(before + 1))
+	})
+
+	It("counts a capped spawn at another phase in a separate series", func() {
+		transport := newSharedClaimRefTransport()
+		client := new(mocks.FakeClaimRefClient)
+		transport.attach(client)
+		a := newRedriveHarness(pkg.ClaimModeShadow, client)
+
+		executionTask := redriveTask("tid-redrive-phase-execution")
+		for i := 0; i < 3; i++ {
+			Expect(a.consume(executionTask)).To(Succeed())
+		}
+		planningTask := redriveTask("tid-redrive-phase-planning")
+		planningTask.Frontmatter["phase"] = "planning"
+		for i := 0; i < 3; i++ {
+			Expect(a.consume(planningTask)).To(Succeed())
+		}
+
+		executionBefore := testutil.ToFloat64(
+			metrics.RedriveCappedTotal.WithLabelValues("", "execution"),
+		)
+		planningBefore := testutil.ToFloat64(
+			metrics.RedriveCappedTotal.WithLabelValues("", "planning"),
+		)
+
+		Expect(a.consume(planningTask)).To(Succeed())
+
+		Expect(testutil.ToFloat64(
+			metrics.RedriveCappedTotal.WithLabelValues("", "planning"),
+		)).To(Equal(planningBefore + 1))
+		Expect(testutil.ToFloat64(
+			metrics.RedriveCappedTotal.WithLabelValues("", "execution"),
+		)).To(Equal(executionBefore))
+	})
+
+	It("uses an empty task_type value when the task declares none", func() {
+		transport := newSharedClaimRefTransport()
+		client := new(mocks.FakeClaimRefClient)
+		transport.attach(client)
+		a := newRedriveHarness(pkg.ClaimModeShadow, client)
+		task := redriveTask("tid-redrive-no-type")
+
+		for i := 0; i < 3; i++ {
+			Expect(a.consume(task)).To(Succeed())
+		}
+		before := testutil.ToFloat64(
+			metrics.RedriveCappedTotal.WithLabelValues("", "execution"),
+		)
+
+		// A two-value call is the contract: a one-value call would panic here.
+		Expect(a.consume(task)).To(Succeed())
+
+		Expect(testutil.ToFloat64(
+			metrics.RedriveCappedTotal.WithLabelValues("", "execution"),
+		)).To(Equal(before + 1))
+	})
+
+	It("uses the declared task_type as the label value", func() {
+		transport := newSharedClaimRefTransport()
+		client := new(mocks.FakeClaimRefClient)
+		transport.attach(client)
+		a := newRedriveHarness(pkg.ClaimModeShadow, client)
+		task := redriveTask("tid-redrive-typed")
+		task.Frontmatter["task_type"] = "update-go"
+
+		for i := 0; i < 3; i++ {
+			Expect(a.consume(task)).To(Succeed())
+		}
+
+		emptyBefore := testutil.ToFloat64(
+			metrics.RedriveCappedTotal.WithLabelValues("", "execution"),
+		)
+		typedBefore := testutil.ToFloat64(
+			metrics.RedriveCappedTotal.WithLabelValues("update-go", "execution"),
+		)
+
+		Expect(a.consume(task)).To(Succeed())
+
+		Expect(testutil.ToFloat64(
+			metrics.RedriveCappedTotal.WithLabelValues("update-go", "execution"),
+		)).To(Equal(typedBefore + 1))
+		Expect(testutil.ToFloat64(
+			metrics.RedriveCappedTotal.WithLabelValues("", "execution"),
+		)).To(Equal(emptyBefore))
 	})
 })

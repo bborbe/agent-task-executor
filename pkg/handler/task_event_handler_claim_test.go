@@ -545,13 +545,16 @@ var _ = Describe("claim gate", func() {
 		}
 		Expect(harness.spawner.SpawnJobCallCount()).To(Equal(3))
 		putCallsBefore := harness.client.PutCallCount()
-		cappedBefore := testutil.ToFloat64(metrics.RedriveCappedTotal)
+		cappedBefore := testutil.ToFloat64(
+			metrics.RedriveCappedTotal.WithLabelValues("", "execution"),
+		)
 
 		Expect(harness.consume(task)).To(Succeed())
 
 		Expect(harness.spawner.SpawnJobCallCount()).To(Equal(3))
 		Expect(harness.client.PutCallCount()).To(Equal(putCallsBefore))
-		Expect(testutil.ToFloat64(metrics.RedriveCappedTotal) - cappedBefore).
-			To(Equal(float64(1)))
+		Expect(testutil.ToFloat64(
+			metrics.RedriveCappedTotal.WithLabelValues("", "execution"),
+		) - cappedBefore).To(Equal(float64(1)))
 	})
 })
