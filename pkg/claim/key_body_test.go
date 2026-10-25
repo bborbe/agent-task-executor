@@ -42,8 +42,8 @@ var _ = Describe("DeriveClaimKeysWithBody", func() {
 			Expect(secondary).To(Equal(wantSecondary))
 			Expect(fallback).To(Equal(wantFallback))
 		},
-		// A standalone pull-request URL keys the task per pull request. The
-		// per-repo key stays primary and the per-PR key is the secondary.
+		// A standalone pull-request URL keys the task per pull request, and the
+		// per-repository key is not used at all — no secondary is produced.
 		Entry(
 			"standalone pull-request URL",
 			"pr-review",
@@ -51,8 +51,8 @@ var _ = Describe("DeriveClaimKeysWithBody", func() {
 			"bborbe",
 			"nuke",
 			"https://github.com/bborbe/nuke/pull/658",
-			"claims/repo/bborbe-nuke",
 			"claims/pr/bborbe-nuke-658",
+			"",
 			false,
 			false,
 		),
@@ -64,8 +64,8 @@ var _ = Describe("DeriveClaimKeysWithBody", func() {
 			"nuke",
 			"title\n\n\nhttps://github.com/bborbe/nuke/pull/658\n"+
 				"copied description\nhttps://github.com/bborbe/nuke/pull/700\n",
-			"claims/repo/bborbe-nuke",
 			"claims/pr/bborbe-nuke-658",
+			"",
 			false,
 			false,
 		),
@@ -77,8 +77,8 @@ var _ = Describe("DeriveClaimKeysWithBody", func() {
 			"nuke",
 			"https://github.com/other/repo/pull/1\n"+
 				"https://github.com/bborbe/nuke/pull/658\n",
-			"claims/repo/bborbe-nuke",
 			"claims/pr/bborbe-nuke-658",
+			"",
 			false,
 			false,
 		),
@@ -89,8 +89,8 @@ var _ = Describe("DeriveClaimKeysWithBody", func() {
 			"BBorbe",
 			"Nuke",
 			"https://github.com/BBorbe/Nuke/pull/658",
-			"claims/repo/bborbe-nuke",
 			"claims/pr/bborbe-nuke-658",
+			"",
 			false,
 			false,
 		),
@@ -101,8 +101,8 @@ var _ = Describe("DeriveClaimKeysWithBody", func() {
 			"bborbe",
 			"nuke",
 			"   https://github.com/bborbe/nuke/pull/658  ",
-			"claims/repo/bborbe-nuke",
 			"claims/pr/bborbe-nuke-658",
+			"",
 			false,
 			false,
 		),
@@ -113,8 +113,8 @@ var _ = Describe("DeriveClaimKeysWithBody", func() {
 			"bborbe",
 			"nuke",
 			"https://github.com/bborbe/nuke/pull/0658",
-			"claims/repo/bborbe-nuke",
 			"claims/pr/bborbe-nuke-658",
+			"",
 			false,
 			false,
 		),

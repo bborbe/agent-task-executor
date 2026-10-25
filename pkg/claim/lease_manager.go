@@ -1230,7 +1230,7 @@ func (m *leaseManager) recoverAdoptGroup(
 	if runErr != nil {
 		countClaim("error")
 		if secondary == nil {
-			m.repairOrAdoptSingle(ctx, primary, leaseUntil, now, true)
+			m.repairOrAdoptSingle(primary, leaseUntil, now, true)
 			return
 		}
 		m.storeRecoveredPair(primary, *secondary, leaseUntil, primary.LeaseUntil, now, true)
@@ -1238,7 +1238,7 @@ func (m *leaseManager) recoverAdoptGroup(
 	}
 	if running {
 		if secondary == nil {
-			m.repairOrAdoptSingle(ctx, primary, leaseUntil, now, false)
+			m.repairOrAdoptSingle(primary, leaseUntil, now, false)
 			return
 		}
 		m.storeRecoveredPair(primary, *secondary, leaseUntil, primary.LeaseUntil, now, false)
@@ -1290,66 +1290,29 @@ func (m *leaseManager) storeRecoveredPair(
 	}
 }
 
-// repairOrAdoptSingle adopts a single listed ref. When the ref is a per-PR key,
-// it derives and writes the per-repository partner so a half-written pair is
-// completed rather than inherited.
+// repairOrAdoptSingle adopts a single listed ref into the held set. Every claim
+// is a single ref, so the ref is adopted exactly as listed: no partner key is
+// derived or written. A per-PR ref is therefore never paired with its
+// per-repository key, which is what used to make every review of one
+// repository serialise behind a shared claim.
 func (m *leaseManager) repairOrAdoptSingle(
-	ctx context.Context,
 	primary ClaimRef,
 	leaseUntil libtime.DateTime,
 	now libtime.DateTime,
 	needsRunningCheck bool,
 ) {
 	key := claimKey(primary.Ref)
-	derived, derivable := repoKeyFromPRKey(key)
-	if !derivable {
-		m.held[key] = &heldClaim{
-			key:               key,
-			taskID:            primary.TaskID,
-			sha:               primary.Sha,
-			leaseUntil:        leaseUntil,
-			leaseUntilStr:     primary.LeaseUntil,
-			lastRenewAt:       now,
-			renewNextTick:     true,
-			needsRunningCheck: needsRunningCheck,
-		}
-		if !needsRunningCheck {
-			countClaim("adopted")
-		}
-		return
+	m.held[key] = &heldClaim{
+		key:               key,
+		taskID:            primary.TaskID,
+		sha:               primary.Sha,
+		leaseUntil:        leaseUntil,
+		leaseUntilStr:     primary.LeaseUntil,
+		lastRenewAt:       now,
+		renewNextTick:     true,
+		needsRunningCheck: needsRunningCheck,
 	}
-	newLease := now.Add(LeaseDuration)
-	sha, err := m.refClient.Put(ctx, derived, "", m.cluster, primary.TaskID, newLease)
-	switch {
-	case err == nil:
-		m.held[derived] = &heldClaim{
-			key:               derived,
-			taskID:            primary.TaskID,
-			sha:               sha,
-			secondKey:         key,
-			secondSha:         primary.Sha,
-			leaseUntil:        newLease,
-			leaseUntilStr:     formatLeaseUntil(newLease),
-			lastRenewAt:       now,
-			renewNextTick:     true,
-			needsRunningCheck: needsRunningCheck,
-		}
+	if !needsRunningCheck {
 		countClaim("adopted")
-	case errors.Is(err, ErrLeaseConflict):
-		// Another cluster owns the per-repository key, so the pair is not ours.
-		countClaim("conflict")
-		m.bestEffortDelete(ctx, key, primary.Sha)
-	default:
-		countClaim("error")
-		m.held[key] = &heldClaim{
-			key:               key,
-			taskID:            primary.TaskID,
-			sha:               primary.Sha,
-			leaseUntil:        leaseUntil,
-			leaseUntilStr:     primary.LeaseUntil,
-			lastRenewAt:       now,
-			renewNextTick:     true,
-			needsRunningCheck: needsRunningCheck,
-		}
 	}
 }

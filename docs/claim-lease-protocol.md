@@ -45,36 +45,36 @@ fallback logs one `event=claim_key_fallback task=<id> repo=<owner>/<repo>`
 warning and increments the unlabelled `executor_claim_key_fallback_total`
 counter once.
 
-### Dual acquire
+### Single ref per claim
 
-A repo-keyed claim is written as a pair of refs. The per-repository key is the
-primary and is written first; for a `pr-review` task whose body carries a usable
-standalone pull-request URL, the per-pull-request key is the secondary and is
-written second. This dual acquire is what stops a mixed fleet from spawning the
-same task twice. The claim is held only when both writes succeed: a secondary
-conflict releases the primary again and no Job is created, so the task is
-treated as claimed elsewhere.
+Every claim is one ref. No task type writes a pair.
 
-The two keys collapse to one ref when the two derivations are equal — every
-task-id-keyed type, and a `pr-review` task with no usable pull-request URL. That
-path is unchanged and writes a single ref.
+A `pr-review` task with a usable pull-request URL is keyed **only** by
+`claims/pr/<owner>-<repo>-<n>`; it never takes the shared per-repository key.
+That is deliberate: while the per-repository key was the primary of a pair, the
+first review of a repository held it, and every sibling review of the same
+repository was refused at takeover with a bare `lease conflict` for as long as
+the holder renewed — so no second review of that repository could start.
+Measured 2026-10-25 on nuke prod: one acquired `claims/repo/bborbe-nuke` refused
+all eleven other `bborbe/nuke` reviews, and 24 `bborbe/homebrew-tap` records
+queued the same way.
 
-While the fleet is mixed, some executors writing the pair and some writing one
-ref, reviews of different pull requests in one repository serialize on the
-shared per-repository key. That serialization ends when the dual write is
-removed in a later release.
+The consequence is that a `pr-review` and a repo-keyed task (`update-go`,
+`release`, `build-fix`) may now run against the same repository concurrently.
+Those types keep the per-repository key among themselves, which is the
+serialization they need; reviews do not participate in it.
 
-Both keys pass `validateClaimComponent`, so a hostile body cannot inject a path
-segment into either ref.
+The recovery path adopts a listed ref exactly as it is found. It never derives a
+partner key, so a restart cannot re-create a pair that the claim path no longer
+writes.
+
+Every key passes `validateClaimComponent`, so a hostile body cannot inject a
+path segment into a ref.
 
 These log lines make claims observable at runtime:
 
 - `event=claim_acquired key=<key> task=<id>` — one per successful `Claim` or
   `Takeover`.
-- `event=claim_dual_acquired key=<primary> second=<secondary> task=<id>` — info,
-  one per successful dual acquire.
-- `event=claim_dual_conflict key=<secondary> task=<id>` — warning, one per
-  secondary write that returned `409`.
 - `event=claim_released key=<key> task=<id> result=<label> sha=<sha>` — one per
   removal, with `result` one of `released`, `already_released`, `fenced` or
   `claim_lost`. The `claim_lost` line is logged at warning level.
