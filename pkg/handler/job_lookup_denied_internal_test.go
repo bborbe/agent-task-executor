@@ -9,6 +9,7 @@ package handler
 
 import (
 	stderrors "errors"
+	"strings"
 	"testing"
 
 	libk8s "github.com/bborbe/k8s"
@@ -28,9 +29,42 @@ func deniedHandler() *taskEventHandler {
 
 func deniedErr(assignee string) *jobLookupDeniedError {
 	return &jobLookupDeniedError{
-		err:       nil,
+		err:       stderrors.New("token expired"),
 		assignee:  assignee,
 		namespace: libk8s.Namespace("dev"),
+	}
+}
+
+// SC2's log arm, positively: a line must actually reach stderr, not merely a
+// throttle entry. A regression that records the timestamp and then skips the
+// glog call passes every map assertion above and emits nothing, which is the
+// silent failure the criterion exists to rule out.
+func TestLogJobLookupDeniedEmitsALine(t *testing.T) {
+	h := deniedHandler()
+
+	out := captureGlogStderr(t, func() {
+		h.logJobLookupDenied(deniedErr("claude"))
+	})
+
+	if !strings.Contains(out, "job_lookup_denied") {
+		t.Fatalf("no job_lookup_denied line emitted; stderr was: %q", out)
+	}
+	if !strings.Contains(out, "assignee=claude") {
+		t.Fatalf("line does not name the assignee; stderr was: %q", out)
+	}
+}
+
+// And the negative half of the same arm: a throttled call must emit nothing.
+func TestLogJobLookupDeniedThrottledCallEmitsNothing(t *testing.T) {
+	h := deniedHandler()
+	h.logJobLookupDenied(deniedErr("claude"))
+
+	out := captureGlogStderr(t, func() {
+		h.logJobLookupDenied(deniedErr("claude"))
+	})
+
+	if strings.Contains(out, "job_lookup_denied") {
+		t.Fatalf("a throttled call still logged; stderr was: %q", out)
 	}
 }
 
