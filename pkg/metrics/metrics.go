@@ -46,11 +46,25 @@ var ReconcileRedrivenTotal = promauto.NewCounter(
 // through as well as the reconcile floor; on the dev fixture (2026-10-14) the
 // floor initiated only two of four spawns, so a reconcile-only counter would
 // have missed the loop's dominant path.
-var RedriveCappedTotal = promauto.NewCounter(
+//
+// Labelled by task type and phase because the unlabelled counter said only that
+// something was capped: a reader of `capped=N` could not tell which kinds of
+// work were stranded. The phase matters because the cap is keyed per
+// (task, phase) — a record stuck at one phase is a different problem from one
+// that advances and re-caps, and only the second is healthy progress.
+//
+// Deliberately NOT pre-initialised in init() with .Add(0). The distinct
+// task_type values are whatever this executor actually spawns, resolved from
+// the agent Config CRs at runtime rather than at compile time, and phase is free
+// text from the task frontmatter. That is the unbounded side of the
+// counter-pre-initialization rule's own boundary: pre-register bounded enums,
+// use absent() in alerting for unbounded domains. Do not "fix" the omission.
+var RedriveCappedTotal = promauto.NewCounterVec(
 	prometheus.CounterOpts{
 		Name: "executor_redrive_capped_total",
-		Help: "Total number of spawns skipped by the consecutive-re-drive cap.",
+		Help: "Total number of spawns skipped by the consecutive-re-drive cap, by task type and phase.",
 	},
+	[]string{"task_type", "phase"},
 )
 
 // ReconcilePassesTotal counts reconcile pass outcomes, labelled by result. The

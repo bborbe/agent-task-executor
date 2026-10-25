@@ -118,6 +118,24 @@ var _ = Describe("Metrics", func() {
 			gatherLabels(mfs, "agent_executor_deferred_concurrency_cap_total", "assignee"),
 		).To(ContainElement("test-assignee"))
 	})
+
+	It("labels the redrive-cap counter with task_type then phase", func() {
+		// The touch is required: this vec is deliberately not pre-initialised,
+		// so it emits no metric family until a label pair is observed. The two
+		// sentinels pin the declaration order — a swap would still be reachable
+		// by every caller, but Prometheus would then report task_type="execution".
+		metrics.RedriveCappedTotal.WithLabelValues("probe-type", "probe-phase").Add(0)
+
+		mfs, err := prometheus.DefaultGatherer.Gather()
+		Expect(err).NotTo(HaveOccurred())
+
+		Expect(
+			gatherLabels(mfs, "executor_redrive_capped_total", "task_type"),
+		).To(ContainElement("probe-type"))
+		Expect(
+			gatherLabels(mfs, "executor_redrive_capped_total", "phase"),
+		).To(ContainElement("probe-phase"))
+	})
 })
 
 func gatherLabels(mfs []*dto.MetricFamily, metricName string, labelName string) []string {

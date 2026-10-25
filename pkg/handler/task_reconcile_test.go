@@ -334,7 +334,9 @@ var _ = Describe("TaskEventHandler reconcile loop", func() {
 			fakeSpawner.IsJobActiveReturns(false, nil)
 			fakeSpawner.SpawnJobReturns("job-1", nil)
 
-			before := testutil.ToFloat64(metrics.RedriveCappedTotal)
+			before := testutil.ToFloat64(
+				metrics.RedriveCappedTotal.WithLabelValues("", "execution"),
+			)
 
 			// Five passes is two past the cap: a pre-fix build spawns on all five.
 			for i := 0; i < 5; i++ {
@@ -342,7 +344,9 @@ var _ = Describe("TaskEventHandler reconcile loop", func() {
 			}
 
 			Expect(fakeSpawner.SpawnJobCallCount()).To(Equal(3))
-			Expect(testutil.ToFloat64(metrics.RedriveCappedTotal)).To(Equal(before + 2))
+			Expect(testutil.ToFloat64(
+				metrics.RedriveCappedTotal.WithLabelValues("", "execution"),
+			)).To(Equal(before + 2))
 		},
 	)
 

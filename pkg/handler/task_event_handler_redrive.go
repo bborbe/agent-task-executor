@@ -62,13 +62,14 @@ func (h *taskEventHandler) inMemoryRedriveCount(id lib.TaskIdentifier, phase str
 // signal.
 func (h *taskEventHandler) signalRedriveCapped(
 	id lib.TaskIdentifier,
+	taskType string,
 	streak int,
 	phase string,
 ) {
-	metrics.RedriveCappedTotal.Inc()
+	metrics.RedriveCappedTotal.WithLabelValues(taskType, phase).Inc()
 	glog.V(1).Infof(
-		"event=redrive_capped task=%s streak=%d cap=%d phase=%q",
-		id, streak, maxConsecutiveRedrives, phase,
+		"event=redrive_capped task=%s task_type=%s streak=%d cap=%d phase=%q",
+		id, taskType, streak, maxConsecutiveRedrives, phase,
 	)
 }
 
@@ -82,7 +83,7 @@ func (h *taskEventHandler) redriveStreakCappedInMemory(task lib.Task) bool {
 	if count < maxConsecutiveRedrives {
 		return false
 	}
-	h.signalRedriveCapped(id, count, phase)
+	h.signalRedriveCapped(id, task.Frontmatter.TaskType().String(), count, phase)
 	return true
 }
 
@@ -107,7 +108,7 @@ func (h *taskEventHandler) redriveStreakCapped(ctx context.Context, task lib.Tas
 	phase := taskPhaseString(task)
 	count := h.inMemoryRedriveCount(id, phase)
 	if count >= maxConsecutiveRedrives {
-		h.signalRedriveCapped(id, count, phase)
+		h.signalRedriveCapped(id, task.Frontmatter.TaskType().String(), count, phase)
 		return true
 	}
 	store, err := h.redriveStreakStore(ctx)
@@ -131,7 +132,7 @@ func (h *taskEventHandler) redriveStreakCapped(ctx context.Context, task lib.Tas
 	if count < maxConsecutiveRedrives {
 		return false
 	}
-	h.signalRedriveCapped(id, count, phase)
+	h.signalRedriveCapped(id, task.Frontmatter.TaskType().String(), count, phase)
 	return true
 }
 

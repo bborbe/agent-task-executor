@@ -298,7 +298,11 @@ no lease-manager path treats it as one.
 - A task capped by the shared streak but not by this executor's memory is
   reported as `capped` in the reconcile pass summary, like one this executor
   counted itself: the spawn funnel carries its refusal back to the pass.
-  `executor_redrive_capped_total` counts every cap regardless.
+  `executor_redrive_capped_total{task_type, phase}` counts every cap regardless,
+  broken down by the task's declared task type and the phase it was capped at.
+  The task type says which kind of work is being stranded; the phase says
+  whether the record is stuck at one phase or advanced and re-capped. Example:
+  `sum by (task_type, phase) (increase(executor_redrive_capped_total[1h]))`.
 
 ## Lost-response recovery
 
