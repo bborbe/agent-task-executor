@@ -8,7 +8,6 @@ import (
 	"context"
 
 	lib "github.com/bborbe/agent"
-	"github.com/bborbe/errors"
 	"github.com/golang/glog"
 
 	pkg "github.com/bborbe/agent-task-executor/pkg"
@@ -34,7 +33,8 @@ func (h *taskEventHandler) deferIfAtConcurrencyCap(
 	}
 	namespace, err := h.jobNamespaceForTask(ctx, config, task.TaskIdentifier)
 	if err != nil {
-		metrics.TaskEventsTotal.WithLabelValues("error").Inc()
+		// Not counted here: the caller counts every error it propagates, and an
+		// increment on both sides would count this failure twice.
 		return false, err
 	}
 	quota, quotaBounded := h.podQuotaFor(ctx, namespace, config)
@@ -50,8 +50,17 @@ func (h *taskEventHandler) deferIfAtConcurrencyCap(
 	}
 	activeSet, err := h.activeJobsFor(ctx, namespace, config.Assignee)
 	if err != nil {
-		metrics.TaskEventsTotal.WithLabelValues("error").Inc()
-		return false, errors.Wrapf(ctx, err, "count active jobs for assignee %s", config.Assignee)
+		// The caller counts the error, not this branch: a refused read is
+		// suppressed rather than propagated, and counting it here would make the
+		// same denial visible on this path and invisible on isJobActive's.
+		return false, wrapJobLookupError(
+			ctx,
+			err,
+			config.Assignee,
+			namespace,
+			"count active jobs for assignee %s",
+			config.Assignee,
+		)
 	}
 	running := len(activeSet)
 	if running < capacity {

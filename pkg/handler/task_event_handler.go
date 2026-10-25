@@ -222,27 +222,28 @@ func NewTaskEventHandler(
 	opts ...HandlerOption,
 ) ClaimLifecycleEventHandler {
 	handler := &taskEventHandler{
-		jobSpawner:            jobSpawner,
-		namespace:             namespace,
-		branch:                branch,
-		cluster:               cluster,
-		stageFilter:           stageFilter,
-		runUntagged:           runUntagged,
-		resolver:              resolver,
-		resultPublisher:       resultPublisher,
-		taskStore:             taskStore,
-		currentDateTime:       currentDateTime,
-		deferredRespawns:      make(map[lib.TaskIdentifier]deferredEntry),
-		deferredEpochs:        make(map[lib.TaskIdentifier]uint64),
-		queuedAtStamps:        make(map[lib.TaskIdentifier]string),
-		spawnLocks:            make(map[string]*sync.Mutex),
-		view:                  view,
-		vaultMatcher:          NewVaultMatcher(taskVault, nil),
-		reconcilePassTimeout:  reconcilePassTimeout,
-		reconcileInterval:     reconcileInterval,
-		claimMode:             claimMode,
-		claimRefClientFactory: claimRefClientFactory,
-		redriveStreaks:        make(map[lib.TaskIdentifier]redriveStreak),
+		jobSpawner:              jobSpawner,
+		namespace:               namespace,
+		branch:                  branch,
+		cluster:                 cluster,
+		stageFilter:             stageFilter,
+		runUntagged:             runUntagged,
+		resolver:                resolver,
+		resultPublisher:         resultPublisher,
+		taskStore:               taskStore,
+		currentDateTime:         currentDateTime,
+		deferredRespawns:        make(map[lib.TaskIdentifier]deferredEntry),
+		deferredEpochs:          make(map[lib.TaskIdentifier]uint64),
+		queuedAtStamps:          make(map[lib.TaskIdentifier]string),
+		spawnLocks:              make(map[string]*sync.Mutex),
+		view:                    view,
+		vaultMatcher:            NewVaultMatcher(taskVault, nil),
+		reconcilePassTimeout:    reconcilePassTimeout,
+		reconcileInterval:       reconcileInterval,
+		claimMode:               claimMode,
+		claimRefClientFactory:   claimRefClientFactory,
+		redriveStreaks:          make(map[lib.TaskIdentifier]redriveStreak),
+		jobLookupDeniedLoggedAt: make(map[string]time.Time),
 	}
 	for _, opt := range opts {
 		opt(handler)
@@ -316,6 +317,12 @@ type taskEventHandler struct {
 	// podQuotaLimiter is the optional pod-capacity reader; nil means no quota
 	// bound. Read only under the per-assignee spawn lock.
 	podQuotaLimiter spawner.PodQuotaLimiter
+	// jobLookupDeniedLoggedAt records the last log line emitted per
+	// assignee/namespace for a denied active-job read, so a broken credential
+	// produces one line per interval rather than one per task per pass. The
+	// counter beside it is unthrottled; only the log is.
+	jobLookupDeniedMu       sync.Mutex
+	jobLookupDeniedLoggedAt map[string]time.Time
 }
 
 // lockAssigneeSpawn serializes the count-then-spawn sequence for one assignee and
@@ -372,9 +379,11 @@ func (h *taskEventHandler) isJobActive(
 	if config == nil || config.Assignee == "" {
 		active, err := h.jobSpawner.IsJobActive(ctx, namespace, task.TaskIdentifier)
 		if err != nil {
-			return false, errors.Wrapf(
+			return false, wrapJobLookupError(
 				ctx,
 				err,
+				"",
+				namespace,
 				"check active job for task %s",
 				task.TaskIdentifier,
 			)
@@ -383,7 +392,14 @@ func (h *taskEventHandler) isJobActive(
 	}
 	activeSet, err := h.activeJobsFor(ctx, namespace, config.Assignee)
 	if err != nil {
-		return false, errors.Wrapf(ctx, err, "check active job for task %s", task.TaskIdentifier)
+		return false, wrapJobLookupError(
+			ctx,
+			err,
+			config.Assignee,
+			namespace,
+			"check active job for task %s",
+			task.TaskIdentifier,
+		)
 	}
 	return activeSet[task.TaskIdentifier], nil
 }
@@ -835,14 +851,9 @@ func (h *taskEventHandler) spawnIfNeededClaimed(
 
 	// If current_job is set in frontmatter, a prior spawn notification was written
 	// to the task file. Verify the job is still active; if not, proceed to spawn.
-	if currentJob := task.Frontmatter.CurrentJob(); currentJob != "" {
-		suppress, err := h.checkActiveCurrentJob(ctx, task, currentJob, config, claim)
-		if err != nil {
-			return spawnOutcomeSuppressed, err
-		}
-		if suppress {
-			return spawnOutcomeSuppressed, nil
-		}
+	if suppress, err := h.suppressForActiveCurrentJob(ctx, task, config, claim); err != nil ||
+		suppress {
+		return spawnOutcomeSuppressed, err
 	}
 
 	// Held across the cap check AND the SpawnJob call below, so no other goroutine
@@ -861,6 +872,13 @@ func (h *taskEventHandler) spawnIfNeededClaimed(
 
 	active, err := h.isJobActive(ctx, task, config)
 	if err != nil {
+		// A refused identity is not a transient read failure: the reconcile floor
+		// re-drives this task once the credential or grant is restored, so
+		// suppressing here is the deferral. Returning the error would exit
+		// ConsumeMessage and restart the executor for every assignee at once.
+		if h.handleJobLookupDenied(err) {
+			return spawnOutcomeSuppressed, nil
+		}
 		metrics.TaskEventsTotal.WithLabelValues("error").Inc()
 		return spawnOutcomeSuppressed, err
 	}
@@ -882,6 +900,10 @@ func (h *taskEventHandler) spawnIfNeededClaimed(
 
 	capped, err := h.deferIfAtConcurrencyCap(ctx, task, config, claim)
 	if err != nil {
+		if h.handleJobLookupDenied(err) {
+			return spawnOutcomeSuppressed, nil
+		}
+		metrics.TaskEventsTotal.WithLabelValues("error").Inc()
 		return spawnOutcomeSuppressed, err
 	}
 	if capped {

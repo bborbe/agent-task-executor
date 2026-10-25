@@ -8,7 +8,6 @@ import (
 	"context"
 
 	lib "github.com/bborbe/agent"
-	"github.com/bborbe/errors"
 	libk8s "github.com/bborbe/k8s"
 	"github.com/golang/glog"
 
@@ -28,15 +27,18 @@ func (h *taskEventHandler) checkActiveCurrentJob(
 ) (bool, error) {
 	namespace, err := h.jobNamespaceForTask(ctx, config, task.TaskIdentifier)
 	if err != nil {
-		metrics.TaskEventsTotal.WithLabelValues("error").Inc()
+		// Not counted here: the caller counts every error it propagates, and an
+		// increment on both sides would count this failure twice.
 		return false, err
 	}
 	active, err := h.jobSpawner.IsJobActive(ctx, namespace, task.TaskIdentifier)
 	if err != nil {
-		metrics.TaskEventsTotal.WithLabelValues("error").Inc()
-		return false, errors.Wrapf(
+		// The caller counts the error, not this branch — see deferIfAtConcurrencyCap.
+		return false, wrapJobLookupError(
 			ctx,
 			err,
+			assigneeOf(config),
+			namespace,
 			"check current_job active for task %s",
 			task.TaskIdentifier,
 		)
@@ -49,40 +51,23 @@ func (h *taskEventHandler) checkActiveCurrentJob(
 		metrics.TaskEventsTotal.WithLabelValues("skipped_active_job").Inc()
 		return true, nil
 	}
-	// Grace window: suppress respawn while the agent's terminal-phase write propagates.
-	// Treat missing or unparseable job_started_at as elapsed (preserves legacy-task behavior).
-	jobStartedAt, parseErr := task.Frontmatter.JobStartedAt()
-	if parseErr != nil {
-		glog.Warningf(
-			"task %s: failed to parse job_started_at: %v; treating grace period as elapsed",
-			task.TaskIdentifier, parseErr,
-		)
-	}
-	if parseErr == nil && !jobStartedAt.IsZero() {
-		elapsed := h.currentDateTime.Now().Time().Sub(jobStartedAt)
-		if elapsed < defaultRespawnGracePeriod {
-			glog.Infof(
-				"event=respawn_grace_window task=%s current_job=%s elapsed=%.0fs",
-				task.TaskIdentifier, currentJob, elapsed.Seconds(),
-			)
-			metrics.TaskEventsTotal.WithLabelValues("respawn_grace_window").Inc()
-			h.storeGraceWindowDeferral(
-				task,
-				config,
-				jobStartedAt.Add(defaultRespawnGracePeriod),
-				claim,
-			)
-			return true, nil
-		}
+	if h.withinRespawnGraceWindow(task, config, currentJob, claim) {
+		return true, nil
 	}
 	// No Job for this task is active here, which is not the same as the Job
 	// being over: current_job lives in the shared vault frontmatter, so it can
 	// name a Job another cluster created, and this informer only sees its own
 	// cluster's Jobs. Without this guard the frontmatter's Job reads as finished
 	// and authorises a second cluster to run a task that is still running.
-	provablyFinished, err := h.jobProvablyFinished(ctx, task, currentJob, namespace)
+	provablyFinished, err := h.currentJobFinished(
+		ctx,
+		task,
+		currentJob,
+		namespace,
+		assigneeOf(config),
+	)
 	if err != nil {
-		return false, errors.Wrapf(ctx, err, "check whether current_job is finished")
+		return false, err
 	}
 	if !provablyFinished {
 		// V(1): a task in the foreign state repeats this line on every dispatch

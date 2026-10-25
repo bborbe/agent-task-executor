@@ -25,6 +25,7 @@ import (
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 	"github.com/prometheus/client_golang/prometheus/testutil"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 
 	agentv1 "github.com/bborbe/agent-task-executor/k8s/apis/agent.benjamin-borbe.de/v1"
 	"github.com/bborbe/agent-task-executor/mocks"
@@ -277,6 +278,25 @@ var _ = Describe("TaskEventHandler", func() {
 			fakeSpawner.ListActiveJobsReturns(nil, errors.Errorf(ctx, "k8s unavailable"))
 			task := lib.Task{
 				TaskIdentifier: lib.TaskIdentifier("tid-9"),
+				Frontmatter: lib.TaskFrontmatter{
+					"status":   "in_progress",
+					"phase":    string(domain.TaskPhaseExecution),
+					"assignee": "claude",
+				},
+			}
+			err := h.ConsumeMessage(ctx, buildMsg(task))
+			Expect(err).NotTo(BeNil())
+			Expect(fakeSpawner.SpawnJobCallCount()).To(Equal(0))
+		})
+
+		// The companion assertion SC1 needs: suppressing every read error would
+		// also swallow programming faults, so a non-identity failure stays fatal.
+		It("still fails the message when the active-Job lookup returns a server error", func() {
+			fakeSpawner.ListActiveJobsReturns(nil, apierrors.NewInternalError(
+				errors.Errorf(ctx, "boom"),
+			))
+			task := lib.Task{
+				TaskIdentifier: lib.TaskIdentifier("tid-500"),
 				Frontmatter: lib.TaskFrontmatter{
 					"status":   "in_progress",
 					"phase":    string(domain.TaskPhaseExecution),

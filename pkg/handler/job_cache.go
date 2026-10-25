@@ -11,6 +11,8 @@ import (
 
 	lib "github.com/bborbe/agent"
 	libk8s "github.com/bborbe/k8s"
+
+	"github.com/bborbe/agent-task-executor/pkg/metrics"
 )
 
 // jobCacheKey is the context key carrying a reconcile pass's active-Job cache.
@@ -109,6 +111,11 @@ func (h *taskEventHandler) activeJobsFor(
 	if err != nil {
 		return nil, err
 	}
+	// Seed the denial counter at 0 for this pair on the read that proves the pair
+	// is served, so a later 401 shows up as an increase rather than as a series
+	// that never existed. The assignee domain comes from Config CRs and cannot be
+	// enumerated at init.
+	metrics.PreInitJobLookupDenied(assignee, namespace.String())
 	if cache != nil {
 		cache.mu.Lock()
 		cache.active[cacheKey] = cachedActiveJobs{active: active, gen: gen, readAt: now}
