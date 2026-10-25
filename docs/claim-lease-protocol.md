@@ -50,13 +50,30 @@ counter once.
 
 Every claim is one ref. No task type writes a pair.
 
-**During a rolling deploy the fleet is mixed.** An executor still running the
-previous image re-derives and writes the per-repository partner when its
-`Recover` meets a per-PR-only ref, transiently re-creating the pair until that
-pod is replaced. The condition is self-clearing — the old pod releases its pair,
-or the lease expires and is fenced on the next recovery — so it cannot
-permanently block a repo-keyed task, but cross-type concurrency should not be
-relied on until the rollout has finished.
+**During a rolling deploy the fleet is mixed**, in two distinct ways.
+
+The *URL branch* is safe: both images derive `claims/pr/<owner>-<repo>-<n>`, so
+old and new contend on the same ref exactly as before.
+
+The *fallback branch* is not. An executor on the previous image keys a
+URL-less pr-review by `claims/repo/<owner>-<repo>`; this one keys it by
+`claims/task/<task id>`. The two shapes share no ref, so for the duration of the
+rollout an old and a new executor can each claim the same URL-less task and each
+spawn a Job for it — the duplicate run the pair existed to prevent. Only a
+uniform fleet closes that window; keeping the fallback on the repository key
+until the rollout finished would have avoided it, at the cost of leaving the
+whole fallback population serialised.
+
+The measured population at the 2026-10-25 change made it harmless in practice:
+of 30 open URL-less records, 25 were `planning` untrusted-author records that
+cannot spawn and 5 were `human_review`, which is not driven. A URL-less review
+that becomes runnable *during* a rollout can still run twice.
+
+The *recovery* side has a smaller transient: an old image re-derives and writes
+the per-repository partner when its `Recover` meets a per-PR-only ref,
+re-creating the pair until that pod is replaced. That one is self-clearing — the
+old pod releases its pair, or the lease expires and is fenced on the next
+recovery — so it cannot permanently block a repo-keyed task.
 
 A `pr-review` task with a usable pull-request URL is keyed **only** by
 `claims/pr/<owner>-<repo>-<n>`; one without takes `claims/task/<task id>`. It

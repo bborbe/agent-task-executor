@@ -228,7 +228,7 @@ func TestAcquireSpawnClaimKeysCloneURLPRReviewPerPullRequest(t *testing.T) {
 	}
 }
 
-func TestAcquireSpawnClaimFallsBackToRepoKey(t *testing.T) {
+func TestAcquireSpawnClaimFallsBackToTaskID(t *testing.T) {
 	ctx := context.Background()
 	bodies := []string{
 		"",
