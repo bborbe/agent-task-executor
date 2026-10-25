@@ -6,13 +6,11 @@ package claim
 
 import (
 	"context"
-	stderrors "errors"
 	"strconv"
 	"strings"
 
 	"github.com/bborbe/errors"
 	libtime "github.com/bborbe/time"
-	"github.com/golang/glog"
 )
 
 const (
@@ -101,6 +99,13 @@ func parseRedriveStreakRef(ref string) (taskID string, phase string, n int, ok b
 	return parts[2], parts[3], parsed, true
 }
 
+// parseRedriveStreakRefForWalker adapts the frozen four-value parser to the
+// shared ref walker's shape. A streak ref carries no detail segment.
+func parseRedriveStreakRefForWalker(ref string) (taskID, phase, detail string, n int, ok bool) {
+	taskID, phase, n, ok = parseRedriveStreakRef(ref)
+	return taskID, phase, "", n, ok
+}
+
 // Count returns how many streak refs taskID has at phase.
 func (s *redriveStreakStore) Count(
 	ctx context.Context,
@@ -114,7 +119,7 @@ func (s *redriveStreakStore) Count(
 	if err := validateClaimComponent(ctx, "phase", component); err != nil {
 		return 0, err
 	}
-	refs, err := s.list(ctx, taskID)
+	refs, err := redriveListForTask(ctx, s.refClient, RedriveStreakPrefix, taskID)
 	if err != nil {
 		return 0, err
 	}
@@ -180,135 +185,30 @@ func (s *redriveStreakStore) Record(
 	if err := validateClaimComponent(ctx, "phase", component); err != nil {
 		return err
 	}
-	refs, err := s.list(ctx, taskID)
-	if err != nil {
-		return err
-	}
-	leaseUntil := s.currentDateTime.Now().Add(RedriveStreakLeaseDuration)
-	for attempt := 1; attempt <= redriveStreakMaxCreateAttempts; attempt++ {
-		next := nextRedriveStreakNumber(refs, taskID, component)
-		key := RedriveStreakPrefix + taskID + "/" + component + "/" + strconv.Itoa(next)
-		_, putErr := s.refClient.Put(
-			ctx,
-			key,
-			"",
-			RedriveStreakCluster,
-			taskID,
-			leaseUntil,
-		)
-		if putErr == nil {
-			s.deleteOtherPhases(ctx, taskID, component, refs)
-			return nil
-		}
-		if !stderrors.Is(putErr, ErrLeaseConflict) {
-			return errors.Wrapf(
-				ctx,
-				putErr,
-				"record redrive streak for task %s at phase %s",
-				taskID,
-				component,
-			)
-		}
-		if attempt == redriveStreakMaxCreateAttempts {
-			return errors.Wrapf(
-				ctx,
-				putErr,
-				"record redrive streak for task %s at phase %s after %d attempts",
-				taskID,
-				component,
-				redriveStreakMaxCreateAttempts,
-			)
-		}
-		refs, err = s.list(ctx, taskID)
-		if err != nil {
-			return err
-		}
-	}
-	return errors.Errorf(
+	return recordRedriveRef(
 		ctx,
-		"record redrive streak for task %s at phase %s exhausted %d attempts",
+		s.refClient,
+		s.currentDateTime,
+		RedriveStreakPrefix,
+		"redrive_streak_write_failed",
+		"streak",
 		taskID,
 		component,
-		redriveStreakMaxCreateAttempts,
+		parseRedriveStreakRefForWalker,
+		func(next int) string {
+			return RedriveStreakPrefix + taskID + "/" + component + "/" + strconv.Itoa(next)
+		},
 	)
 }
 
 // Clear removes every parsed streak ref of taskID, at every phase.
 func (s *redriveStreakStore) Clear(ctx context.Context, taskID string) error {
-	if err := validateClaimComponent(ctx, "task id", taskID); err != nil {
-		return err
-	}
-	refs, err := s.list(ctx, taskID)
-	if err != nil {
-		return err
-	}
-	for _, ref := range refs {
-		refTaskID, _, _, ok := parseRedriveStreakRef(ref.Ref)
-		if !ok || refTaskID != taskID {
-			continue
-		}
-		s.deleteRef(ctx, taskID, ref)
-	}
-	return nil
-}
-
-// list returns every streak ref under taskID's prefix.
-func (s *redriveStreakStore) list(ctx context.Context, taskID string) ([]ClaimRef, error) {
-	refs, err := s.refClient.List(ctx, RedriveStreakPrefix+taskID)
-	if err != nil {
-		return nil, errors.Wrapf(ctx, err, "list redrive streak refs for task %s", taskID)
-	}
-	return refs, nil
-}
-
-// nextRedriveStreakNumber returns one more than the highest parsed number of
-// taskID at component, or 1 when there is none.
-func nextRedriveStreakNumber(refs []ClaimRef, taskID string, component string) int {
-	highest := 0
-	for _, ref := range refs {
-		refTaskID, refPhase, n, ok := parseRedriveStreakRef(ref.Ref)
-		if !ok || refTaskID != taskID || refPhase != component {
-			continue
-		}
-		if n > highest {
-			highest = n
-		}
-	}
-	return highest + 1
-}
-
-// deleteOtherPhases deletes every parsed ref of taskID whose phase differs
-// from component. It never returns an error.
-func (s *redriveStreakStore) deleteOtherPhases(
-	ctx context.Context,
-	taskID string,
-	component string,
-	refs []ClaimRef,
-) {
-	for _, ref := range refs {
-		refTaskID, refPhase, _, ok := parseRedriveStreakRef(ref.Ref)
-		if !ok || refTaskID != taskID || refPhase == component {
-			continue
-		}
-		s.deleteRef(ctx, taskID, ref)
-	}
-}
-
-// deleteRef deletes one streak ref. A conflict or an already-gone ref is
-// ignored; any other failure is logged and the caller continues.
-func (s *redriveStreakStore) deleteRef(ctx context.Context, taskID string, ref ClaimRef) {
-	key := strings.TrimPrefix(ref.Ref, "refs/")
-	err := s.refClient.Delete(ctx, key, ref.Sha)
-	if err == nil {
-		return
-	}
-	if stderrors.Is(err, ErrLeaseConflict) || stderrors.Is(err, ErrRefNotFound) {
-		return
-	}
-	glog.Warningf(
-		"event=redrive_streak_write_failed task=%s key=%s error=%v",
+	return clearRedriveRefs(
+		ctx,
+		s.refClient,
+		RedriveStreakPrefix,
+		"redrive_streak_write_failed",
 		taskID,
-		key,
-		err,
+		parseRedriveStreakRefForWalker,
 	)
 }

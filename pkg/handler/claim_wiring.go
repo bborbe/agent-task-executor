@@ -30,10 +30,6 @@ const parkWriteAttempts = 3
 // is a Kafka publish, and a slow retry would stall the reconcile pass.
 const parkWriteRetryDelay = 200 * time.Millisecond
 
-// ClaimRefClientFactory builds the git-rest claim ref client. It is called at
-// most once per process, and only when CLAIM_MODE is shadow or on.
-type ClaimRefClientFactory func() claim.ClaimRefClient
-
 // leaseManager returns this process's single lease manager, constructing it on
 // first use. Only the two claim-taking modes construct one, so a zero-value or
 // otherwise unparsed mode fails closed instead of building a manager nothing
@@ -100,8 +96,10 @@ func (h *taskEventHandler) createLeaseManager(
 		return nil, errors.Wrapf(ctx, err, "create claim lease manager")
 	}
 	// Assigned only after the manager constructed, so a failed construction
-	// leaves the field nil rather than half-wiring the handler.
+	// leaves the fields nil rather than half-wiring the handler. The two stores
+	// share refClient but keep separate ref namespaces.
 	h.redriveStore = claim.NewRedriveStreakStore(refClient, h.currentDateTime)
+	h.redriveReasons = claim.NewRedriveReasonStore(refClient, h.currentDateTime)
 	return manager, nil
 }
 

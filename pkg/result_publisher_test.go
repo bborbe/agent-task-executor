@@ -16,10 +16,15 @@ import (
 	libkafka "github.com/bborbe/kafka"
 	libtime "github.com/bborbe/time"
 	libtimetest "github.com/bborbe/time/test"
+	"github.com/bborbe/vault-cli/pkg/domain"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
+	"github.com/prometheus/client_golang/prometheus/testutil"
 
+	"github.com/bborbe/agent-task-executor/mocks"
 	"github.com/bborbe/agent-task-executor/pkg"
+	"github.com/bborbe/agent-task-executor/pkg/claim"
+	"github.com/bborbe/agent-task-executor/pkg/metrics"
 )
 
 // capturingSyncProducer implements libkafka.SyncProducer and records sent messages.
@@ -164,6 +169,7 @@ var _ = Describe("ResultPublisher", func() {
 			producer,
 			base.TopicPrefix("develop"),
 			currentDateTime,
+			nil,
 		)
 	})
 
@@ -318,6 +324,7 @@ var _ = Describe("ResultPublisher", func() {
 					partialProducer,
 					base.TopicPrefix("develop"),
 					currentDateTime,
+					nil,
 				)
 
 				task := lib.Task{
@@ -407,6 +414,7 @@ var _ = Describe("ResultPublisher", func() {
 					partialProducer,
 					base.TopicPrefix("develop"),
 					currentDateTime,
+					nil,
 				)
 
 				task := lib.Task{
@@ -511,6 +519,7 @@ var _ = Describe("ResultPublisher", func() {
 				failingProducer,
 				base.TopicPrefix("develop"),
 				currentDateTime,
+				nil,
 			)
 			task := lib.Task{
 				TaskIdentifier: lib.TaskIdentifier("test-task-clear-fail"),
@@ -681,6 +690,7 @@ var _ = Describe("ResultPublisher", func() {
 				failingProducer,
 				base.TopicPrefix("develop"),
 				currentDateTime,
+				nil,
 			)
 
 			task := lib.Task{
@@ -728,6 +738,7 @@ var _ = Describe("ResultPublisher", func() {
 				failingProducer,
 				base.TopicPrefix("develop"),
 				currentDateTime,
+				nil,
 			)
 
 			task := lib.Task{
@@ -901,6 +912,226 @@ var _ = Describe("ResultPublisher", func() {
 			Expect(producer.messages).To(HaveLen(1))
 			_, cmd := decodeUpdateFrontmatterCommand(producer.messages[0])
 			Expect(cmd.TargetVault).To(Equal(""))
+		})
+	})
+
+	Describe("PublishAbort", func() {
+		abortTask := func() lib.Task {
+			return lib.Task{
+				TaskIdentifier: lib.TaskIdentifier("test-task-abort"),
+				Frontmatter: lib.TaskFrontmatter{
+					"status":       "in_progress",
+					"phase":        "execution",
+					"task_type":    "update-go",
+					"target_vault": "work",
+				},
+			}
+		}
+
+		It("writes exactly the four close-out keys and no fifth", func() {
+			err := publisher.PublishAbort(
+				ctx,
+				abortTask(),
+				pkg.AbortReasonBrokenSignature,
+				3,
+			)
+			Expect(err).NotTo(HaveOccurred())
+
+			Expect(producer.messages).To(HaveLen(1))
+			operation, cmd := decodeUpdateFrontmatterCommand(producer.messages[0])
+			Expect(
+				string(operation),
+			).To(Equal(string(taskcmd.UpdateFrontmatterCommandOperation)))
+			Expect(cmd.Updates).To(HaveLen(4))
+			Expect(cmd.Updates["status"]).To(Equal("aborted"))
+			Expect(cmd.Updates["aborted_reason"]).To(Equal(pkg.AbortReasonBrokenSignature))
+			Expect(cmd.Updates["gate_successor"]).To(Equal("none"))
+			Expect(cmd.Updates["current_job"]).To(Equal(""))
+			Expect(cmd.Body).To(BeNil())
+			Expect(cmd.TargetVault).To(Equal("work"))
+
+			// The emitted command must satisfy the command contract.
+			Expect(cmd.Validate(ctx)).To(Succeed())
+
+			// And the close-out guard the write exists to satisfy must accept the
+			// same values. NewTaskFrontmatter returns a value and SetStatus has a
+			// pointer receiver, so the call cannot be chained.
+			fm := domain.NewTaskFrontmatter(map[string]any{
+				"status":         "aborted",
+				"aborted_reason": pkg.AbortReasonBrokenSignature,
+				"gate_successor": "none",
+			})
+			Expect(fm.SetStatus(domain.TaskStatusAborted)).To(Succeed())
+
+			// Without gate_successor the same values are rejected: that is why the
+			// key is not optional.
+			withoutGate := domain.NewTaskFrontmatter(map[string]any{
+				"status":         "aborted",
+				"aborted_reason": pkg.AbortReasonBrokenSignature,
+			})
+			Expect(withoutGate.SetStatus(domain.TaskStatusAborted)).NotTo(Succeed())
+		})
+
+		It("publishes nothing when the task is already aborted", func() {
+			task := abortTask()
+			task.Frontmatter["status"] = "aborted"
+
+			Expect(publisher.PublishAbort(ctx, task, pkg.AbortReasonBrokenSignature, 3)).
+				To(Succeed())
+			Expect(producer.messages).To(BeEmpty())
+		})
+
+		It("dedupes a second abort for the same task", func() {
+			task := abortTask()
+			Expect(publisher.PublishAbort(ctx, task, pkg.AbortReasonBrokenSignature, 3)).
+				To(Succeed())
+			Expect(publisher.PublishAbort(ctx, task, pkg.AbortReasonBrokenSignature, 3)).
+				To(Succeed())
+
+			Expect(producer.messages).To(HaveLen(1))
+		})
+
+		It("does not record dedupe when the send fails, so the next event retries", func() {
+			partialProducer := &partialFailingSyncProducer{
+				successCount: 0,
+				err:          errors.New(context.Background(), "kafka: leader not available"),
+			}
+			failingPublisher := pkg.NewResultPublisher(
+				partialProducer,
+				base.TopicPrefix("develop"),
+				currentDateTime,
+				nil,
+			)
+			task := abortTask()
+
+			Expect(
+				failingPublisher.PublishAbort(ctx, task, pkg.AbortReasonBrokenSignature, 3),
+			).NotTo(Succeed())
+			Expect(
+				failingPublisher.PublishAbort(ctx, task, pkg.AbortReasonBrokenSignature, 3),
+			).NotTo(Succeed())
+
+			// Both attempts reached the producer: a failed send is retried, not
+			// suppressed for the TTL.
+			Expect(partialProducer.messages).To(HaveLen(2))
+		})
+
+		It("increments only the matching abort reason series", func() {
+			brokenBefore := testutil.ToFloat64(
+				metrics.RedriveAbortedTotal.WithLabelValues(
+					metrics.RedriveAbortReasonBrokenSignature,
+				),
+			)
+			transientBefore := testutil.ToFloat64(
+				metrics.RedriveAbortedTotal.WithLabelValues(
+					metrics.RedriveAbortReasonTransientExhausted,
+				),
+			)
+
+			Expect(
+				publisher.PublishAbort(ctx, abortTask(), pkg.AbortReasonBrokenSignature, 3),
+			).To(Succeed())
+
+			Expect(testutil.ToFloat64(
+				metrics.RedriveAbortedTotal.WithLabelValues(
+					metrics.RedriveAbortReasonBrokenSignature,
+				),
+			)).To(Equal(brokenBefore + 1))
+			Expect(testutil.ToFloat64(
+				metrics.RedriveAbortedTotal.WithLabelValues(
+					metrics.RedriveAbortReasonTransientExhausted,
+				),
+			)).To(Equal(transientBefore))
+		})
+	})
+
+	Describe("PublishFailure reason recording", func() {
+		reasonPublisher := func(client claim.ClaimRefClient) pkg.ResultPublisher {
+			return pkg.NewResultPublisher(
+				producer,
+				base.TopicPrefix("develop"),
+				currentDateTime,
+				func() claim.ClaimRefClient { return client },
+			)
+		}
+
+		It("records the reason for the task's current phase", func() {
+			client := new(mocks.FakeClaimRefClient)
+			p := reasonPublisher(client)
+			task := lib.Task{
+				TaskIdentifier: lib.TaskIdentifier("test-task-reason"),
+				Frontmatter: lib.TaskFrontmatter{
+					"status": "in_progress",
+					"phase":  "execution",
+				},
+			}
+
+			Expect(p.PublishFailure(ctx, task, "job-reason-1", "pod_oom_killed")).To(Succeed())
+
+			Expect(client.PutCallCount()).To(Equal(1))
+			_, key, _, cluster, taskID, _ := client.PutArgsForCall(0)
+			Expect(key).To(Equal(
+				"claims/redrive-reason/test-task-reason/execution/pod_oom_killed/1",
+			))
+			Expect(cluster).To(Equal(claim.RedriveStreakCluster))
+			Expect(taskID).To(Equal("test-task-reason"))
+		})
+
+		It("normalises the formatted backoff reason to its vocabulary value", func() {
+			client := new(mocks.FakeClaimRefClient)
+			p := reasonPublisher(client)
+			task := lib.Task{
+				TaskIdentifier: lib.TaskIdentifier("test-task-formatted"),
+				Frontmatter: lib.TaskFrontmatter{
+					"status": "in_progress",
+					"phase":  "execution",
+				},
+			}
+
+			Expect(
+				p.PublishFailure(ctx, task, "job-reason-2", "pod_oom_killed (OOMKilled/137)"),
+			).To(Succeed())
+
+			_, key, _, _, _, _ := client.PutArgsForCall(0)
+			Expect(key).To(Equal(
+				"claims/redrive-reason/test-task-formatted/execution/pod_oom_killed/1",
+			))
+		})
+
+		It("records an unparseable reason as unknown", func() {
+			client := new(mocks.FakeClaimRefClient)
+			p := reasonPublisher(client)
+			task := lib.Task{
+				TaskIdentifier: lib.TaskIdentifier("test-task-unparsed"),
+				Frontmatter: lib.TaskFrontmatter{
+					"status": "in_progress",
+					"phase":  "execution",
+				},
+			}
+
+			Expect(p.PublishFailure(ctx, task, "job-reason-3", "pod OOM killed")).To(Succeed())
+
+			_, key, _, _, _, _ := client.PutArgsForCall(0)
+			Expect(key).To(Equal(
+				"claims/redrive-reason/test-task-unparsed/execution/unknown/1",
+			))
+		})
+
+		It("records nothing on a deduped repeat", func() {
+			client := new(mocks.FakeClaimRefClient)
+			p := reasonPublisher(client)
+			task := lib.Task{
+				TaskIdentifier: lib.TaskIdentifier("test-task-deduped-reason"),
+				Frontmatter: lib.TaskFrontmatter{
+					"status": "in_progress",
+					"phase":  "execution",
+				},
+			}
+
+			Expect(p.PublishFailure(ctx, task, "job-reason-4", "pod_oom_killed")).To(Succeed())
+			Expect(p.PublishFailure(ctx, task, "job-reason-4", "pod_oom_killed")).To(Succeed())
+
+			Expect(client.PutCallCount()).To(Equal(1))
 		})
 	})
 })

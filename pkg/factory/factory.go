@@ -173,7 +173,7 @@ func CreateConfigResolver(
 // git-rest's auth-failure logs name this component.
 func CreateClaimRefClientFactory(
 	baseURL, gatewaySecret string,
-) handler.ClaimRefClientFactory {
+) pkg.ClaimRefClientFactory {
 	return func() claim.ClaimRefClient {
 		return claim.NewClaimRefClient(baseURL, gatewaySecret, "agent-task-executor")
 	}
@@ -208,7 +208,7 @@ func CreateConsumer(
 	reconcilePassTimeout time.Duration,
 	reconcileInterval time.Duration,
 	claimMode pkg.ClaimMode,
-	claimRefClientFactory handler.ClaimRefClientFactory,
+	claimRefClientFactory pkg.ClaimRefClientFactory,
 ) (libkafka.Consumer, handler.ClaimLifecycleEventHandler) {
 	jobSpawner := spawner.NewJobSpawner(
 		kubeClient,

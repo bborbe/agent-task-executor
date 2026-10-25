@@ -429,6 +429,15 @@ func (f *fakeResultPublisher) PublishQueueEntry(
 	return nil
 }
 
+func (f *fakeResultPublisher) PublishAbort(
+	ctx context.Context,
+	task lib.Task,
+	reason string,
+	streak int,
+) error {
+	return nil
+}
+
 func (f *fakeResultPublisher) PublishRaw(
 	ctx context.Context,
 	operation base.CommandOperation,

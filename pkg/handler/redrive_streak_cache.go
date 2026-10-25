@@ -35,6 +35,15 @@ type passRedriveStreakCache struct {
 	once     sync.Once
 	snapshot map[string]map[string]int
 	err      error
+
+	// The cap check now also needs each candidate's recorded reasons, so the
+	// same cache carries a second lazily-fetched snapshot — one list over the
+	// reason prefix per pass. It is a separate prefix, so it cannot be folded
+	// into the streak list, and a second cache type would only duplicate this
+	// one.
+	reasonsOnce    sync.Once
+	reasonSnapshot map[string]map[string][]string
+	reasonsErr     error
 }
 
 // withRedriveStreakCache returns a context carrying an empty per-pass streak
@@ -78,4 +87,31 @@ func (c *passRedriveStreakCache) count(
 	// the snapshot exactly the way RedriveStreakStore.Count does. Nothing is
 	// injected for it because there is nothing to substitute.
 	return c.snapshot[taskID][claim.RedriveStreakPhaseComponent(phase)], nil
+}
+
+// reasons returns taskID's recorded reasons at phase, fetching the pass's
+// reason snapshot on the first call. The snapshot's slices are already ordered
+// by attempt, exactly as RedriveReasonStore.Reasons returns them, so the
+// classifier sees the same window either way.
+//
+// A failed fetch is reported for every candidate of that pass, which the caller
+// treats as no evidence: it refuses the spawn and closes nothing.
+func (c *passRedriveStreakCache) reasons(
+	ctx context.Context,
+	store claim.RedriveReasonStore,
+	taskID string,
+	phase string,
+) ([]string, error) {
+	c.reasonsOnce.Do(func() {
+		c.reasonSnapshot, c.reasonsErr = store.Snapshot(ctx)
+		glog.V(2).Infof(
+			"event=reconcile_reason_snapshot tasks=%d err=%v",
+			len(c.reasonSnapshot),
+			c.reasonsErr,
+		)
+	})
+	if c.reasonsErr != nil {
+		return nil, c.reasonsErr
+	}
+	return c.reasonSnapshot[taskID][claim.RedriveStreakPhaseComponent(phase)], nil
 }
