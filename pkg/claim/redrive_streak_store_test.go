@@ -103,6 +103,63 @@ var _ = Describe("RedriveStreakStore", func() {
 		Expect(other).To(Equal(0))
 	})
 
+	It("answers every task and phase from one snapshot call", func() {
+		seedStreak(fake, "T", "ai_review", 1)
+		seedStreak(fake, "T", "ai_review", 2)
+		seedStreak(fake, "T", "planning", 1)
+		seedStreak(fake, "U", "execution", 1)
+		store := newStreakStore(fake)
+
+		snapshot, err := store.Snapshot(ctx)
+		Expect(err).NotTo(HaveOccurred())
+		Expect(snapshot["T"]["ai_review"]).To(Equal(2))
+		Expect(snapshot["T"]["planning"]).To(Equal(1))
+		Expect(snapshot["U"]["execution"]).To(Equal(1))
+	})
+
+	It("agrees with Count for every task it holds", func() {
+		seedStreak(fake, "T", "ai_review", 1)
+		seedStreak(fake, "T", "ai_review", 2)
+		seedStreak(fake, "U", claim.RedriveStreakPhaseNone, 1)
+		store := newStreakStore(fake)
+
+		snapshot, err := store.Snapshot(ctx)
+		Expect(err).NotTo(HaveOccurred())
+
+		for taskID, phases := range snapshot {
+			for phase, want := range phases {
+				count, countErr := store.Count(ctx, taskID, phase)
+				Expect(countErr).NotTo(HaveOccurred())
+				Expect(count).To(Equal(want))
+			}
+		}
+	})
+
+	It("skips an unparsable ref in a snapshot", func() {
+		seedStreak(fake, "T", "ai_review", 1)
+		fake.Seed(
+			"refs/claims/redrive/T/ai_review/not-a-number",
+			"sha-odd",
+			claim.RedriveStreakCluster,
+			"T",
+			rfc3339(leaseTestT0),
+		)
+		store := newStreakStore(fake)
+
+		snapshot, err := store.Snapshot(ctx)
+		Expect(err).NotTo(HaveOccurred())
+		Expect(snapshot["T"]["ai_review"]).To(Equal(1))
+	})
+
+	It("fails the snapshot when the list fails", func() {
+		seedStreak(fake, "T", "ai_review", 1)
+		fake.SetFault(faultOnMethod(http.MethodGet, http.StatusInternalServerError))
+		store := newStreakStore(fake)
+
+		_, err := store.Snapshot(ctx)
+		Expect(err).To(HaveOccurred())
+	})
+
 	It("shares the recorded streak between separately constructed stores", func() {
 		storeA := newStreakStore(fake)
 		Expect(storeA.Record(ctx, "U", "ai_review")).To(Succeed())

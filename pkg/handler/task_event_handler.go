@@ -1184,6 +1184,12 @@ func (h *taskEventHandler) ReconcileOnce(ctx context.Context) error {
 	// One `list jobs` per assignee for the whole pass, instead of two per task.
 	// Scoped to passCtx so the event path never reads a frozen snapshot.
 	passCtx = withJobCache(passCtx)
+	// One `list refs` of the whole streak prefix for the pass, instead of one
+	// per candidate. Also scoped to passCtx: the Kafka consumer and the
+	// deferred-respawn loop must keep reading live streaks, because a spawn
+	// records a new one. Fetched lazily, so a pass with no candidates pays
+	// nothing. See redrive_streak_cache.go for the measurement.
+	passCtx = withRedriveStreakCache(passCtx)
 
 	if !h.view.Ready() {
 		metrics.ReconcilePassesTotal.WithLabelValues("view_not_ready").Inc()
@@ -1221,13 +1227,13 @@ func (h *taskEventHandler) ReconcileOnce(ctx context.Context) error {
 	// every older child and is never reached while any of them is still eligible.
 	candidates := h.gatherCandidates(passCtx, owned, &c)
 	if h.passDone(passCtx) {
-		c.logAborted()
+		c.logAborted(len(candidates))
 		return nil
 	}
 	sortCandidatesByAdmissionPriority(candidates)
 	for _, candidate := range candidates {
 		if h.passDone(passCtx) {
-			c.logAborted()
+			c.logAborted(len(candidates))
 			return nil
 		}
 		c.add(h.driveCandidate(passCtx, candidate))
@@ -1237,8 +1243,15 @@ func (h *taskEventHandler) ReconcileOnce(ctx context.Context) error {
 	// absence of errors.
 	metrics.ReconcilePassesTotal.WithLabelValues("ok").Inc()
 	glog.Infof(
-		"event=reconcile evaluated=%d re_driven=%d deferred=%d skipped=%d capped=%d task_vault=%q",
-		c.evaluated, c.redriven, c.deferred, c.skipped, c.capped, h.vaultMatcher.Vault(),
+		"event=reconcile evaluated=%d re_driven=%d deferred=%d skipped=%d capped=%d candidates=%d owned=%d task_vault=%q",
+		c.evaluated,
+		c.redriven,
+		c.deferred,
+		c.skipped,
+		c.capped,
+		len(candidates),
+		len(owned),
+		h.vaultMatcher.Vault(),
 	)
 	return nil
 }
@@ -1337,14 +1350,25 @@ func (c *reconcileCounters) add(outcome reconcileOutcome) {
 }
 
 // logAborted records a pass cut short by its context, with the tally reached so far.
-func (c *reconcileCounters) logAborted() {
+//
+// candidates is the size of the gathered set, and it is the term the tally
+// cannot supply: `evaluated` counts only the candidates the drive loop reached,
+// so an aborted pass's `evaluated + skipped` is short of the owned set by the
+// candidates it never drove. Without it the owned-set arithmetic of an aborted
+// pass is unreadable, and the shortfall is indistinguishable from a cut gather —
+// which is the wrong diagnosis, because the gather's own early return prints the
+// same line with evaluated=0. Measured on dev 2026-10-24: trading aborted at
+// `evaluated=16 skipped=436` with 465 owned, and the missing 13 were collected
+// candidates nothing logged.
+func (c *reconcileCounters) logAborted(candidates int) {
 	metrics.ReconcilePassesTotal.WithLabelValues("aborted").Inc()
 	glog.Infof(
-		"event=reconcile_aborted reason=context_cancelled evaluated=%d re_driven=%d deferred=%d skipped=%d",
+		"event=reconcile_aborted reason=context_cancelled evaluated=%d re_driven=%d deferred=%d skipped=%d candidates=%d",
 		c.evaluated,
 		c.redriven,
 		c.deferred,
 		c.skipped,
+		candidates,
 	)
 }
 
