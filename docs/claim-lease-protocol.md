@@ -66,7 +66,10 @@ serialization they need; reviews do not participate in it.
 
 The recovery path adopts a listed ref exactly as it is found. It never derives a
 partner key, so a restart cannot re-create a pair that the claim path no longer
-writes.
+writes. A pair that is still present in the store from an earlier release is
+adopted and released as the pair it is — `ClaimPair` and `TakeoverPair` keep
+their secondary parameter for that state alone, and every caller now passes it
+empty.
 
 Every key passes `validateClaimComponent`, so a hostile body cannot inject a
 path segment into a ref.
