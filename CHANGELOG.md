@@ -2,7 +2,7 @@
 
 All notable changes to this project will be documented in this file.
 
-## Unreleased
+## v0.39.0
 
 - feat: **the consecutive-re-drive cap now reports which task types and phases it is stranding.** `executor_redrive_capped_total` was a bare counter, so `capped=N` said only that something had been capped and could not tell an operator whether the abandoned work was `update-go`, `pr-review` or anything else — nor whether a record was stuck at one phase (a fault) or advancing and re-capping (progress the cap is clipping). The counter is now a `CounterVec` labelled `task_type` and `phase`, and `event=redrive_capped` carries `task_type=` alongside its existing fields so a series and its log line can be matched. The label domain is deliberately unbounded: task types come from the agent Config CRs at runtime and phase is free text from the task frontmatter, so the combinations are not pre-initialised in `init()` — the documented boundary of the counter-pre-initialization rule. No per-task, job-name or timestamp label was added, and the cap's threshold, per-(task, phase) keying and refusal behaviour are unchanged.
 
