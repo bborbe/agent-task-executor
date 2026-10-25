@@ -102,10 +102,10 @@ var ClaimMismatchTotal = promauto.NewCounter(
 )
 
 // ClaimKeyFallbackTotal counts pr-review tasks whose body carried no usable
-// pull-request URL, so their claim fell back to the repository key.
+// pull-request URL, so their claim fell back to their task id.
 var ClaimKeyFallbackTotal = promauto.NewCounter(prometheus.CounterOpts{
 	Name: "executor_claim_key_fallback_total",
-	Help: "Total number of pr-review claim keys that fell back to the repository key.",
+	Help: "Total number of pr-review claim keys that fell back to the task-id key.",
 })
 
 // ParkedLostClaimTotal counts tasks parked at phase human_review after another

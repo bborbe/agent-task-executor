@@ -16,8 +16,11 @@ import (
 	"github.com/bborbe/agent-task-executor/pkg/claim"
 )
 
-// TestClaimOwnerRepoDerivesFromCloneURL pins the fallback that unblocks
-// pr-review claims: those tasks carry clone_url and no repo key.
+// TestClaimOwnerRepoDerivesFromCloneURL pins the owner/repo derivation that
+// unblocks pr-review claims: those tasks carry clone_url and no repo key. The
+// derivation is observed through a repo-keyed type, because a pr-review is no
+// longer keyed by its repository — it takes its pull request's key, or its own
+// task id when the body names none.
 func TestClaimOwnerRepoDerivesFromCloneURL(t *testing.T) {
 	ctx := context.Background()
 
@@ -78,7 +81,7 @@ func TestClaimOwnerRepoDerivesFromCloneURL(t *testing.T) {
 			owner, repo := claimOwnerRepo(task)
 			key, err := claim.DeriveClaimKey(
 				ctx,
-				"pr-review",
+				"update-go",
 				string(task.TaskIdentifier),
 				owner,
 				repo,

@@ -43,15 +43,10 @@ var _ = Describe("DeriveClaimKey", func() {
 			false,
 		),
 		Entry("release", "release", "abc123", "bborbe", "agent", "claims/repo/bborbe-agent", false),
-		Entry(
-			"pr-review",
-			"pr-review",
-			"abc123",
-			"bborbe",
-			"agent",
-			"claims/repo/bborbe-agent",
-			false,
-		),
+		// A pr-review is not repo-keyed: without a usable pull-request URL it
+		// falls back to its task id, so one repository's reviews never contend
+		// for a shared key.
+		Entry("pr-review", "pr-review", "abc123", "bborbe", "agent", "claims/task/abc123", false),
 		Entry(
 			"build-fix",
 			"build-fix",
@@ -87,7 +82,7 @@ var _ = Describe("DeriveClaimKey", func() {
 		Entry("empty owner", "update-go", "abc123", "", "agent", "", true),
 		Entry("empty repo", "update-go", "abc123", "bborbe", "", "", true),
 		Entry("owner with slash", "release", "abc123", "bb/orbe", "agent", "", true),
-		Entry("repo with dotdot", "pr-review", "abc123", "bborbe", "ag..ent", "", true),
+		Entry("repo with dotdot", "update-go", "abc123", "bborbe", "ag..ent", "", true),
 		Entry("owner leading dot", "build-fix", "abc123", ".bborbe", "agent", "", true),
 		Entry("repo trailing lock", "update-go", "abc123", "bborbe", "agent.lock", "", true),
 		Entry("owner invalid character", "update-go", "abc123", "bb orbe", "agent", "", true),

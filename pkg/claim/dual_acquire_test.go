@@ -178,7 +178,7 @@ var _ = Describe("dual acquire", func() {
 			"no pull request url here",
 		)
 		Expect(err).NotTo(HaveOccurred())
-		Expect(primary).To(Equal(dualRepoKey))
+		Expect(primary).To(Equal("claims/task/t2"))
 		Expect(secondary).To(BeEmpty())
 		Expect(fallback).To(BeTrue())
 
@@ -188,7 +188,7 @@ var _ = Describe("dual acquire", func() {
 		requests := fake.Requests()
 		puts := requestsMatching(requests, http.MethodPut, "claims/")
 		Expect(puts).To(HaveLen(1))
-		Expect(puts[0].Path).To(ContainSubstring(dualRepoKey))
+		Expect(puts[0].Path).To(ContainSubstring("claims/task/t2"))
 		Expect(requestsMatching(requests, http.MethodDelete, "claims/")).To(BeEmpty())
 	})
 

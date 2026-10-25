@@ -30,8 +30,8 @@ every key, and keys and task ids are never metric label values.
 
 | Key shape | Used by |
 |---|---|
-| `claims/task/<task id>` | task-id-keyed types |
-| `claims/repo/<owner>-<repo>` | `update-go`, `release`, `build-fix`, and the `pr-review` fallback |
+| `claims/task/<task id>` | task-id-keyed types, and `pr-review` with no usable PR link |
+| `claims/repo/<owner>-<repo>` | `update-go`, `release`, `build-fix` |
 | `claims/pr/<owner>-<repo>-<n>` | `pr-review` with a usable PR link |
 
 A `pr-review` key is per pull request when the task body carries a standalone
@@ -40,41 +40,78 @@ whitespace, is exactly `https://github.com/<o>/<r>/pull/<n>`, where `<o>/<r>`
 matches the task repository case-insensitively, `<n>` is 1–10 digits with a
 value of at least 1, and nothing follows `<n>`.
 
-When no line qualifies, the key falls back to `claims/repo/<owner>-<repo>`. The
-fallback logs one `event=claim_key_fallback task=<id> repo=<owner>/<repo>`
+When no line qualifies, the key falls back to `claims/task/<task id>` — never to
+the per-repository key, which every review of that repository would then share.
+The fallback logs one `event=claim_key_fallback task=<id> repo=<owner>/<repo>`
 warning and increments the unlabelled `executor_claim_key_fallback_total`
 counter once.
 
-### Dual acquire
+### Single ref per claim
 
-A repo-keyed claim is written as a pair of refs. The per-repository key is the
-primary and is written first; for a `pr-review` task whose body carries a usable
-standalone pull-request URL, the per-pull-request key is the secondary and is
-written second. This dual acquire is what stops a mixed fleet from spawning the
-same task twice. The claim is held only when both writes succeed: a secondary
-conflict releases the primary again and no Job is created, so the task is
-treated as claimed elsewhere.
+Every claim is one ref. No task type writes a pair.
 
-The two keys collapse to one ref when the two derivations are equal — every
-task-id-keyed type, and a `pr-review` task with no usable pull-request URL. That
-path is unchanged and writes a single ref.
+**During a rolling deploy the fleet is mixed**, in two distinct ways.
 
-While the fleet is mixed, some executors writing the pair and some writing one
-ref, reviews of different pull requests in one repository serialize on the
-shared per-repository key. That serialization ends when the dual write is
-removed in a later release.
+The *URL branch* is safe: both images derive `claims/pr/<owner>-<repo>-<n>`, so
+old and new contend on the same ref exactly as before.
 
-Both keys pass `validateClaimComponent`, so a hostile body cannot inject a path
-segment into either ref.
+The *fallback branch* is not. An executor on the previous image keys a
+URL-less pr-review by `claims/repo/<owner>-<repo>`; this one keys it by
+`claims/task/<task id>`. The two shapes share no ref, so for the duration of the
+rollout an old and a new executor can each claim the same URL-less task and each
+spawn a Job for it — the duplicate run the pair existed to prevent. Only a
+uniform fleet closes that window; keeping the fallback on the repository key
+until the rollout finished would have avoided it, at the cost of leaving the
+whole fallback population serialised.
+
+The measured population at the 2026-10-25 change made it harmless in practice.
+Two different figures are quoted for it and they answer different questions:
+across **all** repositories the store holds 10,510 pr-review records, 333 of them
+URL-less, of which **30 were open** — 25 `planning` untrusted-author records that
+cannot spawn and 5 `human_review`, which is not driven. Within
+`bborbe/homebrew-tap` alone, **25 of its 32** records are URL-less. No runnable
+URL-less review was open, which is why the window was accepted. A URL-less
+review that becomes runnable *during* a rollout can still run twice.
+
+The *recovery* side has a smaller transient: an old image re-derives and writes
+the per-repository partner when its `Recover` meets a per-PR-only ref,
+re-creating the pair until that pod is replaced. That one is self-clearing — the
+old pod releases its pair, or the lease expires and is fenced on the next
+recovery — so it cannot permanently block a repo-keyed task.
+
+A `pr-review` task with a usable pull-request URL is keyed **only** by
+`claims/pr/<owner>-<repo>-<n>`; one without takes `claims/task/<task id>`. It
+never takes the shared per-repository key, on either branch. That is deliberate:
+while the per-repository key was the primary of a pair, the first review of a
+repository held it, and every sibling review of the same repository was refused
+at takeover with a bare `lease conflict` for as long as the holder renewed — so
+no second review of that repository could start. Measured 2026-10-25 on nuke
+prod: one acquired `claims/repo/bborbe-nuke` refused all eleven other
+`bborbe/nuke` reviews. The fallback branch matters as much as the URL branch:
+25 of the 32 `bborbe/homebrew-tap` records carry no pull-request URL at all —
+they are untrusted-author records parked pending an allowlist decision — so
+keying the fallback by repository would keep that whole queue contending for one
+key.
+
+The consequence is that a `pr-review` and a repo-keyed task (`update-go`,
+`release`, `build-fix`) may now run against the same repository concurrently.
+Those types keep the per-repository key among themselves, which is the
+serialization they need; reviews do not participate in it.
+
+The recovery path adopts a listed ref exactly as it is found. It never derives a
+partner key, so a restart cannot re-create a pair that the claim path no longer
+writes. A pair still present in the store from an earlier release is recovered
+as a pair by `storeRecoveredPair`, which is the only path that handles one;
+`ClaimPair` and `TakeoverPair` keep their secondary parameter but every caller
+now passes it empty.
+
+Every key passes `validateClaimComponent`, so a hostile body cannot inject a
+path segment into a ref.
 
 These log lines make claims observable at runtime:
 
 - `event=claim_acquired key=<key> task=<id>` — one per successful `Claim` or
   `Takeover`.
-- `event=claim_dual_acquired key=<primary> second=<secondary> task=<id>` — info,
-  one per successful dual acquire.
-- `event=claim_dual_conflict key=<secondary> task=<id>` — warning, one per
-  secondary write that returned `409`.
 - `event=claim_released key=<key> task=<id> result=<label> sha=<sha>` — one per
   removal, with `result` one of `released`, `already_released`, `fenced` or
   `claim_lost`. The `claim_lost` line is logged at warning level.
@@ -203,10 +240,10 @@ For each group:
 - A running Job's pair is re-adopted as one claim with both refs at their listed
   shas and the earlier of their two `lease_until` values, with no create; ticks
   renew it from there.
-- A per-pull-request-only claim is repaired by deriving its per-repository
-  partner and writing it, so a crash between the two acquire writes does not
-  leave the pair half-owned. A conflict on that write releases the per-PR ref;
-  a write failure keeps the per-PR ref renewed and fenced.
+- A per-pull-request-only claim is adopted as the single ref it is. No partner
+  key is derived or written, so a restart cannot re-create a pair the claim path
+  no longer writes. A pair still present in the store from an earlier release is
+  recovered as a pair, above.
 - A per-repository-only claim is adopted as a single claim, because a repository
   key carries neither the task type nor the pull-request number, so its per-PR
   partner is not derivable.

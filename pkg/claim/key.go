@@ -13,15 +13,17 @@ import (
 )
 
 // repoKeyedTaskTypes are the task types that share one claim key per
-// repository instead of one key per task id.
+// repository instead of one key per task id. A pr-review is deliberately absent:
+// it is keyed per pull request when its body names one, and per task id when it
+// does not. Sharing the per-repository key made every review of one repository
+// refuse its siblings at takeover.
 var repoKeyedTaskTypes = map[string]bool{
 	"update-go": true,
 	"release":   true,
-	"pr-review": true,
 	"build-fix": true,
 }
 
-// DeriveClaimKey maps a task to the claim key it uses. The four repo-keyed task
+// DeriveClaimKey maps a task to the claim key it uses. The three repo-keyed task
 // types share one key per repository; every other type is keyed by task id.
 // Every component is validated before it is used: empty, "/", "..", a leading
 // ".", a trailing ".lock", or a character outside [A-Za-z0-9._-] is rejected.
@@ -50,10 +52,18 @@ func DeriveClaimKey(
 }
 
 // DeriveClaimKeysWithBody maps a task to the claim refs it uses. The first
-// return value is the primary key and is always written first. The second is
-// the secondary key and is empty when the two derivations are equal. The
-// third reports that a pr-review task fell back to the repository key; it is
-// meaningful only when the error is nil.
+// return value is the primary key. The second is the secondary key, which is
+// always empty: no task type writes a pair any more, so every claim is a
+// single ref. The third reports that a pr-review task carried no usable
+// pull-request URL and was keyed by its task id instead; it is meaningful only
+// when the error is nil.
+//
+// A pr-review task whose body carries a standalone pull-request URL is keyed
+// per pull request, never by the shared repository key. Making the repository
+// key the primary serialised every review of one repository behind a single
+// claim: the first holder refused every sibling at takeover with a bare
+// lease conflict for as long as it renewed, so no review of that repository
+// could start.
 func DeriveClaimKeysWithBody(
 	ctx context.Context,
 	taskType string,
@@ -79,8 +89,8 @@ func DeriveClaimKeysWithBody(
 		if err := validateClaimComponent(ctx, "pull request number", number); err != nil {
 			return "", "", false, errors.Wrapf(ctx, err, "derive pr claim key")
 		}
-		return "claims/repo/" + owner + "-" + repo,
-			"claims/pr/" + owner + "-" + repo + "-" + number,
+		return "claims/pr/" + owner + "-" + repo + "-" + number,
+			"",
 			false,
 			nil
 	}
@@ -133,36 +143,6 @@ func pullRequestNumberFromLine(owner, repo, line string) (string, bool) {
 		return "", false
 	}
 	return strconv.Itoa(value), true
-}
-
-// repoKeyFromPRKey returns the per-repository key for a per-pull-request key
-// of the shape claims/pr/<owner>-<repo>-<n>, where <n> is the trailing
-// all-digit segment. It returns false for any other shape, so a caller never
-// guesses a partner key.
-func repoKeyFromPRKey(key string) (string, bool) {
-	const prefix = "claims/pr/"
-	if !strings.HasPrefix(key, prefix) {
-		return "", false
-	}
-	rest := strings.TrimPrefix(key, prefix)
-	index := strings.LastIndex(rest, "-")
-	if index <= 0 || index == len(rest)-1 {
-		return "", false
-	}
-	number := rest[index+1:]
-	if len(number) > 10 {
-		return "", false
-	}
-	for i := 0; i < len(number); i++ {
-		if number[i] < '0' || number[i] > '9' {
-			return "", false
-		}
-	}
-	value, err := strconv.Atoi(number)
-	if err != nil || value < 1 {
-		return "", false
-	}
-	return "claims/repo/" + rest[:index], true
 }
 
 // validateClaimComponent rejects a value that must not appear in a claim key
