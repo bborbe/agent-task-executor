@@ -255,12 +255,11 @@ func TestAcquireSpawnClaimFallsBackToRepoKey(t *testing.T) {
 			if len(client.putCalls) != 1 {
 				t.Fatalf("expected one Put, got %d", len(client.putCalls))
 			}
-			if client.putCalls[0].key != "claims/repo/bborbe-nuke" {
-				t.Errorf(
-					"claim key = %q, want %q",
-					client.putCalls[0].key,
-					"claims/repo/bborbe-nuke",
-				)
+			// A pr-review with no usable URL is keyed by its task id. Keying it
+			// by the repository instead made every review of that repository
+			// contend for one key.
+			if want := "claims/task/" + id; client.putCalls[0].key != want {
+				t.Errorf("claim key = %q, want %q", client.putCalls[0].key, want)
 			}
 			if delta := after - before; delta != 1 {
 				t.Errorf("fallback counter delta = %v, want 1", delta)

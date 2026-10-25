@@ -1052,8 +1052,8 @@ func (m *leaseManager) HeldClaims() []HeldClaim {
 }
 
 // Recover re-adopts, releases or fences the claims this cluster held before a
-// restart. It never sends a create PUT and never touches another cluster,
-// except to write the missing partner of a per-PR-only claim it repairs.
+// restart. It never sends a create PUT and never writes a partner key: a claim
+// it adopts is adopted exactly as listed.
 func (m *leaseManager) Recover(ctx context.Context) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -1217,8 +1217,8 @@ func (m *leaseManager) recoverFenceGroup(
 }
 
 // recoverAdoptGroup holds, releases or re-checks the claim of a Job that may
-// still be running. A per-PR-only claim is repaired by writing its derived
-// per-repository partner.
+// still be running. A single-ref claim is adopted exactly as listed; a pair
+// recovered from an earlier release is adopted as a pair.
 func (m *leaseManager) recoverAdoptGroup(
 	ctx context.Context,
 	primary ClaimRef,

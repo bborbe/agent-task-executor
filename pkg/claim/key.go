@@ -13,15 +13,17 @@ import (
 )
 
 // repoKeyedTaskTypes are the task types that share one claim key per
-// repository instead of one key per task id.
+// repository instead of one key per task id. A pr-review is deliberately absent:
+// it is keyed per pull request when its body names one, and per task id when it
+// does not. Sharing the per-repository key made every review of one repository
+// refuse its siblings at takeover.
 var repoKeyedTaskTypes = map[string]bool{
 	"update-go": true,
 	"release":   true,
-	"pr-review": true,
 	"build-fix": true,
 }
 
-// DeriveClaimKey maps a task to the claim key it uses. The four repo-keyed task
+// DeriveClaimKey maps a task to the claim key it uses. The three repo-keyed task
 // types share one key per repository; every other type is keyed by task id.
 // Every component is validated before it is used: empty, "/", "..", a leading
 // ".", a trailing ".lock", or a character outside [A-Za-z0-9._-] is rejected.
@@ -52,8 +54,9 @@ func DeriveClaimKey(
 // DeriveClaimKeysWithBody maps a task to the claim refs it uses. The first
 // return value is the primary key. The second is the secondary key, which is
 // always empty: no task type writes a pair any more, so every claim is a
-// single ref. The third reports that a pr-review task fell back to the
-// repository key; it is meaningful only when the error is nil.
+// single ref. The third reports that a pr-review task carried no usable
+// pull-request URL and was keyed by its task id instead; it is meaningful only
+// when the error is nil.
 //
 // A pr-review task whose body carries a standalone pull-request URL is keyed
 // per pull request, never by the shared repository key. Making the repository
