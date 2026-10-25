@@ -102,10 +102,12 @@ func deferredCandidates(t *testing.T, h *taskEventHandler, ctx context.Context, 
 	}
 }
 
-// TestReconcilePassReadsStreakStoreOnce pins the regression the alias change
-// exposed: the cap check made one git-rest round-trip per candidate, so a pass
-// with ~16 candidates spent its whole 45 s budget on them and aborted every
-// tick. Inside a pass the counts must come from one prefix list.
+// TestReconcilePassReadsStreakStoreOnce pins the batching: the cap check used to
+// make one git-rest round-trip per candidate, which is cheap while git-rest is
+// healthy and is what turned a degraded git-rest into a whole-pass abort (the
+// 2026-10-25 outage aborted every pass at 45 s). Inside a pass the counts must
+// come from one prefix list, so the pass's exposure to git-rest latency stops
+// scaling with the candidate count.
 func TestReconcilePassReadsStreakStoreOnce(t *testing.T) {
 	store := &countingStreakStore{snapshot: map[string]map[string]int{}}
 	spawner := &stubJobSpawner{active: map[lib.TaskIdentifier]bool{"other": true}}
