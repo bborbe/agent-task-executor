@@ -29,6 +29,10 @@ func (s *stubRedriveStreakStore) Count(context.Context, string, string) (int, er
 	return s.count, nil
 }
 
+func (s *stubRedriveStreakStore) Snapshot(context.Context) (map[string]map[string]int, error) {
+	return nil, nil
+}
+
 func (s *stubRedriveStreakStore) Record(context.Context, string, string) error { return nil }
 
 func (s *stubRedriveStreakStore) Clear(context.Context, string) error { return nil }
