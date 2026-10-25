@@ -228,7 +228,6 @@ var _ = Describe("DeriveClaimKeysWithBody", func() {
 			false,
 			false,
 		),
-		// An unusable repository still fails loudly through the repo key.
 		// A pr-review with no usable URL is keyed by its task id, never by a
 		// repository key it would share with every sibling review.
 		Entry(

@@ -228,6 +228,46 @@ func TestAcquireSpawnClaimKeysCloneURLPRReviewPerPullRequest(t *testing.T) {
 	}
 }
 
+// TestAcquireSpawnClaimKeysURLlessPRReviewsShareNoKey pins that two URL-less
+// pr-reviews of one repository claim against one shared store without
+// contending: each takes its own task-id key and neither takes the
+// per-repository key. Keying them by repository is the defect this covers —
+// the first holder refused every sibling for as long as it renewed.
+func TestAcquireSpawnClaimKeysURLlessPRReviewsShareNoKey(t *testing.T) {
+	ctx := context.Background()
+	client := &casClaimRefClient{refs: map[string]claim.ClaimRef{}}
+	h := newGateHandler(pkg.ClaimModeOn, client)
+
+	body := "no pull request url here"
+	if !h.acquireSpawnClaim(ctx, prReviewClaimTask("tid-a", body), redispatchConfig()) {
+		t.Fatal("expected the first URL-less pr-review to claim")
+	}
+	if !h.acquireSpawnClaim(ctx, prReviewClaimTask("tid-b", body), redispatchConfig()) {
+		t.Fatal("expected a second URL-less pr-review of the same repo to claim")
+	}
+
+	manager, err := h.ClaimLeaseManager(ctx)
+	if err != nil {
+		t.Fatalf("lease manager: %v", err)
+	}
+	keys := map[string]string{}
+	for _, heldClaim := range manager.HeldClaims() {
+		keys[heldClaim.Key] = heldClaim.TaskID
+	}
+	if len(keys) != 2 {
+		t.Fatalf("expected two task-id claims held, got %+v", keys)
+	}
+	if keys["claims/task/tid-a"] != "tid-a" {
+		t.Errorf("tid-a claim = %+v, want its own task key", keys)
+	}
+	if keys["claims/task/tid-b"] != "tid-b" {
+		t.Errorf("tid-b claim = %+v, want its own task key", keys)
+	}
+	if _, shared := keys["claims/repo/bborbe-nuke"]; shared {
+		t.Error("a URL-less pr-review must not hold the shared per-repository key")
+	}
+}
+
 func TestAcquireSpawnClaimFallsBackToTaskID(t *testing.T) {
 	ctx := context.Background()
 	bodies := []string{

@@ -64,10 +64,14 @@ uniform fleet closes that window; keeping the fallback on the repository key
 until the rollout finished would have avoided it, at the cost of leaving the
 whole fallback population serialised.
 
-The measured population at the 2026-10-25 change made it harmless in practice:
-of 30 open URL-less records, 25 were `planning` untrusted-author records that
-cannot spawn and 5 were `human_review`, which is not driven. A URL-less review
-that becomes runnable *during* a rollout can still run twice.
+The measured population at the 2026-10-25 change made it harmless in practice.
+Two different figures are quoted for it and they answer different questions:
+across **all** repositories the store holds 10,510 pr-review records, 333 of them
+URL-less, of which **30 were open** — 25 `planning` untrusted-author records that
+cannot spawn and 5 `human_review`, which is not driven. Within
+`bborbe/homebrew-tap` alone, **25 of its 32** records are URL-less. No runnable
+URL-less review was open, which is why the window was accepted. A URL-less
+review that becomes runnable *during* a rollout can still run twice.
 
 The *recovery* side has a smaller transient: an old image re-derives and writes
 the per-repository partner when its `Recover` meets a per-PR-only ref,
@@ -96,10 +100,10 @@ serialization they need; reviews do not participate in it.
 
 The recovery path adopts a listed ref exactly as it is found. It never derives a
 partner key, so a restart cannot re-create a pair that the claim path no longer
-writes. A pair that is still present in the store from an earlier release is
-adopted and released as the pair it is — `ClaimPair` and `TakeoverPair` keep
-their secondary parameter for that state alone, and every caller now passes it
-empty.
+writes. A pair still present in the store from an earlier release is recovered
+as a pair by `storeRecoveredPair`, which is the only path that handles one;
+`ClaimPair` and `TakeoverPair` keep their secondary parameter but every caller
+now passes it empty.
 
 Every key passes `validateClaimComponent`, so a hostile body cannot inject a
 path segment into a ref.
