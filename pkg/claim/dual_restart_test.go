@@ -70,24 +70,18 @@ var _ = Describe("Dual claim restart recovery", func() {
 		expectClaimDelta(before, snapshotClaims(), map[string]float64{"adopted": 1})
 	})
 
-	It("repairs a per-PR-only pair", func() {
+	It("adopts a per-PR-only claim without writing a per-repository partner", func() {
 		fake.Seed(prRef, "S-PR", "self", taskID, far())
 		job.SetRunning(map[string]bool{taskID: true})
 		before := snapshotClaims()
 
 		Expect(mgr.Recover(ctx)).To(Succeed())
 
-		puts := requestsMatching(fake.Requests(), http.MethodPut, "claims/repo/bborbe-nuke")
-		Expect(puts).To(HaveLen(1))
-		Expect(puts[0].Status).To(Equal(http.StatusOK))
-		Expect(putExpectedSha(puts[0])).To(BeEmpty())
-
+		Expect(requestsMatching(fake.Requests(), http.MethodPut, "")).To(BeEmpty())
 		held := mgr.HeldClaims()
-		Expect(held).To(HaveLen(2))
+		Expect(held).To(HaveLen(1))
 		Expect(held[0].Key).To(Equal("claims/pr/bborbe-nuke-658"))
 		Expect(held[0].Sha).To(Equal("S-PR"))
-		Expect(held[1].Key).To(Equal("claims/repo/bborbe-nuke"))
-		Expect(held[1].Sha).NotTo(BeEmpty())
 		expectClaimDelta(before, snapshotClaims(), map[string]float64{"adopted": 1})
 	})
 
@@ -104,29 +98,6 @@ var _ = Describe("Dual claim restart recovery", func() {
 		Expect(held[0].Key).To(Equal("claims/repo/bborbe-nuke"))
 		Expect(held[0].Sha).To(Equal("SP"))
 		expectClaimDelta(before, snapshotClaims(), map[string]float64{"adopted": 1})
-	})
-
-	It("releases a per-PR-only claim when its partner write conflicts", func() {
-		fake.Seed(prRef, "S-PR", "self", taskID, far())
-		job.SetRunning(map[string]bool{taskID: true})
-		fake.SetFault(func(req fakeRequest) *fakeFault {
-			if req.Method == http.MethodPut {
-				return &fakeFault{Status: http.StatusConflict}
-			}
-			return nil
-		})
-		before := snapshotClaims()
-
-		Expect(mgr.Recover(ctx)).To(Succeed())
-
-		Expect(
-			requestsMatching(fake.Requests(), http.MethodPut, "claims/repo/bborbe-nuke"),
-		).To(HaveLen(1))
-		deletes := requestsMatching(fake.Requests(), http.MethodDelete, "claims/pr/bborbe-nuke-658")
-		Expect(deletes).To(HaveLen(1))
-		Expect(deleteExpectedSha(deletes[0])).To(Equal("S-PR"))
-		Expect(mgr.HeldClaims()).To(BeEmpty())
-		expectClaimDelta(before, snapshotClaims(), map[string]float64{"conflict": 1})
 	})
 
 	It("fences both refs of a pair", func() {
