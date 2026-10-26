@@ -447,13 +447,46 @@ func TestServiceReapRemovesCopyWhoseConfigIsGone(t *testing.T) {
 	// The CR is deleted: the provider no longer lists it, but still lists the other.
 	provider.configs = []agentv1.Config{survivor}
 
-	if err := loop.ReconcileOnce(ctx); err != nil {
-		t.Fatalf("reconcile failed: %v", err)
+	// TWO passes, because one is never enough: the first sighting is only recorded.
+	// See TestServiceReapNeedsTwoPassesBeforeDeleting.
+	for i := 0; i < 2; i++ {
+		if err := loop.ReconcileOnce(ctx); err != nil {
+			t.Fatalf("reconcile %d failed: %v", i, err)
+		}
 	}
 
 	if _, err := client.AppsV1().StatefulSets("dev-sandbox").
 		Get(ctx, gone.Name, metav1.GetOptions{}); !apierrors.IsNotFound(err) {
 		t.Fatalf("expected orphaned cross-namespace copy to be reaped, got err=%v", err)
+	}
+}
+
+// ⚠️ One pass must never delete, and this is the guard that makes a partially
+// synced Config store harmless. The first reconcile pass after a restart runs
+// concurrently with the informer, and client-go delivers the initial LIST one
+// object at a time (`processDeltas` → `OnAdd` per object), so a pass can see a
+// non-empty SUBSET of the Configs. Every Config missing from that subset looks
+// deleted. Requiring a second sighting means the worst a partial store can do is
+// delay a reap by one interval.
+func TestServiceReapNeedsTwoPassesBeforeDeleting(t *testing.T) {
+	ctx := context.Background()
+	gone := serviceNamespaceConfig("claude-interactive", "dev", "dev-sandbox")
+	survivor := serviceNamespaceConfig("pi-interactive", "dev", "dev-sandbox")
+	survivor.UID = "aaaaaaaa-1111-2222-3333-444444444444"
+	client, loop, provider := newServiceNamespaceLoop(t, "dev", []agentv1.Config{gone, survivor})
+	seedLabelledCopy(t, client, gone, "dev-sandbox", string(gone.UID), "dev", false)
+
+	// A store that has delivered only SOME Configs: `gone` is absent, but this is a
+	// partial view, not a deletion.
+	provider.configs = []agentv1.Config{survivor}
+
+	if err := loop.ReconcileOnce(ctx); err != nil {
+		t.Fatalf("first reconcile failed: %v", err)
+	}
+
+	if _, err := client.AppsV1().StatefulSets("dev-sandbox").
+		Get(ctx, gone.Name, metav1.GetOptions{}); err != nil {
+		t.Fatalf("a single pass deleted a copy on a possibly-partial Config view: %v", err)
 	}
 }
 
@@ -488,7 +521,9 @@ func TestServiceReapSparesLiveOwnedAndForeignWorkloads(t *testing.T) {
 		false,
 	)
 
-	reconciler.ReapOrphanedCopies(ctx, []agentv1.Config{live})
+	for i := 0; i < 2; i++ {
+		reconciler.ReapOrphanedCopies(ctx, []agentv1.Config{live})
+	}
 
 	for _, ns := range []string{"dev-sandbox", "dev", "prod-sandbox"} {
 		if _, err := client.AppsV1().StatefulSets(ns).
@@ -517,7 +552,9 @@ func TestServiceReapDoesNothingOnAnEmptyConfigList(t *testing.T) {
 	seedLabelledCopy(t, client, live, "dev-sandbox", string(live.UID), "dev", false)
 
 	// Exactly what the store returns before the informer has synced.
-	reconciler.ReapOrphanedCopies(ctx, nil)
+	for i := 0; i < 2; i++ {
+		reconciler.ReapOrphanedCopies(ctx, nil)
+	}
 
 	if _, err := client.AppsV1().StatefulSets("dev-sandbox").
 		Get(ctx, live.Name, metav1.GetOptions{}); err != nil {

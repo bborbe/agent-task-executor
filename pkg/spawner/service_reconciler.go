@@ -7,6 +7,7 @@ package spawner
 import (
 	"context"
 	"sort"
+	"sync"
 
 	"github.com/bborbe/errors"
 	k8s "github.com/bborbe/k8s"
@@ -149,6 +150,13 @@ type serviceReconciler struct {
 	kubeClient   kubernetes.Interface
 	namespace    k8s.Namespace
 	storageClass string
+
+	// reapMu guards reapCandidates.
+	reapMu sync.Mutex
+	// reapCandidates holds the copies that looked orphaned on the PREVIOUS pass.
+	// A copy must look orphaned on two consecutive passes before it is deleted —
+	// see ReapOrphanedCopies for why one pass is not enough.
+	reapCandidates map[string]struct{}
 }
 
 // resolveServiceNamespace returns the namespace one Config's workload belongs in.
@@ -276,9 +284,8 @@ func (r *serviceReconciler) undeployInNamespace(
 //   - Only objects with NO ownerRef are considered. Same-namespace copies have one,
 //     and the garbage collector is authoritative for those; reaping them here would
 //     let a momentarily stale Config list delete every live service agent.
-//   - The label selector is the bare UID key, which means "this label exists" — one
-//     cluster-wide list per pass rather than one per Config, and it cannot match an
-//     unrelated workload that merely shares a name.
+//   - The selector is the executor-namespace label, so only copies this executor
+//     stamped are listed at all; the per-item UID check is what decides liveness.
 //
 // Best-effort, like the sweep: a refused list or a failed delete is logged and never
 // fails the pass. A missing cluster-scoped grant must not take every service agent down.
@@ -286,22 +293,28 @@ func (r *serviceReconciler) ReapOrphanedCopies(
 	ctx context.Context,
 	configs []agentv1.Config,
 ) {
-	// ⚠️ An empty list is NOT "every Config is gone" — it is what the store returns
-	// before the informer has listed anything. `serviceReconcileLoop.Run` calls
-	// ReconcileOnce immediately and concurrently with the connector, and
-	// k8s.EventHandler.Get answers `([], nil)` on an empty store with no sync gate,
-	// so the first pass after every restart sees exactly this. Reaping on it deletes
-	// every ownerRef-less cross-namespace service StatefulSet this executor stamped —
-	// and because buildStatefulSet sets WhenDeleted: Delete, the session PVC goes
-	// with them. That is data loss on every restart, so the empty case is refused.
+	// ⚠️ A copy must look orphaned on TWO consecutive passes before it is deleted,
+	// and that is the whole of this function's safety.
 	//
-	// A non-empty list is trusted, and that is a deliberate reading of how the store
-	// fills: a client-go informer populates its store from one atomic LIST before any
-	// watch event is applied, so a store that has anything in it has finished its
-	// initial sync. There is no reachable state where it holds some Configs and not
-	// others, which is why no further sync gate is needed here.
+	// The list passed in comes from the plain Config store, which has no sync gate:
+	// `serviceReconcileLoop.Run` calls ReconcileOnce immediately and concurrently
+	// with the connector, so the first pass after every restart runs against a store
+	// that is empty or — worse — a strict subset, because client-go's `processDeltas`
+	// calls `OnAdd` once per object rather than handing the initial LIST over
+	// atomically. Inferring sync from a non-empty list is therefore wrong, and an
+	// earlier revision of this comment claimed exactly that.
+	//
+	// Requiring two passes is what makes a partial store harmless: a Config the
+	// informer has not delivered yet is missing for at most one pass, and one pass is
+	// a full reconcile interval (a minute by default) against a LIST of a handful of
+	// Configs that completes in milliseconds. A genuinely deleted Config is missing
+	// on every pass, so it is still reaped — one interval later.
+	//
+	// The cost of being wrong here is not downtime: buildStatefulSet sets
+	// `WhenDeleted: Delete`, so reaping a live copy destroys its session PVC.
 	if len(configs) == 0 {
 		glog.V(2).Infof("event=service_orphan_reap_skipped reason=empty_config_list")
+		r.setReapCandidates(nil)
 		return
 	}
 
@@ -319,6 +332,8 @@ func (r *serviceReconciler) ReapOrphanedCopies(
 		glog.Errorf("event=service_orphan_reap_failed error=%v", err)
 		return
 	}
+	previous := r.reapCandidatesSnapshot()
+	current := make(map[string]struct{}, len(list.Items))
 	for i := range list.Items {
 		existing := &list.Items[i]
 		// Checked in code as well as in the selector: the selector is the server's
@@ -335,6 +350,18 @@ func (r *serviceReconciler) ReapOrphanedCopies(
 			continue
 		}
 		if _, ok := live[uid]; ok {
+			continue
+		}
+		key := existing.Namespace + "/" + existing.Name
+		current[key] = struct{}{}
+		if _, seen := previous[key]; !seen {
+			// First sighting. Recorded, not acted on.
+			glog.V(2).Infof(
+				"event=service_orphan_reap_pending config=%s namespace=%s uid=%s",
+				existing.Labels[serviceConfigLabelKey],
+				existing.Namespace,
+				uid,
+			)
 			continue
 		}
 		previousNamespace := k8s.Namespace(existing.Namespace)
@@ -354,6 +381,26 @@ func (r *serviceReconciler) ReapOrphanedCopies(
 			uid,
 		)
 	}
+	r.setReapCandidates(current)
+}
+
+// setReapCandidates replaces the remembered candidate set for the next pass.
+func (r *serviceReconciler) setReapCandidates(candidates map[string]struct{}) {
+	r.reapMu.Lock()
+	defer r.reapMu.Unlock()
+	r.reapCandidates = candidates
+}
+
+// reapCandidatesSnapshot copies the remembered candidate set, so a caller can
+// compare against it without holding the lock across the delete calls.
+func (r *serviceReconciler) reapCandidatesSnapshot() map[string]struct{} {
+	r.reapMu.Lock()
+	defer r.reapMu.Unlock()
+	out := make(map[string]struct{}, len(r.reapCandidates))
+	for k := range r.reapCandidates {
+		out[k] = struct{}{}
+	}
+	return out
 }
 
 // removePreviousNamespaceCopies deletes StatefulSets this Config owns in any
@@ -432,10 +479,12 @@ func ownedByConfig(statefulSet *appsv1.StatefulSet, config agentv1.Config) bool 
 		if owner.Kind == "Config" &&
 			owner.APIVersion == agentv1.SchemeGroupVersion.String() &&
 			owner.Name == config.Name &&
-			// The ownerRef carries the UID too, and it is the half that cannot be
-			// forged by a name collision. An object created before this change has
-			// no UID here, so it falls through to the label pair above.
-			(string(owner.UID) == "" || string(owner.UID) == string(config.UID)) {
+			// No empty-UID arm: `metav1.NewControllerRef` copies the UID, and the API
+			// server requires `OwnerReference.uid`, so no StatefulSet this executor
+			// ever wrote carries a Config ownerRef without one. Accepting an empty
+			// UID would widen the check to any Config-kind reference with a matching
+			// name — the one half of the identity that cannot be forged.
+			string(owner.UID) == string(config.UID) {
 			return true
 		}
 	}
