@@ -2,7 +2,7 @@
 
 All notable changes to this project will be documented in this file.
 
-## Unreleased
+## v0.42.0
 
 - feat: **Give the typed claim client the two capabilities `LeaseManager` needs before it can be rewired onto it: enumeration, and a per-PR target.** This is the preparation half of the rewire, not the rewire itself — nothing calls `ClaimClient` yet, which is exactly why it can be extended safely now.
   **`List(ctx, holder)`** is new. `ClaimClient` was Acquire / Renew / Release / Read only, and a key-at-a-time read cannot answer the question a restarting executor asks: *which claims do I already hold?* `Recover` must enumerate before it can re-adopt, fence or release anything, so the client gains the operation that `GET /api/v1/claims` serves. `holder` empty lists everything; the narrowing is a convenience, not an access boundary — that is the gateway secret's job.
