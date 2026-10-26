@@ -2,7 +2,7 @@
 
 All notable changes to this project will be documented in this file.
 
-## Unreleased
+## v0.41.0
 
 - fix: **join the repository and pull-request claim keys with `/` instead of `-`, because the hyphen join let two repositories share one lock.** A claim key has to identify exactly one object, and it did not: `DeriveClaimKey` built `claims/repo/<owner>-<repo>` and `DeriveClaimKeysWithBody` built `claims/pr/<owner>-<repo>-<number>`, while a hyphen is legal inside both components (the validator accepts `[A-Za-z0-9._-]`). So `owner=a-b, repo=c` and `owner=a, repo=b-c` both derived `claims/repo/a-b-c` — two distinct repositories aliasing one lock, which means the mutual exclusion silently did nothing and two runs could proceed against the same repository each believing it held it. The PR form was worse still, since the number is appended with the same separator. The join is now `/`, which cannot collide because `/` is rejected inside a component, and it matches the streak keys (`claims/redrive/<taskid>/<phase>/<n>`) that were already slash-separated. ⚠️ **This is a wire-format change and must be deployed in lockstep with `vault-api`, which reproduces this derivation rather than deriving its own** — a period where one side writes `claims/repo/a/b` and the other reads `claims/repo/a-b` is a period where the lock excludes nothing. In-flight claims carry a 5-minute lease, so a rolling deploy orphans each one for at most one lease and the next acquire takes it over rather than refusing: vault-api's `acquireToken` reads the existing ref and, when the lease has expired, returns **that ref's own SHA** as the compare-and-swap token with no live holder, so the acquire succeeds instead of answering `409 claim_held`.
 
