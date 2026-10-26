@@ -1,6 +1,7 @@
 ---
-status: draft
-created: "2026-10-26"
+status: approved
+approved: "2026-10-26T22:57:24Z"
+branch: dark-factory/view-divergence-detector
 ---
 
 ## Summary
