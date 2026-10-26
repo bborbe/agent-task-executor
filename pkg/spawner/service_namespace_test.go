@@ -289,3 +289,59 @@ func TestServiceUndeployRemovesPreviousNamespace(t *testing.T) {
 		t.Fatalf("expected one delete against agent-sandbox, got %v", deleted)
 	}
 }
+
+// TestServiceReconcileCrossNamespaceOwnerRef pins the rule that a cross-namespace
+// StatefulSet carries no ownerRef. A namespaced owner that does not exist in the
+// dependent's namespace is treated as absent, and Kubernetes then garbage-collects
+// the dependent — so stamping the Config as owner of a workload in another
+// namespace would make the moved agent delete itself. The label replaces it, and
+// the sweep uses the label to recognise what it may remove.
+func TestServiceReconcileCrossNamespaceOwnerRef(t *testing.T) {
+	ctx := context.Background()
+
+	t.Run("cross-namespace carries no ownerRef but is labelled", func(t *testing.T) {
+		config := serviceNamespaceConfig("identity", "dev", "agent-sandbox")
+		client, loop, _ := newServiceNamespaceLoop(t, "dev", []agentv1.Config{config})
+
+		if err := loop.ReconcileOnce(ctx); err != nil {
+			t.Fatalf("ReconcileOnce failed: %v", err)
+		}
+		created, err := client.AppsV1().StatefulSets("agent-sandbox").
+			Get(ctx, "identity", metav1.GetOptions{})
+		if err != nil {
+			t.Fatalf("get created statefulset: %v", err)
+		}
+		if len(created.OwnerReferences) != 0 {
+			t.Fatalf(
+				"cross-namespace statefulset must carry no ownerRef, got %v",
+				created.OwnerReferences,
+			)
+		}
+		if got := created.Labels["agent.benjamin-borbe.de/config-name"]; got != "identity" {
+			t.Fatalf("expected config-name label identity, got %q", got)
+		}
+	})
+
+	t.Run("same namespace keeps the Config ownerRef", func(t *testing.T) {
+		config := serviceNamespaceConfig("identity", "dev", "")
+		client, loop, _ := newServiceNamespaceLoop(t, "dev", []agentv1.Config{config})
+
+		if err := loop.ReconcileOnce(ctx); err != nil {
+			t.Fatalf("ReconcileOnce failed: %v", err)
+		}
+		created, err := client.AppsV1().StatefulSets("dev").
+			Get(ctx, "identity", metav1.GetOptions{})
+		if err != nil {
+			t.Fatalf("get created statefulset: %v", err)
+		}
+		if len(created.OwnerReferences) != 1 {
+			t.Fatalf(
+				"same-namespace statefulset must keep its ownerRef, got %v",
+				created.OwnerReferences,
+			)
+		}
+		if created.OwnerReferences[0].Kind != "Config" {
+			t.Fatalf("expected ownerRef kind Config, got %q", created.OwnerReferences[0].Kind)
+		}
+	})
+}

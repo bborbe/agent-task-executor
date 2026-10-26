@@ -44,6 +44,12 @@ const serviceStorageSize = "1Gi"
 // stays the single source of truth.
 const agentTypeEnvKey = "AGENT_TYPE"
 
+// serviceConfigLabelKey marks a StatefulSet as this executor's for the named
+// Config, for the case a cross-namespace ownerRef cannot cover: a namespaced
+// owner that does not exist in the dependent's namespace is treated as absent,
+// and Kubernetes then garbage-collects the dependent.
+const serviceConfigLabelKey = "agent.benjamin-borbe.de/config-name"
+
 // serviceReadinessPortName, serviceReadinessPort and serviceReadinessPath are the
 // contract between this reconciler and the service agent's own readiness endpoint:
 // bborbe/agent-pi defaults LISTEN to :9090 and serves /readiness there.
@@ -201,7 +207,7 @@ func (r *serviceReconciler) undeployInNamespace(
 		}
 		return errors.Wrapf(ctx, err, "get statefulset %s", config.Name)
 	}
-	if !ownedByConfig(existing) {
+	if !ownedByConfig(existing, config.Name) {
 		// Someone else's workload, sharing this Config's name. Leave it alone and
 		// say so — reporting it as a removal is how a no-op becomes a false alarm.
 		glog.V(2).
@@ -244,7 +250,7 @@ func (r *serviceReconciler) removePreviousNamespaceCopies(
 		if existing.Namespace == resolvedNamespace.String() {
 			continue
 		}
-		if !ownedByConfig(existing) {
+		if !ownedByConfig(existing, config.Name) {
 			continue
 		}
 		previousNamespace := k8s.Namespace(existing.Namespace)
@@ -265,13 +271,19 @@ func (r *serviceReconciler) removePreviousNamespaceCopies(
 	}
 }
 
-// ownedByConfig reports whether a StatefulSet was created by this executor for a
-// Config. buildStatefulSet sets the Config as the controller owner, so that
-// ownerRef is the executor's own mark: a StatefulSet without it belongs to
+// ownedByConfig reports whether a StatefulSet was created by this executor for
+// the named Config. Two marks are accepted because only one of them can exist in
+// every case: the controller ownerRef where the Config and the workload share a
+// namespace, and the label everywhere else. A StatefulSet with neither belongs to
 // another chart in the namespace that happens to use the same name.
-func ownedByConfig(statefulSet *appsv1.StatefulSet) bool {
+func ownedByConfig(statefulSet *appsv1.StatefulSet, configName string) bool {
+	if statefulSet.Labels[serviceConfigLabelKey] == configName {
+		return true
+	}
 	for _, owner := range statefulSet.OwnerReferences {
-		if owner.Kind == "Config" && owner.APIVersion == agentv1.SchemeGroupVersion.String() {
+		if owner.Kind == "Config" &&
+			owner.APIVersion == agentv1.SchemeGroupVersion.String() &&
+			owner.Name == configName {
 			return true
 		}
 	}
@@ -328,6 +340,13 @@ func (r *serviceReconciler) buildStatefulSet(
 		return nil, errors.Wrapf(ctx, err, "build statefulset for config %s", config.Name)
 	}
 
+	// The builder's AddLabel targets the pod template, so the marker the sweep
+	// reads must be set on the StatefulSet's own metadata.
+	if statefulSet.Labels == nil {
+		statefulSet.Labels = map[string]string{}
+	}
+	statefulSet.Labels[serviceConfigLabelKey] = config.Name
+
 	// An empty StorageClassName must become nil, not "".
 	//
 	// The builder always emits a StorageClassName pointer — hardcoding "standard"
@@ -353,8 +372,16 @@ func (r *serviceReconciler) buildStatefulSet(
 
 	// The Config owns the workload: deleting the CR garbage-collects the
 	// StatefulSet, which is SC4's "CR delete → cleanup" half.
-	statefulSet.OwnerReferences = []metav1.OwnerReference{
-		*metav1.NewControllerRef(&config, agentv1.SchemeGroupVersion.WithKind("Config")),
+	//
+	// Only when the two share a namespace. A namespaced owner that does not exist
+	// in the dependent's namespace is treated as absent, and the garbage collector
+	// then deletes the dependent — so stamping this reference onto a StatefulSet in
+	// another namespace would make the moved workload delete itself. Cross-namespace
+	// copies carry serviceConfigLabelKey instead and are collected by the sweep.
+	if statefulSet.Namespace == r.namespace.String() {
+		statefulSet.OwnerReferences = []metav1.OwnerReference{
+			*metav1.NewControllerRef(&config, agentv1.SchemeGroupVersion.WithKind("Config")),
+		}
 	}
 
 	// A StatefulSet's volumeClaimTemplates are RETAINED by default, so without
