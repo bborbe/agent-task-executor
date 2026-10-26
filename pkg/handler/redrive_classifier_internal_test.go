@@ -22,6 +22,7 @@ import (
 
 	pkg "github.com/bborbe/agent-task-executor/pkg"
 	"github.com/bborbe/agent-task-executor/pkg/claim"
+	"github.com/bborbe/agent-task-executor/pkg/claim/claimtest"
 )
 
 // captureInternalStderr runs fn with glog's stderr redirected into a pipe and
@@ -124,6 +125,9 @@ func newDecisionHandler(
 		DefaultReconcileInterval,
 		pkg.ClaimModeShadow,
 		func() claim.ClaimRefClient { return client },
+		WithClaimClientFactory(func() claim.ClaimClient {
+			return claimtest.NewClient(client, libtime.NewCurrentDateTime().Now)
+		}),
 		WithClaimJobControl(noopJobControl{}),
 	)
 	h, ok := handler.(*taskEventHandler)

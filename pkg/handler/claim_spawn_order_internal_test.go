@@ -19,6 +19,7 @@ import (
 
 	pkg "github.com/bborbe/agent-task-executor/pkg"
 	"github.com/bborbe/agent-task-executor/pkg/claim"
+	"github.com/bborbe/agent-task-executor/pkg/claim/claimtest"
 )
 
 // stubJobSpawner satisfies spawner.JobSpawner without importing the mocks
@@ -158,6 +159,9 @@ func TestSpawnMarksPendingBeforeTakingTheClaim(t *testing.T) {
 		DefaultReconcileInterval,
 		pkg.ClaimModeShadow,
 		func() claim.ClaimRefClient { return client },
+		WithClaimClientFactory(func() claim.ClaimClient {
+			return claimtest.NewClient(client, libtime.NewCurrentDateTime().Now)
+		}),
 		WithClaimJobControl(noopJobControl{}),
 	)
 	h, ok := handler.(*taskEventHandler)

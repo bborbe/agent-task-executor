@@ -55,7 +55,7 @@ var _ = Describe("LeaseManager jobless claim release", func() {
 
 		held := mgr.HeldClaims()
 		Expect(held).To(HaveLen(1))
-		sha := held[0].Sha
+		sha := held[0].LeaseToken
 
 		tickAt(mgr, clock, leaseTestT0.Add(370*libtime.Second))
 		deletes := requestsMatching(fake.Requests(), http.MethodDelete, key)

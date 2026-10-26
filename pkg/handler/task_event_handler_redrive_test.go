@@ -25,6 +25,7 @@ import (
 	"github.com/bborbe/agent-task-executor/mocks"
 	pkg "github.com/bborbe/agent-task-executor/pkg"
 	"github.com/bborbe/agent-task-executor/pkg/claim"
+	"github.com/bborbe/agent-task-executor/pkg/claim/claimtest"
 	"github.com/bborbe/agent-task-executor/pkg/handler"
 	"github.com/bborbe/agent-task-executor/pkg/metrics"
 )
@@ -193,6 +194,9 @@ func newRedriveHarness(mode pkg.ClaimMode, client *mocks.FakeClaimRefClient) *cl
 			return client
 		},
 		handler.WithClaimJobControl(noopClaimJobControl{}),
+		handler.WithClaimClientFactory(func() claim.ClaimClient {
+			return claimtest.NewClient(client, libtime.NewCurrentDateTime().Now)
+		}),
 	)
 	return h
 }

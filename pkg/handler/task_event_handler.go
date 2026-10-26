@@ -304,6 +304,10 @@ type taskEventHandler struct {
 	reconcileInterval     time.Duration
 	claimMode             pkg.ClaimMode
 	claimRefClientFactory pkg.ClaimRefClientFactory
+	// claimClientFactory builds the typed vault-api claim client. The lease
+	// manager reaches every claim through it, so a claim-taking mode without one
+	// fails at lease-manager construction rather than holding nothing.
+	claimClientFactory pkg.ClaimClientFactory
 	// claimJobControl lets the lease manager's fence and restart recovery act on
 	// a Job. Nil falls back to the loud unmanaged control, so a mode that takes a
 	// claim cannot silently run without it.

@@ -20,6 +20,7 @@ import (
 
 	pkg "github.com/bborbe/agent-task-executor/pkg"
 	"github.com/bborbe/agent-task-executor/pkg/claim"
+	"github.com/bborbe/agent-task-executor/pkg/claim/claimtest"
 )
 
 // noopClaimRefClient satisfies claim.ClaimRefClient for construction tests. It
@@ -47,6 +48,9 @@ func TestLeaseManagerRefusesClaimModeOff(t *testing.T) {
 			panic("factory must not be called in claim mode off")
 		},
 		claimJobControl: noopJobControl{},
+		claimClientFactory: func() claim.ClaimClient {
+			return claimtest.NewClient(noopClaimRefClient{}, libtime.NewCurrentDateTime().Now)
+		},
 		currentDateTime: libtime.NewCurrentDateTime(),
 	}
 	manager, err := h.leaseManager(ctx)
@@ -72,6 +76,9 @@ func TestLeaseManagerRefusesUnparsedClaimMode(t *testing.T) {
 			panic("factory must not be called for an unparsed claim mode")
 		},
 		claimJobControl: noopJobControl{},
+		claimClientFactory: func() claim.ClaimClient {
+			return claimtest.NewClient(noopClaimRefClient{}, libtime.NewCurrentDateTime().Now)
+		},
 		currentDateTime: libtime.NewCurrentDateTime(),
 	}
 	manager, err := h.leaseManager(ctx)
@@ -94,6 +101,9 @@ func TestLeaseManagerConstructsOnce(t *testing.T) {
 			return noopClaimRefClient{}
 		},
 		claimJobControl: noopJobControl{},
+		claimClientFactory: func() claim.ClaimClient {
+			return claimtest.NewClient(noopClaimRefClient{}, libtime.NewCurrentDateTime().Now)
+		},
 		currentDateTime: libtime.NewCurrentDateTime(),
 	}
 	first, err := h.leaseManager(ctx)
@@ -127,6 +137,9 @@ func TestLeaseManagerRejectsNilRefClient(t *testing.T) {
 			return nil
 		},
 		claimJobControl: noopJobControl{},
+		claimClientFactory: func() claim.ClaimClient {
+			return claimtest.NewClient(noopClaimRefClient{}, libtime.NewCurrentDateTime().Now)
+		},
 		currentDateTime: libtime.NewCurrentDateTime(),
 	}
 	manager, err := h.leaseManager(ctx)
@@ -150,6 +163,9 @@ func TestLeaseManagerRejectsEmptyCluster(t *testing.T) {
 			return noopClaimRefClient{}
 		},
 		claimJobControl: noopJobControl{},
+		claimClientFactory: func() claim.ClaimClient {
+			return claimtest.NewClient(noopClaimRefClient{}, libtime.NewCurrentDateTime().Now)
+		},
 		currentDateTime: libtime.NewCurrentDateTime(),
 	}
 	_, err := h.leaseManager(ctx)
@@ -171,6 +187,9 @@ func TestLeaseManagerRefusesNilJobControl(t *testing.T) {
 		cluster:   "self",
 		claimRefClientFactory: func() claim.ClaimRefClient {
 			return noopClaimRefClient{}
+		},
+		claimClientFactory: func() claim.ClaimClient {
+			return claimtest.NewClient(noopClaimRefClient{}, libtime.NewCurrentDateTime().Now)
 		},
 		currentDateTime: libtime.NewCurrentDateTime(),
 	}
@@ -211,6 +230,9 @@ func TestRedriveStreakStoreSharesLeaseManagerClient(t *testing.T) {
 			return client
 		},
 		claimJobControl: noopJobControl{},
+		claimClientFactory: func() claim.ClaimClient {
+			return claimtest.NewClient(client, libtime.NewCurrentDateTime().Now)
+		},
 		currentDateTime: libtime.NewCurrentDateTime(),
 	}
 
@@ -249,7 +271,7 @@ func TestRedriveStreakStoreSharesLeaseManagerClient(t *testing.T) {
 	if _, err := manager.Claim(ctx, "claims/task/tid-ac10", "tid-ac10"); err != nil {
 		t.Fatalf("unexpected claim error: %v", err)
 	}
-	if len(client.listCalls) != 1 {
+	if len(client.listCalls) != 3 {
 		t.Fatalf("expected one list call on the shared client, got %d", len(client.listCalls))
 	}
 	if len(client.putCalls) != 1 {

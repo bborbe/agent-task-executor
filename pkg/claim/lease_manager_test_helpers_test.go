@@ -16,6 +16,7 @@ import (
 	"github.com/prometheus/client_golang/prometheus/testutil"
 
 	"github.com/bborbe/agent-task-executor/pkg/claim"
+	"github.com/bborbe/agent-task-executor/pkg/claim/claimtest"
 	"github.com/bborbe/agent-task-executor/pkg/metrics"
 )
 
@@ -114,7 +115,11 @@ func newTestManager(
 	job claim.JobControl,
 	clock libtime.CurrentDateTimeGetter,
 ) claim.LeaseManager {
-	mgr, err := claim.NewLeaseManager(cluster, client, job, clock, libtime.NewWaiterDuration())
+	mgr, err := claim.NewLeaseManager(
+		cluster,
+		claimtest.NewClient(client, clock.Now),
+		job,
+		clock, libtime.NewWaiterDuration())
 	Expect(err).NotTo(HaveOccurred())
 	return mgr
 }

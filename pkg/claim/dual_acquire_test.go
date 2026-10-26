@@ -18,6 +18,7 @@ import (
 	. "github.com/onsi/gomega"
 
 	"github.com/bborbe/agent-task-executor/pkg/claim"
+	"github.com/bborbe/agent-task-executor/pkg/claim/claimtest"
 )
 
 // dualRepoKey and dualPRKey are the two refs of one pr-review claim.
@@ -36,7 +37,7 @@ func newDualManager(
 ) claim.LeaseManager {
 	mgr, err := claim.NewLeaseManager(
 		cluster,
-		claim.NewClaimRefClient(fake.URL(), "", ""),
+		claimtest.NewClient(claim.NewClaimRefClient(fake.URL(), "", ""), clock.Now),
 		job,
 		clock,
 		libtime.NewWaiterDuration(),

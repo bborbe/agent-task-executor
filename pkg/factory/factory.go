@@ -179,6 +179,17 @@ func CreateClaimRefClientFactory(
 	}
 }
 
+// CreateClaimClientFactory returns the constructor for the typed vault-api
+// claim client. The initiator is the executor's own identity, so vault-api's
+// auth-failure logs name this component.
+func CreateClaimClientFactory(
+	baseURL, gatewaySecret string,
+) pkg.ClaimClientFactory {
+	return func() claim.ClaimClient {
+		return claim.NewVaultAPIClaimClient(baseURL, gatewaySecret, "agent-task-executor")
+	}
+}
+
 // CreateConsumer wires together all components and returns a Kafka Consumer that
 // reads task events and spawns K8s Jobs for qualifying tasks, along with the
 // TaskEventHandler so callers can wire RunDeferredRespawnLoop.
@@ -209,6 +220,7 @@ func CreateConsumer(
 	reconcileInterval time.Duration,
 	claimMode pkg.ClaimMode,
 	claimRefClientFactory pkg.ClaimRefClientFactory,
+	claimClientFactory pkg.ClaimClientFactory,
 ) (libkafka.Consumer, handler.ClaimLifecycleEventHandler) {
 	jobSpawner := spawner.NewJobSpawner(
 		kubeClient,
@@ -239,10 +251,9 @@ func CreateConsumer(
 		reconcileInterval,
 		claimMode,
 		claimRefClientFactory,
+		handler.WithClaimClientFactory(claimClientFactory),
 		handler.WithVaultAliases(vaultAliases),
-		handler.WithPodQuotaLimiter(
-			spawner.NewPodQuotaLimiter(kubeClient, currentDateTimeGetter),
-		),
+		handler.WithPodQuotaLimiter(spawner.NewPodQuotaLimiter(kubeClient, currentDateTimeGetter)),
 		handler.WithClaimJobControl(
 			handler.NewKubeJobControl(kubeClient, namespace, resolver, view),
 		),

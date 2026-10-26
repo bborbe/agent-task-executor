@@ -88,9 +88,9 @@ var _ = Describe("LeaseManager restart recovery", func() {
 		held := mgr.HeldClaims()
 		Expect(held).To(HaveLen(2))
 		Expect(held[0].Key).To(Equal("claims/task/a"))
-		Expect(held[0].Sha).To(Equal("SA"))
+		Expect(held[0].LeaseToken).To(Equal("SA"))
 		Expect(held[1].Key).To(Equal("claims/task/e"))
-		Expect(held[1].Sha).To(Equal("SE"))
+		Expect(held[1].LeaseToken).To(Equal("SE"))
 		expectClaimDelta(before, snapshotClaims(), map[string]float64{
 			"adopted":  1,
 			"released": 1,

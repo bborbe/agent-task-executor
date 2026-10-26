@@ -114,6 +114,68 @@ func DeriveClaimKeysWithBody(
 	return primary, "", true, err
 }
 
+// TargetFromKey parses a claim key back into the typed target it addresses. It
+// is the inverse of DeriveClaimKey, and mirrors vault-api's claimScopeFromKey
+// exactly — a shape this side accepts and the server does not is a claim the
+// executor renews into a 404, and the reverse is a claim it can never re-adopt
+// after a restart.
+//
+// It exists because a held claim is addressed two ways: by the target a caller
+// derives when acquiring, and by the key a listing returns on recovery. Without
+// the inverse, recovery would have to re-derive a target from a task's body,
+// which is the caller's job and not something a listed key can supply.
+//
+// A key that is not one of the three claim shapes reports false. The redrive
+// streak keys (claims/redrive/<taskid>/<phase>/<n>) land here: they share the
+// prefix but are counters, never acquired or released, so answering them as
+// claims would invite a caller to renew something that is not a lock.
+func TargetFromKey(key string) (ClaimTarget, bool) {
+	switch {
+	case strings.HasPrefix(key, "claims/task/"):
+		id := strings.TrimPrefix(key, "claims/task/")
+		if id == "" {
+			return ClaimTarget{}, false
+		}
+		return NewTaskClaim(id), true
+	case strings.HasPrefix(key, "claims/repo/"):
+		parts := strings.Split(strings.TrimPrefix(key, "claims/repo/"), "/")
+		if len(parts) != 2 || parts[0] == "" || parts[1] == "" {
+			return ClaimTarget{}, false
+		}
+		return NewRepoClaim(parts[0], parts[1]), true
+	case strings.HasPrefix(key, "claims/pr/"):
+		parts := strings.Split(strings.TrimPrefix(key, "claims/pr/"), "/")
+		if len(parts) != 3 || parts[0] == "" || parts[1] == "" || parts[2] == "" {
+			return ClaimTarget{}, false
+		}
+		return NewPRClaim(parts[0], parts[1], parts[2]), true
+	}
+	return ClaimTarget{}, false
+}
+
+// KeyFor returns the claim key a target addresses, or false when the target is
+// not addressable. It is the forward direction of TargetFromKey and produces
+// exactly the shapes the server parses back.
+func KeyFor(target ClaimTarget) (string, bool) {
+	if target.isAmbiguous() {
+		return "", false
+	}
+	if target.TaskID != "" {
+		return "claims/task/" + target.TaskID, true
+	}
+	if target.isPR() &&
+		(target.Owner == "" || target.Repo == "" || !validPRNumber(target.Number)) {
+		return "", false
+	}
+	if target.Owner != "" && target.Repo != "" {
+		if target.isPR() {
+			return "claims/pr/" + target.Owner + "/" + target.Repo + "/" + target.Number, true
+		}
+		return "claims/repo/" + target.Owner + "/" + target.Repo, true
+	}
+	return "", false
+}
+
 // pullRequestNumberFromBody returns the first standalone pull-request URL in
 // body that names owner/repo, with the number in canonical decimal form.
 func pullRequestNumberFromBody(owner, repo, body string) (string, bool) {
