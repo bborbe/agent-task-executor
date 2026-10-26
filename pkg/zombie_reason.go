@@ -4,6 +4,8 @@
 
 package pkg
 
+import "strings"
+
 // ZombieReason is the closed set of machine-readable reason strings emitted in
 // the ## Failure body section. Operators grep on these values to triage.
 // OOM kills use the dedicated pod_oom_killed value so operators can grep for
@@ -13,6 +15,9 @@ package pkg
 // on-disk task body contract.
 type ZombieReason string
 
+// Every new ZombieReason must be added to this block AND to the
+// ParseZombieReason table in zombie_reason_test.go. The per-value String()
+// specs do not cover the parser.
 const (
 	ZombieReasonImagePullBackOff  ZombieReason = "image_pull_backoff"
 	ZombieReasonPodEvicted        ZombieReason = "pod_evicted"
@@ -23,6 +28,43 @@ const (
 	ZombieReasonTypeMismatch      ZombieReason = "type_mismatch"
 	ZombieReasonPodOOMKilled      ZombieReason = "pod_oom_killed"
 )
+
+// zombieReasonValues is the closed vocabulary as a slice, so ParseZombieReason
+// can recognise every value. Every new ZombieReason constant must be added here
+// AND to the ParseZombieReason table in zombie_reason_test.go — the per-value
+// String() specs do not cover the parser.
+var zombieReasonValues = []ZombieReason{
+	ZombieReasonImagePullBackOff,
+	ZombieReasonPodEvicted,
+	ZombieReasonDeadlineExceeded,
+	ZombieReasonPodNotScheduled,
+	ZombieReasonPodCrashNoStdout,
+	ZombieReasonExecutorWatchLost,
+	ZombieReasonTypeMismatch,
+	ZombieReasonPodOOMKilled,
+}
+
+// ParseZombieReason returns the vocabulary value s names, and false when it
+// names none. It matches up to the first space, so the formatted form produced
+// by backoffFailureReason — "pod_oom_killed (OOMKilled/137)" — parses to
+// ZombieReasonPodOOMKilled. Anything else, including the empty string, returns
+// false.
+//
+// The formatted string is never persisted: its spaces and parentheses are not
+// valid claim key segments. Callers store the parsed value, or "unknown" when
+// this returns false.
+func ParseZombieReason(s string) (ZombieReason, bool) {
+	value := s
+	if idx := strings.IndexByte(value, ' '); idx >= 0 {
+		value = value[:idx]
+	}
+	for _, reason := range zombieReasonValues {
+		if reason.String() == value {
+			return reason, true
+		}
+	}
+	return "", false
+}
 
 // String returns the reason as a string (for use with PublishFailure).
 func (r ZombieReason) String() string { return string(r) }

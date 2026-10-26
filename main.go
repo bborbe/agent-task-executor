@@ -300,15 +300,15 @@ func (a *application) Run(ctx context.Context, sentryClient libsentry.Client) er
 	}
 	defer syncProducer.Close()
 
-	resultPublisher := pkg.NewResultPublisher(syncProducer, a.TopicPrefix, currentDateTimeGetter)
-	taskStore := pkg.NewTaskStore()
-
 	// The git-rest gateway secret is read by NAME from K8s (never logged, never
 	// in env) so the claim ref client can authenticate to git-rest without secret
 	// material entering the Deployment manifest (spec 005 Security). It is read
 	// only in the modes that take a claim: off builds no client, so it must not
 	// read a secret it will never use.
-	var claimRefClientFactory handler.ClaimRefClientFactory
+	//
+	// Declared before the publisher because the publisher records re-drive
+	// failure reasons through a lazily-built reason store over this factory.
+	var claimRefClientFactory pkg.ClaimRefClientFactory
 	if claimMode.TakesClaim() {
 		gitRestGatewaySecretValue, err := pkg.ReadGitRestGatewaySecret(
 			ctx,
@@ -324,6 +324,14 @@ func (a *application) Run(ctx context.Context, sentryClient libsentry.Client) er
 			gitRestGatewaySecretValue,
 		)
 	}
+
+	resultPublisher := pkg.NewResultPublisher(
+		syncProducer,
+		a.TopicPrefix,
+		currentDateTimeGetter,
+		claimRefClientFactory,
+	)
+	taskStore := pkg.NewTaskStore()
 
 	healthcheckRunner := factory.CreateHealthcheckRunner(
 		eventHandlerConfig,

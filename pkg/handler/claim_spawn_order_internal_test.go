@@ -112,6 +112,12 @@ func (stubResultPublisher) PublishParkLostClaim(context.Context, lib.Task) error
 	return nil
 }
 
+func (stubResultPublisher) PublishAbort(
+	context.Context, lib.Task, string, int,
+) error {
+	return nil
+}
+
 func (stubResultPublisher) PublishRaw(
 	context.Context, base.CommandOperation, interface{},
 ) error {

@@ -215,7 +215,7 @@ func NewTaskEventHandler(
 	reconcilePassTimeout time.Duration,
 	reconcileInterval time.Duration,
 	claimMode pkg.ClaimMode,
-	claimRefClientFactory ClaimRefClientFactory,
+	claimRefClientFactory pkg.ClaimRefClientFactory,
 	// opts carries optional dependencies so the many test call sites stay
 	// readable. A claim-taking mode without a job control fails loudly at
 	// lease-manager construction.
@@ -282,7 +282,7 @@ type taskEventHandler struct {
 	reconcilePassTimeout  time.Duration
 	reconcileInterval     time.Duration
 	claimMode             pkg.ClaimMode
-	claimRefClientFactory ClaimRefClientFactory
+	claimRefClientFactory pkg.ClaimRefClientFactory
 	// claimJobControl lets the lease manager's fence and restart recovery act on
 	// a Job. Nil falls back to the loud unmanaged control, so a mode that takes a
 	// claim cannot silently run without it.
@@ -308,6 +308,11 @@ type taskEventHandler struct {
 	// built with the lease manager from the same claim-ref client and stays nil
 	// when claim mode takes no claim.
 	redriveStore claim.RedriveStreakStore
+	// redriveReasons is the persisted failure reason of each spawn attempt,
+	// built beside redriveStore from the same client and nil under the same
+	// conditions. The field is named redriveReasons because redriveReasonStore
+	// is the accessor that mirrors redriveStreakStore.
+	redriveReasons claim.RedriveReasonStore
 	// spawnGens counts Jobs created by this executor per assignee, on any path.
 	// A pass cache entry read at an older generation is refetched, so a Job
 	// spawned by the Kafka consumer or the deferred loop mid-pass is never
@@ -1523,17 +1528,6 @@ func (h *taskEventHandler) driveCandidate(
 	ctx context.Context,
 	candidate reconcileCandidate,
 ) reconcileOutcome {
-	// Checked here as well as in spawnIfNeeded so the pass summary can report the
-	// skip as `capped` rather than folding it into `deferred`. Only the capped
-	// branch signals, so the two checks cannot double-count.
-	//
-	// This in-memory pre-check is the fast path that avoids a store read for a
-	// task this process has already counted to the cap. It is not the whole
-	// answer: the spawn funnel below carries its refusal back, so a task capped
-	// solely by the shared store is reported as `capped` too.
-	if h.redriveStreakCappedInMemory(candidate.task) {
-		return reconcileOutcomeCapped
-	}
 	outcome, err := h.spawnIfNeededClaimed(
 		ctx,
 		candidate.task,

@@ -347,6 +347,12 @@ func (s *parkRecordingPublisher) PublishQueueEntry(
 	return nil
 }
 
+func (s *parkRecordingPublisher) PublishAbort(
+	context.Context, lib.Task, string, int,
+) error {
+	return nil
+}
+
 func (s *parkRecordingPublisher) PublishRaw(
 	context.Context, base.CommandOperation, interface{},
 ) error {

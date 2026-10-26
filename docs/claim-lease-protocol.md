@@ -303,6 +303,72 @@ no lease-manager path treats it as one.
   The task type says which kind of work is being stranded; the phase says
   whether the record is stuck at one phase or advanced and re-capped. Example:
   `sum by (task_type, phase) (increase(executor_redrive_capped_total[1h]))`.
+  The `event=redrive_capped` line carries `class=` (`broken`, `transient` or
+  `unknown`) and `reasons=` (the recorded reasons, comma-joined, or `-`) after
+  its existing fields.
+
+### Reason refs
+
+A reason ref records why one spawn attempt failed, next to the streak, so the
+cap can tell a repeated broken signature from a transient failure instead of
+treating every three-times-failed record the same way.
+
+- Key shape: `claims/redrive-reason/<taskid>/<phase>/<reason>/<n>` — **six**
+  segments under `refs/`. `<n>` is one more than the highest existing number at
+  that (task, phase) **across every reason**, so the numbers are chronological
+  and the newest attempt sorts last even when the reason changed. A per-reason
+  counter would restart a new reason at 1 and let a stale reason dominate the
+  classifier's window. An empty reason is stored as `unknown`.
+- `<reason>` is a bare `ZombieReason` value or the literal `unknown`. The
+  formatted `backoffFailureReason` form (`pod_oom_killed (OOMKilled/137)`) is
+  normalised to its vocabulary value before it is written; it is never stored,
+  because its spaces and parentheses are not valid key segments.
+- The refs live in a separate prefix rather than as a sixth segment on the
+  streak ref because the streak prefix and its five-segment parser are frozen:
+  refs written by the deployed build must keep parsing.
+- An older binary is blind to them because they carry the `redrive-streak`
+  cluster sentinel, which its lease-manager recovery skips — not because of the
+  prefix alone.
+- The reason refs always describe the current streak. They are cleared on the
+  task's terminal path and again when a streak's first spawn is recorded, so
+  deleting only the streak refs still un-caps a task once it restarts or moves
+  phase (the carve-out above), and no reason left by an earlier streak can reach
+  the classifier's window.
+
+### The cap's decision
+
+At `maxConsecutiveRedrives` the executor reads the reasons for that (task, phase)
+and classifies the record. The rules are total and are evaluated in the order
+unknown, broken, transient — the first match wins:
+
+- **broken** — at least the streak count of reasons were recorded and the most
+  recent count are all one value from `pod_crash_no_stdout`, `pod_oom_killed`,
+  `type_mismatch`. The record is closed and the spawn refused.
+- **transient** — the most recent count reasons differ between attempts, or any
+  of them is one of `image_pull_backoff`, `deadline_exceeded`, `pod_evicted`,
+  `pod_not_scheduled`, `executor_watch_lost`. The spawn is allowed up to
+  `maxConsecutiveRedrives + 3` (a bounded extension); reaching that bound closes
+  the record and refuses the spawn.
+- **unknown** — no reasons were recorded, fewer reasons were recorded than the
+  streak counts, or every recent reason is the literal `unknown`. The spawn is
+  refused and nothing is closed: closing a record because its history could not
+  be read is not the safe direction.
+
+`type_mismatch` stays in the broken set because the taxonomy puts it there, but
+it cannot in practice reach the store: a type-mismatched task is filtered before
+the spawn and its failure is published by `PublishTypeMismatchFailure`, not
+`PublishFailure`, so its streak never grows.
+
+Closing a record writes `status: aborted`, `aborted_reason`,
+`gate_successor: "none"` and `current_job: ""` — the close-out pair vault-cli
+requires before it will accept `aborted`. The two reasons are
+`capped:broken-signature` and `capped:transient-retries-exhausted`. The write is
+deduped per task and skipped when the task is already `aborted`.
+
+`executor_redrive_aborted_total{reason}` counts records closed this way. Unlike
+`executor_redrive_capped_total` it **is** pre-initialised at 0 for both reasons:
+its label domain is closed at compile time, which is the bounded side of the
+counter-pre-initialization rule. Do not copy the omission from its neighbour.
 
 ## Lost-response recovery
 
