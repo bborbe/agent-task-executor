@@ -39,8 +39,8 @@ const (
 // type_mismatch is in the taxonomy's broken set but cannot in practice reach the
 // store: a type-mismatched task is filtered before the spawn and its failure is
 // published by PublishTypeMismatchFailure, not PublishFailure, so its streak
-// never grows. The classifier still handles it so the sets partition the whole
-// vocabulary.
+// never grows. The classifier still handles it so the broken set is complete
+// against the taxonomy.
 var brokenRedriveReasons = map[string]struct{}{
 	pkg.ZombieReasonPodCrashNoStdout.String(): {},
 	pkg.ZombieReasonPodOOMKilled.String():     {},
@@ -49,6 +49,12 @@ var brokenRedriveReasons = map[string]struct{}{
 
 // transientRedriveReasons are failures that may well succeed on a retry: image
 // pulls back off, deadlines, evictions, scheduling and a lost watch.
+//
+// The classifier does not consult this set. Everything that is not the cap's
+// worth of identical broken signatures is transient, so membership here
+// documents the taxonomy rather than driving a branch — a value outside it is
+// transient too. TestTransientVocabularyIsTransient keeps the set honest by
+// asserting no entry is classified broken.
 var transientRedriveReasons = map[string]struct{}{
 	pkg.ZombieReasonImagePullBackOff.String():  {},
 	pkg.ZombieReasonDeadlineExceeded.String():  {},

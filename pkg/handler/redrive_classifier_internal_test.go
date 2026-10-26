@@ -242,6 +242,15 @@ func TestClassifyRedriveReasonsDriftedStreak(t *testing.T) {
 			want:    redriveClassTransient,
 		},
 		{
+			// The all-unknown guard must survive the drift: a window shorter than the
+			// streak is transient, but a window that is entirely the literal
+			// "unknown" still has no evidence and must stay unknown.
+			name:    "one unknown literal against a streak of four is still unknown",
+			reasons: []string{"unknown"},
+			count:   4,
+			want:    redriveClassUnknown,
+		},
+		{
 			// The regression: a streak one ahead of the reason set is normal and
 			// must still close a broken record, not strand it as unknown for ever.
 			name: "three broken reasons against a streak of four are broken",
@@ -279,11 +288,12 @@ func TestClassifyRedriveReasonsDriftedStreak(t *testing.T) {
 	}
 }
 
-// TestTransientVocabularyIsTransient pins the closed transient vocabulary. The
-// classifier no longer branches on this set — everything that is not the cap's
-// worth of identical broken signatures is transient — so this test is what keeps
-// the vocabulary honest: a value the set names must classify transient, never a
-// class that refuses the spawn without closing the record.
+// TestTransientVocabularyIsTransient pins the one invariant that still matters
+// about the transient set now that the classifier no longer branches on it:
+// nothing it names may be classified broken, i.e. the two vocabularies stay
+// disjoint. Since transient is the default return, a value added to both maps is
+// the only way this can fail — and that is exactly the mistake worth catching,
+// because it would silently turn a retry into a close.
 func TestTransientVocabularyIsTransient(t *testing.T) {
 	for reason := range transientRedriveReasons {
 		if got := classifyRedriveReasons([]string{reason, reason, reason}, 3); got != redriveClassTransient {
