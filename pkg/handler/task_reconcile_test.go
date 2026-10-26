@@ -1005,6 +1005,15 @@ var _ = Describe("TaskEventHandler reconcile loop", func() {
 		// escalation, is handed to the resolver only as a tie-break among the
 		// Configs that already declare the task_type, never as the sole routing
 		// source; the resolver decides, and the restore writes its Config's assignee.
+		// The name reaches the lookup at all only because its own Config declares
+		// the record's type — inTypePreviousAssignee drops it otherwise.
+		fakeResolver.ResolveReturns(
+			pkg.AgentConfiguration{
+				Assignee:  "tie-break-agent",
+				TaskTypes: []string{"github-update-go"},
+			},
+			nil,
+		)
 		fakeResolver.ResolveByTaskTypeReturns(
 			pkg.AgentConfiguration{Assignee: "tie-break-agent", Image: "my-image:latest"},
 			nil,
@@ -1024,9 +1033,69 @@ var _ = Describe("TaskEventHandler reconcile loop", func() {
 		Expect(assignee).To(Equal("tie-break-agent"))
 	})
 
+	It("does not pass previous_assignee when the named agent declares a different type", func() {
+		// The records this fix targets name an agent that claims none of the
+		// record's type: the probe-claude-interactive-* records carry
+		// task_type healthcheck and previous_assignee claude-interactive, whose
+		// Config declares llm. Handing that name to the lookup can only produce
+		// ErrConfigAmbiguous, and on the non-empty arm — which also hides the
+		// designated default, consulted only once preferAssignee is empty.
+		fakeResolver.ResolveReturns(
+			pkg.AgentConfiguration{
+				Assignee:  "claude-interactive",
+				TaskTypes: []string{"llm"},
+			},
+			nil,
+		)
+		fakeResolver.ResolveByTaskTypeReturns(
+			pkg.AgentConfiguration{Assignee: "healthcheck-dev", Image: "my-image:latest"},
+			nil,
+		)
+		task := parkedTask(domain.TaskPhaseExecution, "healthcheck")
+		task.Frontmatter["previous_assignee"] = "claude-interactive"
+		fakeView.SnapshotReturns([]lib.Task{task})
+
+		Expect(h.ReconcileOnce(ctx)).To(Succeed())
+
+		Expect(fakeResolver.ResolveByTaskTypeCallCount()).To(Equal(1))
+		_, resolvedType, preferAssignee := fakeResolver.ResolveByTaskTypeArgsForCall(0)
+		Expect(resolvedType).To(Equal("healthcheck"))
+		Expect(preferAssignee).To(Equal(""), "a cross-type previous_assignee must not be passed")
+		Expect(fakeResultPublisher.PublishRestoreAssigneeCallCount()).To(Equal(1))
+		_, _, assignee := fakeResultPublisher.PublishRestoreAssigneeArgsForCall(0)
+		Expect(assignee).To(Equal("healthcheck-dev"))
+	})
+
+	It("does not pass previous_assignee when no Config in this stage names it", func() {
+		// Two of the eight records name an agent with no Config in their own stage,
+		// so there is no type set to check the name against and it cannot tie-break.
+		fakeResolver.ResolveReturns(pkg.AgentConfiguration{}, pkg.ErrConfigNotFound)
+		fakeResolver.ResolveByTaskTypeReturns(
+			pkg.AgentConfiguration{Assignee: "healthcheck-dev", Image: "my-image:latest"},
+			nil,
+		)
+		task := parkedTask(domain.TaskPhaseExecution, "healthcheck")
+		task.Frontmatter["previous_assignee"] = "claude-interactive"
+		fakeView.SnapshotReturns([]lib.Task{task})
+
+		Expect(h.ReconcileOnce(ctx)).To(Succeed())
+
+		Expect(fakeResolver.ResolveByTaskTypeCallCount()).To(Equal(1))
+		_, _, preferAssignee := fakeResolver.ResolveByTaskTypeArgsForCall(0)
+		Expect(preferAssignee).To(Equal(""))
+		Expect(fakeResultPublisher.PublishRestoreAssigneeCallCount()).To(Equal(1))
+	})
+
 	It(
 		"still skips a parked task whose task_type matches no Config despite previous_assignee",
 		func() {
+			fakeResolver.ResolveReturns(
+				pkg.AgentConfiguration{
+					Assignee:  "tie-break-agent",
+					TaskTypes: []string{"no-such-type"},
+				},
+				nil,
+			)
 			fakeResolver.ResolveByTaskTypeReturns(pkg.AgentConfiguration{}, pkg.ErrConfigNotFound)
 			task := parkedTask(domain.TaskPhaseExecution, "no-such-type")
 			task.Frontmatter["previous_assignee"] = "tie-break-agent"

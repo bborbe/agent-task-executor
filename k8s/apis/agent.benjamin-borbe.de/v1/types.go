@@ -115,6 +115,15 @@ type ConfigSpec struct {
 	// TaskTypes is the list of task_type values in task frontmatter that route to this agent.
 	// Optional when taskType is set; at least one of taskType or taskTypes must be non-empty.
 	TaskTypes []string `json:"taskTypes,omitempty"`
+	// DefaultForTaskTypes names the task_type values this Config declares itself
+	// the designated default for. It is read only when ResolveByTaskType finds
+	// several Configs claiming the task_type and neither the assignee lookup nor
+	// previous_assignee narrows them to one: the single Config declaring itself
+	// default is then returned instead of refusing with ErrConfigAmbiguous. It is
+	// inert for a type the Config does not also claim in taskType/taskTypes, and
+	// exactly one Config per task_type may declare it — zero or several leave the
+	// refusal unchanged, so this is an explicit input, never a guess.
+	DefaultForTaskTypes []string `json:"defaultForTaskTypes,omitempty"`
 	// Resources holds optional resource requests for the agent container.
 	Resources *AgentResources `json:"resources,omitempty"`
 	// Env holds per-agent environment variables.
@@ -270,6 +279,7 @@ func (s ConfigSpec) Equal(o ConfigSpec) bool {
 		s.Type == o.Type &&
 		s.TaskType == o.TaskType &&
 		reflect.DeepEqual(s.TaskTypes, o.TaskTypes) &&
+		reflect.DeepEqual(s.DefaultForTaskTypes, o.DefaultForTaskTypes) &&
 		s.SecretName == o.SecretName &&
 		s.VolumeClaim == o.VolumeClaim &&
 		s.VolumeMountPath == o.VolumeMountPath &&
@@ -331,6 +341,9 @@ func (s ConfigSpec) Validate(ctx context.Context) error {
 		return err
 	}
 	if err := validateTaskTypesList(ctx, s.TaskTypes); err != nil {
+		return err
+	}
+	if err := validateTaskTypesList(ctx, s.DefaultForTaskTypes); err != nil {
 		return err
 	}
 	if err := validateZombieSweeperInterval(ctx, s.ZombieSweeperIntervalSeconds); err != nil {

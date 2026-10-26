@@ -438,6 +438,75 @@ var _ = Describe("ConfigResolver", func() {
 			})
 		})
 
+		Describe("designated default", func() {
+			// defaulted builds the same two-Config shared-type population as
+			// sharedTypeConfigs; designate marks one of them as the type's
+			// designated default. Image is per-config so a test can tell the two
+			// apart even when their assignees would be read from the same field.
+			defaulted := func(assignees ...string) []agentv1.Config {
+				items := make([]agentv1.Config, 0, len(assignees))
+				for _, assignee := range assignees {
+					items = append(items, agentv1.Config{
+						Spec: agentv1.ConfigSpec{
+							Assignee:  assignee,
+							Image:     "img",
+							TaskTypes: []string{"shared-type"},
+						},
+					})
+				}
+				return items
+			}
+			designate := func(items []agentv1.Config, index int) []agentv1.Config {
+				items[index].Spec.DefaultForTaskTypes = []string{"shared-type"}
+				return items
+			}
+
+			It("returns the designated default when preferAssignee names no claimant", func() {
+				provider.items = designate(defaulted("a-personal", "b-personal"), 0)
+				config, err := resolver.ResolveByTaskType(ctx, "shared-type", "c")
+				Expect(err).To(BeNil())
+				Expect(config.Assignee).To(Equal("a-personal"))
+				Expect(config.Image).To(Equal("img:dev"))
+				Expect(config.DefaultForTaskTypes).To(Equal([]string{"shared-type"}))
+			})
+
+			It("returns the designated default when preferAssignee is empty", func() {
+				provider.items = designate(defaulted("a-personal", "b-personal"), 1)
+				config, err := resolver.ResolveByTaskType(ctx, "shared-type", "")
+				Expect(err).To(BeNil())
+				Expect(config.Assignee).To(Equal("b-personal"))
+			})
+
+			It("stays ambiguous when no Config declares itself default", func() {
+				provider.items = defaulted("a-personal", "b-personal")
+				_, err := resolver.ResolveByTaskType(ctx, "shared-type", "")
+				Expect(err).NotTo(BeNil())
+				Expect(errors.Is(err, pkg.ErrConfigAmbiguous)).To(BeTrue())
+				Expect(err.Error()).To(ContainSubstring("matches 2 configs"))
+				Expect(err.Error()).NotTo(ContainSubstring("designated"))
+			})
+
+			It("stays ambiguous when two Configs declare themselves default", func() {
+				provider.items = designate(designate(defaulted("a-personal", "b-personal"), 0), 1)
+				_, err := resolver.ResolveByTaskType(ctx, "shared-type", "")
+				Expect(err).NotTo(BeNil())
+				Expect(errors.Is(err, pkg.ErrConfigAmbiguous)).To(BeTrue())
+				Expect(err.Error()).To(ContainSubstring("matches 2 configs"))
+			})
+
+			It(
+				"leaves the designated default inert for a type the Config does not declare",
+				func() {
+					items := defaulted("a-personal", "b-personal")
+					items[0].Spec.DefaultForTaskTypes = []string{"other-type"}
+					provider.items = items
+					_, err := resolver.ResolveByTaskType(ctx, "shared-type", "")
+					Expect(err).NotTo(BeNil())
+					Expect(errors.Is(err, pkg.ErrConfigAmbiguous)).To(BeTrue())
+				},
+			)
+		})
+
 		It("never matches an empty taskType", func() {
 			provider.items = []agentv1.Config{
 				{

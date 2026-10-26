@@ -295,6 +295,27 @@ func configMapItemsSchema() apiextensionsv1.JSONSchemaProps {
 	}
 }
 
+// defaultForTaskTypesSchema is the OpenAPI schema for
+// ConfigSpec.defaultForTaskTypes. Extracted from configSpecProperties to keep
+// that function under the funlen limit, mirroring configMapItemsSchema.
+//
+// A Config may declare itself the designated default for a task_type it also
+// claims. The resolver reads it only when the type matches several Configs and
+// neither the assignee nor previous_assignee narrows them to one; zero or
+// several declarations keep the ambiguity refusal.
+func defaultForTaskTypesSchema(maxLength *int64) apiextensionsv1.JSONSchemaProps {
+	return apiextensionsv1.JSONSchemaProps{
+		Type: "array",
+		Items: &apiextensionsv1.JSONSchemaPropsOrArray{
+			Schema: &apiextensionsv1.JSONSchemaProps{
+				Type:      "string",
+				Pattern:   `^[a-z0-9-]+$`,
+				MaxLength: maxLength,
+			},
+		},
+	}
+}
+
 func configSpecProperties() map[string]apiextensionsv1.JSONSchemaProps {
 	minLen := int64(1)
 	maxLen63 := int64(63)
@@ -326,6 +347,7 @@ func configSpecProperties() map[string]apiextensionsv1.JSONSchemaProps {
 				},
 			},
 		},
+		"defaultForTaskTypes": defaultForTaskTypesSchema(&maxLen63),
 		"resources": {
 			Type: "object",
 			Properties: map[string]apiextensionsv1.JSONSchemaProps{
