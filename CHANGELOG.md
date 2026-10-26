@@ -2,7 +2,7 @@
 
 All notable changes to this project will be documented in this file.
 
-## Unreleased
+## v0.43.2
 
 - refactor: **every lease is held through the typed vault-api claim client; git-rest now serves only the redrive counters.** `LeaseManager` spoke git-rest's vocabulary — a ref key, an expected SHA, a prefix listing, an absolute `lease_until` — none of which is a claim. It now acquires, renews, releases and lists through `ClaimClient`, which addresses a *target* (task, repository, or one pull request) with a holder and a TTL and returns a lease token. `targetFromKey`/`KeyFor` are the two halves of the one key format, mirroring vault-api's own inverse, so a claim a listing returns is addressable without re-deriving it from a task body. `Recover` lists by holder instead of enumerating `claims/` and filtering, which is also why the redrive-streak skip and the cluster filter are gone: the server excludes non-claim keys and narrows by holder itself. `ClaimRefClient` stays for `RedriveStreakStore` and `RedriveReasonStore`, whose refs are counters and not leases.
   ⚠️ **`Renew` now carries the holder, and that is a fix, not a rename.** The route writes the holder it is given, so the previous body — holder omitted — would have been refused `400 invalid_holder` on every renew and, had it been accepted, would have erased the holder a recovery listing filters on. A create also reads before it writes: the typed acquire takes over an expired lease by itself, which is right for a takeover and wrong for a create, so the create refuses an existing claim outright and only `Takeover` displaces one, after `TakeoverGrace`. The consequence is one fewer write on the takeover path, and it is what the updated expectations assert.
