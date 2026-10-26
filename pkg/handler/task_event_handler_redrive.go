@@ -245,23 +245,36 @@ func joinRedriveReasons(reasons []string) string {
 // classifyRedriveReasons decides why a streak reached the cap. The rules are
 // evaluated in the order unknown, broken, transient and the first match wins.
 //
-// The order is load-bearing: a short count whose recorded reason is transient
-// matches both the transient rule and the unknown rule, and closing a record on
-// partial evidence is forbidden, so unknown must win.
+// The classifier reads the FAILURES, not the spawns. The streak counts every
+// successful spawn on every path, while a reason is recorded only from
+// PublishFailure, so a spawn that publishes no failure — a reconcile re-drive
+// whose job vanished, for instance — advances the streak without adding a
+// reason. Requiring len(reasons) >= count would therefore strand such a record
+// permanently: the spawn is refused, so it can never earn the missing reason,
+// and nothing is ever closed. The window is the most recent
+// min(count, len(reasons)) reasons instead, and the streak only bounds how far
+// back to look.
 //
-//   - unknown: no reasons at all, fewer reasons than the streak counts, or every
-//     one of the most recent count reasons is the literal "unknown".
-//   - broken: at least count reasons were recorded and the most recent count are
-//     all one value from brokenRedriveReasons.
-//   - transient: the most recent count reasons differ, or any of them is a
-//     transient value.
+//   - unknown: no reasons at all, or every reason in the window is the literal
+//     "unknown" — there is no evidence to act on in either direction.
+//   - broken: the window holds at least maxConsecutiveRedrives reasons and they
+//     are all one value from brokenRedriveReasons. The cap's worth of identical
+//     signatures is what makes a close safe; fewer is partial evidence.
+//   - transient: everything else — differing reasons, a transient value, or a
+//     window shorter than the cap. A retry may help, and the bounded extension
+//     ends the record either way, so no record is left abandoned at the cap.
 //
 // The function is total: every input falls into exactly one class.
 func classifyRedriveReasons(reasons []string, count int) string {
-	if count < 1 || len(reasons) == 0 || len(reasons) < count {
+	if count < 1 || len(reasons) == 0 {
 		return redriveClassUnknown
 	}
-	recent := reasons[len(reasons)-count:]
+	window := count
+	if window > len(reasons) {
+		window = len(reasons)
+	}
+	recent := reasons[len(reasons)-window:]
+
 	allUnknown := true
 	for _, reason := range recent {
 		if reason != claim.RedriveReasonUnknown {
@@ -272,16 +285,13 @@ func classifyRedriveReasons(reasons []string, count int) string {
 	if allUnknown {
 		return redriveClassUnknown
 	}
-	if allSameRedriveReason(recent) {
+	if len(recent) >= maxConsecutiveRedrives && allSameRedriveReason(recent) {
 		if _, broken := brokenRedriveReasons[recent[0]]; broken {
 			return redriveClassBroken
 		}
-		if _, transient := transientRedriveReasons[recent[0]]; transient {
-			return redriveClassTransient
-		}
 	}
-	// Differing reasons, or a value outside the closed vocabulary: a retry may
-	// help, and that is the transient class.
+	// Differing reasons, a transient value, or fewer reasons than the cap: a
+	// retry may help, and the bounded extension ends the record either way.
 	return redriveClassTransient
 }
 

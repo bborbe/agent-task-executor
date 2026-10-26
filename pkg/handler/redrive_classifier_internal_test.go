@@ -198,18 +198,6 @@ func TestClassifyRedriveReasons(t *testing.T) {
 			want:    redriveClassUnknown,
 		},
 		{
-			name:    "one broken reason against a streak of three is unknown, not broken",
-			reasons: []string{"pod_oom_killed"},
-			count:   3,
-			want:    redriveClassUnknown,
-		},
-		{
-			name:    "one transient reason against a streak of three is unknown, not transient",
-			reasons: []string{"deadline_exceeded"},
-			count:   3,
-			want:    redriveClassUnknown,
-		},
-		{
 			name: "only the most recent count reasons are classified",
 			reasons: []string{
 				"pod_oom_killed", "pod_oom_killed", "pod_oom_killed",
@@ -226,6 +214,81 @@ func TestClassifyRedriveReasons(t *testing.T) {
 				t.Fatalf("classify(%v, %d) = %q; want %q", tc.reasons, tc.count, got, tc.want)
 			}
 		})
+	}
+}
+
+// TestClassifyRedriveReasonsDriftedStreak pins the drift rule: the streak counts
+// every successful spawn while a reason is recorded only from PublishFailure, so
+// the streak can legitimately exceed the reason count. The classifier must read
+// the failures it has rather than refuse — a refusal strands the record, because
+// a record that cannot spawn can never earn the missing reason.
+func TestClassifyRedriveReasonsDriftedStreak(t *testing.T) {
+	cases := []struct {
+		name    string
+		reasons []string
+		count   int
+		want    string
+	}{
+		{
+			name:    "one broken reason against a streak of three is transient, not broken",
+			reasons: []string{"pod_oom_killed"},
+			count:   3,
+			want:    redriveClassTransient,
+		},
+		{
+			name:    "one transient reason against a streak of three is transient",
+			reasons: []string{"deadline_exceeded"},
+			count:   3,
+			want:    redriveClassTransient,
+		},
+		{
+			// The regression: a streak one ahead of the reason set is normal and
+			// must still close a broken record, not strand it as unknown for ever.
+			name: "three broken reasons against a streak of four are broken",
+			reasons: []string{
+				"pod_oom_killed", "pod_oom_killed", "pod_oom_killed",
+			},
+			count: 4,
+			want:  redriveClassBroken,
+		},
+		{
+			name:    "two broken reasons against a streak of four are transient, not broken",
+			reasons: []string{"pod_oom_killed", "pod_oom_killed"},
+			count:   4,
+			want:    redriveClassTransient,
+		},
+		{
+			// Observed live on dev 2026-10-26: streak=4 cap=3 with these three
+			// reasons. Differing reasons are transient, so the record earns the
+			// bounded extension instead of being refused and abandoned.
+			name: "the observed mixed set against a streak of four is transient",
+			reasons: []string{
+				"deadline_exceeded", "deadline_exceeded", "pod_crash_no_stdout",
+			},
+			count: 4,
+			want:  redriveClassTransient,
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := classifyRedriveReasons(tc.reasons, tc.count); got != tc.want {
+				t.Fatalf("classify(%v, %d) = %q; want %q", tc.reasons, tc.count, got, tc.want)
+			}
+		})
+	}
+}
+
+// TestTransientVocabularyIsTransient pins the closed transient vocabulary. The
+// classifier no longer branches on this set — everything that is not the cap's
+// worth of identical broken signatures is transient — so this test is what keeps
+// the vocabulary honest: a value the set names must classify transient, never a
+// class that refuses the spawn without closing the record.
+func TestTransientVocabularyIsTransient(t *testing.T) {
+	for reason := range transientRedriveReasons {
+		if got := classifyRedriveReasons([]string{reason, reason, reason}, 3); got != redriveClassTransient {
+			t.Errorf("classify(%q x3, 3) = %q; want %q", reason, got, redriveClassTransient)
+		}
 	}
 }
 
@@ -330,23 +393,33 @@ func TestUnknownRedriveRefusesAndClosesNothing(t *testing.T) {
 	}
 }
 
-// TestPartialEvidenceRefusesAndClosesNothing pins that a broken reason against a
-// longer streak is unknown: a short count means a reason write was lost, which
-// is not evidence of a repeated signature.
-func TestPartialEvidenceRefusesAndClosesNothing(t *testing.T) {
+// TestPartialEvidenceRetriesAndClosesNothing pins the drift rule: a broken reason
+// against a longer streak is transient, not broken. The streak counts every spawn
+// while a reason is recorded only from PublishFailure, so a short count is normal
+// rather than evidence of a repeated signature. It must never close a record as
+// broken — and it must not refuse the spawn either, because a record that cannot
+// spawn can never earn the missing reason and is then stranded at the cap for
+// ever. It earns the bounded extension instead.
+func TestPartialEvidenceRetriesAndClosesNothing(t *testing.T) {
 	publisher := &abortRecordingPublisher{}
 	h, spawner := newDecisionHandler(t, 3, []string{"pod_oom_killed"}, publisher)
 
 	outcome := driveCapped(h)
 
-	if outcome != reconcileOutcomeCapped {
-		t.Fatalf("outcome = %v; want capped", outcome)
+	if outcome != reconcileOutcomeRedriven {
+		t.Fatalf(
+			"outcome = %v; want redriven — partial evidence must not refuse the spawn",
+			outcome,
+		)
 	}
-	if spawner.spawned != 0 {
-		t.Fatalf("spawned = %d; want 0", spawner.spawned)
+	if spawner.spawned != 1 {
+		t.Fatalf("spawned = %d; want 1", spawner.spawned)
 	}
 	if len(publisher.aborts) != 0 {
-		t.Fatalf("aborts = %d; want 0", len(publisher.aborts))
+		t.Fatalf(
+			"aborts = %d; want 0 — partial evidence must never close a record",
+			len(publisher.aborts),
+		)
 	}
 }
 
