@@ -260,6 +260,7 @@ func init() {
 	TaskEventsTotal.WithLabelValues("error").Add(0)
 	TaskEventsTotal.WithLabelValues("type_mismatch").Add(0)
 	TaskEventsTotal.WithLabelValues("spawn_suppressed_terminal_phase").Add(0)
+	TaskEventsTotal.WithLabelValues("skipped_terminal_status").Add(0)
 	TaskEventsTotal.WithLabelValues("unknown_phase").Add(0)
 	TaskEventsTotal.WithLabelValues("respawn_grace_window").Add(0)
 	TaskEventsTotal.WithLabelValues("skipped_foreign_job").Add(0)
