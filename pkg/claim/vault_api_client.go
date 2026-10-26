@@ -185,6 +185,9 @@ func (t ClaimTarget) renewPath() string {
 	return ""
 }
 
+// String renders the target for a log line or an error, never as a path.
+func (t ClaimTarget) String() string { return t.describe() }
+
 // describe renders the target for a log line or error, never as a path.
 func (t ClaimTarget) describe() string {
 	if t.isAmbiguous() {
@@ -223,6 +226,12 @@ type Claim struct {
 	LeaseUntil  libtime.DateTime
 	RenewBefore libtime.DateTime
 	LeaseToken  string
+	// LeaseUnreadable reports that the stored lease_until was not RFC3339. It is
+	// not an error: a claim whose lease nobody can read must still be visible to
+	// a restarting executor so it can be fenced, and dropping it from the
+	// listing would leave a claim that can never be renewed, released or fenced.
+	// A caller that needs an instant must treat this as already past.
+	LeaseUnreadable bool
 }
 
 // claimantTaskIDError names a caller error in the claimant-task-id contract, or
@@ -275,9 +284,15 @@ type ClaimClient interface {
 	) (*Claim, error)
 	// Renew extends an existing lease. It never takes over: a stale token
 	// returns ErrLeaseLost and the caller re-acquires.
+	//
+	// holder is required and is not carried over from the acquire: the route
+	// writes the holder it is given, so a renew that omits it both erases the
+	// holder a recovery listing filters on and is refused outright — the server
+	// answers 400 invalid_holder to an empty one.
 	Renew(
 		ctx context.Context,
 		target ClaimTarget,
+		holder string,
 		leaseToken string,
 		claimantTaskID string,
 		ttlSeconds int,
@@ -395,15 +410,21 @@ func (c *vaultAPIClaimClient) Acquire(
 func (c *vaultAPIClaimClient) Renew(
 	ctx context.Context,
 	target ClaimTarget,
+	holder string,
 	leaseToken string,
 	claimantTaskID string,
 	ttlSeconds int,
 ) (*Claim, error) {
+	if holder == "" {
+		return nil, errors.Wrapf(ctx, ErrClaimTargetInvalid, "renew %s: holder must not be empty",
+			target.describe())
+	}
 	if problem := claimantTaskIDError(target, claimantTaskID); problem != "" {
 		return nil, errors.Wrapf(ctx, ErrClaimTargetInvalid, "renew %s: %s",
 			target.describe(), problem)
 	}
 	body := claimRequestBody{
+		Holder:     holder,
 		LeaseToken: leaseToken,
 		TTLSeconds: ttlSeconds,
 		TaskID:     claimantTaskID,
@@ -516,7 +537,7 @@ func (c *vaultAPIClaimClient) List(ctx context.Context, holder string) ([]Claim,
 	}
 	claims := make([]Claim, 0, len(parsed.Items))
 	for _, item := range parsed.Items {
-		claim, err := claimFromResponse(ctx, item)
+		claim, err := claimFromResponse(ctx, item, false)
 		if err != nil {
 			return nil, err
 		}
@@ -639,32 +660,44 @@ func decodeClaim(ctx context.Context, raw []byte) (*Claim, error) {
 	if err := json.Unmarshal(raw, &parsed); err != nil {
 		return nil, errors.Wrapf(ctx, err, "decode claim response")
 	}
-	return claimFromResponse(ctx, parsed)
+	return claimFromResponse(ctx, parsed, true)
 }
 
 // claimFromResponse validates one wire claim and converts it. It is shared by
 // the single-claim routes and the listing, so both apply the same required-field
 // rules — a listing item that silently defaulted a missing lease would be a
 // claim a caller could neither renew nor trust.
-func claimFromResponse(ctx context.Context, parsed claimResponseBody) (*Claim, error) {
+func claimFromResponse(
+	ctx context.Context,
+	parsed claimResponseBody,
+	strictLease bool,
+) (*Claim, error) {
 	if parsed.LeaseUntil == "" {
 		return nil, errors.Wrapf(ctx, stderrors.New("missing lease_until"), "decode claim response")
 	}
 	if parsed.LeaseToken == "" {
 		return nil, errors.Wrapf(ctx, stderrors.New("missing lease_token"), "decode claim response")
 	}
-	until, err := libtime.ParseDateTime(ctx, parsed.LeaseUntil)
-	if err != nil {
-		return nil, errors.Wrapf(ctx, err, "parse lease_until %q", parsed.LeaseUntil)
-	}
 	result := &Claim{
 		Scope:      parsed.Scope,
 		ID:         parsed.ID,
 		Holder:     parsed.Holder,
 		TaskID:     parsed.TaskID,
-		LeaseUntil: *until,
 		LeaseToken: parsed.LeaseToken,
 	}
+	until, err := libtime.ParseDateTime(ctx, parsed.LeaseUntil)
+	if err != nil {
+		// A single-claim route answers the caller about one claim it is about to
+		// renew or release, so an unreadable lease is fatal there. A listing is
+		// different: a restarting executor must still SEE a claim whose lease
+		// nobody can read, because fencing it is the only way to clear it.
+		if strictLease {
+			return nil, errors.Wrapf(ctx, err, "parse lease_until %q", parsed.LeaseUntil)
+		}
+		result.LeaseUnreadable = true
+		return result, nil
+	}
+	result.LeaseUntil = *until
 	if parsed.RenewBefore != "" {
 		before, err := libtime.ParseDateTime(ctx, parsed.RenewBefore)
 		if err != nil {

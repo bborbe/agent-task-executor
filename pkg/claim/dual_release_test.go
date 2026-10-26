@@ -41,9 +41,9 @@ func heldPairShas(mgr claim.LeaseManager) (string, string) {
 	for _, held := range mgr.HeldClaims() {
 		switch held.Key {
 		case dualRepoKey:
-			primary = held.Sha
+			primary = held.LeaseToken
 		case dualPRKey:
-			secondary = held.Sha
+			secondary = held.LeaseToken
 		}
 	}
 	ExpectWithOffset(1, primary).NotTo(BeEmpty())

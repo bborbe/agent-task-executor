@@ -136,7 +136,14 @@ var _ = Describe("VaultAPIClaimClient", func() {
 				`"lease_until":"2026-10-25T20:00:00Z","renew_before":"2026-10-25T19:59:00Z",` +
 				`"lease_token":"tok-1"}`
 
-			renewed, err := client.Renew(ctx, claim.NewTaskClaim("t-1"), "tok-1", "", 60)
+			renewed, err := client.Renew(
+				ctx,
+				claim.NewTaskClaim("t-1"),
+				"nuke-prod",
+				"tok-1",
+				"",
+				60,
+			)
 			Expect(err).To(BeNil())
 			Expect(renewed.LeaseToken).To(Equal("tok-1"))
 			Expect(lastPath).To(Equal("/api/v1/tasks/t-1/claim/renew"))
@@ -147,7 +154,7 @@ var _ = Describe("VaultAPIClaimClient", func() {
 			status = http.StatusConflict
 			body = `{"error":"lease_lost"}`
 
-			_, err := client.Renew(ctx, claim.NewTaskClaim("t-1"), "stale", "", 60)
+			_, err := client.Renew(ctx, claim.NewTaskClaim("t-1"), "nuke-prod", "stale", "", 60)
 			Expect(err).NotTo(BeNil())
 			Expect(stderrors.Is(err, claim.ErrLeaseLost)).To(BeTrue())
 		})
@@ -211,7 +218,7 @@ var _ = Describe("VaultAPIClaimClient", func() {
 		// which for an empty target is "/renew" — non-empty, so the guard never
 		// fired and the client posted to baseURL+"/renew" instead of refusing.
 		It("is refused locally by Renew, without a request", func() {
-			_, err := client.Renew(ctx, claim.ClaimTarget{}, "tok-1", "", 60)
+			_, err := client.Renew(ctx, claim.ClaimTarget{}, "nuke-prod", "tok-1", "", 60)
 			Expect(err).NotTo(BeNil())
 			Expect(stderrors.Is(err, claim.ErrClaimTargetInvalid)).To(BeTrue())
 			Expect(lastMethod).To(Equal(""))
@@ -245,6 +252,7 @@ var _ = Describe("VaultAPIClaimClient", func() {
 			_, err := client.Renew(
 				ctx,
 				claim.NewRepoClaim("bborbe", "nuke"),
+				"nuke-prod",
 				"tok-1",
 				"claimant-task",
 				60,
@@ -327,7 +335,7 @@ var _ = Describe("VaultAPIClaimClient", func() {
 			status = http.StatusBadGateway
 			body = `{"error":"upstream"}`
 
-			_, err := client.Renew(ctx, claim.NewTaskClaim("t-1"), "tok-1", "", 60)
+			_, err := client.Renew(ctx, claim.NewTaskClaim("t-1"), "nuke-prod", "tok-1", "", 60)
 			var renewErr *claim.StatusError
 			Expect(stderrors.As(err, &renewErr)).To(BeTrue())
 			Expect(renewErr.Status).To(Equal(http.StatusBadGateway))

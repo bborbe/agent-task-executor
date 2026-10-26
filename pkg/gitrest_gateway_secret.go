@@ -34,6 +34,28 @@ func ReadGitRestGatewaySecret(
 	namespace libk8s.Namespace,
 	secretName string,
 ) (string, error) {
+	return readGatewaySecret(
+		ctx,
+		kubeClient,
+		namespace,
+		secretName,
+		gitRestGatewaySecretDataKey,
+		"git-rest",
+	)
+}
+
+// readGatewaySecret is the one reader every gateway credential uses. The
+// component only names the service in the error, so a misconfigured deployment
+// says which secret is missing rather than a generic message; the data key is
+// the caller's because a Secret's layout is the deployment's business.
+func readGatewaySecret(
+	ctx context.Context,
+	kubeClient kubernetes.Interface,
+	namespace libk8s.Namespace,
+	secretName string,
+	dataKey string,
+	component string,
+) (string, error) {
 	if secretName == "" {
 		return "", nil
 	}
@@ -41,23 +63,18 @@ func ReadGitRestGatewaySecret(
 		Secrets(namespace.String()).
 		Get(ctx, secretName, metav1.GetOptions{})
 	if err != nil {
-		return "", errors.Wrapf(ctx, err, "get git-rest gateway secret %q", secretName)
+		return "", errors.Wrapf(ctx, err, "get %s gateway secret %q", component, secretName)
 	}
-	value, ok := secret.Data[gitRestGatewaySecretDataKey]
+	value, ok := secret.Data[dataKey]
 	if !ok {
-		return "", errors.Errorf(
-			ctx,
-			"secret %q lacks data key %q",
-			secretName,
-			gitRestGatewaySecretDataKey,
-		)
+		return "", errors.Errorf(ctx, "secret %q lacks data key %q", secretName, dataKey)
 	}
 	if len(value) == 0 {
 		return "", errors.Errorf(
 			ctx,
 			"secret %q data key %q is empty; unset the secret name to disable gateway auth",
 			secretName,
-			gitRestGatewaySecretDataKey,
+			dataKey,
 		)
 	}
 	return string(value), nil

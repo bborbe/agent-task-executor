@@ -47,7 +47,7 @@ func newClaimedManager(
 	mgr := newTestManager("self", claim.NewClaimRefClient(fake.URL(), "", ""), job, clock)
 	held, err := mgr.Claim(context.Background(), recoveryKey, "t-r")
 	Expect(err).NotTo(HaveOccurred())
-	return mgr, held.Sha
+	return mgr, held.LeaseToken
 }
 
 var _ = Describe("LeaseManager lost-response recovery", func() {
@@ -84,7 +84,7 @@ var _ = Describe("LeaseManager lost-response recovery", func() {
 			Expect(ref.Sha).NotTo(Equal(s0))
 			held := mgr.HeldClaims()
 			Expect(held).To(HaveLen(1))
-			Expect(held[0].Sha).To(Equal(ref.Sha))
+			Expect(held[0].LeaseToken).To(Equal(ref.Sha))
 			Expect(job.DeleteCallCount("t-r")).To(Equal(0))
 			expectClaimDelta(before, snapshotClaims(), map[string]float64{"recovered": 1})
 
@@ -125,7 +125,7 @@ var _ = Describe("LeaseManager lost-response recovery", func() {
 			Expect(job.DeleteCallCount("t-r")).To(Equal(0))
 			held := mgr.HeldClaims()
 			Expect(held).To(HaveLen(1))
-			Expect(held[0].Sha).To(Equal(s0))
+			Expect(held[0].LeaseToken).To(Equal(s0))
 			expectClaimDelta(before, snapshotClaims(), map[string]float64{"renew_failed": 1})
 
 			fake.SetFault(nil)
@@ -165,7 +165,7 @@ var _ = Describe("LeaseManager lost-response recovery", func() {
 			Expect(job.DeleteCallCount("t-r")).To(Equal(0))
 			held := mgr.HeldClaims()
 			Expect(held).To(HaveLen(1))
-			Expect(held[0].Sha).To(Equal(s0))
+			Expect(held[0].LeaseToken).To(Equal(s0))
 			expectClaimDelta(before, snapshotClaims(), map[string]float64{"renew_failed": 1})
 		}),
 		Entry("row 6: an applied create answered 500 is recovered", func() {
@@ -181,7 +181,7 @@ var _ = Describe("LeaseManager lost-response recovery", func() {
 			Expect(err).NotTo(HaveOccurred())
 			ref, ok := fake.Ref("refs/" + recoveryKey)
 			Expect(ok).To(BeTrue())
-			Expect(held.Sha).To(Equal(ref.Sha))
+			Expect(held.LeaseToken).To(Equal(ref.Sha))
 			Expect(mgr.HeldClaims()).To(HaveLen(1))
 			expectClaimDelta(before, snapshotClaims(), map[string]float64{"recovered": 1})
 		}),

@@ -71,15 +71,12 @@ func (m *leaseManager) retryPendingDeletions(ctx context.Context) {
 			continue
 		}
 		if held.pendingDeletionPath == "fence" {
-			m.bestEffortDelete(ctx, held.key, held.sha)
-			if held.secondKey != "" {
-				m.bestEffortDelete(ctx, held.secondKey, held.secondSha)
-			}
+			m.bestEffortRelease(ctx, held)
 			glog.Infof(
-				"event=claim_released key=%s task=%s result=fenced sha=%s",
+				"event=claim_released key=%s task=%s result=fenced token=%s",
 				held.key,
 				held.taskID,
-				held.sha,
+				held.leaseToken,
 			)
 		}
 		delete(m.held, key)
@@ -104,12 +101,9 @@ func (m *leaseManager) evaluateFence(ctx context.Context, now libtime.DateTime) 
 // fenceClaim stops the Job and drops the claim without renewing it.
 func (m *leaseManager) fenceClaim(ctx context.Context, key string, held *heldClaim) {
 	if held.releasePending {
-		m.bestEffortDelete(ctx, held.key, held.sha)
-		if held.secondKey != "" {
-			m.bestEffortDelete(ctx, held.secondKey, held.secondSha)
-		}
+		m.bestEffortRelease(ctx, held)
 		delete(m.held, key)
-		countClaimRemoval(held.key, held.taskID, "fenced", held.sha)
+		countClaimRemoval(held.key, held.taskID, "fenced", held.leaseToken)
 		return
 	}
 	if err := m.jobControl.DeleteJob(ctx, held.taskID); err != nil {
@@ -119,12 +113,9 @@ func (m *leaseManager) fenceClaim(ctx context.Context, key string, held *heldCla
 		held.pendingDeletionPath = "fence"
 		return
 	}
-	m.bestEffortDelete(ctx, held.key, held.sha)
-	if held.secondKey != "" {
-		m.bestEffortDelete(ctx, held.secondKey, held.secondSha)
-	}
+	m.bestEffortRelease(ctx, held)
 	delete(m.held, key)
-	countClaimRemoval(held.key, held.taskID, "fenced", held.sha)
+	countClaimRemoval(held.key, held.taskID, "fenced", held.leaseToken)
 }
 
 // retryPendingReleases retries the ref DELETE of claims whose release failed.
@@ -136,17 +127,21 @@ func (m *leaseManager) retryPendingReleases(ctx context.Context) {
 		if !ok || !held.releasePending {
 			continue
 		}
-		primaryResult, err := m.deleteRefWithDeadline(ctx, held.key, held.sha)
+		primaryResult, err := m.releaseRefWithDeadline(ctx, held.target, held.leaseToken)
 		if err != nil {
 			countClaim("error")
 			continue
 		}
 		if held.secondKey == "" {
 			delete(m.held, key)
-			countClaimRemoval(held.key, held.taskID, primaryResult, held.sha)
+			countClaimRemoval(held.key, held.taskID, primaryResult, held.leaseToken)
 			continue
 		}
-		secondaryResult, err := m.deleteRefWithDeadline(ctx, held.secondKey, held.secondSha)
+		secondaryResult, err := m.releaseRefWithDeadline(
+			ctx,
+			held.secondTarget,
+			held.secondToken,
+		)
 		if err != nil {
 			countClaim("error")
 			continue
@@ -156,7 +151,7 @@ func (m *leaseManager) retryPendingReleases(ctx context.Context) {
 			held.key,
 			held.taskID,
 			pairRemovalResult(primaryResult, secondaryResult),
-			held.sha,
+			held.leaseToken,
 		)
 	}
 }
@@ -315,7 +310,7 @@ func (m *leaseManager) releaseAfterRunningCheck(
 	key string,
 	held *heldClaim,
 ) {
-	primaryResult, err := m.deleteRefWithDeadline(ctx, held.key, held.sha)
+	primaryResult, err := m.releaseRefWithDeadline(ctx, held.target, held.leaseToken)
 	if err != nil {
 		countClaim("error")
 		held.releasePending = true
@@ -323,10 +318,14 @@ func (m *leaseManager) releaseAfterRunningCheck(
 	}
 	if held.secondKey == "" {
 		delete(m.held, key)
-		countClaimRemoval(held.key, held.taskID, primaryResult, held.sha)
+		countClaimRemoval(held.key, held.taskID, primaryResult, held.leaseToken)
 		return
 	}
-	secondaryResult, err := m.deleteRefWithDeadline(ctx, held.secondKey, held.secondSha)
+	secondaryResult, err := m.releaseRefWithDeadline(
+		ctx,
+		held.secondTarget,
+		held.secondToken,
+	)
 	if err != nil {
 		countClaim("error")
 		held.releasePending = true
@@ -337,7 +336,7 @@ func (m *leaseManager) releaseAfterRunningCheck(
 		held.key,
 		held.taskID,
 		pairRemovalResult(primaryResult, secondaryResult),
-		held.sha,
+		held.leaseToken,
 	)
 }
 
@@ -368,58 +367,55 @@ func (m *leaseManager) renewClaim(
 	held *heldClaim,
 	now libtime.DateTime,
 ) {
-	newLease := now.Add(LeaseDuration)
-	newLeaseStr := formatLeaseUntil(newLease)
 	held.lastRenewAt = now
 	held.renewNextTick = false
 	result := "renewed"
 
 	reqCtx, cancel := m.requestContext(ctx)
-	sha, err := m.refClient.Put(reqCtx, held.key, held.sha, m.cluster, held.taskID, newLease)
+	renewed, err := m.claimClient.Renew(
+		reqCtx,
+		held.target,
+		m.cluster,
+		held.leaseToken,
+		claimantTaskID(held.target, held.taskID),
+		leaseSeconds(),
+	)
 	cancel()
 	switch {
 	case err == nil:
-		held.sha = sha
-	case errors.Is(err, ErrLeaseConflict):
+		held.leaseToken = renewed.LeaseToken
+		held.leaseUntil = renewed.LeaseUntil
+	case errors.Is(err, ErrLeaseLost):
 		m.claimLost(ctx, key, held)
 		return
 	default:
 		var ok bool
-		sha, result, ok = m.renewReadBack(ctx, held, newLeaseStr)
+		result, ok = m.renewReadBack(ctx, held)
 		if !ok {
 			return
 		}
-		held.sha = sha
 	}
 
 	if held.secondKey == "" {
-		if result == "renewed" || result == "recovered" {
-			held.leaseUntil = newLease
-			held.leaseUntilStr = newLeaseStr
-		}
 		countClaim(result)
 		return
 	}
 
 	reqCtx, cancel = m.requestContext(ctx)
-	secondSha, err := m.refClient.Put(
+	secondRenewed, err := m.claimClient.Renew(
 		reqCtx,
-		held.secondKey,
-		held.secondSha,
+		held.secondTarget,
 		m.cluster,
-		held.taskID,
-		newLease,
+		held.secondToken,
+		claimantTaskID(held.secondTarget, held.taskID),
+		leaseSeconds(),
 	)
 	cancel()
 	switch {
 	case err == nil:
-		held.secondSha = secondSha
-		if result == "renewed" || result == "recovered" {
-			held.leaseUntil = newLease
-			held.leaseUntilStr = newLeaseStr
-		}
+		held.secondToken = secondRenewed.LeaseToken
 		countClaim(result)
-	case errors.Is(err, ErrLeaseConflict):
+	case errors.Is(err, ErrLeaseLost):
 		m.claimLost(ctx, key, held)
 	default:
 		held.renewNextTick = true
@@ -427,9 +423,10 @@ func (m *leaseManager) renewClaim(
 	}
 }
 
-// claimLost deletes the Job and drops the claim without contacting git-rest.
+// claimLost deletes the Job and drops the claim without contacting the API: a
+// lost lease is already gone, so releasing it would only be refused.
 func (m *leaseManager) claimLost(ctx context.Context, key string, held *heldClaim) {
-	countClaimRemoval(key, held.taskID, "claim_lost", held.sha)
+	countClaimRemoval(key, held.taskID, "claim_lost", held.leaseToken)
 	if err := m.jobControl.DeleteJob(ctx, held.taskID); err != nil {
 		countClaim("error")
 		held.pendingJobDeletion = true
@@ -439,31 +436,35 @@ func (m *leaseManager) claimLost(ctx context.Context, key string, held *heldClai
 	delete(m.held, key)
 }
 
-// renewReadBack decides a failed primary renew from the listed ref, after
-// re-running the fence. It returns the sha to adopt, the result label the
-// caller must count, and whether the claim is still held. It never updates
-// leaseUntil and never counts.
+// renewReadBack decides a failed primary renew from a fresh read, after
+// re-running the fence. It returns the result label the caller must count and
+// whether the claim is still held. On a recovered renew it adopts the token and
+// lease the read returned; it never counts.
 func (m *leaseManager) renewReadBack(
 	ctx context.Context,
 	held *heldClaim,
-	newLeaseStr string,
-) (string, string, bool) {
+) (string, bool) {
 	m.evaluateFence(ctx, m.currentDateTime.Now())
 	if _, ok := m.held[held.key]; !ok {
-		return "", "", false
+		return "", false
 	}
 	reqCtx, cancel := m.requestContext(ctx)
-	ref, err := m.readBack(reqCtx, held.key)
+	listed, err := m.readBack(reqCtx, held.target)
 	cancel()
 	switch {
 	case err != nil:
-		return held.sha, "renew_failed", true
-	case m.ownTriple(ref, held.taskID, newLeaseStr):
-		return ref.Sha, "recovered", true
-	case ref != nil && ref.Sha == held.sha:
-		return held.sha, "renew_failed", true
+		return "renew_failed", true
+	case m.heldByUs(listed) && listed.LeaseToken == held.leaseToken:
+		// The token is unchanged, so the renew did not land: this is one failed
+		// interval, not a recovery. Adopting the listed lease here would report a
+		// renewal that never happened.
+		return "renew_failed", true
+	case m.heldByUs(listed):
+		held.leaseToken = listed.LeaseToken
+		held.leaseUntil = listed.LeaseUntil
+		return "recovered", true
 	default:
 		m.claimLost(ctx, held.key, held)
-		return "", "", false
+		return "", false
 	}
 }

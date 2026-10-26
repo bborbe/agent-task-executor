@@ -16,6 +16,7 @@ import (
 	. "github.com/onsi/gomega"
 
 	"github.com/bborbe/agent-task-executor/pkg/claim"
+	"github.com/bborbe/agent-task-executor/pkg/claim/claimtest"
 )
 
 var _ = Describe("LeaseManager claim", func() {
@@ -40,7 +41,7 @@ var _ = Describe("LeaseManager claim", func() {
 	It("rejects an empty cluster name", func() {
 		_, err := claim.NewLeaseManager(
 			"",
-			claim.NewClaimRefClient(fake.URL(), "", ""),
+			claimtest.NewClient(claim.NewClaimRefClient(fake.URL(), "", ""), clock.Now),
 			job,
 			clock,
 			libtime.NewWaiterDuration(),
@@ -111,7 +112,7 @@ var _ = Describe("LeaseManager claim", func() {
 		}
 		ref, ok := fake.Ref("refs/claims/task/race")
 		Expect(ok).To(BeTrue())
-		Expect(ref.Sha).To(Equal(winner.Sha))
+		Expect(ref.Sha).To(Equal(winner.LeaseToken))
 		expectClaimDelta(before, snapshotClaims(), map[string]float64{
 			"claimed":  1,
 			"conflict": 1,
@@ -127,7 +128,7 @@ var _ = Describe("LeaseManager claim", func() {
 		refs, err := client.List(ctx, "claims/task/selfcheck")
 		Expect(err).NotTo(HaveOccurred())
 		Expect(refs).To(HaveLen(1))
-		Expect(refs[0].Sha).To(Equal(held.Sha))
+		Expect(refs[0].Sha).To(Equal(held.LeaseToken))
 
 		_, err = client.Put(
 			ctx,
