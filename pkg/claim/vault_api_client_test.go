@@ -239,9 +239,19 @@ var _ = Describe("VaultAPIClaimClient", func() {
 			body = `{"scope":"repo","id":"bborbe/nuke","holder":"holder-a",` +
 				`"lease_until":"2026-10-25T20:00:00Z","renew_before":"2026-10-25T19:59:00Z",` +
 				`"lease_token":"tok-1"}`
-			_, err := client.Renew(ctx, claim.NewRepoClaim("bborbe", "nuke"), "tok-1", "", 60)
+			// Renew carries the claimant task id too: the server routes renew and
+			// acquire through the same task-id check, so an empty one here is the
+			// same 400 the acquire would get.
+			_, err := client.Renew(
+				ctx,
+				claim.NewRepoClaim("bborbe", "nuke"),
+				"tok-1",
+				"claimant-task",
+				60,
+			)
 			Expect(err).To(BeNil())
 			Expect(lastPath).To(Equal("/api/v1/repos/bborbe/nuke/claim/renew"))
+			Expect(string(lastBody)).To(ContainSubstring(`"task_id":"claimant-task"`))
 
 			status = http.StatusNoContent
 			body = ""
@@ -406,6 +416,58 @@ var _ = Describe("VaultAPIClaimClient", func() {
 			Expect(string(lastBody)).To(ContainSubstring(`"task_id":"claimant-task"`))
 		})
 
+		It("refuses a target that sets both a task and a pull request", func() {
+			// The regression this exists for: isRepo() is false when only Number is
+			// set, so this target failed the TaskID+repo ambiguity guard and then
+			// matched the task branch — silently claiming a task the caller never
+			// named, which is exactly what the type promises never to do.
+			_, err := client.Acquire(
+				ctx,
+				claim.ClaimTarget{TaskID: "t-1", Number: "7"},
+				"holder-a",
+				"",
+				120,
+			)
+			Expect(err).NotTo(BeNil())
+			Expect(lastPath).To(BeEmpty())
+		})
+
+		It("refuses a number that is not digits, because PathEscape leaves .. alone", func() {
+			// url.PathEscape does not escape ".", so a number of ".." would survive
+			// as /pulls/../claim and a server that cleans paths could resolve it to
+			// the repository route — claiming a different object than named.
+			_, err := client.Acquire(
+				ctx,
+				claim.NewPRClaim("bborbe", "nuke", ".."),
+				"holder-a",
+				"claimant-task",
+				120,
+			)
+			Expect(err).NotTo(BeNil())
+			Expect(lastPath).To(BeEmpty())
+		})
+
+		It("refuses a task claim that carries a claimant task id", func() {
+			// The server cannot catch this half: it derives the task id from the
+			// address, so a supplied one is either ignored or accepted. Refused here
+			// or nowhere.
+			_, err := client.Acquire(
+				ctx,
+				claim.NewTaskClaim("t-1"),
+				"holder-a",
+				"someone-elses-task",
+				120,
+			)
+			Expect(err).NotTo(BeNil())
+			Expect(lastPath).To(BeEmpty())
+		})
+
+		It("refuses a repository claim that carries no claimant task id", func() {
+			_, err := client.Acquire(ctx, claim.NewRepoClaim("bborbe", "nuke"), "holder-a", "", 120)
+			Expect(err).NotTo(BeNil())
+			Expect(lastPath).To(BeEmpty())
+		})
+
 		It("refuses a number with no repository instead of inventing a path", func() {
 			// The route has no shape for a number alone. Guessing one would claim a
 			// key the server never serves, and the caller would read the resulting
@@ -452,6 +514,29 @@ var _ = Describe("VaultAPIClaimClient", func() {
 			// Escaped, because a holder is an opaque string and an unescaped space
 			// or ampersand would silently change which claims come back.
 			Expect(lastQuery).To(Equal("holder=holder+a"))
+		})
+
+		It("escapes an ampersand in the holder, which would otherwise split the query", func() {
+			status = http.StatusOK
+			body = `{"items":[],"total":0,"skipped":0}`
+
+			_, err := client.List(ctx, "a&b=c")
+			Expect(err).To(BeNil())
+			// Unescaped, this would arrive as two parameters and the server would
+			// filter on "a" — a different holder, silently.
+			Expect(lastQuery).To(Equal("holder=a%26b%3Dc"))
+		})
+
+		It("fails the whole listing when an item is missing its lease", func() {
+			// The point of sharing claimFromResponse: a listing item must not default
+			// a missing lease and hand back a claim that can be neither renewed nor
+			// trusted. This exercises that guarantee through List, not through Read.
+			status = http.StatusOK
+			body = `{"items":[{"scope":"repo","id":"bborbe/nuke","holder":"holder-a",` +
+				`"lease_token":"tok-1"}],"total":1,"skipped":0}`
+
+			_, err := client.List(ctx, "holder-a")
+			Expect(err).NotTo(BeNil())
 		})
 
 		It("fails rather than returning an empty list when the server errors", func() {

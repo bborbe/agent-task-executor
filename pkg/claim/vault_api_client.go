@@ -117,11 +117,42 @@ func (t ClaimTarget) isRepo() bool { return t.Owner != "" || t.Repo != "" }
 // isPR reports whether this target names one pull request.
 func (t ClaimTarget) isPR() bool { return t.Number != "" }
 
+// isAmbiguous reports whether this target sets two addressing forms at once.
+//
+// Number counts as an addressing form on its own here, even though isRepo() is
+// false for a target that carries only a Number. Missing that is how
+// ClaimTarget{TaskID: "t-1", Number: "7"} slipped through: it failed the
+// TaskID+repo guard, then matched the task branch, and was silently claimed as a
+// task — exactly the silent resolution this type promises never to do.
+func (t ClaimTarget) isAmbiguous() bool {
+	return t.TaskID != "" && (t.isRepo() || t.isPR())
+}
+
+// validPRNumber reports whether a pull-request number can be a path segment.
+//
+// Digits only, deliberately. url.PathEscape does not escape ".", so a number of
+// ".." would survive as /pulls/../claim and a server that cleans paths could
+// resolve that to the repository route — claiming a different object than the
+// caller named. Refusing non-digits locally costs nothing: a pull-request number
+// is always digits, and the server's own component validator rejects "." and
+// ".." anyway, so this refuses only inputs that could never be served.
+func validPRNumber(number string) bool {
+	if number == "" {
+		return false
+	}
+	for _, r := range number {
+		if r < '0' || r > '9' {
+			return false
+		}
+	}
+	return true
+}
+
 // path returns the vault-api path for this target, or "" when the target is
 // not addressable. An ambiguous target (both forms set) is NOT addressable:
 // picking one silently would act on a different object than the caller named.
 func (t ClaimTarget) path() string {
-	if t.TaskID != "" && t.isRepo() {
+	if t.isAmbiguous() {
 		return ""
 	}
 	if t.TaskID != "" {
@@ -129,7 +160,7 @@ func (t ClaimTarget) path() string {
 	}
 	// A number without a repository addresses nothing: the route has no shape
 	// for it, and inventing one would claim a key the server never serves.
-	if t.isPR() && (t.Owner == "" || t.Repo == "") {
+	if t.isPR() && (t.Owner == "" || t.Repo == "" || !validPRNumber(t.Number)) {
 		return ""
 	}
 	if t.Owner != "" && t.Repo != "" {
@@ -156,7 +187,11 @@ func (t ClaimTarget) renewPath() string {
 
 // describe renders the target for a log line or error, never as a path.
 func (t ClaimTarget) describe() string {
-	if t.TaskID != "" && t.isRepo() {
+	if t.isAmbiguous() {
+		if t.isPR() {
+			return "ambiguous target (task " + t.TaskID + ", pull request " +
+				t.Owner + "/" + t.Repo + "#" + t.Number + ")"
+		}
 		return "ambiguous target (task " + t.TaskID + ", repo " + t.Owner + "/" + t.Repo + ")"
 	}
 	if t.TaskID != "" {
@@ -190,6 +225,27 @@ type Claim struct {
 	LeaseToken  string
 }
 
+// claimantTaskIDError names a caller error in the claimant-task-id contract, or
+// "" when the contract is satisfied.
+//
+// The rule has two halves and the server only enforces one of them: it answers
+// 400 missing_task_id when a repository or per-PR write omits the id, but it
+// cannot tell that a task claim carrying one is wrong — it would derive the task
+// id from the address and ignore the supplied value, or worse, accept it. So the
+// task-claim half is refused here or nowhere.
+func claimantTaskIDError(target ClaimTarget, claimantTaskID string) string {
+	if target.TaskID != "" {
+		if claimantTaskID != "" {
+			return "a task claim must not carry a claimant task id"
+		}
+		return ""
+	}
+	if claimantTaskID == "" {
+		return "a repository or pull-request claim requires a claimant task id"
+	}
+	return ""
+}
+
 //counterfeiter:generate -o ../../mocks/vault_api_claim_client.go --fake-name FakeVaultAPIClaimClient . ClaimClient
 
 // ClaimClient is the typed vault-api claim contract. It replaces the
@@ -204,6 +260,7 @@ type ClaimClient interface {
 	// Acquire takes the claim for holder with the given TTL in seconds. A held
 	// claim returns a *ClaimHeldError. An expired lease is taken over, so a
 	// dead holder cannot block the target forever.
+	//
 	// claimantTaskID is the claiming run's own task identifier. The server
 	// requires it for a repository or per-PR claim and answers 400
 	// missing_task_id without it; for a task claim it must be empty, because the
@@ -316,6 +373,10 @@ func (c *vaultAPIClaimClient) Acquire(
 	claimantTaskID string,
 	ttlSeconds int,
 ) (*Claim, error) {
+	if problem := claimantTaskIDError(target, claimantTaskID); problem != "" {
+		return nil, errors.Wrapf(ctx, ErrClaimTargetInvalid, "acquire %s: %s",
+			target.describe(), problem)
+	}
 	body := claimRequestBody{Holder: holder, TTLSeconds: ttlSeconds, TaskID: claimantTaskID}
 	status, raw, err := c.do(ctx, http.MethodPost, target, body)
 	if err != nil {
@@ -338,6 +399,10 @@ func (c *vaultAPIClaimClient) Renew(
 	claimantTaskID string,
 	ttlSeconds int,
 ) (*Claim, error) {
+	if problem := claimantTaskIDError(target, claimantTaskID); problem != "" {
+		return nil, errors.Wrapf(ctx, ErrClaimTargetInvalid, "renew %s: %s",
+			target.describe(), problem)
+	}
 	body := claimRequestBody{
 		LeaseToken: leaseToken,
 		TTLSeconds: ttlSeconds,
@@ -410,16 +475,44 @@ func (c *vaultAPIClaimClient) List(ctx context.Context, holder string) ([]Claim,
 		return nil, err
 	}
 	if status != http.StatusOK {
-		return nil, errors.Wrapf(
-			ctx,
-			stderrors.New("unexpected status"),
-			"list claims: status %d",
-			status,
-		)
+		// The shared StatusError type, not a bespoke error: a caller matching
+		// *StatusError to decide whether to retry must see a listing failure the
+		// same way it sees an acquire failure.
+		return nil, &StatusError{Action: "list", Target: "claims", Status: status}
 	}
 	var parsed claimListResponseBody
 	if err := json.Unmarshal(raw, &parsed); err != nil {
 		return nil, errors.Wrapf(ctx, err, "decode claim list response")
+	}
+	// Neither of these is fatal, and both are worth saying out loud.
+	//
+	// skipped counts refs under the claims prefix that are NOT addressable
+	// claims. In practice these are the redrive streak keys
+	// (claims/redrive/<taskid>/<phase>/<n>), which share the prefix but are
+	// counters — the server is right to leave them out and they are not lost
+	// leases. A non-zero count is therefore normal. It can also mean a claim key
+	// whose shape this client cannot parse, and that IS worth knowing about,
+	// which is why it is logged rather than dropped.
+	//
+	// total is the number of items in the response, so a mismatch with the
+	// decoded length means the body did not arrive whole. Failing hard would
+	// brick recovery on a heuristic; staying silent would let a partial listing
+	// read as "this holder holds nothing", which is the one conclusion a
+	// restarting executor must never draw by accident.
+	if parsed.Skipped > 0 {
+		glog.V(2).Infof(
+			"claim list: %d refs under the claims prefix are not addressable claims "+
+				"(redrive streak keys are expected here; any other shape is not)",
+			parsed.Skipped,
+		)
+	}
+	if parsed.Total != len(parsed.Items) {
+		glog.Warningf(
+			"claim list: server reported total=%d but sent %d items; treating the "+
+				"listing as partial",
+			parsed.Total,
+			len(parsed.Items),
+		)
 	}
 	claims := make([]Claim, 0, len(parsed.Items))
 	for _, item := range parsed.Items {
