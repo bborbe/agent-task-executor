@@ -169,7 +169,7 @@ func TestAcquireSpawnClaimKeysPRReviewsPerPullRequest(t *testing.T) {
 	if len(held) != 1 {
 		t.Fatalf("expected one held claim (no pair), got %d: %+v", len(held), held)
 	}
-	if held[0].Key != "claims/pr/bborbe-nuke-658" || held[0].TaskID != "tid-658" {
+	if held[0].Key != "claims/pr/bborbe/nuke/658" || held[0].TaskID != "tid-658" {
 		t.Errorf("held claim = %+v, want pr/658 owned by tid-658", held[0])
 	}
 
@@ -188,13 +188,13 @@ func TestAcquireSpawnClaimKeysPRReviewsPerPullRequest(t *testing.T) {
 	if len(keys) != 2 {
 		t.Fatalf("expected both per-PR claims held, got %+v", keys)
 	}
-	if keys["claims/pr/bborbe-nuke-658"] != "tid-658" {
-		t.Errorf("pr/658 owner = %q, want tid-658", keys["claims/pr/bborbe-nuke-658"])
+	if keys["claims/pr/bborbe/nuke/658"] != "tid-658" {
+		t.Errorf("pr/658 owner = %q, want tid-658", keys["claims/pr/bborbe/nuke/658"])
 	}
-	if keys["claims/pr/bborbe-nuke-662"] != "tid-662" {
-		t.Errorf("pr/662 owner = %q, want tid-662", keys["claims/pr/bborbe-nuke-662"])
+	if keys["claims/pr/bborbe/nuke/662"] != "tid-662" {
+		t.Errorf("pr/662 owner = %q, want tid-662", keys["claims/pr/bborbe/nuke/662"])
 	}
-	if _, shared := keys["claims/repo/bborbe-nuke"]; shared {
+	if _, shared := keys["claims/repo/bborbe/nuke"]; shared {
 		t.Error("a pr-review must not hold the shared per-repository key")
 	}
 }
@@ -219,11 +219,11 @@ func TestAcquireSpawnClaimKeysCloneURLPRReviewPerPullRequest(t *testing.T) {
 	if len(client.putCalls) != 1 {
 		t.Fatalf("expected one Put (per-PR only), got %d", len(client.putCalls))
 	}
-	if client.putCalls[0].key != "claims/pr/bborbe-nuke-658" {
+	if client.putCalls[0].key != "claims/pr/bborbe/nuke/658" {
 		t.Errorf(
 			"claim key = %q, want %q",
 			client.putCalls[0].key,
-			"claims/pr/bborbe-nuke-658",
+			"claims/pr/bborbe/nuke/658",
 		)
 	}
 }
@@ -263,7 +263,7 @@ func TestAcquireSpawnClaimKeysURLlessPRReviewsShareNoKey(t *testing.T) {
 	if keys["claims/task/tid-b"] != "tid-b" {
 		t.Errorf("tid-b claim = %+v, want its own task key", keys)
 	}
-	if _, shared := keys["claims/repo/bborbe-nuke"]; shared {
+	if _, shared := keys["claims/repo/bborbe/nuke"]; shared {
 		t.Error("a URL-less pr-review must not hold the shared per-repository key")
 	}
 }

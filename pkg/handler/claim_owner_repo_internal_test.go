@@ -35,22 +35,22 @@ func TestClaimOwnerRepoDerivesFromCloneURL(t *testing.T) {
 			frontmatter: lib.TaskFrontmatter{
 				"clone_url": "https://github.com/bborbe/go-skeleton.git",
 			},
-			wantKey: "claims/repo/bborbe-go-skeleton",
+			wantKey: "claims/repo/bborbe/go-skeleton",
 		},
 		{
 			name:        "clone_url https without .git",
 			frontmatter: lib.TaskFrontmatter{"clone_url": "https://github.com/bborbe/agent"},
-			wantKey:     "claims/repo/bborbe-agent",
+			wantKey:     "claims/repo/bborbe/agent",
 		},
 		{
 			name:        "clone_url scp-style ssh",
 			frontmatter: lib.TaskFrontmatter{"clone_url": "git@github.com:bborbe/agent.git"},
-			wantKey:     "claims/repo/bborbe-agent",
+			wantKey:     "claims/repo/bborbe/agent",
 		},
 		{
 			name:        "clone_url ssh scheme",
 			frontmatter: lib.TaskFrontmatter{"clone_url": "ssh://git@github.com/bborbe/agent.git"},
-			wantKey:     "claims/repo/bborbe-agent",
+			wantKey:     "claims/repo/bborbe/agent",
 		},
 		{
 			name: "repo wins over clone_url",
@@ -58,7 +58,7 @@ func TestClaimOwnerRepoDerivesFromCloneURL(t *testing.T) {
 				"repo":      "bborbe/agent",
 				"clone_url": "https://github.com/other/thing.git",
 			},
-			wantKey: "claims/repo/bborbe-agent",
+			wantKey: "claims/repo/bborbe/agent",
 		},
 		{
 			name:        "neither key fails loudly",
