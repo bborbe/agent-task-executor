@@ -1,7 +1,8 @@
 ---
-spec: ["config-service-namespace"]
-status: draft
+status: approved
+spec: [config-service-namespace]
 created: "2026-10-26T07:55:00Z"
+queued: "2026-10-26T06:53:01Z"
 ---
 
 <summary>

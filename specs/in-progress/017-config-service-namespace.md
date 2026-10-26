@@ -1,5 +1,7 @@
 ---
-status: draft
+status: approved
+approved: "2026-10-26T06:52:56Z"
+branch: dark-factory/config-service-namespace
 ---
 
 ## Summary
