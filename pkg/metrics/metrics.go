@@ -18,12 +18,22 @@ var TaskEventsTotal = promauto.NewCounterVec(
 	[]string{"result"},
 )
 
-// JobsSpawnedTotal counts successfully spawned jobs.
-var JobsSpawnedTotal = promauto.NewCounter(
+// JobsSpawnedTotal counts successfully spawned jobs, by the namespace the Job was
+// created in.
+//
+// ⚠️ The namespace label is not decoration. Without it this counter answers "how
+// many Jobs spawned" and cannot answer "where", so no query can prove that a fleet
+// stopped creating Jobs in its control namespace after moving them into per-domain
+// sandboxes — the read is then satisfied by any spawn anywhere. The value is the
+// RESOLVED namespace (`ResolveJobNamespace`), not the Config's raw field, because an
+// empty `jobNamespace` means "the executor's own namespace" and labelling it "" would
+// make the control-namespace spawns indistinguishable from the sandboxed ones.
+var JobsSpawnedTotal = promauto.NewCounterVec(
 	prometheus.CounterOpts{
 		Name: "agent_executor_jobs_spawned_total",
-		Help: "Total number of jobs successfully spawned.",
+		Help: "Total number of jobs successfully spawned, by target namespace.",
 	},
+	[]string{"namespace"},
 )
 
 // ReconcileRedrivenTotal counts tasks re-driven by the reconcile loop after a
@@ -243,6 +253,12 @@ var TaskViewSkippedTotal = promauto.NewCounter(prometheus.CounterOpts{
 })
 
 func init() {
+	// Only the fixed sentinel is seeded. The namespace vocabulary is unbounded, so
+	// seeding it is not possible — but a CounterVec with no series registers no
+	// metric family at all, and a counter that is absent until the first spawn is
+	// indistinguishable from one that was never wired up. "unresolved" is this
+	// counter's only bounded value, so it is the one that can be seeded honestly.
+	JobsSpawnedTotal.WithLabelValues("unresolved").Add(0)
 	TaskEventsTotal.WithLabelValues("spawned").Add(0)
 	TaskEventsTotal.WithLabelValues("skipped_status").Add(0)
 	TaskEventsTotal.WithLabelValues("skipped_phase").Add(0)
