@@ -2,7 +2,7 @@
 
 All notable changes to this project will be documented in this file.
 
-## Unreleased
+## v0.43.0
 
 - fix: **a task whose status is terminal is no longer a candidate, whatever its Config's `trigger.statuses` says.** `reconcileTask` and `parseAndFilter` each gated status on the per-Config allow-list alone, so a Config that listed `completed` or `aborted` admitted finished tasks — and the candidate set is what the re-drive cap is charged against, so a terminal task admitted there is capped on every pass forever: `clearRedriveStreak` fires on a terminal *transition*, and for a task that went terminal before this executor saw it that transition never comes. `IsTerminalStatus` is now the status-side twin of `IsTerminal`/`terminalPhases` and is applied unconditionally in both filters, ahead of the allow-list, mirroring the terminal-phase rule that was already in place: a Config may narrow eligibility, never widen it past "the work is over". `cleanupTerminalTask` reads the same set instead of repeating the two literals. The skip is reported as `executor_task_events_total{result="skipped_terminal_status"}` rather than folded into `skipped_status` — both refuse the task, only this one says why.
   ⚠️ **This reverses the behaviour asserted by the spec `spawns job when Config has Trigger.Statuses=[completed] and event status=completed`**, which is updated in the same change; it encoded the allow-list-is-authoritative reading and not a used configuration — all 33 Configs across dev and prod declare `statuses: [in_progress]` and no other value, so nothing in the fleet changes today. The rule closes the class rather than a live instance.
