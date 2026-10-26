@@ -26,8 +26,8 @@ var _ = Describe("Dual claim restart recovery", func() {
 
 	const (
 		taskID  = "t-dual"
-		prRef   = "refs/claims/pr/bborbe-nuke-658"
-		repoRef = "refs/claims/repo/bborbe-nuke"
+		prRef   = "refs/claims/pr/bborbe/nuke/658"
+		repoRef = "refs/claims/repo/bborbe/nuke"
 	)
 
 	far := func() string {
@@ -61,10 +61,10 @@ var _ = Describe("Dual claim restart recovery", func() {
 		Expect(requestsMatching(fake.Requests(), http.MethodPut, "")).To(BeEmpty())
 		held := mgr.HeldClaims()
 		Expect(held).To(HaveLen(2))
-		Expect(held[0].Key).To(Equal("claims/pr/bborbe-nuke-658"))
+		Expect(held[0].Key).To(Equal("claims/pr/bborbe/nuke/658"))
 		Expect(held[0].TaskID).To(Equal(taskID))
 		Expect(held[0].Sha).To(Equal("S-PR"))
-		Expect(held[1].Key).To(Equal("claims/repo/bborbe-nuke"))
+		Expect(held[1].Key).To(Equal("claims/repo/bborbe/nuke"))
 		Expect(held[1].TaskID).To(Equal(taskID))
 		Expect(held[1].Sha).To(Equal("SP"))
 		expectClaimDelta(before, snapshotClaims(), map[string]float64{"adopted": 1})
@@ -80,7 +80,7 @@ var _ = Describe("Dual claim restart recovery", func() {
 		Expect(requestsMatching(fake.Requests(), http.MethodPut, "")).To(BeEmpty())
 		held := mgr.HeldClaims()
 		Expect(held).To(HaveLen(1))
-		Expect(held[0].Key).To(Equal("claims/pr/bborbe-nuke-658"))
+		Expect(held[0].Key).To(Equal("claims/pr/bborbe/nuke/658"))
 		Expect(held[0].Sha).To(Equal("S-PR"))
 		expectClaimDelta(before, snapshotClaims(), map[string]float64{"adopted": 1})
 	})
@@ -95,7 +95,7 @@ var _ = Describe("Dual claim restart recovery", func() {
 		Expect(requestsMatching(fake.Requests(), http.MethodPut, "")).To(BeEmpty())
 		held := mgr.HeldClaims()
 		Expect(held).To(HaveLen(1))
-		Expect(held[0].Key).To(Equal("claims/repo/bborbe-nuke"))
+		Expect(held[0].Key).To(Equal("claims/repo/bborbe/nuke"))
 		Expect(held[0].Sha).To(Equal("SP"))
 		expectClaimDelta(before, snapshotClaims(), map[string]float64{"adopted": 1})
 	})

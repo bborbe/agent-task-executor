@@ -27,6 +27,22 @@ var repoKeyedTaskTypes = map[string]bool{
 // types share one key per repository; every other type is keyed by task id.
 // Every component is validated before it is used: empty, "/", "..", a leading
 // ".", a trailing ".lock", or a character outside [A-Za-z0-9._-] is rejected.
+//
+// ⚠️ Owner and repo are joined with "/", not "-", and that is load-bearing.
+// A hyphen is legal inside both components, so the old hyphen join was lossy:
+// owner "a-b" with repo "c" and owner "a" with repo "b-c" both derived
+// "claims/repo/a-b-c" — two distinct repositories aliasing one lock, so the
+// mutual exclusion silently did nothing. Because "/" is rejected inside a
+// component, the slash join cannot collide. This also matches the streak keys
+// (claims/redrive/<taskid>/<phase>/<n>), which were already slash-separated.
+//
+// ⚠️ The format is shared with vault-api, which reproduces it rather than
+// deriving its own. The two must change together: a period where one side
+// writes "claims/repo/a/b" and the other reads "claims/repo/a-b" is a period
+// where the lock excludes nothing. In-flight claims carry a 5-minute lease, so
+// a rolling deploy orphans each one for at most one lease and the next acquire
+// takes it over (see AcquireClaimHandler in vault-api, which carries an expired
+// ref's own SHA as the compare-and-swap).
 func DeriveClaimKey(
 	ctx context.Context,
 	taskType string,
@@ -43,7 +59,7 @@ func DeriveClaimKey(
 		if err := validateClaimComponent(ctx, "repo", repo); err != nil {
 			return "", err
 		}
-		return "claims/repo/" + owner + "-" + repo, nil
+		return "claims/repo/" + owner + "/" + repo, nil
 	}
 	if err := validateClaimComponent(ctx, "task id", taskID); err != nil {
 		return "", err
@@ -89,7 +105,7 @@ func DeriveClaimKeysWithBody(
 		if err := validateClaimComponent(ctx, "pull request number", number); err != nil {
 			return "", "", false, errors.Wrapf(ctx, err, "derive pr claim key")
 		}
-		return "claims/pr/" + owner + "-" + repo + "-" + number,
+		return "claims/pr/" + owner + "/" + repo + "/" + number,
 			"",
 			false,
 			nil

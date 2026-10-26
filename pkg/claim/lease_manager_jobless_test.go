@@ -39,7 +39,7 @@ var _ = Describe("LeaseManager jobless claim release", func() {
 	})
 
 	It("releases a held claim whose Job has been absent for 300 s", func() {
-		key := "claims/repo/bborbe-nuke"
+		key := "claims/repo/bborbe/nuke"
 		_, err := mgr.Claim(ctx, key, "4684419b")
 		Expect(err).NotTo(HaveOccurred())
 		job.SetRunning(map[string]bool{})

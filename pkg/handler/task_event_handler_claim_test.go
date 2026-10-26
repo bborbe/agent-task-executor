@@ -350,7 +350,7 @@ var _ = Describe("claim gate", func() {
 
 		Expect(harness.spawner.SpawnJobCallCount()).To(Equal(1))
 		_, key, expectedSha, _, taskID, _ := harness.client.PutArgsForCall(0)
-		Expect(key).To(Equal("claims/repo/bborbe-agent"))
+		Expect(key).To(Equal("claims/repo/bborbe/agent"))
 		Expect(expectedSha).To(Equal(""))
 		Expect(taskID).To(Equal(string(task.TaskIdentifier)))
 		expectClaimDelta(before, snapshotClaims(), map[string]float64{"claimed": 1})

@@ -39,10 +39,10 @@ var _ = Describe("DeriveClaimKey", func() {
 			"abc123",
 			"bborbe",
 			"agent",
-			"claims/repo/bborbe-agent",
+			"claims/repo/bborbe/agent",
 			false,
 		),
-		Entry("release", "release", "abc123", "bborbe", "agent", "claims/repo/bborbe-agent", false),
+		Entry("release", "release", "abc123", "bborbe", "agent", "claims/repo/bborbe/agent", false),
 		// A pr-review is not repo-keyed: without a usable pull-request URL it
 		// falls back to its task id, so one repository's reviews never contend
 		// for a shared key.
@@ -53,7 +53,7 @@ var _ = Describe("DeriveClaimKey", func() {
 			"abc123",
 			"bborbe",
 			"agent",
-			"claims/repo/bborbe-agent",
+			"claims/repo/bborbe/agent",
 			false,
 		),
 		Entry(
@@ -62,7 +62,7 @@ var _ = Describe("DeriveClaimKey", func() {
 			"abc123",
 			"Bborbe",
 			"Agent",
-			"claims/repo/bborbe-agent",
+			"claims/repo/bborbe/agent",
 			false,
 		),
 		// Every other type is keyed by task id.

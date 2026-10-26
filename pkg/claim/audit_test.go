@@ -56,7 +56,7 @@ var _ = Describe("LeaseManager AuditMismatch", func() {
 	})
 
 	It("counts one mismatch for a dual claim without a Job, not one per ref", func() {
-		_, err := mgr.ClaimPair(ctx, "claims/repo/bborbe-nuke", "claims/pr/bborbe-nuke-658", "t1")
+		_, err := mgr.ClaimPair(ctx, "claims/repo/bborbe/nuke", "claims/pr/bborbe/nuke/658", "t1")
 		Expect(err).NotTo(HaveOccurred())
 		Expect(mgr.HeldClaims()).To(HaveLen(2))
 

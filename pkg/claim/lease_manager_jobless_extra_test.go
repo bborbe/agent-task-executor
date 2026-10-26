@@ -33,7 +33,7 @@ var _ = Describe("LeaseManager jobless claim release edge cases", func() {
 	)
 
 	const (
-		joblessKey  = "claims/repo/bborbe-nuke"
+		joblessKey  = "claims/repo/bborbe/nuke"
 		joblessTask = "t-jobless"
 	)
 
