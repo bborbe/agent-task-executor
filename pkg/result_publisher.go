@@ -21,11 +21,26 @@ import (
 	libtime "github.com/bborbe/time"
 	"github.com/bborbe/vault-cli/pkg/domain"
 	"github.com/golang/glog"
+
+	"github.com/bborbe/agent-task-executor/pkg/claim"
+	"github.com/bborbe/agent-task-executor/pkg/metrics"
 )
 
 const (
 	dedupeCapacity = 1024
 	dedupeTTL      = 3600 * time.Second
+)
+
+// The two reasons a record may be closed out with. The vocabulary is closed:
+// nothing else is ever written to aborted_reason by the re-drive path, which is
+// why executor_redrive_aborted_total can be pre-initialised for both values.
+const (
+	// AbortReasonBrokenSignature means the most recent attempts all failed with
+	// the same broken signature — the work is not going to succeed by retrying.
+	AbortReasonBrokenSignature = metrics.RedriveAbortReasonBrokenSignature
+	// AbortReasonTransientExhausted means the failures were transient, but the
+	// bounded extension is spent.
+	AbortReasonTransientExhausted = metrics.RedriveAbortReasonTransientExhausted
 )
 
 //counterfeiter:generate -o ../mocks/result_publisher.go --fake-name FakeResultPublisher . ResultPublisher
@@ -94,6 +109,15 @@ type ResultPublisher interface {
 	// as they are. human_review is already in the executor's terminal-phase set,
 	// so a parked task is never re-spawned and needs no second guard.
 	PublishParkLostClaim(ctx context.Context, task lib.Task) error
+	// PublishAbort closes a record the consecutive-re-drive cap has decided to
+	// stop driving. It writes status aborted plus the close-out pair vault-cli
+	// requires (aborted_reason and gate_successor) and clears current_job. It
+	// writes those four keys and no others. Idempotent per task: an already
+	// aborted task is left alone, and a publish is deduped through the same
+	// TTL'd LRU as PublishFailure. streak is the cap's count at the time of the
+	// decision, carried for the log line only — the reason store's ref count is
+	// deliberately not the streak count.
+	PublishAbort(ctx context.Context, task lib.Task, reason string, streak int) error
 	// PublishQueueEntry records when a task first started waiting behind the
 	// concurrency cap. It publishes queued_at and touches no other key.
 	PublishQueueEntry(ctx context.Context, task lib.Task, queuedAt string) error
@@ -101,11 +125,14 @@ type ResultPublisher interface {
 	PublishRaw(ctx context.Context, operation base.CommandOperation, payload interface{}) error
 }
 
-// NewResultPublisher creates a ResultPublisher.
+// NewResultPublisher creates a ResultPublisher. claimRefClientFactory may be
+// nil — claim mode off, or a mode that never built a client — in which case no
+// failure reason is recorded and every publish behaves exactly as before.
 func NewResultPublisher(
 	syncProducer libkafka.SyncProducer,
 	topicPrefix base.TopicPrefix,
 	currentDateTime libtime.CurrentDateTimeGetter,
+	claimRefClientFactory ClaimRefClientFactory,
 ) ResultPublisher {
 	return &resultPublisher{
 		commandObjectSender: cdb.NewCommandObjectSender(
@@ -113,8 +140,9 @@ func NewResultPublisher(
 			topicPrefix,
 			log.DefaultSamplerFactory,
 		),
-		currentDateTime: currentDateTime,
-		dedupe:          newDedupe(dedupeCapacity, currentDateTime),
+		currentDateTime:       currentDateTime,
+		claimRefClientFactory: claimRefClientFactory,
+		dedupe:                newDedupe(dedupeCapacity, currentDateTime),
 	}
 }
 
@@ -176,6 +204,71 @@ type resultPublisher struct {
 	commandObjectSender cdb.CommandObjectSender
 	currentDateTime     libtime.CurrentDateTimeGetter
 	dedupe              *ttlDedupe
+	// claimRefClientFactory builds the client the reason store records through.
+	// Nil under claim mode off.
+	claimRefClientFactory ClaimRefClientFactory
+	// reasonStoreOnce guards the lazy construction below. PublishFailure is
+	// called from more than one goroutine (the Job and Pod informers), and the
+	// precommit gate runs with -race=false, so an unguarded nil-check would ship
+	// as a silent data race.
+	reasonStoreOnce sync.Once
+	reasonStore     claim.RedriveReasonStore
+}
+
+// redriveReasonStore returns the lazily-built reason store, or nil when no
+// claim ref client factory was injected. A nil store means "no evidence": the
+// failure publish still succeeds and nothing is recorded.
+func (p *resultPublisher) redriveReasonStore() claim.RedriveReasonStore {
+	if p.claimRefClientFactory == nil {
+		return nil
+	}
+	p.reasonStoreOnce.Do(func() {
+		refClient := p.claimRefClientFactory()
+		if refClient == nil {
+			return
+		}
+		p.reasonStore = claim.NewRedriveReasonStore(refClient, p.currentDateTime)
+	})
+	return p.reasonStore
+}
+
+// recordRedriveReason persists the failure reason of the task's current phase.
+// A recognised ZombieReason is stored verbatim; anything else, including the
+// formatted "pod_oom_killed (OOMKilled/137)" form, is normalised to "unknown" or
+// its parsed value — the formatted string's spaces and parentheses are not
+// valid claim key segments. A store failure is logged and swallowed: recording
+// evidence must never fail a failure publish.
+func (p *resultPublisher) recordRedriveReason(
+	ctx context.Context,
+	task lib.Task,
+	reason string,
+) {
+	store := p.redriveReasonStore()
+	if store == nil {
+		return
+	}
+	normalized := claim.RedriveReasonUnknown
+	if parsed, ok := ParseZombieReason(reason); ok {
+		normalized = parsed.String()
+	}
+	phase := taskPhase(task)
+	if err := store.Record(ctx, string(task.TaskIdentifier), phase, normalized); err != nil {
+		glog.Warningf(
+			"event=redrive_reason_write_failed task=%s phase=%q error=%v",
+			task.TaskIdentifier,
+			phase,
+			err,
+		)
+	}
+}
+
+// taskPhase returns the task's phase as a string, or "" when it carries none.
+// The reason ref normalizes "" to the frozen "none" component.
+func taskPhase(task lib.Task) string {
+	if phase := task.Frontmatter.Phase(); phase != nil {
+		return string(*phase)
+	}
+	return ""
 }
 
 // targetVaultFromTask reads the task's frontmatter "target_vault" key and
@@ -266,6 +359,11 @@ func (p *resultPublisher) PublishFailure(
 	// and the retry allows trigger_count to eventually bump so the retry cap
 	// (applyTriggerCap in result_writer.go) fires.
 	p.dedupe.recordDedupe(jobName)
+
+	// Recorded here, after the dedupe key, so a repeated informer delivery of
+	// the same job cannot double-record. The record is swallowed on failure:
+	// evidence gathering must never turn a delivered failure into an error.
+	p.recordRedriveReason(ctx, task, reason)
 
 	return nil
 }
@@ -419,6 +517,77 @@ func (p *resultPublisher) PublishParkLostClaim(
 		},
 	}
 	return p.publishRaw(ctx, taskcmd.UpdateFrontmatterCommandOperation, cmd)
+}
+
+// PublishAbort closes a record the consecutive-re-drive cap has stopped
+// driving. It writes status, aborted_reason, gate_successor and current_job and
+// touches no other key.
+//
+// gate_successor is not optional: vault-cli freezes the close-out pair as
+// aborted_reason + gate_successor, and its SetStatus rejects aborted when
+// either is missing, so a task written without it would sit in a state no
+// vault-cli write could then reproduce.
+//
+// This is an UpdateFrontmatterCommand rather than a result publish for the same
+// reason PublishSetTriggerScope is: the write must land on the on-disk
+// frontmatter directly (buildUpdateModifyFn), not be merged through the result
+// writer's ownership guard.
+//
+// Idempotent twice. A task already carrying status aborted is left untouched,
+// and a successful publish is deduped per task through the same TTL'd LRU as
+// PublishFailure — the cap check runs on every event and every pass, and a
+// write the controller has not yet applied must not be re-published each time.
+// The dedupe key is recorded only after publishRaw succeeds, so a failed send
+// is retried on the next event instead of being suppressed for the TTL.
+func (p *resultPublisher) PublishAbort(
+	ctx context.Context,
+	task lib.Task,
+	reason string,
+	streak int,
+) error {
+	if task.Frontmatter.Status() == domain.TaskStatusAborted {
+		return nil
+	}
+	dedupeKey := "abort:" + string(task.TaskIdentifier)
+	if p.dedupe.checkDedupe(dedupeKey) {
+		glog.V(2).Infof(
+			"event=redrive_abort_dedupe task=%s reason=%s",
+			task.TaskIdentifier,
+			reason,
+		)
+		return nil
+	}
+	cmd := taskcmd.UpdateFrontmatterCommand{
+		TaskIdentifier: task.TaskIdentifier,
+		TargetVault:    targetVaultFromTask(task),
+		Updates: lib.TaskFrontmatter{
+			"status":         string(domain.TaskStatusAborted),
+			"aborted_reason": reason,
+			"gate_successor": "none",
+			"current_job":    "",
+		},
+	}
+	if err := p.publishRaw(ctx, taskcmd.UpdateFrontmatterCommandOperation, cmd); err != nil {
+		return errors.Wrapf(
+			ctx,
+			err,
+			"publish abort for task %s",
+			task.TaskIdentifier,
+		)
+	}
+	metrics.RedriveAbortedTotal.WithLabelValues(reason).Inc()
+	// V(0): a record leaving the re-drive loop is not a steady state, so it must
+	// be visible without raising a verbosity flag.
+	glog.Infof(
+		"event=redrive_aborted task=%s task_type=%s reason=%s streak=%d phase=%q",
+		task.TaskIdentifier,
+		task.Frontmatter.TaskType().String(),
+		reason,
+		streak,
+		taskPhase(task),
+	)
+	p.dedupe.recordDedupe(dedupeKey)
+	return nil
 }
 
 // PublishQueueEntry writes only the queued_at key: the moment the task first

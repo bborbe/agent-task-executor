@@ -67,6 +67,37 @@ var RedriveCappedTotal = promauto.NewCounterVec(
 	[]string{"task_type", "phase"},
 )
 
+// The two reasons the consecutive-re-drive cap may close a record with. The
+// vocabulary is closed at compile time, which is what lets
+// RedriveAbortedTotal be pre-initialised.
+const (
+	// RedriveAbortReasonBrokenSignature means the most recent attempts all failed
+	// with the same broken signature.
+	RedriveAbortReasonBrokenSignature = "capped:broken-signature"
+	// RedriveAbortReasonTransientExhausted means the failures were transient but
+	// the bounded extension is spent.
+	RedriveAbortReasonTransientExhausted = "capped:transient-retries-exhausted"
+)
+
+// RedriveAbortedTotal counts records the executor closed out because the
+// consecutive-re-drive cap decided retrying would not help, labelled by abort
+// reason.
+//
+// Unlike RedriveCappedTotal, it IS pre-initialised in init() with .Add(0) for
+// both reason values. That is the bounded side of the counter-pre-initialization
+// rule: this label domain is closed at compile time (two constants above), so
+// every series can be registered before any abort. Its neighbour's labels —
+// task_type from runtime Config CRs and free-text phase — are unbounded, which
+// is why that one is deliberately left absent. Do not make the two match: the
+// difference is the rule, not an oversight.
+var RedriveAbortedTotal = promauto.NewCounterVec(
+	prometheus.CounterOpts{
+		Name: "executor_redrive_aborted_total",
+		Help: "Total number of records closed out by the consecutive-re-drive cap, by abort reason.",
+	},
+	[]string{"reason"},
+)
+
 // ReconcilePassesTotal counts reconcile pass outcomes, labelled by result. The
 // failure reasons mirror ReconcileOnce's log events, and `ok` is counted on
 // every pass that gets past the vault classification — so an alert can fire on a
@@ -247,6 +278,14 @@ func init() {
 		"task_vault_unstamped",
 	} {
 		ReconcilePassesTotal.WithLabelValues(result).Add(0)
+	}
+	// Pre-initialise the closed abort vocabulary so both series are visible
+	// before any abort. Unlike RedriveCappedTotal, whose labels are unbounded.
+	for _, reason := range []string{
+		RedriveAbortReasonBrokenSignature,
+		RedriveAbortReasonTransientExhausted,
+	} {
+		RedriveAbortedTotal.WithLabelValues(reason).Add(0)
 	}
 	ClaimKeyFallbackTotal.Add(0)
 	for _, result := range []string{"parked", "failed"} {

@@ -6,6 +6,7 @@ package handler
 
 import (
 	"context"
+	"strings"
 
 	lib "github.com/bborbe/agent"
 	"github.com/golang/glog"
@@ -14,6 +15,47 @@ import (
 	"github.com/bborbe/agent-task-executor/pkg/claim"
 	"github.com/bborbe/agent-task-executor/pkg/metrics"
 )
+
+// transientRedriveBudget is how many extra spawns a transient failure earns
+// beyond maxConsecutiveRedrives. It is a bounded extension, not an exemption:
+// reaching maxConsecutiveRedrives + transientRedriveBudget closes the record
+// rather than extending it again.
+//
+// Declared here rather than beside maxConsecutiveRedrives in
+// task_event_handler.go, which is already at the revive file-length limit.
+const transientRedriveBudget = 3
+
+// The classifier's three classes. They are also the values logged as class=.
+const (
+	redriveClassUnknown   = "unknown"
+	redriveClassBroken    = "broken"
+	redriveClassTransient = "transient"
+)
+
+// brokenRedriveReasons are the failure signatures that say retrying the same
+// work at the same phase will not help: the pod produced no output and crashed,
+// was OOM-killed, or the task type does not match the agent.
+//
+// type_mismatch is in the taxonomy's broken set but cannot in practice reach the
+// store: a type-mismatched task is filtered before the spawn and its failure is
+// published by PublishTypeMismatchFailure, not PublishFailure, so its streak
+// never grows. The classifier still handles it so the sets partition the whole
+// vocabulary.
+var brokenRedriveReasons = map[string]struct{}{
+	pkg.ZombieReasonPodCrashNoStdout.String(): {},
+	pkg.ZombieReasonPodOOMKilled.String():     {},
+	pkg.ZombieReasonTypeMismatch.String():     {},
+}
+
+// transientRedriveReasons are failures that may well succeed on a retry: image
+// pulls back off, deadlines, evictions, scheduling and a lost watch.
+var transientRedriveReasons = map[string]struct{}{
+	pkg.ZombieReasonImagePullBackOff.String():  {},
+	pkg.ZombieReasonDeadlineExceeded.String():  {},
+	pkg.ZombieReasonPodEvicted.String():        {},
+	pkg.ZombieReasonPodNotScheduled.String():   {},
+	pkg.ZombieReasonExecutorWatchLost.String(): {},
+}
 
 // redriveStreak is the executor's record of consecutive spawns for one task at
 // one phase: how many, and which phase they accrued in. See maxConsecutiveRedrives
@@ -41,6 +83,21 @@ func (h *taskEventHandler) redriveStreakStore(
 	return h.redriveStore, nil
 }
 
+// redriveReasonStore returns this process's reason store, or nil when claim
+// mode takes no claim. It mirrors redriveStreakStore exactly, including the
+// lease-manager warm-up that builds both stores.
+func (h *taskEventHandler) redriveReasonStore(
+	ctx context.Context,
+) (claim.RedriveReasonStore, error) {
+	if h.claimMode == pkg.ClaimModeOff {
+		return nil, nil
+	}
+	if _, err := h.leaseManager(ctx); err != nil {
+		return nil, err
+	}
+	return h.redriveReasons, nil
+}
+
 // inMemoryRedriveCount returns the streak this process has recorded for id at
 // phase, or 0 when the recorded streak belongs to another phase.
 func (h *taskEventHandler) inMemoryRedriveCount(id lib.TaskIdentifier, phase string) int {
@@ -65,34 +122,29 @@ func (h *taskEventHandler) signalRedriveCapped(
 	taskType string,
 	streak int,
 	phase string,
+	class string,
+	reasons string,
 ) {
 	metrics.RedriveCappedTotal.WithLabelValues(taskType, phase).Inc()
 	glog.V(1).Infof(
-		"event=redrive_capped task=%s task_type=%s streak=%d cap=%d phase=%q",
-		id, taskType, streak, maxConsecutiveRedrives, phase,
+		"event=redrive_capped task=%s task_type=%s streak=%d cap=%d phase=%q class=%s reasons=%s",
+		id, taskType, streak, maxConsecutiveRedrives, phase, class, reasons,
 	)
 }
 
-// redriveStreakCappedInMemory is the cheap pre-check the reconcile pass uses
-// for its summary. It never reads the store; the authoritative check runs in
-// the spawn funnel.
-func (h *taskEventHandler) redriveStreakCappedInMemory(task lib.Task) bool {
-	id := task.TaskIdentifier
-	phase := taskPhaseString(task)
-	count := h.inMemoryRedriveCount(id, phase)
-	if count < maxConsecutiveRedrives {
-		return false
-	}
-	h.signalRedriveCapped(id, task.Frontmatter.TaskType().String(), count, phase)
-	return true
-}
-
 // redriveStreakCapped reports whether the spawn must be refused because the
-// task has been spawned maxConsecutiveRedrives times at this phase. Memory is
-// checked first; when it already reaches the cap the store is not read. A
-// failed store read logs event=redrive_streak_read_failed and uses memory
-// alone. The refusal keeps today's metric and log line, with streak showing
-// the larger count actually used.
+// task has been spawned maxConsecutiveRedrives times at this phase, and, when it
+// is, decides what to do about it: close a broken record, extend a transient
+// one, or refuse without closing when there is no evidence.
+//
+// Memory is checked first, but reaching the cap in memory no longer short-
+// circuits: the classification needs the stored reasons, and a task this
+// process itself counted to the cap is the ordinary case, not a reason to skip
+// the read. Below the cap nothing is read at all.
+//
+// A failed store read logs event=redrive_streak_read_failed and uses memory
+// alone. A failed reason read logs event=redrive_reason_read_failed and is
+// treated as no evidence, which refuses but closes nothing.
 //
 // Skipping is the whole bound. The streak is deliberately NOT cleared here, so
 // the task stays capped until something moves it — clearing on the cap would
@@ -107,10 +159,6 @@ func (h *taskEventHandler) redriveStreakCapped(ctx context.Context, task lib.Tas
 	id := task.TaskIdentifier
 	phase := taskPhaseString(task)
 	count := h.inMemoryRedriveCount(id, phase)
-	if count >= maxConsecutiveRedrives {
-		h.signalRedriveCapped(id, task.Frontmatter.TaskType().String(), count, phase)
-		return true
-	}
 	store, err := h.redriveStreakStore(ctx)
 	if err != nil {
 		glog.Warningf(
@@ -132,7 +180,118 @@ func (h *taskEventHandler) redriveStreakCapped(ctx context.Context, task lib.Tas
 	if count < maxConsecutiveRedrives {
 		return false
 	}
-	h.signalRedriveCapped(id, task.Frontmatter.TaskType().String(), count, phase)
+
+	reasons, reasonsErr := h.redriveReasonsFor(ctx, id, phase)
+	if reasonsErr != nil {
+		glog.Warningf(
+			"event=redrive_reason_read_failed task=%s phase=%q error=%v",
+			id, phase, reasonsErr,
+		)
+	}
+	class := classifyRedriveReasons(reasons, count)
+	if class == redriveClassTransient && count < maxConsecutiveRedrives+transientRedriveBudget {
+		// The bounded extension: a transient failure earns more attempts, and
+		// the spawn is allowed. Nothing was refused, so nothing is signalled.
+		return false
+	}
+
+	h.signalRedriveCapped(
+		id,
+		task.Frontmatter.TaskType().String(),
+		count,
+		phase,
+		class,
+		joinRedriveReasons(reasons),
+	)
+	if class != redriveClassUnknown {
+		h.abortRedrive(ctx, task, abortReasonForClass(class), count)
+	}
+	return true
+}
+
+// abortReasonForClass maps a closeable class to its abort reason. unknown never
+// reaches here: it refuses without closing.
+func abortReasonForClass(class string) string {
+	if class == redriveClassBroken {
+		return pkg.AbortReasonBrokenSignature
+	}
+	return pkg.AbortReasonTransientExhausted
+}
+
+// abortRedrive closes the record. A publish failure is logged and swallowed:
+// the spawn is refused either way, and the next event retries the write.
+func (h *taskEventHandler) abortRedrive(
+	ctx context.Context,
+	task lib.Task,
+	reason string,
+	streak int,
+) {
+	if err := h.resultPublisher.PublishAbort(ctx, task, reason, streak); err != nil {
+		glog.Warningf(
+			"event=redrive_abort_failed task=%s reason=%s error=%v",
+			task.TaskIdentifier, reason, err,
+		)
+	}
+}
+
+// joinRedriveReasons renders the reason set for the log line. "-" means none.
+func joinRedriveReasons(reasons []string) string {
+	if len(reasons) == 0 {
+		return "-"
+	}
+	return strings.Join(reasons, ",")
+}
+
+// classifyRedriveReasons decides why a streak reached the cap. The rules are
+// evaluated in the order unknown, broken, transient and the first match wins.
+//
+// The order is load-bearing: a short count whose recorded reason is transient
+// matches both the transient rule and the unknown rule, and closing a record on
+// partial evidence is forbidden, so unknown must win.
+//
+//   - unknown: no reasons at all, fewer reasons than the streak counts, or every
+//     one of the most recent count reasons is the literal "unknown".
+//   - broken: at least count reasons were recorded and the most recent count are
+//     all one value from brokenRedriveReasons.
+//   - transient: the most recent count reasons differ, or any of them is a
+//     transient value.
+//
+// The function is total: every input falls into exactly one class.
+func classifyRedriveReasons(reasons []string, count int) string {
+	if count < 1 || len(reasons) == 0 || len(reasons) < count {
+		return redriveClassUnknown
+	}
+	recent := reasons[len(reasons)-count:]
+	allUnknown := true
+	for _, reason := range recent {
+		if reason != claim.RedriveReasonUnknown {
+			allUnknown = false
+			break
+		}
+	}
+	if allUnknown {
+		return redriveClassUnknown
+	}
+	if allSameRedriveReason(recent) {
+		if _, broken := brokenRedriveReasons[recent[0]]; broken {
+			return redriveClassBroken
+		}
+		if _, transient := transientRedriveReasons[recent[0]]; transient {
+			return redriveClassTransient
+		}
+	}
+	// Differing reasons, or a value outside the closed vocabulary: a retry may
+	// help, and that is the transient class.
+	return redriveClassTransient
+}
+
+// allSameRedriveReason reports whether every entry holds the same value.
+func allSameRedriveReason(reasons []string) bool {
+	for _, reason := range reasons[1:] {
+		if reason != reasons[0] {
+			return false
+		}
+	}
 	return true
 }
 
@@ -152,6 +311,27 @@ func (h *taskEventHandler) redriveStreakCount(
 	return store.Count(ctx, taskID, phase)
 }
 
+// redriveReasonsFor answers one task's recorded reasons. Inside a reconcile pass
+// they come from the pass's single reason snapshot; everywhere else they are
+// read live, for the same reason the count is.
+func (h *taskEventHandler) redriveReasonsFor(
+	ctx context.Context,
+	id lib.TaskIdentifier,
+	phase string,
+) ([]string, error) {
+	store, err := h.redriveReasonStore(ctx)
+	if err != nil {
+		return nil, err
+	}
+	if store == nil {
+		return nil, nil
+	}
+	if cache := redriveStreakCacheFrom(ctx); cache != nil {
+		return cache.reasons(ctx, store, string(id), phase)
+	}
+	return store.Reasons(ctx, string(id), phase)
+}
+
 // taskPhaseString returns the task's phase as a string, or "" when it carries
 // none. Shared by the cap check and the streak record so the two can never
 // disagree about which phase a streak belongs to.
@@ -166,6 +346,14 @@ func taskPhaseString(task lib.Task) string {
 // just happened, resetting it when the task has moved phase, then records the
 // spawn in the shared store. The in-memory update happens first and always: a
 // store failure must not roll back the Job or stop the floor from counting.
+//
+// When the shared store says this is a NEW streak, the task's reason refs are
+// cleared before the spawn is recorded. The classifier's short-count guard
+// compares the reason count against the streak count, so a reason set left by an
+// earlier streak would satisfy the guard on partial evidence and could close the
+// record as broken. The shared Count is read directly, not through the pass
+// cache: the cache can be older than a spawn this pass already recorded, and a
+// stale 0 would discard the reasons of a streak the store already counted.
 //
 // Called only after SpawnJob returned successfully, so a suppressed, deferred
 // or capped spawn does not count — the streak measures spawns, not attempts.
@@ -193,6 +381,7 @@ func (h *taskEventHandler) recordRedriveSpawn(ctx context.Context, task lib.Task
 	if store == nil {
 		return
 	}
+	h.clearReasonsForNewStreak(ctx, store, id, phase)
 	if recordErr := store.Record(ctx, string(id), phase); recordErr != nil {
 		glog.Warningf(
 			"event=redrive_streak_write_failed task=%s phase=%q error=%v",
@@ -201,24 +390,73 @@ func (h *taskEventHandler) recordRedriveSpawn(ctx context.Context, task lib.Task
 	}
 }
 
-// clearRedriveStreak ends this task's streak in memory and in the shared store.
-// Called when the task reaches a terminal state, where a further spawn is an
-// operator decision rather than a re-drive of the loop this cap bounds. A store
-// failure is logged and never blocks the terminal handling.
+// clearReasonsForNewStreak clears the task's reason refs when the shared streak
+// is still at 0, i.e. the spawn about to be recorded starts a new streak. Both
+// the read and the clear are logged and swallowed.
+func (h *taskEventHandler) clearReasonsForNewStreak(
+	ctx context.Context,
+	streakStore claim.RedriveStreakStore,
+	id lib.TaskIdentifier,
+	phase string,
+) {
+	count, countErr := streakStore.Count(ctx, string(id), phase)
+	if countErr != nil {
+		glog.Warningf(
+			"event=redrive_streak_read_failed task=%s phase=%q error=%v",
+			id, phase, countErr,
+		)
+		return
+	}
+	if count != 0 {
+		return
+	}
+	reasonStore, err := h.redriveReasonStore(ctx)
+	if err != nil {
+		glog.Warningf(
+			"event=redrive_reason_write_failed task=%s phase=%q error=%v",
+			id, phase, err,
+		)
+		return
+	}
+	if reasonStore == nil {
+		return
+	}
+	if clearErr := reasonStore.Clear(ctx, string(id)); clearErr != nil {
+		glog.Warningf(
+			"event=redrive_reason_write_failed task=%s phase=%q error=%v",
+			id, phase, clearErr,
+		)
+	}
+}
+
+// clearRedriveStreak ends this task's streak in memory and in both shared
+// stores. Called when the task reaches a terminal state, where a further spawn
+// is an operator decision rather than a re-drive of the loop this cap bounds. A
+// store failure is logged and never blocks the terminal handling.
 func (h *taskEventHandler) clearRedriveStreak(ctx context.Context, id lib.TaskIdentifier) {
 	h.redriveMu.Lock()
 	delete(h.redriveStreaks, id)
 	h.redriveMu.Unlock()
 
-	store, err := h.redriveStreakStore(ctx)
-	if err != nil {
+	if store, err := h.redriveStreakStore(ctx); err != nil {
 		glog.Warningf("event=redrive_streak_write_failed task=%s error=%v", id, err)
-		return
+	} else if store != nil {
+		if clearErr := store.Clear(ctx, string(id)); clearErr != nil {
+			glog.Warningf(
+				"event=redrive_streak_write_failed task=%s error=%v",
+				id, clearErr,
+			)
+		}
 	}
-	if store == nil {
-		return
-	}
-	if clearErr := store.Clear(ctx, string(id)); clearErr != nil {
-		glog.Warningf("event=redrive_streak_write_failed task=%s error=%v", id, clearErr)
+
+	if store, err := h.redriveReasonStore(ctx); err != nil {
+		glog.Warningf("event=redrive_reason_write_failed task=%s error=%v", id, err)
+	} else if store != nil {
+		if clearErr := store.Clear(ctx, string(id)); clearErr != nil {
+			glog.Warningf(
+				"event=redrive_reason_write_failed task=%s error=%v",
+				id, clearErr,
+			)
+		}
 	}
 }

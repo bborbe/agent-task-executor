@@ -8,6 +8,7 @@ import (
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 	"github.com/prometheus/client_golang/prometheus"
+	"github.com/prometheus/client_golang/prometheus/testutil"
 	dto "github.com/prometheus/client_model/go"
 
 	"github.com/bborbe/agent-task-executor/pkg/metrics"
@@ -117,6 +118,49 @@ var _ = Describe("Metrics", func() {
 		Expect(
 			gatherLabels(mfs, "agent_executor_deferred_concurrency_cap_total", "assignee"),
 		).To(ContainElement("test-assignee"))
+	})
+
+	It("pre-initialises executor_redrive_aborted_total for both abort reasons", func() {
+		mfs, err := prometheus.DefaultGatherer.Gather()
+		Expect(err).NotTo(HaveOccurred())
+
+		Expect(
+			gatherLabels(mfs, "executor_redrive_aborted_total", "reason"),
+		).To(ConsistOf(
+			metrics.RedriveAbortReasonBrokenSignature,
+			metrics.RedriveAbortReasonTransientExhausted,
+		))
+	})
+
+	It("moves only the matching abort series", func() {
+		// Both reasons are pre-initialised, so ToFloat64 on the bare collector
+		// panics; read the child series instead. Deltas, never absolutes: these
+		// counters are process-global and never reset.
+		brokenBefore := testutil.ToFloat64(
+			metrics.RedriveAbortedTotal.WithLabelValues(
+				metrics.RedriveAbortReasonBrokenSignature,
+			),
+		)
+		transientBefore := testutil.ToFloat64(
+			metrics.RedriveAbortedTotal.WithLabelValues(
+				metrics.RedriveAbortReasonTransientExhausted,
+			),
+		)
+
+		metrics.RedriveAbortedTotal.WithLabelValues(
+			metrics.RedriveAbortReasonBrokenSignature,
+		).Inc()
+
+		Expect(testutil.ToFloat64(
+			metrics.RedriveAbortedTotal.WithLabelValues(
+				metrics.RedriveAbortReasonBrokenSignature,
+			),
+		)).To(Equal(brokenBefore + 1))
+		Expect(testutil.ToFloat64(
+			metrics.RedriveAbortedTotal.WithLabelValues(
+				metrics.RedriveAbortReasonTransientExhausted,
+			),
+		)).To(Equal(transientBefore))
 	})
 
 	It("labels the redrive-cap counter with task_type then phase", func() {

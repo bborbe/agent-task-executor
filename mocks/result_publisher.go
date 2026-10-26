@@ -11,6 +11,20 @@ import (
 )
 
 type FakeResultPublisher struct {
+	PublishAbortStub        func(context.Context, lib.Task, string, int) error
+	publishAbortMutex       sync.RWMutex
+	publishAbortArgsForCall []struct {
+		arg1 context.Context
+		arg2 lib.Task
+		arg3 string
+		arg4 int
+	}
+	publishAbortReturns struct {
+		result1 error
+	}
+	publishAbortReturnsOnCall map[int]struct {
+		result1 error
+	}
 	PublishClearCurrentJobStub        func(context.Context, lib.Task, string) error
 	publishClearCurrentJobMutex       sync.RWMutex
 	publishClearCurrentJobArgsForCall []struct {
@@ -143,6 +157,70 @@ type FakeResultPublisher struct {
 	}
 	invocations      map[string][][]interface{}
 	invocationsMutex sync.RWMutex
+}
+
+func (fake *FakeResultPublisher) PublishAbort(arg1 context.Context, arg2 lib.Task, arg3 string, arg4 int) error {
+	fake.publishAbortMutex.Lock()
+	ret, specificReturn := fake.publishAbortReturnsOnCall[len(fake.publishAbortArgsForCall)]
+	fake.publishAbortArgsForCall = append(fake.publishAbortArgsForCall, struct {
+		arg1 context.Context
+		arg2 lib.Task
+		arg3 string
+		arg4 int
+	}{arg1, arg2, arg3, arg4})
+	stub := fake.PublishAbortStub
+	fakeReturns := fake.publishAbortReturns
+	fake.recordInvocation("PublishAbort", []interface{}{arg1, arg2, arg3, arg4})
+	fake.publishAbortMutex.Unlock()
+	if stub != nil {
+		return stub(arg1, arg2, arg3, arg4)
+	}
+	if specificReturn {
+		return ret.result1
+	}
+	return fakeReturns.result1
+}
+
+func (fake *FakeResultPublisher) PublishAbortCallCount() int {
+	fake.publishAbortMutex.RLock()
+	defer fake.publishAbortMutex.RUnlock()
+	return len(fake.publishAbortArgsForCall)
+}
+
+func (fake *FakeResultPublisher) PublishAbortCalls(stub func(context.Context, lib.Task, string, int) error) {
+	fake.publishAbortMutex.Lock()
+	defer fake.publishAbortMutex.Unlock()
+	fake.PublishAbortStub = stub
+}
+
+func (fake *FakeResultPublisher) PublishAbortArgsForCall(i int) (context.Context, lib.Task, string, int) {
+	fake.publishAbortMutex.RLock()
+	defer fake.publishAbortMutex.RUnlock()
+	argsForCall := fake.publishAbortArgsForCall[i]
+	return argsForCall.arg1, argsForCall.arg2, argsForCall.arg3, argsForCall.arg4
+}
+
+func (fake *FakeResultPublisher) PublishAbortReturns(result1 error) {
+	fake.publishAbortMutex.Lock()
+	defer fake.publishAbortMutex.Unlock()
+	fake.PublishAbortStub = nil
+	fake.publishAbortReturns = struct {
+		result1 error
+	}{result1}
+}
+
+func (fake *FakeResultPublisher) PublishAbortReturnsOnCall(i int, result1 error) {
+	fake.publishAbortMutex.Lock()
+	defer fake.publishAbortMutex.Unlock()
+	fake.PublishAbortStub = nil
+	if fake.publishAbortReturnsOnCall == nil {
+		fake.publishAbortReturnsOnCall = make(map[int]struct {
+			result1 error
+		})
+	}
+	fake.publishAbortReturnsOnCall[i] = struct {
+		result1 error
+	}{result1}
 }
 
 func (fake *FakeResultPublisher) PublishClearCurrentJob(arg1 context.Context, arg2 lib.Task, arg3 string) error {

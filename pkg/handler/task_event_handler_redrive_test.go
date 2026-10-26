@@ -253,25 +253,32 @@ var _ = Describe("redrive streak persistence", func() {
 		Expect(c.spawner.SpawnJobCallCount()).To(Equal(0))
 	})
 
-	It("AC8(a): a failed store read falls back to memory and is not re-read once capped", func() {
-		transport := newSharedClaimRefTransport()
-		transport.listErr = stderrors.New("git-rest down")
-		client := new(mocks.FakeClaimRefClient)
-		transport.attach(client)
-		a := newRedriveHarness(pkg.ClaimModeShadow, client)
-		task := redriveTask("tid-redrive-read-fail")
+	It(
+		"AC8(a): a failed store read falls back to memory and the capped event re-reads both stores",
+		func() {
+			transport := newSharedClaimRefTransport()
+			transport.listErr = stderrors.New("git-rest down")
+			client := new(mocks.FakeClaimRefClient)
+			transport.attach(client)
+			a := newRedriveHarness(pkg.ClaimModeShadow, client)
+			task := redriveTask("tid-redrive-read-fail")
 
-		for i := 0; i < 3; i++ {
+			for i := 0; i < 3; i++ {
+				Expect(a.consume(task)).To(Succeed())
+			}
+			Expect(a.spawner.SpawnJobCallCount()).To(Equal(3))
+			listCalls := client.ListCallCount()
+
 			Expect(a.consume(task)).To(Succeed())
-		}
-		Expect(a.spawner.SpawnJobCallCount()).To(Equal(3))
-		listCalls := client.ListCallCount()
 
-		Expect(a.consume(task)).To(Succeed())
-
-		Expect(a.spawner.SpawnJobCallCount()).To(Equal(3))
-		Expect(client.ListCallCount()).To(Equal(listCalls))
-	})
+			// The spawn is still refused from the in-memory floor, but reaching the
+			// cap no longer short-circuits: the capped event reads the streak and then
+			// the reasons, so the classifier can run on the ordinary path. Two extra
+			// list calls are that pair of reads.
+			Expect(a.spawner.SpawnJobCallCount()).To(Equal(3))
+			Expect(client.ListCallCount()).To(Equal(listCalls + 2))
+		},
+	)
 
 	It("AC8(b): a failed store read warns and never clears the streak", func() {
 		transport := newSharedClaimRefTransport()
