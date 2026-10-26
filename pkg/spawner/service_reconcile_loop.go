@@ -133,6 +133,11 @@ func (l *serviceReconcileLoop) ReconcileOnce(ctx context.Context) error {
 
 	glog.V(2).
 		Infof("event=service_reconcile done configs=%d services=%d undeployed=%d failures=%d", len(configs), services, undeployed, len(failures))
+
+	// Once per pass, not per Config: a cross-namespace workload whose Config has been
+	// deleted is otherwise unreachable, because every other cleanup path is driven by
+	// a Config that still exists in the list above.
+	l.reconciler.ReapOrphanedCopies(ctx, configs)
 	if len(failures) > 0 {
 		return errors.Wrapf(
 			ctx,

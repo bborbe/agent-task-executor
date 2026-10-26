@@ -345,3 +345,149 @@ func TestServiceReconcileCrossNamespaceOwnerRef(t *testing.T) {
 		}
 	})
 }
+
+// seedLabelledCopy creates a StatefulSet carrying the label trio buildStatefulSet
+// stamps. withOwnerRef=false is what a copy in another namespace looks like.
+func seedLabelledCopy(
+	t *testing.T,
+	client *fake.Clientset,
+	config agentv1.Config,
+	namespace string,
+	uid string,
+	executorNS string,
+	withOwnerRef bool,
+) {
+	t.Helper()
+	seed := &appsv1.StatefulSet{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      config.Name,
+			Namespace: namespace,
+			Labels: map[string]string{
+				"agent.benjamin-borbe.de/config-name":        config.Name,
+				"agent.benjamin-borbe.de/config-uid":         uid,
+				"agent.benjamin-borbe.de/executor-namespace": executorNS,
+			},
+		},
+	}
+	if withOwnerRef {
+		seed.OwnerReferences = []metav1.OwnerReference{
+			*metav1.NewControllerRef(&config, agentv1.SchemeGroupVersion.WithKind("Config")),
+		}
+	}
+	if _, err := client.AppsV1().
+		StatefulSets(namespace).
+		Create(context.Background(), seed, metav1.CreateOptions{}); err != nil {
+		t.Fatalf("seed labelled copy failed: %v", err)
+	}
+}
+
+// A StatefulSet labelled for a DIFFERENT Config object that happens to share this
+// one's name must survive the sweep. Two executors in one cluster each running a
+// `claude-interactive` is the dev/prod pairing this feature exists for, and a
+// name-only match made each delete the other's workload — and its PVC — every tick.
+func TestServiceSweepSparesAnotherConfigWithTheSameName(t *testing.T) {
+	ctx := context.Background()
+	config := serviceNamespaceConfig("claude-interactive", "dev", "dev-sandbox")
+	client, loop, _ := newServiceNamespaceLoop(t, "dev", []agentv1.Config{config})
+
+	seedLabelledCopy(
+		t,
+		client,
+		config,
+		"prod-sandbox",
+		"99999999-8888-7777-6666-555555555555",
+		"prod",
+		false,
+	)
+
+	if err := loop.ReconcileOnce(ctx); err != nil {
+		t.Fatalf("reconcile failed: %v", err)
+	}
+
+	if _, err := client.AppsV1().StatefulSets("prod-sandbox").
+		Get(ctx, config.Name, metav1.GetOptions{}); err != nil {
+		t.Fatalf("sweep deleted another Config's workload with the same name: %v", err)
+	}
+}
+
+// The sweep must still remove this Config's OWN previous copy, or a namespace
+// change leaves the old workload running with the Config's Secret.
+func TestServiceSweepRemovesOwnPreviousCopy(t *testing.T) {
+	ctx := context.Background()
+	config := serviceNamespaceConfig("claude-interactive", "dev", "dev-sandbox")
+	client, loop, _ := newServiceNamespaceLoop(t, "dev", []agentv1.Config{config})
+
+	seedLabelledCopy(t, client, config, "old-sandbox", string(config.UID), "dev", false)
+
+	if err := loop.ReconcileOnce(ctx); err != nil {
+		t.Fatalf("reconcile failed: %v", err)
+	}
+
+	if _, err := client.AppsV1().StatefulSets("old-sandbox").
+		Get(ctx, config.Name, metav1.GetOptions{}); !apierrors.IsNotFound(err) {
+		t.Fatalf("expected own previous copy to be removed, got err=%v", err)
+	}
+}
+
+// Deleting the Config CR removes it from the provider list, so no per-Config path
+// runs for it any more. Without the reaper its cross-namespace StatefulSet keeps
+// running with the Config's Secret env and its PVC, with nothing to collect it.
+func TestServiceReapRemovesCopyWhoseConfigIsGone(t *testing.T) {
+	ctx := context.Background()
+	gone := serviceNamespaceConfig("claude-interactive", "dev", "dev-sandbox")
+	client, loop, provider := newServiceNamespaceLoop(t, "dev", []agentv1.Config{gone})
+	seedLabelledCopy(t, client, gone, "dev-sandbox", string(gone.UID), "dev", false)
+
+	// The CR is deleted: the provider no longer lists it.
+	provider.configs = nil
+
+	if err := loop.ReconcileOnce(ctx); err != nil {
+		t.Fatalf("reconcile failed: %v", err)
+	}
+
+	if _, err := client.AppsV1().StatefulSets("dev-sandbox").
+		Get(ctx, gone.Name, metav1.GetOptions{}); !apierrors.IsNotFound(err) {
+		t.Fatalf("expected orphaned cross-namespace copy to be reaped, got err=%v", err)
+	}
+}
+
+// The reaper must never touch a workload the garbage collector owns, must never
+// touch one whose Config still exists, and must never touch another executor's.
+// A stale or momentarily empty Config list would otherwise take every service
+// agent down — including, in the last case, a peer executor's.
+func TestServiceReapSparesLiveOwnedAndForeignWorkloads(t *testing.T) {
+	ctx := context.Background()
+	live := serviceNamespaceConfig("claude-interactive", "dev", "dev-sandbox")
+	client := fake.NewClientset()
+	reconciler := spawner.NewServiceReconciler(
+		libk8s.NewStatefulSetDeployer(client),
+		client,
+		libk8s.Namespace("dev"),
+		"standard",
+	)
+
+	// Live Config, cross-namespace copy: keep.
+	seedLabelledCopy(t, client, live, "dev-sandbox", string(live.UID), "dev", false)
+	// Same-namespace copy: carries an ownerRef, so the GC is authoritative.
+	seedLabelledCopy(t, client, live, "dev", "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee", "dev", true)
+	// Another executor's copy, same Config name and a UID absent from this list.
+	// Its UID is not live here by definition, so only the executor label spares it.
+	seedLabelledCopy(
+		t,
+		client,
+		live,
+		"prod-sandbox",
+		"99999999-8888-7777-6666-555555555555",
+		"prod",
+		false,
+	)
+
+	reconciler.ReapOrphanedCopies(ctx, []agentv1.Config{live})
+
+	for _, ns := range []string{"dev-sandbox", "dev", "prod-sandbox"} {
+		if _, err := client.AppsV1().StatefulSets(ns).
+			Get(ctx, live.Name, metav1.GetOptions{}); err != nil {
+			t.Fatalf("reaper removed a workload it must spare in %s: %v", ns, err)
+		}
+	}
+}

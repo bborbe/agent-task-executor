@@ -11,6 +11,12 @@ import (
 )
 
 type FakeServiceReconciler struct {
+	ReapOrphanedCopiesStub        func(context.Context, []v1.Config)
+	reapOrphanedCopiesMutex       sync.RWMutex
+	reapOrphanedCopiesArgsForCall []struct {
+		arg1 context.Context
+		arg2 []v1.Config
+	}
 	ReconcileServiceStub        func(context.Context, v1.Config, pkg.AgentConfiguration) error
 	reconcileServiceMutex       sync.RWMutex
 	reconcileServiceArgsForCall []struct {
@@ -38,6 +44,44 @@ type FakeServiceReconciler struct {
 	}
 	invocations      map[string][][]interface{}
 	invocationsMutex sync.RWMutex
+}
+
+func (fake *FakeServiceReconciler) ReapOrphanedCopies(arg1 context.Context, arg2 []v1.Config) {
+	var arg2Copy []v1.Config
+	if arg2 != nil {
+		arg2Copy = make([]v1.Config, len(arg2))
+		copy(arg2Copy, arg2)
+	}
+	fake.reapOrphanedCopiesMutex.Lock()
+	fake.reapOrphanedCopiesArgsForCall = append(fake.reapOrphanedCopiesArgsForCall, struct {
+		arg1 context.Context
+		arg2 []v1.Config
+	}{arg1, arg2Copy})
+	stub := fake.ReapOrphanedCopiesStub
+	fake.recordInvocation("ReapOrphanedCopies", []interface{}{arg1, arg2Copy})
+	fake.reapOrphanedCopiesMutex.Unlock()
+	if stub != nil {
+		fake.ReapOrphanedCopiesStub(arg1, arg2)
+	}
+}
+
+func (fake *FakeServiceReconciler) ReapOrphanedCopiesCallCount() int {
+	fake.reapOrphanedCopiesMutex.RLock()
+	defer fake.reapOrphanedCopiesMutex.RUnlock()
+	return len(fake.reapOrphanedCopiesArgsForCall)
+}
+
+func (fake *FakeServiceReconciler) ReapOrphanedCopiesCalls(stub func(context.Context, []v1.Config)) {
+	fake.reapOrphanedCopiesMutex.Lock()
+	defer fake.reapOrphanedCopiesMutex.Unlock()
+	fake.ReapOrphanedCopiesStub = stub
+}
+
+func (fake *FakeServiceReconciler) ReapOrphanedCopiesArgsForCall(i int) (context.Context, []v1.Config) {
+	fake.reapOrphanedCopiesMutex.RLock()
+	defer fake.reapOrphanedCopiesMutex.RUnlock()
+	argsForCall := fake.reapOrphanedCopiesArgsForCall[i]
+	return argsForCall.arg1, argsForCall.arg2
 }
 
 func (fake *FakeServiceReconciler) ReconcileService(arg1 context.Context, arg2 v1.Config, arg3 pkg.AgentConfiguration) error {
