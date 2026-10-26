@@ -118,7 +118,7 @@ func (l *serviceReconcileLoop) ReconcileOnce(ctx context.Context) error {
 			// orphan a running workload for the life of the cluster.
 			// UndeployService is idempotent, so this is a no-op for the job
 			// Configs that never had one, which is most of them.
-			if err := l.reconciler.UndeployService(ctx, config.Name); err != nil {
+			if err := l.reconciler.UndeployService(ctx, config); err != nil {
 				failures = append(failures, err)
 				continue
 			}

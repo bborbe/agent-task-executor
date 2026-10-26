@@ -16,6 +16,7 @@ import (
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/util/intstr"
+	kubernetes "k8s.io/client-go/kubernetes"
 
 	agentv1 "github.com/bborbe/agent-task-executor/k8s/apis/agent.benjamin-borbe.de/v1"
 	pkg "github.com/bborbe/agent-task-executor/pkg"
@@ -75,8 +76,10 @@ type ServiceReconciler interface {
 		config agentv1.Config,
 		resolved pkg.AgentConfiguration,
 	) error
-	// UndeployService removes the StatefulSet a Config owns, in the reconciler's
-	// own namespace — but only if the executor actually owns it.
+	// UndeployService removes the StatefulSet a Config owns, in the Config's
+	// resolved namespace — but only if the executor actually owns it. It also
+	// sweeps every remaining namespace for copies this Config left behind when
+	// its serviceNamespace changed.
 	//
 	// The ownership check is not defensive decoration. The loop calls this for
 	// every Config that is not a service, and a StatefulSet's name here is just
@@ -87,20 +90,20 @@ type ServiceReconciler interface {
 	// Idempotent and honest: a missing StatefulSet is not an error (the ownerRef
 	// may already have collected it), and a StatefulSet this executor does not
 	// own is left untouched and reported as such, never as a removal.
-	UndeployService(ctx context.Context, name string) error
+	UndeployService(ctx context.Context, config agentv1.Config) error
 }
 
 // NewServiceReconciler returns a ServiceReconciler that deploys StatefulSets
 // through the given deployer.
 func NewServiceReconciler(
 	deployer k8s.StatefulSetDeployer,
-	statefulSets k8s.StatefulSetInterface,
+	kubeClient kubernetes.Interface,
 	namespace k8s.Namespace,
 	storageClass string,
 ) ServiceReconciler {
 	return &serviceReconciler{
 		deployer:     deployer,
-		statefulSets: statefulSets,
+		kubeClient:   kubeClient,
 		namespace:    namespace,
 		storageClass: storageClass,
 	}
@@ -108,9 +111,23 @@ func NewServiceReconciler(
 
 type serviceReconciler struct {
 	deployer     k8s.StatefulSetDeployer
-	statefulSets k8s.StatefulSetInterface
+	kubeClient   kubernetes.Interface
 	namespace    k8s.Namespace
 	storageClass string
+}
+
+// resolveServiceNamespace returns the namespace one Config's workload belongs in.
+// It reads the value from the Config rather than from the resolved settings, so
+// create and delete can never disagree about the namespace.
+func (r *serviceReconciler) resolveServiceNamespace(
+	ctx context.Context,
+	config agentv1.Config,
+) (k8s.Namespace, error) {
+	namespace, err := pkg.ResolveServiceNamespace(ctx, r.namespace, config.Spec.ServiceNamespace)
+	if err != nil {
+		return "", errors.Wrapf(ctx, err, "resolve service namespace for config %s", config.Name)
+	}
+	return namespace, nil
 }
 
 func (r *serviceReconciler) ReconcileService(
@@ -125,7 +142,12 @@ func (r *serviceReconciler) ReconcileService(
 		return nil
 	}
 
-	statefulSet, err := r.buildStatefulSet(ctx, config, resolved)
+	namespace, err := r.resolveServiceNamespace(ctx, config)
+	if err != nil {
+		return err
+	}
+
+	statefulSet, err := r.buildStatefulSet(ctx, config, resolved, namespace)
 	if err != nil {
 		return err
 	}
@@ -133,15 +155,43 @@ func (r *serviceReconciler) ReconcileService(
 		return errors.Wrapf(ctx, err, "deploy statefulset %s", statefulSet.Name)
 	}
 	glog.V(2).
-		Infof("reconciled service statefulset %s for assignee %s with image %s", statefulSet.Name, resolved.Assignee, resolved.Image)
+		Infof("reconciled service statefulset %s in namespace %s for assignee %s with image %s", statefulSet.Name, namespace, resolved.Assignee, resolved.Image)
+
+	// A namespace change creates the new workload above and leaves the old one
+	// running with the Config's Secret. Removing the previous copy is best-effort:
+	// the reconcile has already succeeded, and a refused cluster-wide list must not
+	// take a healthy service agent down.
+	r.removePreviousNamespaceCopies(ctx, config, namespace)
 	return nil
 }
 
 func (r *serviceReconciler) UndeployService(
 	ctx context.Context,
-	name string,
+	config agentv1.Config,
 ) error {
-	existing, err := r.statefulSets.Get(ctx, name, metav1.GetOptions{})
+	namespace, err := r.resolveServiceNamespace(ctx, config)
+	if err != nil {
+		return err
+	}
+	if err := r.undeployInNamespace(ctx, config, namespace); err != nil {
+		return err
+	}
+	// A Config that changed from service to job while clearing serviceNamespace
+	// resolves to the executor's own namespace, so a copy left in a sandbox
+	// namespace is unreachable by the lookup above. Sweep remaining namespaces too.
+	r.removePreviousNamespaceCopies(ctx, config, namespace)
+	return nil
+}
+
+// undeployInNamespace removes the StatefulSet this Config owns in one namespace.
+func (r *serviceReconciler) undeployInNamespace(
+	ctx context.Context,
+	config agentv1.Config,
+	namespace k8s.Namespace,
+) error {
+	existing, err := r.kubeClient.AppsV1().
+		StatefulSets(namespace.String()).
+		Get(ctx, config.Name, metav1.GetOptions{})
 	if err != nil {
 		if apierrors.IsNotFound(err) {
 			// Nothing to remove — the ownerRef may already have collected it, and
@@ -149,20 +199,70 @@ func (r *serviceReconciler) UndeployService(
 			// had a StatefulSet at all. Silent, and *not* reported as a removal.
 			return nil
 		}
-		return errors.Wrapf(ctx, err, "get statefulset %s", name)
+		return errors.Wrapf(ctx, err, "get statefulset %s", config.Name)
 	}
 	if !ownedByConfig(existing) {
 		// Someone else's workload, sharing this Config's name. Leave it alone and
 		// say so — reporting it as a removal is how a no-op becomes a false alarm.
 		glog.V(2).
-			Infof("kept statefulset %s: not owned by a Config, refusing to undeploy", name)
+			Infof("kept statefulset %s: not owned by a Config, refusing to undeploy", config.Name)
 		return nil
 	}
-	if err := r.deployer.Undeploy(ctx, r.namespace, k8s.Name(name)); err != nil {
-		return errors.Wrapf(ctx, err, "undeploy statefulset %s", name)
+	if err := r.deployer.Undeploy(ctx, namespace, k8s.Name(config.Name)); err != nil {
+		return errors.Wrapf(ctx, err, "undeploy statefulset %s", config.Name)
 	}
-	glog.V(2).Infof("removed service statefulset %s", name)
+	glog.V(2).Infof("removed service statefulset %s in namespace %s", config.Name, namespace)
 	return nil
+}
+
+// removePreviousNamespaceCopies deletes StatefulSets this Config owns in any
+// namespace other than the resolved one. A namespace change creates the new copy
+// and, without this, leaves the previous one running with the Config's Secret.
+//
+// Best-effort by design: the workload has already been reconciled, so a refused
+// cluster-wide list (403) or a failed delete is logged and never fails the
+// reconcile. A missing cluster-scoped grant must not take every service agent down.
+func (r *serviceReconciler) removePreviousNamespaceCopies(
+	ctx context.Context,
+	config agentv1.Config,
+	resolvedNamespace k8s.Namespace,
+) {
+	list, err := r.kubeClient.AppsV1().StatefulSets("").List(ctx, metav1.ListOptions{})
+	if err != nil {
+		glog.Errorf(
+			"event=service_namespace_sweep_failed config=%s error=%v",
+			config.Name,
+			err,
+		)
+		return
+	}
+	for i := range list.Items {
+		existing := &list.Items[i]
+		if existing.Name != config.Name {
+			continue
+		}
+		if existing.Namespace == resolvedNamespace.String() {
+			continue
+		}
+		if !ownedByConfig(existing) {
+			continue
+		}
+		previousNamespace := k8s.Namespace(existing.Namespace)
+		if err := r.deployer.Undeploy(ctx, previousNamespace, k8s.Name(existing.Name)); err != nil {
+			glog.Errorf(
+				"event=service_namespace_sweep_delete_failed config=%s namespace=%s error=%v",
+				config.Name,
+				previousNamespace,
+				err,
+			)
+			continue
+		}
+		glog.V(2).Infof(
+			"event=service_namespace_removed config=%s namespace=%s",
+			config.Name,
+			previousNamespace,
+		)
+	}
 }
 
 // ownedByConfig reports whether a StatefulSet was created by this executor for a
@@ -183,6 +283,7 @@ func (r *serviceReconciler) buildStatefulSet(
 	ctx context.Context,
 	config agentv1.Config,
 	resolved pkg.AgentConfiguration,
+	namespace k8s.Namespace,
 ) (*appsv1.StatefulSet, error) {
 	mountPath := resolved.VolumeMountPath
 	if mountPath == "" {
@@ -210,7 +311,7 @@ func (r *serviceReconciler) buildStatefulSet(
 
 	objectMetaBuilder := k8s.NewObjectMetaBuilder()
 	objectMetaBuilder.SetName(k8s.Name(config.Name))
-	objectMetaBuilder.SetNamespace(r.namespace)
+	objectMetaBuilder.SetNamespace(namespace)
 
 	statefulSetBuilder := k8s.NewStatefulSetBuilder()
 	statefulSetBuilder.SetObjectMetaBuilder(objectMetaBuilder)

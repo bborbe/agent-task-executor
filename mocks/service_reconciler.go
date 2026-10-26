@@ -24,11 +24,11 @@ type FakeServiceReconciler struct {
 	reconcileServiceReturnsOnCall map[int]struct {
 		result1 error
 	}
-	UndeployServiceStub        func(context.Context, string) error
+	UndeployServiceStub        func(context.Context, v1.Config) error
 	undeployServiceMutex       sync.RWMutex
 	undeployServiceArgsForCall []struct {
 		arg1 context.Context
-		arg2 string
+		arg2 v1.Config
 	}
 	undeployServiceReturns struct {
 		result1 error
@@ -103,12 +103,12 @@ func (fake *FakeServiceReconciler) ReconcileServiceReturnsOnCall(i int, result1 
 	}{result1}
 }
 
-func (fake *FakeServiceReconciler) UndeployService(arg1 context.Context, arg2 string) error {
+func (fake *FakeServiceReconciler) UndeployService(arg1 context.Context, arg2 v1.Config) error {
 	fake.undeployServiceMutex.Lock()
 	ret, specificReturn := fake.undeployServiceReturnsOnCall[len(fake.undeployServiceArgsForCall)]
 	fake.undeployServiceArgsForCall = append(fake.undeployServiceArgsForCall, struct {
 		arg1 context.Context
-		arg2 string
+		arg2 v1.Config
 	}{arg1, arg2})
 	stub := fake.UndeployServiceStub
 	fakeReturns := fake.undeployServiceReturns
@@ -129,13 +129,13 @@ func (fake *FakeServiceReconciler) UndeployServiceCallCount() int {
 	return len(fake.undeployServiceArgsForCall)
 }
 
-func (fake *FakeServiceReconciler) UndeployServiceCalls(stub func(context.Context, string) error) {
+func (fake *FakeServiceReconciler) UndeployServiceCalls(stub func(context.Context, v1.Config) error) {
 	fake.undeployServiceMutex.Lock()
 	defer fake.undeployServiceMutex.Unlock()
 	fake.UndeployServiceStub = stub
 }
 
-func (fake *FakeServiceReconciler) UndeployServiceArgsForCall(i int) (context.Context, string) {
+func (fake *FakeServiceReconciler) UndeployServiceArgsForCall(i int) (context.Context, v1.Config) {
 	fake.undeployServiceMutex.RLock()
 	defer fake.undeployServiceMutex.RUnlock()
 	argsForCall := fake.undeployServiceArgsForCall[i]

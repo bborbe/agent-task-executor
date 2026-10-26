@@ -78,8 +78,8 @@ var _ = Describe("ServiceReconcileLoop", func() {
 		Expect(loop.ReconcileOnce(ctx)).To(Succeed())
 		Expect(reconciler.ReconcileServiceCallCount()).To(Equal(0))
 		Expect(reconciler.UndeployServiceCallCount()).To(Equal(1))
-		_, name := reconciler.UndeployServiceArgsForCall(0)
-		Expect(name).To(Equal("claude"))
+		_, config := reconciler.UndeployServiceArgsForCall(0)
+		Expect(config.Name).To(Equal("claude"))
 	})
 
 	It("treats an unset type as job, matching the CRD contract, and undeploys it", func() {

@@ -147,6 +147,15 @@ type ConfigSpec struct {
 	// isolation by naming the executor namespace. The namespace must already exist
 	// and already hold this Config's PVCs and Secrets before the field is set.
 	JobNamespace string `json:"jobNamespace,omitempty"`
+	// ServiceNamespace is the namespace the executor deploys this Config's
+	// long-running StatefulSet in, for a Config whose spec.type is service.
+	// Empty (the default) means the executor's own namespace, so every Config that
+	// does not set it behaves exactly as before. A value equal to the executor's
+	// own namespace is rejected at reconcile time: a Config may never opt out of
+	// isolation by naming the executor namespace. The namespace must already exist,
+	// must already permit StatefulSets for the executor's service account, and must
+	// already hold this Config's Secret before the field is set.
+	ServiceNamespace string `json:"serviceNamespace,omitempty"`
 	// MaxConcurrentJobs caps how many Jobs this agent may run at once. Spawns
 	// beyond the cap are deferred and retried, never dropped. 0 (the default)
 	// means unlimited, preserving existing behaviour for every agent that does
@@ -278,6 +287,7 @@ func (s ConfigSpec) Equal(o ConfigSpec) bool {
 		reflect.DeepEqual(s.ConfigMapItems, o.ConfigMapItems) &&
 		s.PriorityClassName == o.PriorityClassName &&
 		s.JobNamespace == o.JobNamespace &&
+		s.ServiceNamespace == o.ServiceNamespace &&
 		s.MaxConcurrentJobs == o.MaxConcurrentJobs &&
 		reflect.DeepEqual(s.RerunOnLostClaim, o.RerunOnLostClaim) &&
 		reflect.DeepEqual(s.Env, o.Env) &&

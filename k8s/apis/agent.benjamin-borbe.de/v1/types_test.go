@@ -421,6 +421,66 @@ var _ = Describe("ConfigSpec", func() {
 		})
 	})
 
+	Describe("JSON round-trip for serviceNamespace", func() {
+		It("round-trips serviceNamespace through JSON", func() {
+			spec := agentv1.ConfigSpec{
+				Assignee:         "claude-agent",
+				Image:            "example/image:latest",
+				Heartbeat:        "30m",
+				ServiceNamespace: "agent-sandbox",
+			}
+			data, err := json.Marshal(spec)
+			Expect(err).To(BeNil())
+			var decoded agentv1.ConfigSpec
+			Expect(json.Unmarshal(data, &decoded)).To(Succeed())
+			Expect(decoded.ServiceNamespace).To(Equal("agent-sandbox"))
+		})
+
+		It("omits serviceNamespace from JSON when empty", func() {
+			spec := agentv1.ConfigSpec{
+				Assignee:  "claude-agent",
+				Image:     "example/image:latest",
+				Heartbeat: "30m",
+			}
+			data, err := json.Marshal(spec)
+			Expect(err).To(BeNil())
+			Expect(string(data)).NotTo(ContainSubstring("serviceNamespace"))
+		})
+	})
+
+	Describe("Equal with serviceNamespace", func() {
+		It("returns false when ServiceNamespace differs", func() {
+			a := agentv1.ConfigSpec{
+				Assignee:         "claude",
+				Image:            "registry/agent-claude",
+				Heartbeat:        "30m",
+				ServiceNamespace: "agent-sandbox",
+			}
+			b := agentv1.ConfigSpec{
+				Assignee:  "claude",
+				Image:     "registry/agent-claude",
+				Heartbeat: "30m",
+			}
+			Expect(a.Equal(b)).To(BeFalse())
+		})
+
+		It("returns true when ServiceNamespace matches", func() {
+			a := agentv1.ConfigSpec{
+				Assignee:         "claude",
+				Image:            "registry/agent-claude",
+				Heartbeat:        "30m",
+				ServiceNamespace: "agent-sandbox",
+			}
+			b := agentv1.ConfigSpec{
+				Assignee:         "claude",
+				Image:            "registry/agent-claude",
+				Heartbeat:        "30m",
+				ServiceNamespace: "agent-sandbox",
+			}
+			Expect(a.Equal(b)).To(BeTrue())
+		})
+	})
+
 	Describe("Equal - maxConcurrentJobs", func() {
 		It("returns false when MaxConcurrentJobs differs", func() {
 			a := agentv1.ConfigSpec{

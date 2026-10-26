@@ -75,6 +75,10 @@ type AgentConfiguration struct {
 	// ConfigSpec.JobNamespace. Empty means the executor's own namespace. Resolve
 	// it with ResolveJobNamespace before use.
 	JobNamespace string
+	// ServiceNamespace is the namespace this Config's service StatefulSet must be
+	// deployed in, from ConfigSpec.ServiceNamespace. Empty means the executor's
+	// own namespace. Resolve it with ResolveServiceNamespace before use.
+	ServiceNamespace string
 	// ImagePullSecret is the name of the K8s Secret used for image pulls.
 	// Empty uses the cluster default (typically "docker").
 	ImagePullSecret string
@@ -145,6 +149,7 @@ func (a AgentConfigurations) TaggedConfigurations(branch string) AgentConfigurat
 			MaxConcurrentJobs:       c.MaxConcurrentJobs,
 			PriorityClassName:       c.PriorityClassName,
 			JobNamespace:            c.JobNamespace,
+			ServiceNamespace:        c.ServiceNamespace,
 			ImagePullSecret:         c.ImagePullSecret,
 			Trigger:                 c.Trigger,
 			RerunOnLostClaim:        c.RerunOnLostClaim,

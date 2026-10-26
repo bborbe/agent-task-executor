@@ -250,6 +250,7 @@ func convert(ctx context.Context, obj agentv1.Config, branch string) (AgentConfi
 		MaxConcurrentJobs:       obj.Spec.MaxConcurrentJobs,
 		PriorityClassName:       obj.Spec.PriorityClassName,
 		JobNamespace:            obj.Spec.JobNamespace,
+		ServiceNamespace:        obj.Spec.ServiceNamespace,
 		Trigger:                 obj.Spec.Trigger,
 		RerunOnLostClaim:        obj.Spec.RerunOnLostClaim,
 		ZombieJobTimeoutSeconds: obj.Spec.ZombieJobTimeoutSeconds,
