@@ -286,6 +286,25 @@ func (r *serviceReconciler) ReapOrphanedCopies(
 	ctx context.Context,
 	configs []agentv1.Config,
 ) {
+	// ⚠️ An empty list is NOT "every Config is gone" — it is what the store returns
+	// before the informer has listed anything. `serviceReconcileLoop.Run` calls
+	// ReconcileOnce immediately and concurrently with the connector, and
+	// k8s.EventHandler.Get answers `([], nil)` on an empty store with no sync gate,
+	// so the first pass after every restart sees exactly this. Reaping on it deletes
+	// every ownerRef-less cross-namespace service StatefulSet this executor stamped —
+	// and because buildStatefulSet sets WhenDeleted: Delete, the session PVC goes
+	// with them. That is data loss on every restart, so the empty case is refused.
+	//
+	// A non-empty list is trusted, and that is a deliberate reading of how the store
+	// fills: a client-go informer populates its store from one atomic LIST before any
+	// watch event is applied, so a store that has anything in it has finished its
+	// initial sync. There is no reachable state where it holds some Configs and not
+	// others, which is why no further sync gate is needed here.
+	if len(configs) == 0 {
+		glog.V(2).Infof("event=service_orphan_reap_skipped reason=empty_config_list")
+		return
+	}
+
 	live := make(map[string]struct{}, len(configs))
 	for _, config := range configs {
 		if uid := string(config.UID); uid != "" {

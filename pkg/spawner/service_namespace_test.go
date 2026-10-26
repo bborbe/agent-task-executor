@@ -432,14 +432,20 @@ func TestServiceSweepRemovesOwnPreviousCopy(t *testing.T) {
 // Deleting the Config CR removes it from the provider list, so no per-Config path
 // runs for it any more. Without the reaper its cross-namespace StatefulSet keeps
 // running with the Config's Secret env and its PVC, with nothing to collect it.
+//
+// ⚠️ A SECOND Config is kept alive on purpose. An empty list is not "everything was
+// deleted", it is an unsynced store, and the reaper refuses it — so modelling the
+// deletion as an empty list would test the wrong thing entirely.
 func TestServiceReapRemovesCopyWhoseConfigIsGone(t *testing.T) {
 	ctx := context.Background()
 	gone := serviceNamespaceConfig("claude-interactive", "dev", "dev-sandbox")
-	client, loop, provider := newServiceNamespaceLoop(t, "dev", []agentv1.Config{gone})
+	survivor := serviceNamespaceConfig("pi-interactive", "dev", "dev-sandbox")
+	survivor.UID = "aaaaaaaa-1111-2222-3333-444444444444"
+	client, loop, provider := newServiceNamespaceLoop(t, "dev", []agentv1.Config{gone, survivor})
 	seedLabelledCopy(t, client, gone, "dev-sandbox", string(gone.UID), "dev", false)
 
-	// The CR is deleted: the provider no longer lists it.
-	provider.configs = nil
+	// The CR is deleted: the provider no longer lists it, but still lists the other.
+	provider.configs = []agentv1.Config{survivor}
 
 	if err := loop.ReconcileOnce(ctx); err != nil {
 		t.Fatalf("reconcile failed: %v", err)
@@ -489,5 +495,32 @@ func TestServiceReapSparesLiveOwnedAndForeignWorkloads(t *testing.T) {
 			Get(ctx, live.Name, metav1.GetOptions{}); err != nil {
 			t.Fatalf("reaper removed a workload it must spare in %s: %v", ns, err)
 		}
+	}
+}
+
+// ⚠️ The first reconcile pass after every restart runs before the Config store has
+// listed anything, and ReapOrphanedCopies receives an empty slice. Treating that as
+// "every Config is gone" deletes every cross-namespace service workload this executor
+// stamped — and their PVCs, because WhenDeleted is Delete. This is the difference
+// between a restart and data loss.
+func TestServiceReapDoesNothingOnAnEmptyConfigList(t *testing.T) {
+	ctx := context.Background()
+	live := serviceNamespaceConfig("claude-interactive", "dev", "dev-sandbox")
+	client := fake.NewClientset()
+	reconciler := spawner.NewServiceReconciler(
+		libk8s.NewStatefulSetDeployer(client),
+		client,
+		libk8s.Namespace("dev"),
+		"standard",
+	)
+
+	seedLabelledCopy(t, client, live, "dev-sandbox", string(live.UID), "dev", false)
+
+	// Exactly what the store returns before the informer has synced.
+	reconciler.ReapOrphanedCopies(ctx, nil)
+
+	if _, err := client.AppsV1().StatefulSets("dev-sandbox").
+		Get(ctx, live.Name, metav1.GetOptions{}); err != nil {
+		t.Fatalf("an unsynced Config store destroyed a live cross-namespace workload: %v", err)
 	}
 }
