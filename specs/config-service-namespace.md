@@ -111,13 +111,11 @@ Every AC is container-executable, so there is **no operator rung** here — deli
 
 ## Suggested Decomposition
 
-Three prompts, in this order, each independently deployable:
+The three layers are named because they *are* separable, but this ships as **one prompt** deliberately: layer 1 alone is inert and unobservable, and layers 2 and 3 are the same edit to the same function — the audit of the first prompt draft found that every hazard (the namespace-bound client, the orphan on move) lives exactly at the seam between them, so splitting would ship a reconciler that creates in the new namespace and cannot delete from the old one, between two PRs, with nothing catching it. The split stays recorded so that if this prompt proves too large to review, the seam is already named.
 
 1. **Inert field**: `ConfigSpec.ServiceNamespace` + `Equal` + `AgentConfiguration` + `TaggedConfigurations` + `convert()` + CRD schema with parity + `ResolveServiceNamespace` (shared helper) + tests. No behaviour change; the executor deploy is a no-op.
 2. **Reconciler follows it**: the cluster-wide client ripple, resolved namespace on create, `UndeployService` signature + mock regeneration + loop caller, refusal AC, target-namespace AC. Still no Config sets the field.
-3. **Move safety**: the previous-namespace removal, its AC, the golden fixture, docs and CHANGELOG.
-
-The seam is the behaviour change: 1 is expressible-but-inert, 2 makes it real, 3 makes it safe to actually use. Prompt 041 covers 1 and 2 today and must be split or explicitly justified as one.
+3. **Move safety**: the previous-namespace removal, its AC, the unset-namespace substitution, docs and CHANGELOG.
 
 ## Follow-ups
 
