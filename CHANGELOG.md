@@ -2,7 +2,7 @@
 
 All notable changes to this project will be documented in this file.
 
-## Unreleased
+## v0.44.0
 
 - feat: **the spawn counter carries the namespace the Job landed in.** `agent_executor_jobs_spawned_total` was a label-free counter, so it could answer "how many Jobs spawned" and never "where" — which made it useless for the one question the sandbox migration turns on: whether a fleet stopped creating Jobs in its control namespace after moving them into per-domain sandboxes. Any spawn anywhere satisfied a read that was supposed to prove placement. It is now a `CounterVec` labelled `namespace`, carrying the **resolved** value from `ResolveJobNamespace`, not the Config's raw `jobNamespace`: empty means "the executor's own namespace", so labelling that `""` would leave a control-namespace spawn indistinguishable from a sandboxed one. A value that cannot be resolved is reported as `unresolved` rather than collapsed into the executor namespace, so a broken read is visible as itself instead of reading as a control-namespace spawn; that sentinel is the counter's only bounded value and the only series seeded at startup, since a `CounterVec` with no series registers no metric family at all and a counter absent until the first spawn is indistinguishable from one that was never wired up. Existing queries and dashboards are unaffected — a selector without the label matches every value.
 
