@@ -87,6 +87,9 @@ type ClaimTarget struct {
 	// Owner and Repo address a repository claim.
 	Owner string
 	Repo  string
+	// Number narrows a repository claim to one pull request. Only meaningful
+	// together with Owner and Repo; a number on its own addresses nothing.
+	Number string
 }
 
 // NewTaskClaim returns a target addressed by task identifier.
@@ -97,8 +100,22 @@ func NewRepoClaim(owner, repo string) ClaimTarget {
 	return ClaimTarget{Owner: owner, Repo: repo}
 }
 
+// NewPRClaim returns a target addressed by one pull request.
+//
+// A per-PR claim exists because the repository claim serialises every review of
+// a repository: pr-reviewer takes the repo key, so a second PR's review waits
+// behind the first for as long as it renews. The narrower key lets two reviews
+// of the same repository run at once, and the executor holds both — recovering
+// the pair by task id.
+func NewPRClaim(owner, repo, number string) ClaimTarget {
+	return ClaimTarget{Owner: owner, Repo: repo, Number: number}
+}
+
 // isRepo reports whether this target names a repository rather than a task.
 func (t ClaimTarget) isRepo() bool { return t.Owner != "" || t.Repo != "" }
+
+// isPR reports whether this target names one pull request.
+func (t ClaimTarget) isPR() bool { return t.Number != "" }
 
 // path returns the vault-api path for this target, or "" when the target is
 // not addressable. An ambiguous target (both forms set) is NOT addressable:
@@ -110,7 +127,16 @@ func (t ClaimTarget) path() string {
 	if t.TaskID != "" {
 		return "/api/v1/tasks/" + url.PathEscape(t.TaskID) + "/claim"
 	}
+	// A number without a repository addresses nothing: the route has no shape
+	// for it, and inventing one would claim a key the server never serves.
+	if t.isPR() && (t.Owner == "" || t.Repo == "") {
+		return ""
+	}
 	if t.Owner != "" && t.Repo != "" {
+		if t.isPR() {
+			return "/api/v1/repos/" + url.PathEscape(t.Owner) + "/" + url.PathEscape(t.Repo) +
+				"/pulls/" + url.PathEscape(t.Number) + "/claim"
+		}
 		return "/api/v1/repos/" + url.PathEscape(t.Owner) + "/" + url.PathEscape(t.Repo) + "/claim"
 	}
 	return ""
@@ -136,6 +162,12 @@ func (t ClaimTarget) describe() string {
 	if t.TaskID != "" {
 		return "task " + t.TaskID
 	}
+	if t.isPR() && (t.Owner == "" || t.Repo == "") {
+		return "pull request " + t.Number + " without a repository"
+	}
+	if t.isPR() {
+		return "pull request " + t.Owner + "/" + t.Repo + "#" + t.Number
+	}
 	if t.isRepo() {
 		return "repo " + t.Owner + "/" + t.Repo
 	}
@@ -143,10 +175,16 @@ func (t ClaimTarget) describe() string {
 }
 
 // Claim is the server's view of a held lease.
+//
+// TaskID is the claiming run's own task identifier, as the transport stores it.
+// It is what makes a listed claim groupable: a repository claim belongs to no
+// task of its own, so recovery pairs a repository claim with its per-PR claim by
+// this field rather than by key shape.
 type Claim struct {
 	Scope       string
 	ID          string
 	Holder      string
+	TaskID      string
 	LeaseUntil  libtime.DateTime
 	RenewBefore libtime.DateTime
 	LeaseToken  string
@@ -166,15 +204,32 @@ type ClaimClient interface {
 	// Acquire takes the claim for holder with the given TTL in seconds. A held
 	// claim returns a *ClaimHeldError. An expired lease is taken over, so a
 	// dead holder cannot block the target forever.
-	Acquire(ctx context.Context, target ClaimTarget, holder string, ttlSeconds int) (*Claim, error)
+	// claimantTaskID is the claiming run's own task identifier. The server
+	// requires it for a repository or per-PR claim and answers 400
+	// missing_task_id without it; for a task claim it must be empty, because the
+	// server derives the task id from the address and a caller-supplied one
+	// would let a run claim under a task it did not address.
+	Acquire(
+		ctx context.Context,
+		target ClaimTarget,
+		holder string,
+		claimantTaskID string,
+		ttlSeconds int,
+	) (*Claim, error)
 	// Renew extends an existing lease. It never takes over: a stale token
 	// returns ErrLeaseLost and the caller re-acquires.
 	Renew(
 		ctx context.Context,
 		target ClaimTarget,
 		leaseToken string,
+		claimantTaskID string,
 		ttlSeconds int,
 	) (*Claim, error)
+	// List returns every claim, optionally narrowed to one holder. This is what
+	// a restarting executor needs and what a key-at-a-time read cannot express:
+	// Recover must see the claims it left behind before it can re-adopt, fence or
+	// release them. holder empty lists all.
+	List(ctx context.Context, holder string) ([]Claim, error)
 	// Release drops the claim. A token that is no longer current is
 	// ErrLeaseLost, not a silent success.
 	Release(ctx context.Context, target ClaimTarget, leaseToken string) error
@@ -210,6 +265,12 @@ type claimRequestBody struct {
 	Holder     string `json:"holder,omitempty"`
 	TTLSeconds int    `json:"ttl_seconds,omitempty"`
 	LeaseToken string `json:"lease_token,omitempty"`
+	// TaskID is the claiming run's own task identifier. The server REQUIRES it
+	// on a repository or per-PR write and answers 400 missing_task_id without
+	// it, because the transport stores a task id on every ref. A task claim
+	// omits it: the server derives it from the address, and sending one would
+	// let a caller claim under a task other than the one it addressed.
+	TaskID string `json:"task_id,omitempty"`
 }
 
 // claimResponseBody is the server's claim representation.
@@ -217,9 +278,18 @@ type claimResponseBody struct {
 	Scope       string `json:"scope"`
 	ID          string `json:"id"`
 	Holder      string `json:"holder"`
+	TaskID      string `json:"task_id"`
 	LeaseUntil  string `json:"lease_until"`
 	RenewBefore string `json:"renew_before"`
 	LeaseToken  string `json:"lease_token"`
+}
+
+// claimListResponseBody is GET /api/v1/claims. It carries no index_age_seconds:
+// claims are read live from git-rest and no index describes them.
+type claimListResponseBody struct {
+	Items   []claimResponseBody `json:"items"`
+	Total   int                 `json:"total"`
+	Skipped int                 `json:"skipped"`
 }
 
 // errorResponseBody is the flat error envelope every existing vault-api route
@@ -243,9 +313,10 @@ func (c *vaultAPIClaimClient) Acquire(
 	ctx context.Context,
 	target ClaimTarget,
 	holder string,
+	claimantTaskID string,
 	ttlSeconds int,
 ) (*Claim, error) {
-	body := claimRequestBody{Holder: holder, TTLSeconds: ttlSeconds}
+	body := claimRequestBody{Holder: holder, TTLSeconds: ttlSeconds, TaskID: claimantTaskID}
 	status, raw, err := c.do(ctx, http.MethodPost, target, body)
 	if err != nil {
 		return nil, err
@@ -264,9 +335,14 @@ func (c *vaultAPIClaimClient) Renew(
 	ctx context.Context,
 	target ClaimTarget,
 	leaseToken string,
+	claimantTaskID string,
 	ttlSeconds int,
 ) (*Claim, error) {
-	body := claimRequestBody{LeaseToken: leaseToken, TTLSeconds: ttlSeconds}
+	body := claimRequestBody{
+		LeaseToken: leaseToken,
+		TTLSeconds: ttlSeconds,
+		TaskID:     claimantTaskID,
+	}
 	status, raw, err := c.doPath(ctx, http.MethodPost, target.renewPath(), target, body)
 	if err != nil {
 		return nil, err
@@ -313,6 +389,47 @@ func (c *vaultAPIClaimClient) Read(ctx context.Context, target ClaimTarget) (*Cl
 		return nil, statusError("read", target, status)
 	}
 	return decodeClaim(ctx, raw)
+}
+
+// List returns every claim, optionally narrowed to one holder.
+//
+// It is the one operation that has no target: it asks the server what exists
+// rather than what is held on a named object. That is what a restarting
+// executor needs — Recover must see the claims it left behind before it can
+// re-adopt, fence or release them, and a key-at-a-time read cannot enumerate.
+//
+// holder empty lists every claim. The narrowing is a convenience the server
+// applies; it is not an access boundary, which is the gateway secret's job.
+func (c *vaultAPIClaimClient) List(ctx context.Context, holder string) ([]Claim, error) {
+	path := "/api/v1/claims"
+	if holder != "" {
+		path += "?holder=" + url.QueryEscape(holder)
+	}
+	status, raw, err := c.doPath(ctx, http.MethodGet, path, ClaimTarget{}, nil)
+	if err != nil {
+		return nil, err
+	}
+	if status != http.StatusOK {
+		return nil, errors.Wrapf(
+			ctx,
+			stderrors.New("unexpected status"),
+			"list claims: status %d",
+			status,
+		)
+	}
+	var parsed claimListResponseBody
+	if err := json.Unmarshal(raw, &parsed); err != nil {
+		return nil, errors.Wrapf(ctx, err, "decode claim list response")
+	}
+	claims := make([]Claim, 0, len(parsed.Items))
+	for _, item := range parsed.Items {
+		claim, err := claimFromResponse(ctx, item)
+		if err != nil {
+			return nil, err
+		}
+		claims = append(claims, *claim)
+	}
+	return claims, nil
 }
 
 // do issues one request against the target's own path.
@@ -429,6 +546,14 @@ func decodeClaim(ctx context.Context, raw []byte) (*Claim, error) {
 	if err := json.Unmarshal(raw, &parsed); err != nil {
 		return nil, errors.Wrapf(ctx, err, "decode claim response")
 	}
+	return claimFromResponse(ctx, parsed)
+}
+
+// claimFromResponse validates one wire claim and converts it. It is shared by
+// the single-claim routes and the listing, so both apply the same required-field
+// rules — a listing item that silently defaulted a missing lease would be a
+// claim a caller could neither renew nor trust.
+func claimFromResponse(ctx context.Context, parsed claimResponseBody) (*Claim, error) {
 	if parsed.LeaseUntil == "" {
 		return nil, errors.Wrapf(ctx, stderrors.New("missing lease_until"), "decode claim response")
 	}
@@ -443,6 +568,7 @@ func decodeClaim(ctx context.Context, raw []byte) (*Claim, error) {
 		Scope:      parsed.Scope,
 		ID:         parsed.ID,
 		Holder:     parsed.Holder,
+		TaskID:     parsed.TaskID,
 		LeaseUntil: *until,
 		LeaseToken: parsed.LeaseToken,
 	}
