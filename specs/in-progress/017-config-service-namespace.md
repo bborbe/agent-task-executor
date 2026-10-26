@@ -1,6 +1,8 @@
 ---
-status: approved
+status: prompted
 approved: "2026-10-26T06:52:56Z"
+generating: "2026-10-26T07:45:24Z"
+prompted: "2026-10-26T07:45:24Z"
 branch: dark-factory/config-service-namespace
 ---
 

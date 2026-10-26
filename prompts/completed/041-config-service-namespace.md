@@ -1,6 +1,6 @@
 ---
 status: completed
-spec: [config-service-namespace]
+spec: [017-config-service-namespace]
 summary: 'Added ConfigSpec.ServiceNamespace end-to-end: CRD type/Equal/schema parity, AgentConfiguration plumbing, shared namespace-resolution rule, and namespace-aware service reconcile/undeploy with previous-namespace cleanup, docs and tests.'
 execution_id: agent-task-executor-svcns-exec-041-config-service-namespace
 dark-factory-version: v0.198.7
