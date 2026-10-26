@@ -2,7 +2,7 @@
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
-package claim
+package claim_test
 
 // Plain Go tests, not Ginkgo: specs declared in an internal test package of
 // this repository are not discovered by the package-external suite.
@@ -16,6 +16,9 @@ import (
 	"time"
 
 	libtime "github.com/bborbe/time"
+
+	"github.com/bborbe/agent-task-executor/pkg/claim"
+	"github.com/bborbe/agent-task-executor/pkg/claim/claimtest"
 )
 
 // successHoldRefClient is a compare-and-swap claim store shared by two managers,
@@ -31,7 +34,7 @@ func newSuccessHoldRefClient() *successHoldRefClient {
 	return &successHoldRefClient{refs: map[string]string{}}
 }
 
-func (c *successHoldRefClient) List(context.Context, string) ([]ClaimRef, error) {
+func (c *successHoldRefClient) List(context.Context, string) ([]claim.ClaimRef, error) {
 	return nil, nil
 }
 
@@ -47,10 +50,10 @@ func (c *successHoldRefClient) Put(
 	defer c.mu.Unlock()
 	current, exists := c.refs[key]
 	if expectedSha == "" && exists {
-		return "", ErrLeaseConflict
+		return "", claim.ErrLeaseConflict
 	}
 	if expectedSha != "" && (!exists || current != expectedSha) {
-		return "", ErrLeaseConflict
+		return "", claim.ErrLeaseConflict
 	}
 	c.seq++
 	sha := "sha-" + strconv.Itoa(c.seq)
@@ -63,7 +66,7 @@ func (c *successHoldRefClient) Delete(_ context.Context, key string, expectedSha
 	defer c.mu.Unlock()
 	current, exists := c.refs[key]
 	if !exists || current != expectedSha {
-		return ErrLeaseConflict
+		return claim.ErrLeaseConflict
 	}
 	delete(c.refs, key)
 	return nil
@@ -119,17 +122,29 @@ func TestReleaseAfterSuccessHoldsTheClaimAgainstAPeer(t *testing.T) {
 	clockA := &stepClock{now: start}
 	clockB := &stepClock{now: start}
 
-	mgrA, err := NewLeaseManager("nuke-prod", client, job, clockA, libtime.NewWaiterDuration())
+	mgrA, err := claim.NewLeaseManager(
+		"nuke-prod",
+		claimtest.NewClient(client, clockA.Now),
+		job,
+		clockA,
+		libtime.NewWaiterDuration(),
+	)
 	if err != nil {
 		t.Fatalf("NewLeaseManager(nuke-prod) returned %v", err)
 	}
-	mgrB, err := NewLeaseManager("sun", client, job, clockB, libtime.NewWaiterDuration())
+	mgrB, err := claim.NewLeaseManager(
+		"sun",
+		claimtest.NewClient(client, clockB.Now),
+		job,
+		clockB,
+		libtime.NewWaiterDuration(),
+	)
 	if err != nil {
 		t.Fatalf("NewLeaseManager(sun) returned %v", err)
 	}
 
 	ctx := context.Background()
-	const key = "claims/repo/task-1"
+	const key = "claims/task/task-1"
 
 	if _, claimErr := mgrA.Claim(ctx, key, "task-1"); claimErr != nil {
 		t.Fatalf("cluster A claim returned %v; want success", claimErr)
@@ -146,9 +161,9 @@ func TestReleaseAfterSuccessHoldsTheClaimAgainstAPeer(t *testing.T) {
 	// Inside the window the peer cannot take the task over, so it cannot spawn.
 	clockB.set(start.Add(30 * time.Second))
 	held, err := mgrB.Claim(ctx, key, "task-1")
-	if !stderrors.Is(err, ErrLeaseConflict) || held != nil {
+	if !stderrors.Is(err, claim.ErrLeaseConflict) || held != nil {
 		t.Fatalf(
-			"peer claim inside the grace window = (%v, %v); want (nil, ErrLeaseConflict)",
+			"peer claim inside the grace window = (%v, %v); want (nil, claim.ErrLeaseConflict)",
 			held,
 			err,
 		)
@@ -156,11 +171,11 @@ func TestReleaseAfterSuccessHoldsTheClaimAgainstAPeer(t *testing.T) {
 
 	// Past the window A lets go — by the hold's expiry or by the fence, both of
 	// which delete the ref — and the peer may claim.
-	clockA.set(start.Add(SuccessGracePeriod + time.Second))
+	clockA.set(start.Add(claim.SuccessGracePeriod + time.Second))
 	if tickErr := mgrA.Tick(ctx); tickErr != nil {
 		t.Fatalf("A tick returned %v; want nil", tickErr)
 	}
-	clockB.set(start.Add(SuccessGracePeriod + 2*time.Second))
+	clockB.set(start.Add(claim.SuccessGracePeriod + 2*time.Second))
 	held, err = mgrB.Claim(ctx, key, "task-1")
 	if err != nil || held == nil {
 		t.Fatalf("peer claim after the window = (%v, %v); want a held claim", held, err)
@@ -177,19 +192,25 @@ func TestReleaseAfterSuccessReleasesImmediatelyWhenTheWindowHasPassed(t *testing
 	start := time.Date(2026, 10, 23, 5, 55, 0, 0, time.UTC)
 	clock := &stepClock{now: start}
 
-	mgr, err := NewLeaseManager("nuke-prod", client, job, clock, libtime.NewWaiterDuration())
+	mgr, err := claim.NewLeaseManager(
+		"nuke-prod",
+		claimtest.NewClient(client, clock.Now),
+		job,
+		clock,
+		libtime.NewWaiterDuration(),
+	)
 	if err != nil {
 		t.Fatalf("NewLeaseManager returned %v", err)
 	}
 
 	ctx := context.Background()
-	const key = "claims/repo/task-2"
+	const key = "claims/task/task-2"
 
 	if _, claimErr := mgr.Claim(ctx, key, "task-2"); claimErr != nil {
 		t.Fatalf("claim returned %v; want success", claimErr)
 	}
 
-	clock.set(start.Add(SuccessGracePeriod + time.Minute))
+	clock.set(start.Add(claim.SuccessGracePeriod + time.Minute))
 	if err := mgr.ReleaseAfterSuccess(ctx, key, libtime.DateTime(start)); err != nil {
 		t.Fatalf("ReleaseAfterSuccess returned %v; want nil", err)
 	}
@@ -229,12 +250,18 @@ func TestReleaseAfterSuccessRetriesWhenTheJobCheckFails(t *testing.T) {
 	start := time.Date(2026, 10, 23, 5, 55, 0, 0, time.UTC)
 	clock := &stepClock{now: start}
 
-	mgr, err := NewLeaseManager("nuke-prod", client, job, clock, libtime.NewWaiterDuration())
+	mgr, err := claim.NewLeaseManager(
+		"nuke-prod",
+		claimtest.NewClient(client, clock.Now),
+		job,
+		clock,
+		libtime.NewWaiterDuration(),
+	)
 	if err != nil {
 		t.Fatalf("NewLeaseManager returned %v", err)
 	}
 	ctx := context.Background()
-	const key = "claims/repo/task-3"
+	const key = "claims/task/task-3"
 
 	if _, claimErr := mgr.Claim(ctx, key, "task-3"); claimErr != nil {
 		t.Fatalf("claim returned %v; want success", claimErr)
@@ -271,12 +298,18 @@ func TestReleaseAfterSuccessCapsAFutureCompletion(t *testing.T) {
 	start := time.Date(2026, 10, 23, 5, 55, 0, 0, time.UTC)
 	clock := &stepClock{now: start}
 
-	mgr, err := NewLeaseManager("nuke-prod", client, job, clock, libtime.NewWaiterDuration())
+	mgr, err := claim.NewLeaseManager(
+		"nuke-prod",
+		claimtest.NewClient(client, clock.Now),
+		job,
+		clock,
+		libtime.NewWaiterDuration(),
+	)
 	if err != nil {
 		t.Fatalf("NewLeaseManager returned %v", err)
 	}
 	ctx := context.Background()
-	const key = "claims/repo/task-4"
+	const key = "claims/task/task-4"
 
 	if _, claimErr := mgr.Claim(ctx, key, "task-4"); claimErr != nil {
 		t.Fatalf("claim returned %v; want success", claimErr)
@@ -294,7 +327,7 @@ func TestReleaseAfterSuccessCapsAFutureCompletion(t *testing.T) {
 		)
 	}
 	// One window from NOW, not one window from the future stamp, so it is over.
-	clock.set(start.Add(SuccessGracePeriod + time.Second))
+	clock.set(start.Add(claim.SuccessGracePeriod + time.Second))
 	if tickErr := mgr.Tick(ctx); tickErr != nil {
 		t.Fatalf("tick returned %v; want nil", tickErr)
 	}
@@ -322,17 +355,29 @@ func TestReleaseInsideTheSuccessHoldKeepsTheClaim(t *testing.T) {
 	clockA := &stepClock{now: start}
 	clockB := &stepClock{now: start}
 
-	mgrA, err := NewLeaseManager("nuke-prod", client, job, clockA, libtime.NewWaiterDuration())
+	mgrA, err := claim.NewLeaseManager(
+		"nuke-prod",
+		claimtest.NewClient(client, clockA.Now),
+		job,
+		clockA,
+		libtime.NewWaiterDuration(),
+	)
 	if err != nil {
 		t.Fatalf("NewLeaseManager(nuke-prod) returned %v", err)
 	}
-	mgrB, err := NewLeaseManager("sun", client, job, clockB, libtime.NewWaiterDuration())
+	mgrB, err := claim.NewLeaseManager(
+		"sun",
+		claimtest.NewClient(client, clockB.Now),
+		job,
+		clockB,
+		libtime.NewWaiterDuration(),
+	)
 	if err != nil {
 		t.Fatalf("NewLeaseManager(sun) returned %v", err)
 	}
 
 	ctx := context.Background()
-	const key = "claims/repo/task-3"
+	const key = "claims/task/task-3"
 
 	if _, claimErr := mgrA.Claim(ctx, key, "task-3"); claimErr != nil {
 		t.Fatalf("cluster A claim returned %v; want success", claimErr)
@@ -352,16 +397,20 @@ func TestReleaseInsideTheSuccessHoldKeepsTheClaim(t *testing.T) {
 
 	clockB.set(start.Add(2*time.Minute + 29*time.Second))
 	held, err := mgrB.Claim(ctx, key, "task-3")
-	if !stderrors.Is(err, ErrLeaseConflict) || held != nil {
-		t.Fatalf("peer claim inside the hold = (%v, %v); want (nil, ErrLeaseConflict)", held, err)
+	if !stderrors.Is(err, claim.ErrLeaseConflict) || held != nil {
+		t.Fatalf(
+			"peer claim inside the hold = (%v, %v); want (nil, claim.ErrLeaseConflict)",
+			held,
+			err,
+		)
 	}
 
 	// The hold's own expiry still releases it.
-	clockA.set(start.Add(SuccessGracePeriod + time.Second))
+	clockA.set(start.Add(claim.SuccessGracePeriod + time.Second))
 	if tickErr := mgrA.Tick(ctx); tickErr != nil {
 		t.Fatalf("A tick returned %v; want nil", tickErr)
 	}
-	clockB.set(start.Add(SuccessGracePeriod + 2*time.Second))
+	clockB.set(start.Add(claim.SuccessGracePeriod + 2*time.Second))
 	held, err = mgrB.Claim(ctx, key, "task-3")
 	if err != nil || held == nil {
 		t.Fatalf("peer claim after the hold = (%v, %v); want a held claim", held, err)
@@ -380,11 +429,23 @@ func TestStaleSuccessInsideTheHoldKeepsTheClaim(t *testing.T) {
 	clockA := &stepClock{now: newerDone.Add(9 * time.Second)}
 	clockB := &stepClock{now: newerDone.Add(9 * time.Second)}
 
-	mgrA, err := NewLeaseManager("sun", client, job, clockA, libtime.NewWaiterDuration())
+	mgrA, err := claim.NewLeaseManager(
+		"sun",
+		claimtest.NewClient(client, clockA.Now),
+		job,
+		clockA,
+		libtime.NewWaiterDuration(),
+	)
 	if err != nil {
 		t.Fatalf("NewLeaseManager(sun) returned %v", err)
 	}
-	mgrB, err := NewLeaseManager("nuke-prod", client, job, clockB, libtime.NewWaiterDuration())
+	mgrB, err := claim.NewLeaseManager(
+		"nuke-prod",
+		claimtest.NewClient(client, clockB.Now),
+		job,
+		clockB,
+		libtime.NewWaiterDuration(),
+	)
 	if err != nil {
 		t.Fatalf("NewLeaseManager(nuke-prod) returned %v", err)
 	}
@@ -410,16 +471,20 @@ func TestStaleSuccessInsideTheHoldKeepsTheClaim(t *testing.T) {
 
 	clockB.set(newerDone.Add(65 * time.Second))
 	held, err := mgrB.Claim(ctx, key, "task-4")
-	if !stderrors.Is(err, ErrLeaseConflict) || held != nil {
-		t.Fatalf("peer claim inside the hold = (%v, %v); want (nil, ErrLeaseConflict)", held, err)
+	if !stderrors.Is(err, claim.ErrLeaseConflict) || held != nil {
+		t.Fatalf(
+			"peer claim inside the hold = (%v, %v); want (nil, claim.ErrLeaseConflict)",
+			held,
+			err,
+		)
 	}
 
 	// The newer run's hold still ends on time.
-	clockA.set(newerDone.Add(SuccessGracePeriod + time.Second))
+	clockA.set(newerDone.Add(claim.SuccessGracePeriod + time.Second))
 	if tickErr := mgrA.Tick(ctx); tickErr != nil {
 		t.Fatalf("A tick returned %v; want nil", tickErr)
 	}
-	clockB.set(newerDone.Add(SuccessGracePeriod + 2*time.Second))
+	clockB.set(newerDone.Add(claim.SuccessGracePeriod + 2*time.Second))
 	held, err = mgrB.Claim(ctx, key, "task-4")
 	if err != nil || held == nil {
 		t.Fatalf("peer claim after the hold = (%v, %v); want a held claim", held, err)

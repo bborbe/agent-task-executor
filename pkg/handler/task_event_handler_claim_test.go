@@ -27,6 +27,7 @@ import (
 	"github.com/bborbe/agent-task-executor/mocks"
 	pkg "github.com/bborbe/agent-task-executor/pkg"
 	"github.com/bborbe/agent-task-executor/pkg/claim"
+	"github.com/bborbe/agent-task-executor/pkg/claim/claimtest"
 	"github.com/bborbe/agent-task-executor/pkg/handler"
 	"github.com/bborbe/agent-task-executor/pkg/metrics"
 )
@@ -116,7 +117,12 @@ func newClaimHarness(mode pkg.ClaimMode, opts ...handler.HandlerOption) *claimHa
 			return client
 		},
 		append(
-			[]handler.HandlerOption{handler.WithClaimJobControl(noopClaimJobControl{})},
+			[]handler.HandlerOption{
+				handler.WithClaimJobControl(noopClaimJobControl{}),
+				handler.WithClaimClientFactory(func() claim.ClaimClient {
+					return claimtest.NewClient(client, libtime.NewCurrentDateTime().Now)
+				}),
+			},
 			opts...,
 		)...,
 	)
@@ -350,7 +356,7 @@ var _ = Describe("claim gate", func() {
 
 		Expect(harness.spawner.SpawnJobCallCount()).To(Equal(1))
 		_, key, expectedSha, _, taskID, _ := harness.client.PutArgsForCall(0)
-		Expect(key).To(Equal("claims/repo/bborbe-agent"))
+		Expect(key).To(Equal("claims/repo/bborbe/agent"))
 		Expect(expectedSha).To(Equal(""))
 		Expect(taskID).To(Equal(string(task.TaskIdentifier)))
 		expectClaimDelta(before, snapshotClaims(), map[string]float64{"claimed": 1})
@@ -415,8 +421,10 @@ var _ = Describe("claim gate", func() {
 			"conflict":   1,
 			"taken_over": 1,
 		})
-		Expect(dispatchPutCount(harness)).To(Equal(2))
-		_, putKey, expectedSha, cluster, _, _ := harness.client.PutArgsForCall(1)
+		// One write: the create reads first and never attempts a doomed write, so
+		// only the takeover's write is recorded.
+		Expect(dispatchPutCount(harness)).To(Equal(1))
+		_, putKey, expectedSha, cluster, _, _ := harness.client.PutArgsForCall(0)
 		Expect(putKey).To(Equal(key))
 		Expect(expectedSha).To(Equal("expired-sha"))
 		Expect(cluster).To(Equal("self"))

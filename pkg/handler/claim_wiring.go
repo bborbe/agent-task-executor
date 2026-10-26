@@ -74,6 +74,25 @@ func (h *taskEventHandler) createLeaseManager(
 			h.claimMode,
 		)
 	}
+	// The lease manager reaches every claim through the typed client. A nil
+	// factory, or a factory that builds nothing, is a construction failure: the
+	// manager has no fallback, because falling back to the git-rest ref client
+	// would put reads on one service and writes on another.
+	if h.claimClientFactory == nil {
+		return nil, errors.Errorf(
+			ctx,
+			"claim client factory is nil for claim mode %q",
+			h.claimMode,
+		)
+	}
+	claimClient := h.claimClientFactory()
+	if claimClient == nil {
+		return nil, errors.Errorf(
+			ctx,
+			"claim client factory returned nil for claim mode %q",
+			h.claimMode,
+		)
+	}
 	// The fence and restart recovery act on a Job. A mode that takes a claim must
 	// never run them against the loud unmanaged control, so a nil injection is a
 	// construction failure rather than a silent no-op.
@@ -87,7 +106,7 @@ func (h *taskEventHandler) createLeaseManager(
 	}
 	manager, err := claim.NewLeaseManager(
 		h.cluster,
-		refClient,
+		claimClient,
 		jobControl,
 		h.currentDateTime,
 		libtime.NewWaiterDuration(),

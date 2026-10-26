@@ -60,7 +60,7 @@ var _ = Describe("LeaseManager release", func() {
 		Expect(mgr.Release(ctx, releaseKey)).To(Succeed())
 		deletes := requestsMatching(fake.Requests(), http.MethodDelete, releaseKey)
 		Expect(deletes).To(HaveLen(1))
-		Expect(deletes[0].RawQuery).To(ContainSubstring("expected_sha=" + held.Sha))
+		Expect(deletes[0].RawQuery).To(ContainSubstring("expected_sha=" + held.LeaseToken))
 		Expect(deletes[0].Status).To(Equal(http.StatusOK))
 		Expect(mgr.HeldClaims()).To(BeEmpty())
 		expectClaimDelta(before, snapshotClaims(), map[string]float64{"released": 1})
@@ -128,7 +128,7 @@ var _ = Describe("LeaseManager release", func() {
 		Expect(requestsMatching(fake.Requests(), http.MethodPut, releaseKey)).To(BeEmpty())
 		deletes := requestsMatching(fake.Requests(), http.MethodDelete, releaseKey)
 		Expect(deletes).To(HaveLen(1))
-		Expect(deletes[0].RawQuery).To(ContainSubstring("expected_sha=" + held.Sha))
+		Expect(deletes[0].RawQuery).To(ContainSubstring("expected_sha=" + held.LeaseToken))
 		Expect(mgr.HeldClaims()).To(BeEmpty())
 		expectClaimDelta(before, snapshotClaims(), map[string]float64{"released": 1})
 	})
@@ -147,7 +147,7 @@ var _ = Describe("LeaseManager release", func() {
 		Expect(job.DeleteCallCount(releaseTask)).To(Equal(0))
 		deletes := requestsMatching(fake.Requests(), http.MethodDelete, releaseKey)
 		Expect(deletes).To(HaveLen(1))
-		Expect(deletes[0].RawQuery).To(ContainSubstring("expected_sha=" + held.Sha))
+		Expect(deletes[0].RawQuery).To(ContainSubstring("expected_sha=" + held.LeaseToken))
 		Expect(mgr.HeldClaims()).To(BeEmpty())
 		expectClaimDelta(before, snapshotClaims(), map[string]float64{
 			"error":  24,

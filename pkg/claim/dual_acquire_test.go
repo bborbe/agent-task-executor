@@ -18,12 +18,13 @@ import (
 	. "github.com/onsi/gomega"
 
 	"github.com/bborbe/agent-task-executor/pkg/claim"
+	"github.com/bborbe/agent-task-executor/pkg/claim/claimtest"
 )
 
 // dualRepoKey and dualPRKey are the two refs of one pr-review claim.
 const (
-	dualRepoKey = "claims/repo/bborbe-nuke"
-	dualPRKey   = "claims/pr/bborbe-nuke-658"
+	dualRepoKey = "claims/repo/bborbe/nuke"
+	dualPRKey   = "claims/pr/bborbe/nuke/658"
 )
 
 // newDualManager builds a manager over fake without any Ginkgo helper, so the
@@ -36,7 +37,7 @@ func newDualManager(
 ) claim.LeaseManager {
 	mgr, err := claim.NewLeaseManager(
 		cluster,
-		claim.NewClaimRefClient(fake.URL(), "", ""),
+		claimtest.NewClient(claim.NewClaimRefClient(fake.URL(), "", ""), clock.Now),
 		job,
 		clock,
 		libtime.NewWaiterDuration(),

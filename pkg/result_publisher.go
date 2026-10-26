@@ -29,6 +29,16 @@ import (
 const (
 	dedupeCapacity = 1024
 	dedupeTTL      = 3600 * time.Second
+
+	// defaultMaxTriggers is the cap armed on a pod_crash_no_stdout failure. It
+	// mirrors the fallback lib.TaskFrontmatter.MaxTriggers() returns when the key
+	// is absent, so the cap written here equals the cap the dispatch budget
+	// already assumes. Writing the literal is required, not redundant: the
+	// controller's assignee-clear is opt-in on the key being PRESENT, while the
+	// dispatch budget defaults the cap ON for any task carrying a ref — the two
+	// disagree exactly when the key is missing, which is the stuck state this
+	// write removes.
+	defaultMaxTriggers = 3
 )
 
 // The two reasons a record may be closed out with. The vocabulary is closed:
@@ -53,10 +63,26 @@ type ResultPublisher interface {
 	PublishSpawnNotification(ctx context.Context, task lib.Task, jobName string) error
 	// PublishFailure publishes a zombie failure: clears current_job and atomically
 	// bumps trigger_count by 1 via a paired IncrementFrontmatterCommand. Leaves
-	// phase, status, and assignee untouched so the existing trigger_count retry
-	// cap (applyTriggerCap in task/controller/pkg/result/result_writer.go) handles
-	// eventual operator-inbox escalation. Idempotent per current_job via a TTL'd
-	// LRU; concurrent classifications for the same job emit one event.
+	// phase, status, and assignee untouched — the escalation is the controller's
+	// increment executor, which clears assignee once trigger_count reaches an
+	// explicitly-set max_triggers, and an empty assignee is what surfaces the
+	// record in the operator inbox.
+	//
+	// That cap is opt-in on the key being present: an absent max_triggers means
+	// no cap, so a record without the key accrues trigger_count forever and its
+	// assignee is never cleared. For the pod_crash_no_stdout class this method
+	// therefore arms the cap by writing max_triggers=defaultMaxTriggers when the
+	// key is absent — the class is otherwise unreachable, because a crash before
+	// the first stdout write leaves nothing for the deliverer to act on. The
+	// other seven classes keep their own escalation semantics and are untouched.
+	//
+	// applyTriggerCap (task/controller/pkg/result/result_writer.go) does NOT cover
+	// this path, and reading it as though it did is what left the hole open: it
+	// runs on the result-merge path only, while these writes take the atomic
+	// frontmatter-command path (buildUpdateModifyFn), which never reaches it.
+	//
+	// Idempotent per current_job via a TTL'd LRU; concurrent classifications for
+	// the same job emit one event.
 	PublishFailure(ctx context.Context, task lib.Task, jobName string, reason string) error
 	// PublishClearCurrentJob clears current_job in the vault task frontmatter
 	// (writes "" only — no body section, no trigger_count bump, no status/phase
@@ -300,6 +326,37 @@ func (p *resultPublisher) PublishSpawnNotification(
 	return p.publishRaw(ctx, taskcmd.UpdateFrontmatterCommandOperation, cmd)
 }
 
+// crashFailureUpdates builds the frontmatter Updates for a zombie failure. Every
+// class clears current_job. The pod_crash_no_stdout class additionally arms the
+// trigger cap, because it is the one class whose counter nothing acts on: the
+// deliverer never sees the record (the pod died before writing stdout), so no
+// outcome is ever published for it, and without a cap the controller's
+// assignee-clear — the only operator-inbox signal this path has — never fires.
+//
+// The gate is ParseZombieReason, not string equality. PublishFailure takes reason
+// as a raw string and is shared by all eight ZombieReason values, several of
+// which already carry their own escalation semantics; matching on the parsed
+// vocabulary keeps a suffixed form such as "pod_oom_killed (OOMKilled/137)"
+// correctly classified as its own class rather than falling through to a literal
+// comparison that cannot match it.
+//
+// An already-present max_triggers is left alone. The controller's write path is a
+// blind Updates apply, so writing here would clobber an operator's deliberate
+// budget — the store holds records at 5 and 6, and halving one of those is a
+// regression, not a repair.
+func crashFailureUpdates(task lib.Task, reason string) lib.TaskFrontmatter {
+	updates := lib.TaskFrontmatter{"current_job": ""}
+	parsed, ok := ParseZombieReason(reason)
+	if !ok || parsed != ZombieReasonPodCrashNoStdout {
+		return updates
+	}
+	if _, present := task.Frontmatter["max_triggers"]; present {
+		return updates
+	}
+	updates["max_triggers"] = defaultMaxTriggers
+	return updates
+}
+
 func (p *resultPublisher) PublishFailure(
 	ctx context.Context,
 	task lib.Task,
@@ -321,9 +378,7 @@ func (p *resultPublisher) PublishFailure(
 	updateCmd := taskcmd.UpdateFrontmatterCommand{
 		TaskIdentifier: task.TaskIdentifier,
 		TargetVault:    targetVaultFromTask(task),
-		Updates: lib.TaskFrontmatter{
-			"current_job": "",
-		},
+		Updates:        crashFailureUpdates(task, reason),
 		Body: &taskcmd.BodySection{
 			Heading: "## Failure",
 			Section: section,
@@ -356,8 +411,15 @@ func (p *resultPublisher) PublishFailure(
 	// Record dedupe only after BOTH publishes succeed. If the increment fails,
 	// the next cycle re-sends both messages — the duplicate current_job=""
 	// write is idempotent (writing empty to already-empty is a no-op visually),
-	// and the retry allows trigger_count to eventually bump so the retry cap
-	// (applyTriggerCap in result_writer.go) fires.
+	// and the retry allows trigger_count to eventually bump so the controller's
+	// increment executor clears assignee at the cap.
+	//
+	// Order between the update and the increment is NOT guaranteed: they are two
+	// independent commands and nothing keys them to one partition. When the
+	// increment lands first it sees no max_triggers and clears nothing, and the
+	// cap takes effect from the next failure cycle instead. That costs one cycle,
+	// never the escalation: the update is idempotent, so every later cycle finds
+	// the key present and the assignee-clear fires there.
 	p.dedupe.recordDedupe(jobName)
 
 	// Recorded here, after the dedupe key, so a repeated informer delivery of

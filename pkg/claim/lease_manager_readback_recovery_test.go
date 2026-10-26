@@ -66,7 +66,7 @@ var _ = Describe("LeaseManager read-back recovery", func() {
 		Expect(mgr.HeldClaims()).To(HaveLen(1))
 		stored, ok := fake.Ref("refs/claims/task/cancel")
 		Expect(ok).To(BeTrue())
-		Expect(held.Sha).To(Equal(stored.Sha))
+		Expect(held.LeaseToken).To(Equal(stored.Sha))
 		expectClaimDelta(before, snapshotClaims(), map[string]float64{"recovered": 1})
 	})
 
@@ -87,7 +87,10 @@ var _ = Describe("LeaseManager read-back recovery", func() {
 		held, err := mgr.Claim(ctx, "claims/task/taken", "t-taken")
 		Expect(held).To(BeNil())
 		Expect(stderrors.Is(err, claim.ErrLeaseConflict)).To(BeTrue())
-		Expect(requestsMatching(fake.Requests(), http.MethodGet, "")).To(BeEmpty())
+		// The typed acquire reads the claim before it writes, so one GET is
+		// expected. What must not happen is a read AFTER the failed write: a
+		// conflict is final and is never recovered by reading it back.
+		Expect(requestsMatching(fake.Requests(), http.MethodGet, "")).To(HaveLen(1))
 		Expect(mgr.HeldClaims()).To(BeEmpty())
 		expectClaimDelta(before, snapshotClaims(), map[string]float64{"conflict": 1})
 	})

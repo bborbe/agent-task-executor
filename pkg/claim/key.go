@@ -27,6 +27,22 @@ var repoKeyedTaskTypes = map[string]bool{
 // types share one key per repository; every other type is keyed by task id.
 // Every component is validated before it is used: empty, "/", "..", a leading
 // ".", a trailing ".lock", or a character outside [A-Za-z0-9._-] is rejected.
+//
+// ⚠️ Owner and repo are joined with "/", not "-", and that is load-bearing.
+// A hyphen is legal inside both components, so the old hyphen join was lossy:
+// owner "a-b" with repo "c" and owner "a" with repo "b-c" both derived
+// "claims/repo/a-b-c" — two distinct repositories aliasing one lock, so the
+// mutual exclusion silently did nothing. Because "/" is rejected inside a
+// component, the slash join cannot collide. This also matches the streak keys
+// (claims/redrive/<taskid>/<phase>/<n>), which were already slash-separated.
+//
+// ⚠️ The format is shared with vault-api, which reproduces it rather than
+// deriving its own. The two must change together: a period where one side
+// writes "claims/repo/a/b" and the other reads "claims/repo/a-b" is a period
+// where the lock excludes nothing. In-flight claims carry a 5-minute lease, so
+// a rolling deploy orphans each one for at most one lease and the next acquire
+// takes it over (see AcquireClaimHandler in vault-api, which carries an expired
+// ref's own SHA as the compare-and-swap).
 func DeriveClaimKey(
 	ctx context.Context,
 	taskType string,
@@ -43,7 +59,7 @@ func DeriveClaimKey(
 		if err := validateClaimComponent(ctx, "repo", repo); err != nil {
 			return "", err
 		}
-		return "claims/repo/" + owner + "-" + repo, nil
+		return "claims/repo/" + owner + "/" + repo, nil
 	}
 	if err := validateClaimComponent(ctx, "task id", taskID); err != nil {
 		return "", err
@@ -89,13 +105,75 @@ func DeriveClaimKeysWithBody(
 		if err := validateClaimComponent(ctx, "pull request number", number); err != nil {
 			return "", "", false, errors.Wrapf(ctx, err, "derive pr claim key")
 		}
-		return "claims/pr/" + owner + "-" + repo + "-" + number,
+		return "claims/pr/" + owner + "/" + repo + "/" + number,
 			"",
 			false,
 			nil
 	}
 	primary, err := DeriveClaimKey(ctx, taskType, taskID, owner, repo)
 	return primary, "", true, err
+}
+
+// TargetFromKey parses a claim key back into the typed target it addresses. It
+// is the inverse of DeriveClaimKey, and mirrors vault-api's claimScopeFromKey
+// exactly — a shape this side accepts and the server does not is a claim the
+// executor renews into a 404, and the reverse is a claim it can never re-adopt
+// after a restart.
+//
+// It exists because a held claim is addressed two ways: by the target a caller
+// derives when acquiring, and by the key a listing returns on recovery. Without
+// the inverse, recovery would have to re-derive a target from a task's body,
+// which is the caller's job and not something a listed key can supply.
+//
+// A key that is not one of the three claim shapes reports false. The redrive
+// streak keys (claims/redrive/<taskid>/<phase>/<n>) land here: they share the
+// prefix but are counters, never acquired or released, so answering them as
+// claims would invite a caller to renew something that is not a lock.
+func TargetFromKey(key string) (ClaimTarget, bool) {
+	switch {
+	case strings.HasPrefix(key, "claims/task/"):
+		id := strings.TrimPrefix(key, "claims/task/")
+		if id == "" {
+			return ClaimTarget{}, false
+		}
+		return NewTaskClaim(id), true
+	case strings.HasPrefix(key, "claims/repo/"):
+		parts := strings.Split(strings.TrimPrefix(key, "claims/repo/"), "/")
+		if len(parts) != 2 || parts[0] == "" || parts[1] == "" {
+			return ClaimTarget{}, false
+		}
+		return NewRepoClaim(parts[0], parts[1]), true
+	case strings.HasPrefix(key, "claims/pr/"):
+		parts := strings.Split(strings.TrimPrefix(key, "claims/pr/"), "/")
+		if len(parts) != 3 || parts[0] == "" || parts[1] == "" || parts[2] == "" {
+			return ClaimTarget{}, false
+		}
+		return NewPRClaim(parts[0], parts[1], parts[2]), true
+	}
+	return ClaimTarget{}, false
+}
+
+// KeyFor returns the claim key a target addresses, or false when the target is
+// not addressable. It is the forward direction of TargetFromKey and produces
+// exactly the shapes the server parses back.
+func KeyFor(target ClaimTarget) (string, bool) {
+	if target.isAmbiguous() {
+		return "", false
+	}
+	if target.TaskID != "" {
+		return "claims/task/" + target.TaskID, true
+	}
+	if target.isPR() &&
+		(target.Owner == "" || target.Repo == "" || !validPRNumber(target.Number)) {
+		return "", false
+	}
+	if target.Owner != "" && target.Repo != "" {
+		if target.isPR() {
+			return "claims/pr/" + target.Owner + "/" + target.Repo + "/" + target.Number, true
+		}
+		return "claims/repo/" + target.Owner + "/" + target.Repo, true
+	}
+	return "", false
 }
 
 // pullRequestNumberFromBody returns the first standalone pull-request URL in

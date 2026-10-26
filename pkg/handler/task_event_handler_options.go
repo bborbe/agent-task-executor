@@ -5,6 +5,7 @@
 package handler
 
 import (
+	pkg "github.com/bborbe/agent-task-executor/pkg"
 	"github.com/bborbe/agent-task-executor/pkg/claim"
 	"github.com/bborbe/agent-task-executor/pkg/spawner"
 )
@@ -18,6 +19,17 @@ type HandlerOption func(*taskEventHandler)
 func WithClaimJobControl(control claim.JobControl) HandlerOption {
 	return func(h *taskEventHandler) {
 		h.claimJobControl = control
+	}
+}
+
+// WithClaimClientFactory supplies the typed vault-api claim client. A
+// claim-taking mode without one fails at lease-manager construction rather than
+// holding nothing, which is why it is not a positional argument: only the modes
+// that take a claim need it, and every other caller would pass a nil it never
+// uses.
+func WithClaimClientFactory(factory pkg.ClaimClientFactory) HandlerOption {
+	return func(h *taskEventHandler) {
+		h.claimClientFactory = factory
 	}
 }
 

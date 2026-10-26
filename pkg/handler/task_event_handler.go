@@ -161,6 +161,27 @@ func IsTerminal(phase domain.TaskPhase) bool {
 	return ok
 }
 
+// terminalStatuses is the status-side twin of terminalPhases: the two statuses a
+// task never leaves, because the work is finished or was cancelled.
+//
+// It is deliberately a fixed set rather than something read from a Config's
+// trigger.statuses. A Config narrows eligibility; it must never be able to widen
+// it past "this task is over", and a Config that listed one of these would
+// otherwise make every finished task in the vault a candidate again.
+var terminalStatuses = map[domain.TaskStatus]struct{}{
+	domain.TaskStatusCompleted: {},
+	domain.TaskStatusAborted:   {},
+}
+
+// IsTerminalStatus reports whether the given status is in the terminal set.
+// A terminal task must never be a candidate: its file says the work is over, so a
+// spawn could only hand an agent a task nobody wants run, and a cap would charge
+// it to the re-drive budget on every pass forever.
+func IsTerminalStatus(status domain.TaskStatus) bool {
+	_, ok := terminalStatuses[status]
+	return ok
+}
+
 // applyPhaseGate emits metrics/logs for terminal and unknown phases.
 // Returns true when the task must be skipped (terminal phase suppressed).
 func applyPhaseGate(task lib.Task, phase domain.TaskPhase) bool {
@@ -283,6 +304,10 @@ type taskEventHandler struct {
 	reconcileInterval     time.Duration
 	claimMode             pkg.ClaimMode
 	claimRefClientFactory pkg.ClaimRefClientFactory
+	// claimClientFactory builds the typed vault-api claim client. The lease
+	// manager reaches every claim through it, so a claim-taking mode without one
+	// fails at lease-manager construction rather than holding nothing.
+	claimClientFactory pkg.ClaimClientFactory
 	// claimJobControl lets the lease manager's fence and restart recovery act on
 	// a Job. Nil falls back to the loud unmanaged control, so a mode that takes a
 	// claim cannot silently run without it.
@@ -482,8 +507,8 @@ func (h *taskEventHandler) storedCurrentJob(task lib.Task) string {
 // window fires ~300s later and respawns a job for an already-done task (the "path C"
 // respawn observed on dev 2026-07-13 for probe 095c58d7).
 func (h *taskEventHandler) cleanupTerminalTask(ctx context.Context, task lib.Task) {
-	status := string(task.Frontmatter.Status())
-	if status != "completed" && status != "aborted" {
+	status := task.Frontmatter.Status()
+	if !IsTerminalStatus(status) {
 		return
 	}
 	// Guard against stale terminal events from an earlier job cycle. A terminal
@@ -599,6 +624,15 @@ func (h *taskEventHandler) parseAndFilter(
 		}
 		glog.V(2).Infof("type mismatch: %s (task %s)", mismatch, task.TaskIdentifier)
 		return h.skipAndEvict(task, "type_mismatch")
+	}
+
+	// A terminal task is never driven, even when a Config lists its status in
+	// trigger.statuses — the status-side twin of the terminal-phase gate below,
+	// and unconditional for the same reason. cleanupTerminalTask above has already
+	// released the claim, dropped the store entry, cancelled any deferred respawn
+	// and cleared the streak for this event.
+	if IsTerminalStatus(task.Frontmatter.Status()) {
+		return h.skipAndEvict(task, "skipped_terminal_status")
 	}
 
 	if !effectiveTriggerStatuses(config).Contains(task.Frontmatter.Status()) {
@@ -1621,6 +1655,18 @@ func (h *taskEventHandler) reconcileTask(
 		return task, nil, false, err
 	}
 	if skip {
+		return task, nil, false, nil
+	}
+	// A task whose status is terminal is never a candidate, even when a Config
+	// lists that status in trigger.statuses — the status-side twin of the
+	// terminal-phase gate below, and unconditional for the same reason.
+	//
+	// This is the rule that keeps a finished task out of the candidate set, and
+	// the candidate set is what the re-drive cap is charged against: a terminal
+	// task admitted here is capped on every pass, forever, because the terminal
+	// transition that clears a streak fires on the event path and this task's
+	// happened before the executor was listening for it.
+	if IsTerminalStatus(task.Frontmatter.Status()) {
 		return task, nil, false, nil
 	}
 	if !effectiveTriggerStatuses(config).Contains(task.Frontmatter.Status()) {

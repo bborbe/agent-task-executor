@@ -84,7 +84,7 @@ var _ = Describe("LeaseManager tick", func() {
 		Expect(mgr.HeldClaims()).To(BeEmpty())
 		Expect(requestsMatching(fake.Requests(), http.MethodDelete, tickKey)).To(BeEmpty())
 		expectClaimDelta(before, snapshotClaims(), map[string]float64{"claim_lost": 1})
-		Expect(held.Sha).NotTo(BeEmpty())
+		Expect(held.LeaseToken).NotTo(BeEmpty())
 	})
 
 	It("fences at T0+240 before any renew request", func() {
@@ -110,7 +110,7 @@ var _ = Describe("LeaseManager tick", func() {
 		deletes := requestsMatching(fake.Requests(), http.MethodDelete, tickKey)
 		Expect(deletes).To(HaveLen(1))
 		Expect(deletes[0].Status).To(Equal(http.StatusInternalServerError))
-		Expect(deletes[0].RawQuery).To(ContainSubstring("expected_sha=" + held.Sha))
+		Expect(deletes[0].RawQuery).To(ContainSubstring("expected_sha=" + held.LeaseToken))
 		Expect(mgr.HeldClaims()).To(BeEmpty())
 		expectClaimDelta(before, snapshotClaims(), map[string]float64{
 			"renew_failed": 3,
@@ -154,6 +154,8 @@ var _ = Describe("LeaseManager tick", func() {
 			xLease    = rfc3339(leaseTestT0.Add(35*libtime.Second + claim.LeaseDuration))
 			remaining time.Duration
 			renews    int
+			yLists    int
+			xLists    int
 		)
 		client.PutStub = func(
 			reqCtx context.Context,
@@ -188,8 +190,21 @@ var _ = Describe("LeaseManager tick", func() {
 			defer stateMu.Unlock()
 			switch prefix {
 			case "claims/task/y":
+				// The typed acquire reads before it writes, so the first read must
+				// answer "free"; only the later read-back fails, which is what makes
+				// the renew a failed interval rather than a lost claim.
+				yLists++
+				if yLists <= 2 {
+					return nil, nil
+				}
 				return nil, stderrors.New("list failed")
 			case "claims/task/x":
+				// Same reason as y: the acquire reads first, so the first read must
+				// answer "free". The seeded ref is what the later renews see.
+				xLists++
+				if xLists <= 2 {
+					return nil, nil
+				}
 				return []claim.ClaimRef{{
 					Ref:        "refs/claims/task/x",
 					Sha:        xSha,

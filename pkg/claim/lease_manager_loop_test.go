@@ -16,6 +16,7 @@ import (
 
 	"github.com/bborbe/agent-task-executor/mocks"
 	"github.com/bborbe/agent-task-executor/pkg/claim"
+	"github.com/bborbe/agent-task-executor/pkg/claim/claimtest"
 )
 
 var _ = Describe("LeaseManager loop", func() {
@@ -33,7 +34,11 @@ var _ = Describe("LeaseManager loop", func() {
 			cancel()
 			return waitCtx.Err()
 		}
-		mgr, err := claim.NewLeaseManager("self", client, job, clock, waiter)
+		mgr, err := claim.NewLeaseManager(
+			"self",
+			claimtest.NewClient(client, clock.Now),
+			job,
+			clock, waiter)
 		Expect(err).NotTo(HaveOccurred())
 
 		done := make(chan error, 1)
@@ -65,7 +70,11 @@ var _ = Describe("LeaseManager loop", func() {
 		waiter.WaitStub = func(context.Context, libtime.Duration) error {
 			return stderrors.New("wait failed")
 		}
-		mgr, err := claim.NewLeaseManager("self", client, job, clock, waiter)
+		mgr, err := claim.NewLeaseManager(
+			"self",
+			claimtest.NewClient(client, clock.Now),
+			job,
+			clock, waiter)
 		Expect(err).NotTo(HaveOccurred())
 		Expect(mgr.Run(context.Background())).NotTo(Succeed())
 	})

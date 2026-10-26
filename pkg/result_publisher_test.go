@@ -294,6 +294,119 @@ var _ = Describe("ResultPublisher", func() {
 		)
 	})
 
+	Describe("PublishFailure trigger cap", func() {
+		// The cap is armed only for the crash class, and only when the key is
+		// absent. Both halves are load-bearing: arming it for every class would
+		// silently cap the seven classes the deliverer does reach, and clobbering
+		// a present value would halve a deliberate operator budget.
+
+		It("arms max_triggers=3 for the pod_crash_no_stdout class", func() {
+			task := lib.Task{
+				TaskIdentifier: lib.TaskIdentifier("test-task-crash"),
+				Frontmatter: lib.TaskFrontmatter{
+					"status":        "in_progress",
+					"phase":         "planning",
+					"assignee":      "pr-reviewer-agent",
+					"trigger_count": 1,
+				},
+				Content: lib.TaskContent("do the work"),
+			}
+			err := publisher.PublishFailure(
+				ctx,
+				task,
+				"claude-20260418120000",
+				"pod_crash_no_stdout",
+			)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(producer.messages).To(HaveLen(2))
+
+			_, updateCmd := decodeUpdateFrontmatterCommand(producer.messages[0])
+			Expect(updateCmd.Updates).To(HaveLen(2))
+			Expect(updateCmd.Updates["current_job"]).To(Equal(""))
+			// BeNumerically, not Equal(3): the assertion reads the command back
+			// through its JSON encoding, where every number decodes as float64.
+			Expect(updateCmd.Updates["max_triggers"]).To(BeNumerically("==", 3))
+
+			_, hasAssignee := updateCmd.Updates["assignee"]
+			Expect(hasAssignee).To(BeFalse(), "assignee is the controller's to clear, not ours")
+		})
+
+		It("arms the cap for a suffixed crash reason, proving the parser gate not string equality",
+			func() {
+				task := lib.Task{
+					TaskIdentifier: lib.TaskIdentifier("test-task-crash-suffixed"),
+					Frontmatter: lib.TaskFrontmatter{
+						"status": "in_progress",
+					},
+					Content: lib.TaskContent("do the work"),
+				}
+				err := publisher.PublishFailure(
+					ctx,
+					task,
+					"claude-20260418120000",
+					"pod_crash_no_stdout (Error/1)",
+				)
+				Expect(err).NotTo(HaveOccurred())
+
+				_, updateCmd := decodeUpdateFrontmatterCommand(producer.messages[0])
+				Expect(updateCmd.Updates).To(HaveLen(2))
+				Expect(updateCmd.Updates["max_triggers"]).To(BeNumerically("==", 3))
+			},
+		)
+
+		DescribeTable("leaves every other class uncapped",
+			func(reason string) {
+				task := lib.Task{
+					TaskIdentifier: lib.TaskIdentifier("test-task-other-class"),
+					Frontmatter: lib.TaskFrontmatter{
+						"status": "in_progress",
+					},
+					Content: lib.TaskContent("do the work"),
+				}
+				err := publisher.PublishFailure(ctx, task, "claude-20260418120000", reason)
+				Expect(err).NotTo(HaveOccurred())
+
+				_, updateCmd := decodeUpdateFrontmatterCommand(producer.messages[0])
+				Expect(updateCmd.Updates).To(HaveLen(1))
+				Expect(updateCmd.Updates["current_job"]).To(Equal(""))
+				_, hasMax := updateCmd.Updates["max_triggers"]
+				Expect(hasMax).To(BeFalse(), "reason %q must not arm the cap", reason)
+			},
+			Entry("pod_oom_killed", "pod_oom_killed"),
+			Entry("pod_oom_killed with suffix", "pod_oom_killed (OOMKilled/137)"),
+			Entry("pod_evicted", "pod_evicted"),
+			Entry("image_pull_backoff", "image_pull_backoff"),
+			Entry("executor_watch_lost", "executor_watch_lost"),
+			Entry("type_mismatch", "type_mismatch"),
+			Entry("unknown reason", "something nobody classified"),
+			Entry("empty reason", ""),
+		)
+
+		It("preserves an operator-set max_triggers instead of clobbering it", func() {
+			task := lib.Task{
+				TaskIdentifier: lib.TaskIdentifier("test-task-operator-cap"),
+				Frontmatter: lib.TaskFrontmatter{
+					"status":        "in_progress",
+					"max_triggers":  6,
+					"trigger_count": 1,
+				},
+				Content: lib.TaskContent("do the work"),
+			}
+			err := publisher.PublishFailure(
+				ctx,
+				task,
+				"claude-20260418120000",
+				"pod_crash_no_stdout",
+			)
+			Expect(err).NotTo(HaveOccurred())
+
+			_, updateCmd := decodeUpdateFrontmatterCommand(producer.messages[0])
+			Expect(updateCmd.Updates).To(HaveLen(1))
+			_, hasMax := updateCmd.Updates["max_triggers"]
+			Expect(hasMax).To(BeFalse(), "a deliberate budget of 6 must not become 3")
+		})
+	})
+
 	Describe("PublishFailure dedupe", func() {
 		It("suppresses a second call with the same job name", func() {
 			task := lib.Task{

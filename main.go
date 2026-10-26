@@ -58,6 +58,8 @@ type application struct {
 	VaultAliases               string            `required:"false" arg:"vault-aliases"                  env:"VAULT_ALIASES"                  usage:"Comma-separated vault slugs this executor also owns, in addition to TASK_VAULT; overrides the built-in alias set for this vault. Empty uses the built-in set, which is empty for a vault that is not mid-rename"`
 	GitRestURL                 string            `required:"false" arg:"gitrest-url"                    env:"GITREST_URL"                    usage:"git-rest HTTP API base URL the claim ref client writes leased claim refs through"`
 	GitRestGatewaySecret       string            `required:"false" arg:"gitrest-gateway-secret"         env:"GITREST_GATEWAY_SECRET"         usage:"NAME of the K8s Secret carrying the git-rest gateway secret (data key gateway-secret) — never the secret value; empty disables gateway auth"`
+	VaultAPIURL                string            `required:"false" arg:"vault-api-url"                  env:"VAULT_API_URL"                  usage:"vault-api base URL the lease manager acquires, renews and releases claims through. REQUIRED when CLAIM_MODE takes a claim, so a claim-taking deployment without it fails closed at startup instead of holding nothing"`
+	VaultAPIGatewaySecret      string            `required:"false" arg:"vault-api-gateway-secret"       env:"VAULT_API_GATEWAY_SECRET"       usage:"NAME of the K8s Secret carrying the vault-api gateway secret (data key gateway-secret) — never the secret value; empty disables gateway auth"`
 	BuildGitVersion            string            `required:"false" arg:"build-git-version"              env:"BUILD_GIT_VERSION"              usage:"Build Git version (git describe --tags --always --dirty)"                                                                                                                                                                                                                           default:"dev"`
 	BuildGitCommit             string            `required:"false" arg:"build-git-commit"               env:"BUILD_GIT_COMMIT"               usage:"Build Git commit hash"                                                                                                                                                                                                                                                              default:"none"`
 	BuildDate                  *libtime.DateTime `required:"false" arg:"build-date"                     env:"BUILD_DATE"                     usage:"Build timestamp (RFC3339)"`
@@ -309,6 +311,7 @@ func (a *application) Run(ctx context.Context, sentryClient libsentry.Client) er
 	// Declared before the publisher because the publisher records re-drive
 	// failure reasons through a lazily-built reason store over this factory.
 	var claimRefClientFactory pkg.ClaimRefClientFactory
+	var claimClientFactory pkg.ClaimClientFactory
 	if claimMode.TakesClaim() {
 		gitRestGatewaySecretValue, err := pkg.ReadGitRestGatewaySecret(
 			ctx,
@@ -322,6 +325,29 @@ func (a *application) Run(ctx context.Context, sentryClient libsentry.Client) er
 		claimRefClientFactory = factory.CreateClaimRefClientFactory(
 			a.GitRestURL,
 			gitRestGatewaySecretValue,
+		)
+		// The lease manager holds every claim through vault-api. Without a URL
+		// there is nothing to hold them through, and the manager deliberately has
+		// no fallback, so this fails at startup rather than at the first spawn.
+		if a.VaultAPIURL == "" {
+			return errors.Errorf(
+				ctx,
+				"vault-api-url is required when claim mode %q takes a claim",
+				claimMode,
+			)
+		}
+		vaultAPIGatewaySecretValue, err := pkg.ReadVaultAPIGatewaySecret(
+			ctx,
+			kubeClient,
+			a.Namespace,
+			a.VaultAPIGatewaySecret,
+		)
+		if err != nil {
+			return errors.Wrapf(ctx, err, "read vault-api gateway secret")
+		}
+		claimClientFactory = factory.CreateClaimClientFactory(
+			a.VaultAPIURL,
+			vaultAPIGatewaySecretValue,
 		)
 	}
 
@@ -377,6 +403,7 @@ func (a *application) Run(ctx context.Context, sentryClient libsentry.Client) er
 		a.ReconcileInterval,
 		claimMode,
 		claimRefClientFactory,
+		claimClientFactory,
 	)
 
 	// Built after the handler: a terminal Job releases the claim taken before it

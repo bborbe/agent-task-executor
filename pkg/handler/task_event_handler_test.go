@@ -1598,8 +1598,15 @@ var _ = Describe("TaskEventHandler", func() {
 		})
 
 		It(
-			"spawns job when Config has Trigger.Statuses=[completed] and event status=completed",
+			"does not spawn when Config has Trigger.Statuses=[completed] and event status=completed",
 			func() {
+				// A terminal status is the task saying the work is over; a Config may
+				// narrow eligibility, never widen it past that. Until 2026-10-26 this
+				// spec asserted the opposite, on the reading that Trigger.Statuses is
+				// authoritative for status the way Trigger.Phases was for phase before
+				// the terminal-phase gate landed. The harm it allowed: a terminal task
+				// re-enters the reconcile candidate set and is capped every pass,
+				// forever, because the transition that clears its streak already fired.
 				fakeSpawner.IsJobActiveReturns(false, nil)
 				fakeResolver.ResolveReturns(
 					pkg.AgentConfiguration{
@@ -1621,7 +1628,7 @@ var _ = Describe("TaskEventHandler", func() {
 				}
 				err := h.ConsumeMessage(ctx, buildMsg(task))
 				Expect(err).To(BeNil())
-				Expect(fakeSpawner.SpawnJobCallCount()).To(Equal(1))
+				Expect(fakeSpawner.SpawnJobCallCount()).To(Equal(0))
 			},
 		)
 

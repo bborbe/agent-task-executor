@@ -19,6 +19,7 @@ import (
 
 	pkg "github.com/bborbe/agent-task-executor/pkg"
 	"github.com/bborbe/agent-task-executor/pkg/claim"
+	"github.com/bborbe/agent-task-executor/pkg/claim/claimtest"
 	"github.com/bborbe/agent-task-executor/pkg/metrics"
 )
 
@@ -143,7 +144,10 @@ func newGateHandler(mode pkg.ClaimMode, client claim.ClaimRefClient) *taskEventH
 		cluster:               "self",
 		currentDateTime:       libtime.NewCurrentDateTime(),
 		claimRefClientFactory: func() claim.ClaimRefClient { return client },
-		claimJobControl:       noopJobControl{},
+		claimClientFactory: func() claim.ClaimClient {
+			return claimtest.NewClient(client, libtime.NewCurrentDateTime().Now)
+		},
+		claimJobControl: noopJobControl{},
 	}
 }
 
@@ -293,18 +297,18 @@ func TestAcquireSpawnClaimTakeoverExpired(t *testing.T) {
 		"conflict":   1,
 		"taken_over": 1,
 	})
-	if len(client.putCalls) != 2 {
-		t.Fatalf("expected two Put calls, got %d", len(client.putCalls))
+	if len(client.putCalls) != 1 {
+		t.Fatalf("expected one Put call, got %d", len(client.putCalls))
 	}
-	if client.putCalls[1].expectedSha != "expired-sha" {
+	if client.putCalls[0].expectedSha != "expired-sha" {
 		t.Errorf(
 			"takeover expected_sha = %q, want %q",
 			client.putCalls[1].expectedSha,
 			"expired-sha",
 		)
 	}
-	if client.putCalls[1].cluster != "self" {
-		t.Errorf("takeover cluster = %q, want %q", client.putCalls[1].cluster, "self")
+	if client.putCalls[0].cluster != "self" {
+		t.Errorf("takeover cluster = %q, want %q", client.putCalls[0].cluster, "self")
 	}
 }
 
@@ -324,7 +328,7 @@ func TestAcquireSpawnClaimTakeoverStillValid(t *testing.T) {
 		"conflict":           1,
 		"takeover_too_early": 1,
 	})
-	if len(client.putCalls) != 1 {
+	if len(client.putCalls) != 0 {
 		t.Fatalf("expected the takeover to write nothing, got %d Put calls", len(client.putCalls))
 	}
 }
@@ -345,7 +349,7 @@ func TestAcquireSpawnClaimTakeoverInsideGrace(t *testing.T) {
 		"conflict":           1,
 		"takeover_too_early": 1,
 	})
-	if len(client.putCalls) != 1 {
+	if len(client.putCalls) != 0 {
 		t.Fatalf("expected the takeover to write nothing, got %d Put calls", len(client.putCalls))
 	}
 }
