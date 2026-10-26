@@ -206,6 +206,23 @@ func TestClassifyRedriveReasons(t *testing.T) {
 			count: 3,
 			want:  redriveClassBroken,
 		},
+		{
+			// Pins the truncation DIRECTION: six identical values above pass even if
+			// the slice were reasons[:window]. Here the oldest reason differs, so
+			// only taking the most recent three can classify broken.
+			name: "a differing older reason is excluded from the window",
+			reasons: []string{
+				"deadline_exceeded", "pod_oom_killed", "pod_oom_killed", "pod_oom_killed",
+			},
+			count: 3,
+			want:  redriveClassBroken,
+		},
+		{
+			name:    "a streak below one is unknown",
+			reasons: []string{"pod_oom_killed"},
+			count:   0,
+			want:    redriveClassUnknown,
+		},
 	}
 
 	for _, tc := range cases {

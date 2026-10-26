@@ -362,8 +362,15 @@ and nothing is ever closed.
 
 Fewer reasons than the cap is deliberately not a close: partial evidence must
 never classify a record as broken. It is transient instead, which retries under
-the bounded extension and ends the record either way — so the one outcome the
-classifier never produces is a record abandoned at the cap.
+the bounded extension and ends the record either way — so a record that reached
+the cap *with* recorded evidence is never abandoned there.
+
+The **unknown** branch above is the one case that still is. A record with no
+reasons at all, or a window that is entirely the literal `unknown`, is refused
+without being closed, and a refused spawn can never earn the missing reason — so
+it stays at the cap indefinitely. That is deliberate rather than an oversight:
+it is the population capped before this classification existed, and closing on
+unread history is not the safe direction. Draining it is separate work.
 
 `type_mismatch` stays in the broken set because the taxonomy puts it there, but
 it cannot in practice reach the store: a type-mismatched task is filtered before
