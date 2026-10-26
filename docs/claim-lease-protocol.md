@@ -339,20 +339,38 @@ treating every three-times-failed record the same way.
 
 At `maxConsecutiveRedrives` the executor reads the reasons for that (task, phase)
 and classifies the record. The rules are total and are evaluated in the order
-unknown, broken, transient — the first match wins:
+unknown, broken, transient — the first match wins.
 
-- **broken** — at least the streak count of reasons were recorded and the most
-  recent count are all one value from `pod_crash_no_stdout`, `pod_oom_killed`,
+The window the classifier reads is the most recent `min(count, len(reasons))`
+reasons, where `count` is the streak. The streak counts every successful spawn
+while a reason is recorded only from `PublishFailure`, so a spawn that publishes
+no failure — a reconcile re-drive whose job vanished — advances the streak
+without adding a reason. Sizing the window by the streak alone would refuse such
+a record forever: the spawn is refused, so it can never earn the missing reason,
+and nothing is ever closed.
+
+- **broken** — the window holds at least `maxConsecutiveRedrives` reasons and they
+  are all one value from `pod_crash_no_stdout`, `pod_oom_killed`,
   `type_mismatch`. The record is closed and the spawn refused.
-- **transient** — the most recent count reasons differ between attempts, or any
-  of them is one of `image_pull_backoff`, `deadline_exceeded`, `pod_evicted`,
-  `pod_not_scheduled`, `executor_watch_lost`. The spawn is allowed up to
-  `maxConsecutiveRedrives + 3` (a bounded extension); reaching that bound closes
-  the record and refuses the spawn.
-- **unknown** — no reasons were recorded, fewer reasons were recorded than the
-  streak counts, or every recent reason is the literal `unknown`. The spawn is
-  refused and nothing is closed: closing a record because its history could not
-  be read is not the safe direction.
+- **transient** — everything else: the reasons differ between attempts, one is a
+  value outside the broken set, or fewer reasons were recorded than the cap. The
+  spawn is allowed up to `maxConsecutiveRedrives + 3` (a bounded extension);
+  reaching that bound closes the record and refuses the spawn.
+- **unknown** — no reasons were recorded, or every reason in the window is the
+  literal `unknown`. The spawn is refused and nothing is closed: closing a record
+  because its history could not be read is not the safe direction.
+
+Fewer reasons than the cap is deliberately not a close: partial evidence must
+never classify a record as broken. It is transient instead, which retries under
+the bounded extension and ends the record either way — so a record that reached
+the cap *with* recorded evidence is never abandoned there.
+
+The **unknown** branch above is the one case that still is. A record with no
+reasons at all, or a window that is entirely the literal `unknown`, is refused
+without being closed, and a refused spawn can never earn the missing reason — so
+it stays at the cap indefinitely. That is deliberate rather than an oversight:
+it is the population capped before this classification existed, and closing on
+unread history is not the safe direction. Draining it is separate work.
 
 `type_mismatch` stays in the broken set because the taxonomy puts it there, but
 it cannot in practice reach the store: a type-mismatched task is filtered before
