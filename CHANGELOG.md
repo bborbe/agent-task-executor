@@ -2,7 +2,7 @@
 
 All notable changes to this project will be documented in this file.
 
-## Unreleased
+## v0.45.0
 
 - feat: **a Config can declare itself the designated default for a task_type, so a type claimed by several CRs resolves instead of refusing.** `healthcheck` is claimed by 14 Configs on dev and 13 on prod, `llm` by 6 and 3; `ResolveByTaskType` matched every one of them, `narrowByAssignee` narrowed none, and the call returned `ErrConfigAmbiguous` for every record of those two types — 42 `in_progress` records sat in the store with an empty `assignee`, 8 of them `healthcheck`. `ConfigSpec.defaultForTaskTypes` is now part of the CRD schema, and the resolver reads it only after the assignee tier has failed: exactly one match declaring itself the default wins, zero or several leave the refusal untouched. That is an explicit declaration on the Config, not a guess, so none of the five contract tests inverts. `previous_assignee` is additionally passed on only when the Config it names actually declares the record's type — `claude-interactive` declares `llm`, so a `healthcheck` record escalated to it carried an input that could only ever produce the ambiguity it was meant to break.
 
