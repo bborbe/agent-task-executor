@@ -153,7 +153,11 @@ func (h *taskEventHandler) checkViewDivergence(ctx context.Context, owned []lib.
 	}
 	glog.Infof(
 		"event=view_divergence_summary compared=%d divergent=%d index_age_seconds=%d warnings=%d absent=%d named=%d",
-		report.Compared, report.Divergent, index.IndexAgeSeconds, index.Warnings,
-		report.Absent, named,
+		report.Compared,
+		report.Divergent,
+		index.IndexAgeSeconds,
+		index.Warnings,
+		report.Absent,
+		named,
 	)
 }
