@@ -2,7 +2,7 @@
 
 All notable changes to this project will be documented in this file.
 
-## Unreleased
+## v0.46.0
 
 - test: **the view/vault divergence check is pinned end to end through `ReconcileOnce` against a real `httptest` index.** `pkg/handler/view_divergence_test.go` drives the real `claim.NewVaultAPIIndexClient` so the auth and envelope paths are exercised: a status-only and a phase-only divergence each emit one `event=view_divergence` line with both sides of both fields and a summary carrying `compared=3 divergent=1 index_age_seconds=12 warnings=` from the index, agreement emits neither, an owned id missing from the index reads `event=view_divergence_absent` and moves only the `absent` series, and an empty index reports all three owned ids absent (`compared=0`). The negative cases are at the same level: a closed port logs `event=view_divergence_read_error`, moves the `read_error` series and still drives and spawns its candidate; a handler built without `WithVaultAPIIndexClient` emits no line and moves no series; and a not-ready view, unstamped or mismatched vault, or already-expired context makes zero index requests. A 50-task pass makes exactly one request, and the request is pinned as an unfiltered, authenticated `GET /api/v1/tasks` with the gateway header pair. Per-id lines are capped at 20 a pass and the summary carries `absent` and `named` alongside `divergent`: an index that returns nothing classifies every owned task as absent, and naming all 7,232 of them once a minute would be a worse fault than the divergence it reports. The counts are never truncated — only the named lines are.
 
