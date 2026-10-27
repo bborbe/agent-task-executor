@@ -220,7 +220,7 @@ func CreateConsumer(
 	reconcileInterval time.Duration,
 	claimMode pkg.ClaimMode,
 	claimRefClientFactory pkg.ClaimRefClientFactory,
-	claimClientFactory pkg.ClaimClientFactory,
+	claimClientFactory pkg.ClaimClientFactory, vaultIndexClient claim.VaultAPIIndexClient,
 ) (libkafka.Consumer, handler.ClaimLifecycleEventHandler) {
 	jobSpawner := spawner.NewJobSpawner(
 		kubeClient,
@@ -252,6 +252,7 @@ func CreateConsumer(
 		claimMode,
 		claimRefClientFactory,
 		handler.WithClaimClientFactory(claimClientFactory),
+		handler.WithVaultAPIIndexClient(vaultIndexClient),
 		handler.WithVaultAliases(vaultAliases),
 		handler.WithPodQuotaLimiter(spawner.NewPodQuotaLimiter(kubeClient, currentDateTimeGetter)),
 		handler.WithClaimJobControl(

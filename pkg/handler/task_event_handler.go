@@ -311,7 +311,9 @@ type taskEventHandler struct {
 	// claimJobControl lets the lease manager's fence and restart recovery act on
 	// a Job. Nil falls back to the loud unmanaged control, so a mode that takes a
 	// claim cannot silently run without it.
-	claimJobControl  claim.JobControl
+	claimJobControl claim.JobControl
+	// vaultIndexClient nil means the deployment has no vault-api URL and the check is skipped.
+	vaultIndexClient claim.VaultAPIIndexClient
 	claimManagerOnce sync.Once
 	claimManager     claim.LeaseManager
 	claimManagerErr  error
@@ -333,10 +335,9 @@ type taskEventHandler struct {
 	// built with the lease manager from the same claim-ref client and stays nil
 	// when claim mode takes no claim.
 	redriveStore claim.RedriveStreakStore
-	// redriveReasons is the persisted failure reason of each spawn attempt,
-	// built beside redriveStore from the same client and nil under the same
-	// conditions. The field is named redriveReasons because redriveReasonStore
-	// is the accessor that mirrors redriveStreakStore.
+	// redriveReasons is the persisted failure reason of each spawn attempt, built
+	// beside redriveStore from the same client and nil under the same conditions.
+	// It is named redriveReasons because redriveReasonStore is its accessor.
 	redriveReasons claim.RedriveReasonStore
 	// spawnGens counts Jobs created by this executor per assignee, on any path.
 	// A pass cache entry read at an older generation is refetched, so a Job
@@ -349,8 +350,7 @@ type taskEventHandler struct {
 	podQuotaLimiter spawner.PodQuotaLimiter
 	// jobLookupDeniedLoggedAt records the last log line emitted per
 	// assignee/namespace for a denied active-job read, so a broken credential
-	// produces one line per interval rather than one per task per pass. The
-	// counter beside it is unthrottled; only the log is.
+	// produces one line per interval, not one per task per pass; only the log is throttled.
 	jobLookupDeniedMu       sync.Mutex
 	jobLookupDeniedLoggedAt map[string]time.Time
 }
@@ -1302,6 +1302,11 @@ func (h *taskEventHandler) ReconcileOnce(ctx context.Context) error {
 		return nil
 	}
 	sortCandidatesByAdmissionPriority(candidates)
+	// One vault-api index read per pass that reaches the drive loop. Advisory:
+	// a read failure is logged and the pass drives its candidates unchanged.
+	if !h.passDone(passCtx) {
+		h.checkViewDivergence(passCtx, owned)
+	}
 	for _, candidate := range candidates {
 		if h.passDone(passCtx) {
 			c.logAborted(len(candidates))

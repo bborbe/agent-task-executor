@@ -107,6 +107,40 @@ An operator distinguishes the two per-id causes with the vault-api proxy probe:
 - `422 invalid_frontmatter` — the file exists but was excluded from the index.
 - `404 not_found` — no file exists for that id.
 
+## Divergence check
+
+Once per reconcile pass that reaches the drive loop, the executor reads this
+index once and joins it to the tasks the pass owns.
+
+- **Join key:** each owned view task's `task_identifier` to `items[].id`.
+- **Compared fields:** `status` and `phase`. A difference in **either** is a
+  divergence; a matching status with a different phase is still reported.
+- **Per-id events**, at warning level, for each finding:
+  - `event=view_divergence task=<id> view_status=<s> vault_status=<s> view_phase=<p> vault_phase=<p>`
+  - `event=view_divergence_absent task=<id> view_status=<s> view_phase=<p>` —
+    the id is owned but the index does not contain it. It is a separate event
+    name so a grep for `event=view_divergence task=` never matches an absent id.
+- **Summary event**, once per pass, at info level:
+  `event=view_divergence_summary compared=<n> divergent=<n> index_age_seconds=<n> warnings=<n>`.
+  `warnings` is the global index warning count, not a per-id attribution.
+- **`compared` counts ids actually joined**, not owned ids. A failed or empty
+  index therefore reads as `compared=0`, never as agreement.
+- **One read per pass.** No read happens before the vault-classification early
+  returns (`view_not_ready`, `task_vault_unstamped`, `task_vault_mismatch`) and
+  none after the pass budget is spent. A pass that is already done makes no
+  call.
+- **A read failure is logged** (`event=view_divergence_read_error`) and the pass
+  continues unchanged. The check is advisory: it changes no eligibility,
+  admission, capping or spawning, and it never writes to the vault.
+- **A deployment without a vault-api URL** builds no client, makes no call and
+  emits nothing.
+- **Canonical values on both sides.** The view normalizes legacy aliases
+  (`todo`→`next`, `done`→`completed`, `deferred`→`hold`, and the phase
+  equivalents). Vault-api reads the same `vault-cli` domain values, so the index
+  side is assumed canonical too. This is an assumption, not a contract: if the
+  serving vault-api ever returns a raw alias, the check reports a permanent
+  false divergence for that id.
+
 ## Source
 
 The envelope above is pinned from

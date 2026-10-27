@@ -31,6 +31,7 @@ import (
 	"k8s.io/client-go/rest"
 
 	"github.com/bborbe/agent-task-executor/pkg"
+	"github.com/bborbe/agent-task-executor/pkg/claim"
 	"github.com/bborbe/agent-task-executor/pkg/factory"
 	"github.com/bborbe/agent-task-executor/pkg/handler"
 	"github.com/bborbe/agent-task-executor/pkg/probe"
@@ -312,6 +313,7 @@ func (a *application) Run(ctx context.Context, sentryClient libsentry.Client) er
 	// failure reasons through a lazily-built reason store over this factory.
 	var claimRefClientFactory pkg.ClaimRefClientFactory
 	var claimClientFactory pkg.ClaimClientFactory
+	var vaultAPIIndexClient claim.VaultAPIIndexClient
 	if claimMode.TakesClaim() {
 		gitRestGatewaySecretValue, err := pkg.ReadGitRestGatewaySecret(
 			ctx,
@@ -348,6 +350,11 @@ func (a *application) Run(ctx context.Context, sentryClient libsentry.Client) er
 		claimClientFactory = factory.CreateClaimClientFactory(
 			a.VaultAPIURL,
 			vaultAPIGatewaySecretValue,
+		)
+		vaultAPIIndexClient = claim.NewVaultAPIIndexClient(
+			a.VaultAPIURL,
+			vaultAPIGatewaySecretValue,
+			"agent-task-executor",
 		)
 	}
 
@@ -404,6 +411,7 @@ func (a *application) Run(ctx context.Context, sentryClient libsentry.Client) er
 		claimMode,
 		claimRefClientFactory,
 		claimClientFactory,
+		vaultAPIIndexClient,
 	)
 
 	// Built after the handler: a terminal Job releases the claim taken before it
