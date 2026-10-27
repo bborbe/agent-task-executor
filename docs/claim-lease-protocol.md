@@ -6,6 +6,26 @@ of the task's claim. This document describes the protocol implemented by
 `pkg/claim`. The constants below are invariants, not configuration — there is
 no knob, flag or opt-out for any of them.
 
+## The spawn guard reads a claim, it never writes one
+
+A task's frontmatter carries a `current_job`, and it is shared through the
+vault, so it can name a Job another cluster created. `IsJobActive` lists only
+this cluster's Jobs, so "no active Job here" does not mean the Job is over.
+
+When this executor's own store has no entry for the task — a restart, or a task
+it never spawned — the guard reads the task's claim (`GET` on the claim route)
+and treats a live claim as proof that some cluster is still running the task:
+the spawn is suppressed and re-deferred. `claim_free` lets the respawn proceed,
+an expired lease counts as free (the takeover rule), an unreadable lease as
+held, and a failed read suppresses and retries on the next pass. The read is
+one request per dispatch pass on a task whose store entry is empty, and none
+otherwise. Claim mode `off` keeps no claim, so there the guard falls back to
+local evidence and says so in `event=foreign_job_unprobeable`.
+
+This is why the success hold matters beyond the peer's `Claim` being refused:
+the held claim is also what stops a cold peer from respawning the task inside
+the success grace.
+
 ## Constants
 
 | Constant | Value | Meaning |
