@@ -2,7 +2,7 @@
 
 All notable changes to this project will be documented in this file.
 
-## Unreleased
+## v0.46.1
 
 - fix: **the divergence check names a divergence before it names an absence.** Both classes shared one 20-line budget and were emitted in id order, so a flood of absent ids spent the budget before any divergence was reached — measured on dev 2026-10-27, 74 absent against 3 divergent, one of the three unnamed. Divergences are the finding the check exists to report, so they are named first and counted separately; the summary now carries `named` and `named_absent` rather than one ambiguous `named`. The counts themselves were never truncated and still are not.
 
