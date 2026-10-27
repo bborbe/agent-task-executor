@@ -1,7 +1,8 @@
 ---
-status: approved
+status: prompted
 approved: "2026-10-26T22:57:24Z"
 generating: "2026-10-26T23:00:36Z"
+prompted: "2026-10-27T19:30:42Z"
 branch: dark-factory/view-divergence-detector
 ---
 

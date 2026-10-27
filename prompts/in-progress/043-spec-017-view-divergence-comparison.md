@@ -1,8 +1,13 @@
 ---
-status: approved
+status: executing
 spec: [017-view-divergence-detector]
+execution_id: agent-task-executor-view-divergence-exec-043-spec-017-view-divergence-comparison
+dark-factory-version: v0.198.7
 created: "2026-10-27T00:00:00Z"
 queued: "2026-10-26T23:15:33Z"
+started: "2026-10-27T19:43:07Z"
+completed: "2026-10-27T19:22:27Z"
+lastFailReason: 'setup workflow: git merge origin default branch: merge origin/master: : git merge origin/master failed: exit status 1'
 ---
 
 # Compare the reconcile snapshot to the vault index and report divergence
