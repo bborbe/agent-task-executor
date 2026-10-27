@@ -191,6 +191,82 @@ func liveClaim() *claim.Claim {
 	}
 }
 
+// TestJobProvablyFinishedDoesNotProbeInShadowMode pins the shadow contract: a
+// shadow executor takes claims but never blocks a dispatch, so a live claim must
+// not suppress its spawn. Without this the probe would silently promote shadow
+// to on.
+func TestJobProvablyFinishedDoesNotProbeInShadowMode(t *testing.T) {
+	asked := false
+	h := newCurrentJobHandler()
+	h.claimMode = pkg.ClaimModeShadow
+	h.claimClientFactory = func() claim.ClaimClient {
+		return readOnlyClaimClient{
+			read: func(context.Context, claim.ClaimTarget) (*claim.Claim, error) {
+				asked = true
+				return liveClaim(), nil
+			},
+		}
+	}
+	task := currentJobTask("pr-reviewer-agent-94c1801c-20261022205503", 7*time.Minute)
+
+	finished, err := h.jobProvablyFinished(
+		context.Background(),
+		task,
+		"pr-reviewer-agent-94c1801c-20261022205503",
+		libk8s.Namespace("dev"),
+	)
+	if err != nil {
+		t.Fatalf("jobProvablyFinished returned %v; want nil", err)
+	}
+	if !finished {
+		t.Fatal("provably finished = false in shadow mode; want true — shadow never blocks a dispatch")
+	}
+	if asked {
+		t.Error("the claim store was read in shadow mode; want no read")
+	}
+}
+
+// TestJobProvablyFinishedSuppressesWhenTheClaimClientCannotBeBuilt covers the
+// two fail-closed branches of client construction. Both must suppress and count:
+// a regression that turned either into "free" would authorise exactly the
+// duplicate spawn this guard exists to prevent.
+func TestJobProvablyFinishedSuppressesWhenTheClaimClientCannotBeBuilt(t *testing.T) {
+	cases := map[string]func() claim.ClaimClient{
+		"nil factory": nil,
+		"factory nil": func() claim.ClaimClient { return nil },
+	}
+	for name, factory := range cases {
+		t.Run(name, func(t *testing.T) {
+			h := newCurrentJobHandler()
+			h.claimMode = pkg.ClaimModeOn
+			h.claimClientFactory = factory
+			task := currentJobTask("pr-reviewer-agent-94c1801c-20261022205503", 7*time.Minute)
+			before := testutil.ToFloat64(
+				metrics.TaskEventsTotal.WithLabelValues("claim_probe_failed"),
+			)
+
+			finished, err := h.jobProvablyFinished(
+				context.Background(),
+				task,
+				"pr-reviewer-agent-94c1801c-20261022205503",
+				libk8s.Namespace("dev"),
+			)
+			if err != nil {
+				t.Fatalf("jobProvablyFinished returned %v; want nil", err)
+			}
+			if finished {
+				t.Fatal("provably finished = true without a claim client; want false")
+			}
+			after := testutil.ToFloat64(
+				metrics.TaskEventsTotal.WithLabelValues("claim_probe_failed"),
+			)
+			if delta := after - before; delta != 1 {
+				t.Errorf("claim_probe_failed delta = %v; want 1", delta)
+			}
+		})
+	}
+}
+
 // TestJobProvablyFinishedRejectsAClaimedForeignJobWithNoStoreEntry is SC1's
 // case: the store is empty (a cold pod, or a spawn this executor never made),
 // so nothing local can tell another cluster's running Job from this executor's

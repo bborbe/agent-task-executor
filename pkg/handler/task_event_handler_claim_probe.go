@@ -13,6 +13,7 @@ import (
 	"github.com/bborbe/errors"
 	"github.com/golang/glog"
 
+	pkg "github.com/bborbe/agent-task-executor/pkg"
 	"github.com/bborbe/agent-task-executor/pkg/claim"
 	"github.com/bborbe/agent-task-executor/pkg/metrics"
 )
@@ -46,12 +47,19 @@ const (
 //
 // An error means the claim store could not be read. That is not evidence of
 // absence — a caller must keep suppressing, exactly as it does for a failed Job
-// lookup — and the read is retried on the next pass.
+// lookup — and the read is retried on the next pass. Every failure is counted
+// and logged HERE, with the stage that failed, so the caller only has to
+// suppress and cannot count it twice or misattribute the stage.
+//
+// Only `on` probes. `shadow` takes claims but never blocks a dispatch — that is
+// its contract — so a held claim must not suppress a spawn there, and treating
+// shadow as unavailable keeps the probe from quietly turning it into `on`.
+// Claim mode off keeps no claim at all.
 func (h *taskEventHandler) claimProbe(
 	ctx context.Context,
 	task lib.Task,
 ) (claimProbeResult, error) {
-	if !h.claimMode.TakesClaim() {
+	if h.claimMode != pkg.ClaimModeOn {
 		return claimProbeUnavailable, nil
 	}
 	client, err := h.claimProbeClient(ctx)
@@ -59,10 +67,12 @@ func (h *taskEventHandler) claimProbe(
 		// The mode takes a claim, so a client that cannot be built is a fault,
 		// not "this deployment keeps no claims": fail closed like every other
 		// claim-taking path rather than fall back to local-only evidence.
+		countClaimProbeFailure(task, "client", err)
 		return claimProbeUnavailable, err
 	}
 	target, err := claimTargetFor(ctx, task)
 	if err != nil {
+		countClaimProbeFailure(task, "derive", err)
 		return claimProbeUnavailable, err
 	}
 	current, err := client.Read(ctx, target)
@@ -70,12 +80,9 @@ func (h *taskEventHandler) claimProbe(
 		if stderrors.Is(err, claim.ErrClaimFree) {
 			return claimProbeFree, nil
 		}
-		return claimProbeUnavailable, errors.Wrapf(
-			ctx,
-			err,
-			"read claim for task %s",
-			task.TaskIdentifier,
-		)
+		wrapped := errors.Wrapf(ctx, err, "read claim for task %s", task.TaskIdentifier)
+		countClaimProbeFailure(task, "read", wrapped)
+		return claimProbeUnavailable, wrapped
 	}
 	// An unreadable lease is treated as held: the same direction restart
 	// recovery takes, because a claim nobody can read is one nobody has been

@@ -185,8 +185,8 @@ func (h *taskEventHandler) currentJobFinishedWithoutStoreEntry(
 	if err != nil {
 		// A failed read is not evidence of absence — suppress and retry on the
 		// next pass, the same direction the failed Job lookup takes. Not fatal:
-		// a vault-api blip must not restart the executor for every assignee.
-		countClaimProbeFailure(task, "read", err)
+		// a vault-api blip must not restart the executor for every assignee. The
+		// probe already counted and logged it, with the stage that failed.
 		return false, nil
 	}
 	switch probe {

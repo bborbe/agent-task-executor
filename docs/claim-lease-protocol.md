@@ -19,8 +19,17 @@ the spawn is suppressed and re-deferred. `claim_free` lets the respawn proceed,
 an expired lease counts as free (the takeover rule), an unreadable lease as
 held, and a failed read suppresses and retries on the next pass. The read is
 one request per dispatch pass on a task whose store entry is empty, and none
-otherwise. Claim mode `off` keeps no claim, so there the guard falls back to
-local evidence and says so in `event=foreign_job_unprobeable`.
+otherwise. Only claim mode `on` probes: `shadow` takes claims but never blocks a
+dispatch, so a held claim must not suppress a spawn there, and treating shadow as
+unavailable is what keeps the probe from quietly turning it into `on`.
+
+⚠️ **Two residuals, both real.** Claim mode `off` keeps no claim at all, so the
+guard falls back to local evidence and says so in
+`event=foreign_job_unprobeable`. And a claim's absence only proves that no
+*claim-taking* cluster holds the task: a peer running claim mode off, or an image
+older than `v0.26.2`, writes no claim, so a task it is running stays invisible
+here and the respawn can still duplicate it. That gap closes when every cluster
+takes claims, not by anything this side can read.
 
 This is why the success hold matters beyond the peer's `Claim` being refused:
 the held claim is also what stops a cold peer from respawning the task inside
