@@ -317,9 +317,9 @@ type taskEventHandler struct {
 	claimManagerOnce sync.Once
 	claimManager     claim.LeaseManager
 	claimManagerErr  error
-	// claimProbe is the read-only claim client the foreign-current_job probe
+	// probeState is the read-only claim client the foreign-current_job probe
 	// uses, built lazily and separately from the lease manager.
-	claimProbe claimProbeState
+	probeState claimProbeState
 	// spawnPendingSet marks tasks whose spawn is between taking the claim and
 	// recording the new Job. A terminal event for the previous Job arriving in
 	// that window names the only Job the store knows, so without this marker it

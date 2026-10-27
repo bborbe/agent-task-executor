@@ -17,56 +17,76 @@ import (
 	"github.com/bborbe/agent-task-executor/pkg/metrics"
 )
 
-// claimHeldFor reports whether ANY cluster currently holds this task's claim.
+// claimProbeResult is what the shared record says about a task, as one value
+// rather than a pair of booleans: "no claim exists" and "no claim can be read"
+// are different answers that both look like false, and reading the second as
+// the first is exactly the mistake the probe exists to prevent.
+type claimProbeResult int
+
+const (
+	// claimProbeUnavailable means this deployment keeps no claim to read
+	// (CLAIM_MODE=off, or a factory that was never injected). The caller falls
+	// back to local evidence; it must not read this as a free claim.
+	claimProbeUnavailable claimProbeResult = iota
+	// claimProbeHeld means some cluster holds the task's claim right now.
+	claimProbeHeld
+	// claimProbeFree means the claim is absent or its lease has passed.
+	claimProbeFree
+)
+
+// claimProbe asks the shared record whether any cluster is running this task.
 //
-// It is the one shared record that answers a question this executor cannot
-// answer locally: with no store entry, the Job named in current_job may be
-// another cluster's, and that cluster's Job is invisible here. Its claim is not
-// — the claim lives in the vault's ref store, is written before the Job and
-// released when the Job ends (or held for the success grace after it), so a
-// live claim says "somewhere is running this task" and its absence says no
-// compliant cluster is.
-//
-// available is false when this deployment takes no claim (CLAIM_MODE=off, or a
-// factory that was never injected): there is then no shared record to read, and
-// the caller must fall back to the local-only behaviour rather than read the
-// absence of a claim it never had as proof.
+// It is the one record that answers a question this executor cannot answer
+// locally: with no store entry, the Job named in current_job may be another
+// cluster's, and that cluster's Job is invisible here. Its claim is not — the
+// claim lives in the vault's ref store, is written before the Job and released
+// when the Job ends (or held for the success grace after it), so a live claim
+// says "somewhere is running this task" and its absence says no compliant
+// cluster is.
 //
 // An error means the claim store could not be read. That is not evidence of
 // absence — a caller must keep suppressing, exactly as it does for a failed Job
 // lookup — and the read is retried on the next pass.
-func (h *taskEventHandler) claimHeldFor(
+func (h *taskEventHandler) claimProbe(
 	ctx context.Context,
 	task lib.Task,
-) (held bool, available bool, err error) {
+) (claimProbeResult, error) {
 	if !h.claimMode.TakesClaim() {
-		return false, false, nil
+		return claimProbeUnavailable, nil
 	}
 	client, err := h.claimProbeClient(ctx)
 	if err != nil {
 		// The mode takes a claim, so a client that cannot be built is a fault,
 		// not "this deployment keeps no claims": fail closed like every other
 		// claim-taking path rather than fall back to local-only evidence.
-		return false, true, err
+		return claimProbeUnavailable, err
 	}
 	target, err := claimTargetFor(ctx, task)
 	if err != nil {
-		return false, true, err
+		return claimProbeUnavailable, err
 	}
 	current, err := client.Read(ctx, target)
 	if err != nil {
 		if stderrors.Is(err, claim.ErrClaimFree) {
-			return false, true, nil
+			return claimProbeFree, nil
 		}
-		return false, true, errors.Wrapf(ctx, err, "read claim for task %s", task.TaskIdentifier)
+		return claimProbeUnavailable, errors.Wrapf(
+			ctx,
+			err,
+			"read claim for task %s",
+			task.TaskIdentifier,
+		)
 	}
-	// An unreadable lease is treated as live: the same direction restart
+	// An unreadable lease is treated as held: the same direction restart
 	// recovery takes, because a claim nobody can read is one nobody has been
 	// proven to have dropped.
 	if current.LeaseUnreadable {
-		return true, true, nil
+		return claimProbeHeld, nil
 	}
-	return h.currentDateTime.Now().Time().Before(current.LeaseUntil.Time()), true, nil
+	if h.currentDateTime.Now().Time().Before(current.LeaseUntil.Time()) {
+		return claimProbeHeld, nil
+	}
+	return claimProbeFree, nil
 }
 
 // claimTargetFor derives the claim target this task's spawn would take.
@@ -128,17 +148,17 @@ func (h *taskEventHandler) claimProbeClient(ctx context.Context) (claim.ClaimCli
 			h.claimMode,
 		)
 	}
-	h.claimProbe.once.Do(func() {
-		h.claimProbe.client = h.claimClientFactory()
+	h.probeState.once.Do(func() {
+		h.probeState.client = h.claimClientFactory()
 	})
-	if h.claimProbe.client == nil {
+	if h.probeState.client == nil {
 		return nil, errors.Errorf(
 			ctx,
 			"claim client factory returned nil for claim mode %q",
 			h.claimMode,
 		)
 	}
-	return h.claimProbe.client, nil
+	return h.probeState.client, nil
 }
 
 // countClaimProbeFailure records a claim read that failed or could not be

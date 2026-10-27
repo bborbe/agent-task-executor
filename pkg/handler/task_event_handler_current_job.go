@@ -181,8 +181,24 @@ func (h *taskEventHandler) currentJobFinishedWithoutStoreEntry(
 	ctx context.Context,
 	task lib.Task,
 ) (bool, error) {
-	held, available, err := h.claimHeldFor(ctx, task)
-	if !available {
+	probe, err := h.claimProbe(ctx, task)
+	if err != nil {
+		// A failed read is not evidence of absence — suppress and retry on the
+		// next pass, the same direction the failed Job lookup takes. Not fatal:
+		// a vault-api blip must not restart the executor for every assignee.
+		countClaimProbeFailure(task, "read", err)
+		return false, nil
+	}
+	switch probe {
+	case claimProbeHeld:
+		glog.V(2).Infof(
+			"event=foreign_job_claimed_elsewhere task=%s: a live claim shows the task is still running somewhere this cluster cannot see",
+			task.TaskIdentifier,
+		)
+		return false, nil
+	case claimProbeFree:
+		return true, nil
+	default:
 		// Claim mode off keeps no shared record, so the ambiguity cannot be
 		// resolved here. Stated rather than hidden: the respawn proceeds on
 		// local evidence alone, which is the pre-existing behaviour.
@@ -193,18 +209,4 @@ func (h *taskEventHandler) currentJobFinishedWithoutStoreEntry(
 		)
 		return true, nil
 	}
-	if err != nil {
-		// A failed read is not evidence of absence — suppress and retry on the
-		// next pass, the same direction the failed Job lookup takes. Not fatal:
-		// a vault-api blip must not restart the executor for every assignee.
-		countClaimProbeFailure(task, "read", err)
-		return false, nil
-	}
-	if held {
-		glog.V(2).Infof(
-			"event=foreign_job_claimed_elsewhere task=%s: a live claim shows the task is still running somewhere this cluster cannot see",
-			task.TaskIdentifier,
-		)
-	}
-	return !held, nil
 }
