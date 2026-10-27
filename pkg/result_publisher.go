@@ -728,9 +728,21 @@ type parkPublisher interface {
 // is a deliberate human-park (the agent wrote its verdict into the task file and
 // stopped) or a run that produced nothing — either way the record must leave the
 // loop rather than be re-spawned on every reconcile pass.
+// A terminal status short-circuits: the store entry is updated by Kafka events,
+// which can lag the agent's own write, so a task that already completed would
+// otherwise be dragged back to human_review by its own success.
 func parkedJob(task lib.Task) bool {
+	status := task.Frontmatter.Status()
+	if status == domain.TaskStatusCompleted || status == domain.TaskStatusAborted {
+		return false
+	}
 	phase := task.Frontmatter.Phase()
-	return phase != nil && *phase == domain.TaskPhaseExecution
+	if phase == nil {
+		return false
+	}
+	// Both drive phases: the executor spawns for a planning-phase task as well as
+	// an execution-phase one, so a park in either would otherwise loop.
+	return *phase == domain.TaskPhasePlanning || *phase == domain.TaskPhaseExecution
 }
 
 // PublishAbort closes a record the consecutive-re-drive cap has stopped

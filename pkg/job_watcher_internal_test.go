@@ -483,3 +483,21 @@ var _ = Describe("parkedJob", func() {
 		Expect(parkedJob(lib.Task{Frontmatter: lib.TaskFrontmatter{}})).To(BeFalse())
 	})
 })
+
+var _ = Describe("parkedJob status guard", func() {
+	It("does not park a task whose status is already terminal", func() {
+		task := lib.Task{Frontmatter: lib.TaskFrontmatter{
+			"phase":  "execution",
+			"status": "completed",
+		}}
+		Expect(parkedJob(task)).To(BeFalse())
+	})
+
+	It("parks a task still in the planning drive phase", func() {
+		task := lib.Task{Frontmatter: lib.TaskFrontmatter{
+			"phase":  "planning",
+			"status": "in_progress",
+		}}
+		Expect(parkedJob(task)).To(BeTrue())
+	})
+})
