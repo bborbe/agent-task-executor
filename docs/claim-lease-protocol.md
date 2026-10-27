@@ -192,7 +192,13 @@ is actually running.
 The decision is visible in one line: `event=concurrency_admit` and
 `event=concurrency_cap` both carry `running=`, `cap=`, `max=` and `quota=`,
 where `cap` is the effective bound, `max` the declared value and `quota` the
-value read from the quota (0 when no quota bound applies).
+value read from the quota. `quota_bound=` names why the quota did or did not
+bound the decision — `ok` when the read succeeded (`quota` is then authoritative,
+including a genuine `hard.pods: 0`), `failed` when the read was refused or
+errored (`cap` fell back to `max`), or `none` when no limiter, no priority class,
+or no quota scoping the class applied. It exists because `quota=0` alone cannot
+distinguish those three, and the failed read is exactly the state an operator
+must be able to see without inferring it from `cap`.
 
 ## Fence
 
