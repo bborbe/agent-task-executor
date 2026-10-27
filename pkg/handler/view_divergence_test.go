@@ -347,7 +347,35 @@ var _ = Describe("reconcile pass view/vault divergence check", func() {
 		})
 
 		Expect(strings.Count(out, "event=view_divergence_absent")).To(Equal(20))
-		Expect(out).To(ContainSubstring("absent=40 named=20"))
+		Expect(out).To(ContainSubstring("absent=40 named=0 named_absent=20"))
+	})
+
+	It("names a divergence even when absent ids would exhaust the budget", func() {
+		// Absences outnumber divergences by orders of magnitude — measured on dev
+		// 2026-10-27, 74 against 3. A budget shared between the two is spent on
+		// whichever ids sort first, which left one of those three divergences
+		// unnamed. Divergences are the finding the check exists to report, so they
+		// are named first and counted separately.
+		server, _, _ := newIndexServer(indexBody([]map[string]any{
+			{"id": "tid-39", "status": "in_progress", "phase": "done"},
+		}, 12, 0))
+		client := claim.NewVaultAPIIndexClient(
+			server.URL, "secret", "agent-task-executor",
+		)
+		owned := make([]lib.Task, 0, 40)
+		for i := 0; i < 40; i++ {
+			owned = append(owned, ownedTask(fmt.Sprintf("tid-%02d", i), "completed", "done"))
+		}
+		fakeView.SnapshotReturns(owned)
+		h := newDivergenceHandler(client, fakeView)
+
+		out := captureStderr(func() {
+			Expect(h.ReconcileOnce(ctx)).To(Succeed())
+		})
+
+		Expect(out).To(ContainSubstring("event=view_divergence task=tid-39"))
+		Expect(strings.Count(out, "event=view_divergence_absent")).To(Equal(20))
+		Expect(out).To(ContainSubstring("named=1 named_absent=20"))
 	})
 
 	It("makes one index request per pass regardless of task count", func() {

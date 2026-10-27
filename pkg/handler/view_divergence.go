@@ -124,22 +124,21 @@ func (h *taskEventHandler) checkViewDivergence(ctx context.Context, owned []lib.
 	// every owned id as absent. Naming each of them would write thousands of
 	// warning lines every pass, once a minute, which is a worse fault than the
 	// divergence it reports. The counts stay exact in the metric and the
-	// summary; only the first maxDivergenceLogLines ids are named.
-	named := 0
+	// summary; only maxDivergenceLogLines ids are named.
+	//
+	// Divergences are emitted before absences, and the two are counted
+	// separately rather than sharing one budget. A shared budget spends itself
+	// on whichever ids sort first, and absences outnumber divergences by orders
+	// of magnitude — measured on dev 2026-10-27, 74 absent against 3 divergent,
+	// which left one of the three divergences unnamed. The whole point of the
+	// check is to name divergences, so they cannot be the ones dropped.
+	namedDivergent := 0
 	for _, finding := range report.Findings {
 		if finding.Absent {
-			metrics.ViewDivergenceTotal.WithLabelValues("absent").Inc()
-			if named < maxDivergenceLogLines {
-				glog.Warningf(
-					"event=view_divergence_absent task=%s view_status=%s view_phase=%s",
-					finding.ID, finding.ViewStatus, finding.ViewPhase,
-				)
-				named++
-			}
 			continue
 		}
 		metrics.ViewDivergenceTotal.WithLabelValues("mismatch").Inc()
-		if named < maxDivergenceLogLines {
+		if namedDivergent < maxDivergenceLogLines {
 			glog.Warningf(
 				"event=view_divergence task=%s view_status=%s vault_status=%s view_phase=%s vault_phase=%s",
 				finding.ID,
@@ -148,16 +147,31 @@ func (h *taskEventHandler) checkViewDivergence(ctx context.Context, owned []lib.
 				finding.ViewPhase,
 				finding.VaultPhase,
 			)
-			named++
+			namedDivergent++
+		}
+	}
+	namedAbsent := 0
+	for _, finding := range report.Findings {
+		if !finding.Absent {
+			continue
+		}
+		metrics.ViewDivergenceTotal.WithLabelValues("absent").Inc()
+		if namedAbsent < maxDivergenceLogLines {
+			glog.Warningf(
+				"event=view_divergence_absent task=%s view_status=%s view_phase=%s",
+				finding.ID, finding.ViewStatus, finding.ViewPhase,
+			)
+			namedAbsent++
 		}
 	}
 	glog.Infof(
-		"event=view_divergence_summary compared=%d divergent=%d index_age_seconds=%d warnings=%d absent=%d named=%d",
+		"event=view_divergence_summary compared=%d divergent=%d index_age_seconds=%d warnings=%d absent=%d named=%d named_absent=%d",
 		report.Compared,
 		report.Divergent,
 		index.IndexAgeSeconds,
 		index.Warnings,
 		report.Absent,
-		named,
+		namedDivergent,
+		namedAbsent,
 	)
 }
