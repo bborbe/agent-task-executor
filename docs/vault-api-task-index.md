@@ -171,8 +171,11 @@ with a closed set: `ok`, `mismatch`, `absent`, `read_error`.
 
 ## Source
 
-The envelope above is pinned from
-`specs/in-progress/017-view-divergence-detector.md`.
+The envelope above is pinned from the served response of `GET /api/v1/tasks`
+against the vault-api deployment named in the `VAULT_API_URL` env var, read on
+2026-10-26. Re-read that endpoint before changing a field name here — this
+document is the contract the executor decodes against, and it goes stale the
+moment vault-api's `ListResponse` moves.
 
 **The serving vault-api version was not recorded in this repository.** vault-api
 is not a Go dependency here and no manifest pins its image, so there is no

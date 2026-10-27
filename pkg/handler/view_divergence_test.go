@@ -326,6 +326,30 @@ var _ = Describe("reconcile pass view/vault divergence check", func() {
 		Entry("empty items"),
 	)
 
+	It("caps the per-id lines and keeps the full count in the summary", func() {
+		// An index that returns nothing classifies every owned task as absent.
+		// Naming all of them would write one warning per owned task per pass,
+		// once a minute — a worse fault than the divergence it reports. The
+		// counts stay exact; only the first maxDivergenceLogLines ids are named.
+		server, _, _ := newIndexServer(indexBody([]map[string]any{}, 12, 0))
+		client := claim.NewVaultAPIIndexClient(
+			server.URL, "secret", "agent-task-executor",
+		)
+		owned := make([]lib.Task, 0, 40)
+		for i := 0; i < 40; i++ {
+			owned = append(owned, ownedTask(fmt.Sprintf("tid-%02d", i), "completed", "done"))
+		}
+		fakeView.SnapshotReturns(owned)
+		h := newDivergenceHandler(client, fakeView)
+
+		out := captureStderr(func() {
+			Expect(h.ReconcileOnce(ctx)).To(Succeed())
+		})
+
+		Expect(strings.Count(out, "event=view_divergence_absent")).To(Equal(20))
+		Expect(out).To(ContainSubstring("absent=40 named=20"))
+	})
+
 	It("makes one index request per pass regardless of task count", func() {
 		const taskCount = 50
 		items := make([]map[string]any, 0, taskCount)

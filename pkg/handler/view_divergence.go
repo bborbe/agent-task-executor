@@ -15,6 +15,12 @@ import (
 	"github.com/bborbe/agent-task-executor/pkg/metrics"
 )
 
+// maxDivergenceLogLines bounds how many individual ids one pass names. The
+// counts are never truncated — the metric and the summary carry the full
+// number — but a stale or empty index classifies every owned task, and naming
+// thousands of ids once a minute is a worse fault than the divergence itself.
+const maxDivergenceLogLines = 20
+
 // viewDivergenceFinding is one owned task whose view state differs from the
 // vault index, or that the index does not contain at all. Both sides of both
 // fields are carried so a reader can see which one moved.
@@ -113,27 +119,41 @@ func (h *taskEventHandler) checkViewDivergence(ctx context.Context, owned []lib.
 	// that finds findings still counts one successful read.
 	metrics.ViewDivergenceTotal.WithLabelValues("ok").Inc()
 	report := compareViewToIndex(owned, index)
+	// A stale or empty index does not produce a handful of findings, it
+	// produces one per owned task: an index that returns nothing classifies
+	// every owned id as absent. Naming each of them would write thousands of
+	// warning lines every pass, once a minute, which is a worse fault than the
+	// divergence it reports. The counts stay exact in the metric and the
+	// summary; only the first maxDivergenceLogLines ids are named.
+	named := 0
 	for _, finding := range report.Findings {
 		if finding.Absent {
 			metrics.ViewDivergenceTotal.WithLabelValues("absent").Inc()
-			glog.Warningf(
-				"event=view_divergence_absent task=%s view_status=%s view_phase=%s",
-				finding.ID, finding.ViewStatus, finding.ViewPhase,
-			)
+			if named < maxDivergenceLogLines {
+				glog.Warningf(
+					"event=view_divergence_absent task=%s view_status=%s view_phase=%s",
+					finding.ID, finding.ViewStatus, finding.ViewPhase,
+				)
+				named++
+			}
 			continue
 		}
 		metrics.ViewDivergenceTotal.WithLabelValues("mismatch").Inc()
-		glog.Warningf(
-			"event=view_divergence task=%s view_status=%s vault_status=%s view_phase=%s vault_phase=%s",
-			finding.ID,
-			finding.ViewStatus,
-			finding.VaultStatus,
-			finding.ViewPhase,
-			finding.VaultPhase,
-		)
+		if named < maxDivergenceLogLines {
+			glog.Warningf(
+				"event=view_divergence task=%s view_status=%s vault_status=%s view_phase=%s vault_phase=%s",
+				finding.ID,
+				finding.ViewStatus,
+				finding.VaultStatus,
+				finding.ViewPhase,
+				finding.VaultPhase,
+			)
+			named++
+		}
 	}
 	glog.Infof(
-		"event=view_divergence_summary compared=%d divergent=%d index_age_seconds=%d warnings=%d",
+		"event=view_divergence_summary compared=%d divergent=%d index_age_seconds=%d warnings=%d absent=%d named=%d",
 		report.Compared, report.Divergent, index.IndexAgeSeconds, index.Warnings,
+		report.Absent, named,
 	)
 }

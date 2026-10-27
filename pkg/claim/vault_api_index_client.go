@@ -40,6 +40,11 @@ type TaskIndex struct {
 
 // VaultAPIIndexClient reads vault-api's task index. It is read-only: the
 // divergence check never writes to the vault through it.
+//
+// No //counterfeiter:generate directive, deliberately. Its only consumer is
+// pkg/handler, whose tests double it with an in-package stub — and a generated
+// fake would live in mocks/, which imports pkg/handler, so an internal test
+// cannot use it. A generated mock here would be dead surface.
 type VaultAPIIndexClient interface {
 	Read(ctx context.Context) (*TaskIndex, error)
 }
