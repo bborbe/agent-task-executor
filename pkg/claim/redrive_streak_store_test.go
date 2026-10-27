@@ -53,14 +53,44 @@ func newStreakStore(fake *fakeGitRest) claim.RedriveStreakStore {
 	)
 }
 
-// seedStreak seeds one streak ref in the fake.
+// seedStreak seeds one streak ref in the fake, with the lease a write at the
+// test clock's instant would carry.
 func seedStreak(fake *fakeGitRest, taskID, phase string, n int) {
+	seedStreakLeased(
+		fake,
+		taskID,
+		phase,
+		n,
+		leaseTestT0.Add(claim.RedriveStreakLeaseDuration),
+	)
+}
+
+// seedStreakLeased seeds one streak ref with an explicit lease deadline, so a
+// spec can model a ref written by an earlier process at a known time.
+func seedStreakLeased(
+	fake *fakeGitRest,
+	taskID, phase string,
+	n int,
+	leaseUntil libtime.DateTime,
+) {
 	fake.Seed(
 		"refs/"+claim.RedriveStreakPrefix+taskID+"/"+phase+"/"+strconv.Itoa(n),
 		"sha-"+taskID+"-"+phase+"-"+strconv.Itoa(n),
 		claim.RedriveStreakCluster,
 		taskID,
-		rfc3339(leaseTestT0),
+		rfc3339(leaseUntil),
+	)
+}
+
+// newStreakStoreAt builds a store over the fake with a settable clock, so a
+// spec can advance past the release window without sleeping.
+func newStreakStoreAt(
+	fake *fakeGitRest,
+	clock libtime.CurrentDateTime,
+) claim.RedriveStreakStore {
+	return claim.NewRedriveStreakStore(
+		claim.NewClaimRefClient(fake.URL(), "", ""),
+		clock,
 	)
 }
 
@@ -179,7 +209,7 @@ var _ = Describe("RedriveStreakStore", func() {
 		Expect(ok).To(BeTrue())
 		Expect(ref.Cluster).To(Equal("redrive-streak"))
 		Expect(ref.TaskID).To(Equal("T"))
-		Expect(ref.LeaseUntil).To(Equal(rfc3339(leaseTestT0.Add(24 * libtime.Hour))))
+		Expect(ref.LeaseUntil).To(Equal(rfc3339(leaseTestT0.Add(6 * libtime.Hour))))
 
 		puts := requestsMatching(fake.Requests(), http.MethodPut, "claims/redrive/")
 		Expect(puts).NotTo(BeEmpty())
@@ -365,5 +395,89 @@ var _ = Describe("RedriveStreakStore", func() {
 		Expect(
 			requestsMatching(fake.Requests(), http.MethodDelete, "claims/redrive/"),
 		).To(BeEmpty())
+	})
+
+	It("refuses the cap inside one window and releases it after", func() {
+		clock := newTestClock(leaseTestT0)
+		store := newStreakStoreAt(fake, clock)
+		for i := 0; i < 3; i++ {
+			Expect(store.Record(ctx, "T", "ai_review")).To(Succeed())
+		}
+
+		count, err := store.Count(ctx, "T", "ai_review")
+		Expect(err).NotTo(HaveOccurred())
+		Expect(count).To(
+			Equal(3),
+			"a still-failing task must stay capped inside one window",
+		)
+
+		advance(clock, claim.RedriveStreakLeaseDuration-libtime.Second)
+		count, err = store.Count(ctx, "T", "ai_review")
+		Expect(err).NotTo(HaveOccurred())
+		Expect(count).To(Equal(3))
+
+		advance(clock, 2*libtime.Second)
+		count, err = store.Count(ctx, "T", "ai_review")
+		Expect(err).NotTo(HaveOccurred())
+		Expect(count).To(
+			Equal(0),
+			"a task capped by a past outage must be released by the window",
+		)
+	})
+
+	It("releases the snapshot on the same window as Count", func() {
+		clock := newTestClock(leaseTestT0)
+		store := newStreakStoreAt(fake, clock)
+		for i := 0; i < 3; i++ {
+			Expect(store.Record(ctx, "T", "ai_review")).To(Succeed())
+		}
+		advance(clock, claim.RedriveStreakLeaseDuration)
+
+		snapshot, err := store.Snapshot(ctx)
+		Expect(err).NotTo(HaveOccurred())
+		Expect(snapshot["T"]["ai_review"]).To(
+			Equal(0),
+			"the reconcile pass answers every cap check from this map, so an "+
+				"expired ref left in it would keep the task capped forever",
+		)
+	})
+
+	It("prunes expired refs so a released streak restarts at one", func() {
+		clock := newTestClock(leaseTestT0)
+		store := newStreakStoreAt(fake, clock)
+		Expect(store.Record(ctx, "T", "ai_review")).To(Succeed())
+		Expect(store.Record(ctx, "T", "ai_review")).To(Succeed())
+		advance(clock, claim.RedriveStreakLeaseDuration+libtime.Second)
+
+		Expect(store.Record(ctx, "T", "ai_review")).To(Succeed())
+
+		_, kept := fake.Ref("refs/claims/redrive/T/ai_review/1")
+		_, pruned := fake.Ref("refs/claims/redrive/T/ai_review/2")
+		Expect(kept).To(BeTrue())
+		Expect(pruned).To(BeFalse())
+
+		count, err := store.Count(ctx, "T", "ai_review")
+		Expect(err).NotTo(HaveOccurred())
+		Expect(count).To(Equal(1))
+	})
+
+	It("keeps a ref whose lease cannot be read, so the cap cannot weaken", func() {
+		seedStreakLeased(fake, "T", "ai_review", 1, leaseTestT0)
+		fake.Seed(
+			"refs/claims/redrive/T/ai_review/2",
+			"sha-2",
+			claim.RedriveStreakCluster,
+			"T",
+			"not-a-timestamp",
+		)
+		clock := newTestClock(leaseTestT0.Add(claim.RedriveStreakLeaseDuration + libtime.Hour))
+		store := newStreakStoreAt(fake, clock)
+
+		count, err := store.Count(ctx, "T", "ai_review")
+		Expect(err).NotTo(HaveOccurred())
+		Expect(count).To(
+			Equal(1),
+			"the expired ref drops out and the unreadable one stays counted",
+		)
 	})
 })

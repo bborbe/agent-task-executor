@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	lib "github.com/bborbe/agent"
+	libtime "github.com/bborbe/time"
 	"github.com/golang/glog"
 
 	pkg "github.com/bborbe/agent-task-executor/pkg"
@@ -71,6 +72,12 @@ var transientRedriveReasons = map[string]struct{}{
 type redriveStreak struct {
 	count int
 	phase string
+	// since is when this streak last advanced. The cap check takes
+	// max(memory, stored), so a permanent in-memory 3 would keep a task capped
+	// after the store's window had released it — the floor has to expire on the
+	// same window or the release path this change adds is defeated by the
+	// process's own memory.
+	since libtime.DateTime
 }
 
 // redriveStreakStore returns this process's streak store, or nil when claim
@@ -104,13 +111,33 @@ func (h *taskEventHandler) redriveReasonStore(
 	return h.redriveReasons, nil
 }
 
+// redriveStreakExpired reports whether an in-memory streak has outlived the
+// window the shared store applies to its refs, so the two release together.
+//
+// The window runs from the streak's last advance, which is the conservative
+// reading: the store ages each ref from its own write, so it starts counting
+// down as soon as the first ref is written. Anchoring memory to the last write
+// can therefore hold the floor up to one window longer than the store would,
+// and never shorter — max(memory, stored) then delays a release slightly but
+// cannot suppress one, and cannot weaken the cap either.
+func redriveStreakExpired(streak redriveStreak, now libtime.DateTime) bool {
+	if streak.since.IsZero() {
+		return false
+	}
+	return !now.Time().Before(streak.since.Add(claim.RedriveStreakLeaseDuration).Time())
+}
+
 // inMemoryRedriveCount returns the streak this process has recorded for id at
-// phase, or 0 when the recorded streak belongs to another phase.
+// phase, or 0 when the recorded streak belongs to another phase or has outlived
+// the release window.
 func (h *taskEventHandler) inMemoryRedriveCount(id lib.TaskIdentifier, phase string) int {
 	h.redriveMu.Lock()
 	defer h.redriveMu.Unlock()
 	streak, ok := h.redriveStreaks[id]
 	if !ok || streak.phase != phase {
+		return 0
+	}
+	if redriveStreakExpired(streak, h.currentDateTime.Now()) {
 		return 0
 	}
 	return streak.count
@@ -378,11 +405,21 @@ func taskPhaseString(task lib.Task) string {
 func (h *taskEventHandler) recordRedriveSpawn(ctx context.Context, task lib.Task) {
 	id := task.TaskIdentifier
 	phase := taskPhaseString(task)
+	now := h.currentDateTime.Now()
 	h.redriveMu.Lock()
-	if prev, ok := h.redriveStreaks[id]; ok && prev.phase == phase {
-		h.redriveStreaks[id] = redriveStreak{count: prev.count + 1, phase: phase}
-	} else {
-		h.redriveStreaks[id] = redriveStreak{count: 1, phase: phase}
+	prev, found := h.redriveStreaks[id]
+	switch {
+	case !found || prev.phase != phase || redriveStreakExpired(prev, now):
+		// A new phase or an expired window starts a fresh streak: the store has
+		// released the old one, so carrying its count forward would re-cap the
+		// task the moment it spawns again.
+		h.redriveStreaks[id] = redriveStreak{count: 1, phase: phase, since: now}
+	default:
+		h.redriveStreaks[id] = redriveStreak{
+			count: prev.count + 1,
+			phase: phase,
+			since: now,
+		}
 	}
 	h.redriveMu.Unlock()
 
