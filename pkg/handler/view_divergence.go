@@ -12,6 +12,7 @@ import (
 	"github.com/golang/glog"
 
 	"github.com/bborbe/agent-task-executor/pkg/claim"
+	"github.com/bborbe/agent-task-executor/pkg/metrics"
 )
 
 // viewDivergenceFinding is one owned task whose view state differs from the
@@ -104,18 +105,24 @@ func (h *taskEventHandler) checkViewDivergence(ctx context.Context, owned []lib.
 	if err != nil || index == nil {
 		// A nil index is a read failure, not an empty index: dereferencing it
 		// inside the pass is the one outcome the check must never produce.
+		metrics.ViewDivergenceTotal.WithLabelValues("read_error").Inc()
 		glog.Warningf("event=view_divergence_read_error error=%v", err)
 		return
 	}
+	// `ok` means the read succeeded, not that there was no divergence: a pass
+	// that finds findings still counts one successful read.
+	metrics.ViewDivergenceTotal.WithLabelValues("ok").Inc()
 	report := compareViewToIndex(owned, index)
 	for _, finding := range report.Findings {
 		if finding.Absent {
+			metrics.ViewDivergenceTotal.WithLabelValues("absent").Inc()
 			glog.Warningf(
 				"event=view_divergence_absent task=%s view_status=%s view_phase=%s",
 				finding.ID, finding.ViewStatus, finding.ViewPhase,
 			)
 			continue
 		}
+		metrics.ViewDivergenceTotal.WithLabelValues("mismatch").Inc()
 		glog.Warningf(
 			"event=view_divergence task=%s view_status=%s vault_status=%s view_phase=%s vault_phase=%s",
 			finding.ID,

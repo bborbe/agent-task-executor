@@ -163,6 +163,23 @@ var _ = Describe("Metrics", func() {
 		)).To(Equal(transientBefore))
 	})
 
+	It("pre-initialises exactly the four view-divergence results at zero", func() {
+		mfs, err := prometheus.DefaultGatherer.Gather()
+		Expect(err).NotTo(HaveOccurred())
+
+		Expect(
+			gatherLabels(mfs, "executor_view_divergence_total", "result"),
+		).To(ConsistOf("ok", "mismatch", "absent", "read_error"))
+
+		// The series are pre-initialised, so ToFloat64 on the bare collector
+		// panics; read each child series instead.
+		for _, result := range []string{"ok", "mismatch", "absent", "read_error"} {
+			Expect(testutil.ToFloat64(
+				metrics.ViewDivergenceTotal.WithLabelValues(result),
+			)).To(Equal(float64(0)), "result=%s", result)
+		}
+	})
+
 	It("labels the redrive-cap counter with task_type then phase", func() {
 		// The touch is required: this vec is deliberately not pre-initialised,
 		// so it emits no metric family until a label pair is observed. The two

@@ -124,6 +124,26 @@ var ReconcilePassesTotal = promauto.NewCounterVec(
 	[]string{"result"},
 )
 
+// ViewDivergenceTotal counts reconcile-pass view/vault divergence checks by
+// result. The result set is closed at compile time: `ok` and `read_error`
+// increment once per pass that reaches the check, `mismatch` and `absent`
+// increment once per task id. An alert written against one reading is wrong
+// under the other, so the unit is part of the contract. Task ids are never
+// label values.
+//
+// A new name is required rather than reusing
+// executor_reconcile_passes_total{result="task_vault_mismatch"}: that label
+// describes vault-ownership classification over the in-memory snapshot, not
+// a per-id file comparison, and merging the two would let a dashboard read
+// one failure as the other.
+var ViewDivergenceTotal = promauto.NewCounterVec(
+	prometheus.CounterOpts{
+		Name: "executor_view_divergence_total",
+		Help: "Total number of view/vault divergence checks by result (ok, mismatch, absent, read_error).",
+	},
+	[]string{"result"},
+)
+
 // SkippedUnknownAssigneeTotal counts tasks skipped because their assignee
 // matches no agent Config CR, labelled by the unknown assignee name. The bare
 // TaskEventsTotal{result="skipped_unknown_assignee"} counter says a skip
@@ -295,6 +315,12 @@ func init() {
 		"task_vault_unstamped",
 	} {
 		ReconcilePassesTotal.WithLabelValues(result).Add(0)
+	}
+	// Pre-initialise the closed divergence result set: `rate(...) == 0` must be
+	// able to fire on a check that never ran, and an absent series would make
+	// the never-ran case indistinguishable from a healthy quiet fleet.
+	for _, result := range []string{"ok", "mismatch", "absent", "read_error"} {
+		ViewDivergenceTotal.WithLabelValues(result).Add(0)
 	}
 	// Pre-initialise the closed abort vocabulary so both series are visible
 	// before any abort. Unlike RedriveCappedTotal, whose labels are unbounded.

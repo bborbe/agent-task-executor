@@ -1,8 +1,13 @@
 ---
-status: approved
+status: completed
 spec: [017-view-divergence-detector]
+summary: Added the closed-label executor_view_divergence_total counter, wired per-pass and per-id increments, and documented and tested the contract.
+execution_id: agent-task-executor-view-divergence-exec-044-spec-017-view-divergence-metrics
+dark-factory-version: v0.198.7
 created: "2026-10-27T00:00:00Z"
 queued: "2026-10-26T23:15:33Z"
+started: "2026-10-27T19:53:40Z"
+completed: "2026-10-27T19:59:27Z"
 ---
 
 # Count the divergence check by result, with a fixed increment unit

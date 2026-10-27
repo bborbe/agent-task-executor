@@ -141,6 +141,34 @@ index once and joins it to the tasks the pass owns.
   serving vault-api ever returns a raw alias, the check reports a permanent
   false divergence for that id.
 
+## Metric contract
+
+`executor_view_divergence_total` counts the check's outcomes, labelled `result`
+with a closed set: `ok`, `mismatch`, `absent`, `read_error`.
+
+| Result | Increment unit |
+|---|---|
+| `ok` | once per pass that reaches the check and reads the index successfully |
+| `read_error` | once per pass whose read fails |
+| `mismatch` | once per divergent task id |
+| `absent` | once per owned id the index does not contain |
+
+- **`ok` means the read succeeded, not "no divergence".** A pass that finds
+  three divergences still increments `ok` once. An alert written against `ok`
+  as agreement is wrong under this unit.
+- **All four series are pre-initialised at 0**, so `rate(...) == 0` can fire on
+  a check that never ran. The label domain is closed at compile time, which is
+  what makes that seeding honest.
+- **No task id, claim key or timestamp is ever a label value.** Cardinality is
+  fixed at four.
+- **A deployment with no vault-api URL increments nothing** — no client, no
+  check, no series movement.
+- **Why a new name.** `executor_reconcile_passes_total{result="task_vault_mismatch"}`
+  already exists, but it describes vault-ownership classification over the
+  in-memory snapshot, not a per-id file comparison. Reusing it as a label value
+  would let a dashboard read one failure as the other, so the two stay separate
+  counters.
+
 ## Source
 
 The envelope above is pinned from
