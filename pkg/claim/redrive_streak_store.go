@@ -11,6 +11,7 @@ import (
 
 	"github.com/bborbe/errors"
 	libtime "github.com/bborbe/time"
+	"github.com/golang/glog"
 )
 
 const (
@@ -25,9 +26,18 @@ const (
 	// RedriveStreakPhaseNone is the phase component used when a task carries
 	// no phase.
 	RedriveStreakPhaseNone = "none"
-	// RedriveStreakLeaseDuration is the informational lease of a streak ref.
-	// Nothing renews or expires it.
-	RedriveStreakLeaseDuration = 24 * libtime.Hour
+	// RedriveStreakLeaseDuration is the window a streak ref counts toward the
+	// cap. A ref whose lease_until has passed is ignored by Count and by
+	// Snapshot, and Record prunes it, so the cap still refuses a fourth spawn
+	// inside one window while a task capped by a past outage is released once
+	// that window has passed — with no operator action.
+	//
+	// Nothing renews a ref, so expiry is the only release path the executor
+	// controls. That is why the read side must honour it: a streak ref that
+	// never expires makes the cap permanent, and a permanent cap turns a
+	// systemic outage into a fleet that cannot recover after the cause is
+	// fixed. The window is what keeps the cap a bound rather than an outage.
+	RedriveStreakLeaseDuration = 6 * libtime.Hour
 	// redriveStreakMaxCreateAttempts bounds the create retries on a 409.
 	redriveStreakMaxCreateAttempts = 3
 )
@@ -39,7 +49,8 @@ const (
 // reads the same count.
 type RedriveStreakStore interface {
 	// Count returns how many streak refs taskID has at phase. Refs at other
-	// phases and refs whose key does not parse are not counted.
+	// phases, refs whose key does not parse, and refs whose lease_until has
+	// passed are not counted.
 	Count(ctx context.Context, taskID string, phase string) (int, error)
 	// Snapshot returns every parsed streak ref as taskID → phase component →
 	// count, from ONE list call over the whole streak prefix. The reconcile pass
@@ -47,9 +58,15 @@ type RedriveStreakStore interface {
 	// Count issues one list per task, which is what put a pass over a large
 	// candidate set over its budget (see handler/redrive_streak_cache.go).
 	// Keys are normalized with RedriveStreakPhaseComponent.
+	//
+	// Expired refs are skipped exactly as Count skips them. That is load-bearing
+	// rather than tidy: the pass answers the cap check from this map, so a
+	// snapshot counting expired refs would keep every released task capped on
+	// the path that actually re-drives it.
 	Snapshot(ctx context.Context) (map[string]map[string]int, error)
 	// Record appends one spawn of taskID at phase, then deletes the task's
-	// refs at every other phase. A 409 create is retried on the next free
+	// refs at every other phase. Expired refs of taskID are pruned first, so a
+	// released streak restarts at 1. A 409 create is retried on the next free
 	// number at most redriveStreakMaxCreateAttempts times.
 	Record(ctx context.Context, taskID string, phase string) error
 	// Clear removes every parsed streak ref of taskID, at every phase.
@@ -106,6 +123,33 @@ func parseRedriveStreakRefForWalker(ref string) (taskID, phase, detail string, n
 	return taskID, phase, "", n, ok
 }
 
+// redriveStreakRefExpired reports whether ref's lease has passed at now, i.e.
+// whether the spawn it counts happened longer than RedriveStreakLeaseDuration
+// ago and no longer bears on the cap.
+//
+// An absent or unparseable lease_until counts as NOT expired. The cap is the
+// behaviour that must never weaken, and git-rest writes the field on every
+// create, so an unreadable value is a store anomaly rather than evidence that
+// the streak is over. Expiring on a parse failure would release a genuinely
+// failing task on a malformed ref, which is the exact failure this window must
+// not introduce.
+func redriveStreakRefExpired(ctx context.Context, now libtime.DateTime, ref ClaimRef) bool {
+	if ref.LeaseUntil == "" {
+		return false
+	}
+	leaseUntil, err := libtime.ParseDateTime(ctx, ref.LeaseUntil)
+	if err != nil {
+		glog.Warningf(
+			"event=redrive_streak_lease_unparsed ref=%s lease_until=%q error=%v",
+			ref.Ref,
+			ref.LeaseUntil,
+			err,
+		)
+		return false
+	}
+	return !now.Time().Before(leaseUntil.Time())
+}
+
 // Count returns how many streak refs taskID has at phase.
 func (s *redriveStreakStore) Count(
 	ctx context.Context,
@@ -124,9 +168,13 @@ func (s *redriveStreakStore) Count(
 		return 0, err
 	}
 	count := 0
+	now := s.currentDateTime.Now()
 	for _, ref := range refs {
 		refTaskID, refPhase, _, ok := parseRedriveStreakRef(ref.Ref)
 		if !ok || refTaskID != taskID || refPhase != component {
+			continue
+		}
+		if redriveStreakRefExpired(ctx, now, ref) {
 			continue
 		}
 		count++
@@ -156,9 +204,20 @@ func (s *redriveStreakStore) Snapshot(ctx context.Context) (map[string]map[strin
 	// Count has none: refs is already in memory, returned by the one list call
 	// above, and folding it is pure CPU over a bounded slice. Cancellation is
 	// observed at the call that can actually block.
+	//
+	// Expired refs are skipped here for the same reason Count skips them, and
+	// the filter is NOT optional on this path: the reconcile pass answers every
+	// candidate's cap check from this snapshot (handler/redrive_streak_cache.go),
+	// so a Snapshot that counted expired refs would leave the pass reporting
+	// every capped task as capped forever and the release would never reach the
+	// one path that actually re-drives a task.
+	now := s.currentDateTime.Now()
 	for _, ref := range refs {
 		taskID, phase, _, ok := parseRedriveStreakRef(ref.Ref)
 		if !ok {
+			continue
+		}
+		if redriveStreakRefExpired(ctx, now, ref) {
 			continue
 		}
 		phases, found := counts[taskID]
@@ -185,6 +244,7 @@ func (s *redriveStreakStore) Record(
 	if err := validateClaimComponent(ctx, "phase", component); err != nil {
 		return err
 	}
+	s.pruneExpired(ctx, taskID)
 	return recordRedriveRef(
 		ctx,
 		s.refClient,
@@ -211,4 +271,38 @@ func (s *redriveStreakStore) Clear(ctx context.Context, taskID string) error {
 		taskID,
 		parseRedriveStreakRefForWalker,
 	)
+}
+
+// pruneExpired deletes taskID's streak refs whose lease has passed, so the
+// number sequence stays bounded and a task released by the window restarts at
+// 1 rather than continuing a dead sequence.
+//
+// Scoped to this store's prefix AND to this one task. The reason store shares
+// the redrive ref space (claims/redrive-reason/), and a prune that walked the
+// streak prefix instead of one task's refs would delete reasons the classifier
+// still needs. parseRedriveStreakRef already rejects a reason key on segment
+// count, so the two cannot be confused; the task scoping is what keeps this
+// from being an unbounded sweep on a path that runs after every spawn.
+//
+// Deletion is best-effort: a failure is logged and never fails the Record,
+// because the spawn it is about to record has already happened.
+func (s *redriveStreakStore) pruneExpired(ctx context.Context, taskID string) {
+	refs, err := redriveListForTask(ctx, s.refClient, RedriveStreakPrefix, taskID)
+	if err != nil {
+		glog.Warningf(
+			"event=redrive_streak_prune_failed task=%s error=%v", taskID, err,
+		)
+		return
+	}
+	now := s.currentDateTime.Now()
+	for _, ref := range refs {
+		refTaskID, _, _, ok := parseRedriveStreakRef(ref.Ref)
+		if !ok || refTaskID != taskID {
+			continue
+		}
+		if !redriveStreakRefExpired(ctx, now, ref) {
+			continue
+		}
+		redriveDeleteRef(ctx, s.refClient, "redrive_streak_prune_failed", taskID, ref)
+	}
 }
