@@ -351,6 +351,104 @@ func TestJobProvablyFinishedAsksForTheTasksOwnClaim(t *testing.T) {
 	}
 }
 
+// TestJobProvablyFinishedTreatsAClaimInsideTheTakeoverGraceAsHeld pins the
+// boundary the protocol actually draws: a claim is takeable at lease end PLUS
+// the takeover grace, not at lease end. Inside that grace a holder that has not
+// renewed yet may still be running, so the probe must keep suppressing — reading
+// it as free would reopen a 30 s window for the duplicate it exists to prevent.
+func TestJobProvablyFinishedTreatsAClaimInsideTheTakeoverGraceAsHeld(t *testing.T) {
+	h := claimedCurrentJobHandler(
+		func(context.Context, claim.ClaimTarget) (*claim.Claim, error) {
+			return &claim.Claim{
+				Holder:     "sun",
+				LeaseUntil: libtime.DateTime(time.Now().Add(-10 * time.Second)),
+			}, nil
+		},
+	)
+	task := currentJobTask("pr-reviewer-agent-94c1801c-20261022205503", 7*time.Minute)
+
+	finished, err := h.jobProvablyFinished(
+		context.Background(),
+		task,
+		"pr-reviewer-agent-94c1801c-20261022205503",
+		libk8s.Namespace("dev"),
+	)
+	if err != nil {
+		t.Fatalf("jobProvablyFinished returned %v; want nil", err)
+	}
+	if finished {
+		t.Fatal("provably finished = true inside the takeover grace; want false")
+	}
+}
+
+// TestJobProvablyFinishedTreatsAnUnreadableLeaseAsHeld covers the fail-closed
+// half of the lease check: a claim whose lease nobody can read has not been
+// proven dropped, so it must keep suppressing rather than read as free.
+func TestJobProvablyFinishedTreatsAnUnreadableLeaseAsHeld(t *testing.T) {
+	h := claimedCurrentJobHandler(
+		func(context.Context, claim.ClaimTarget) (*claim.Claim, error) {
+			return &claim.Claim{Holder: "sun", LeaseUnreadable: true}, nil
+		},
+	)
+	task := currentJobTask("pr-reviewer-agent-94c1801c-20261022205503", 7*time.Minute)
+
+	finished, err := h.jobProvablyFinished(
+		context.Background(),
+		task,
+		"pr-reviewer-agent-94c1801c-20261022205503",
+		libk8s.Namespace("dev"),
+	)
+	if err != nil {
+		t.Fatalf("jobProvablyFinished returned %v; want nil", err)
+	}
+	if finished {
+		t.Fatal("provably finished = true for an unreadable lease; want false")
+	}
+}
+
+// TestJobProvablyFinishedSuppressesWhenTheClaimKeyCannotBeDerived covers the
+// derive-error branch: a task whose claim key cannot be built has no claim to
+// read, and "cannot tell" must suppress rather than read as free.
+func TestJobProvablyFinishedSuppressesWhenTheClaimKeyCannotBeDerived(t *testing.T) {
+	h := claimedCurrentJobHandler(
+		func(context.Context, claim.ClaimTarget) (*claim.Claim, error) {
+			t.Fatal("the claim store was read for a task whose key cannot be derived")
+			return nil, nil
+		},
+	)
+	// A repo-keyed task type with no repo and no clone_url fails key derivation:
+	// DeriveClaimKey rejects the empty owner component.
+	task := lib.Task{
+		TaskIdentifier: lib.TaskIdentifier("tid-current-job-1"),
+		Frontmatter: lib.TaskFrontmatter{
+			"current_job": "pr-reviewer-agent-94c1801c-20261022205503",
+			"task_type":   "update-go",
+		},
+	}
+	before := testutil.ToFloat64(
+		metrics.TaskEventsTotal.WithLabelValues("claim_probe_failed"),
+	)
+
+	finished, err := h.jobProvablyFinished(
+		context.Background(),
+		task,
+		"pr-reviewer-agent-94c1801c-20261022205503",
+		libk8s.Namespace("dev"),
+	)
+	if err != nil {
+		t.Fatalf("jobProvablyFinished returned %v; want nil", err)
+	}
+	if finished {
+		t.Fatal("provably finished = true when the claim key cannot be derived; want false")
+	}
+	after := testutil.ToFloat64(
+		metrics.TaskEventsTotal.WithLabelValues("claim_probe_failed"),
+	)
+	if delta := after - before; delta != 1 {
+		t.Errorf("claim_probe_failed delta = %v; want 1", delta)
+	}
+}
+
 // TestJobProvablyFinishedTreatsAnExpiredClaimAsFinished covers the takeover
 // rule: a claim past its lease is one nobody renewed, so it is not evidence that
 // anything is still running.

@@ -16,8 +16,10 @@ When this executor's own store has no entry for the task — a restart, or a tas
 it never spawned — the guard reads the task's claim (`GET` on the claim route)
 and treats a live claim as proof that some cluster is still running the task:
 the spawn is suppressed and re-deferred. `claim_free` lets the respawn proceed,
-an expired lease counts as free (the takeover rule), an unreadable lease as
-held, and a failed read suppresses and retries on the next pass. The read is
+a claim past its lease **by the takeover grace** counts as free — not one merely
+past its lease, because inside that grace the protocol still treats the holder as
+possibly running — an unreadable lease counts as held, and a failed read
+suppresses and retries on the next pass. The read is
 one request per dispatch pass on a task whose store entry is empty, and none
 otherwise. Only claim mode `on` probes: `shadow` takes claims but never blocks a
 dispatch, so a held claim must not suppress a spawn there, and treating shadow as

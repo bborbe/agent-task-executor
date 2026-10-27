@@ -90,7 +90,14 @@ func (h *taskEventHandler) claimProbe(
 	if current.LeaseUnreadable {
 		return claimProbeHeld, nil
 	}
-	if h.currentDateTime.Now().Time().Before(current.LeaseUntil.Time()) {
+	// Free only once the protocol would let another cluster TAKE the claim, which
+	// is at lease end plus the takeover grace — not at lease end. A claim inside
+	// that grace may still have a live holder that has not renewed yet, so
+	// reading it as free would reopen a 30 s window for exactly the duplicate
+	// this probe exists to prevent.
+	if h.currentDateTime.Now().Time().Before(
+		current.LeaseUntil.Add(claim.TakeoverGrace).Time(),
+	) {
 		return claimProbeHeld, nil
 	}
 	return claimProbeFree, nil
