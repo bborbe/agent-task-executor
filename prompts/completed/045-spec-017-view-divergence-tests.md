@@ -1,8 +1,13 @@
 ---
-status: approved
+status: completed
 spec: [017-view-divergence-detector]
+summary: Added pkg/handler/view_divergence_test.go proving the reconcile-pass divergence detector end to end through ReconcileOnce against a real httptest index, covering divergence, agreement, absence, empty index, read failure, no-client, request bounds and early-return passes; precommit passes.
+execution_id: agent-task-executor-view-divergence-exec-045-spec-017-view-divergence-tests
+dark-factory-version: v0.198.7
 created: "2026-10-27T00:00:00Z"
 queued: "2026-10-26T23:15:33Z"
+started: "2026-10-27T19:59:28Z"
+completed: "2026-10-27T20:07:13Z"
 ---
 
 # Prove the detector end to end through the reconcile pass
