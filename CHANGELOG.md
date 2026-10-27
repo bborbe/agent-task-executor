@@ -4,6 +4,8 @@ All notable changes to this project will be documented in this file.
 
 ## Unreleased
 
+- fix: **a refused quota read can no longer render as a genuine zero in the admission line.** Both used to reach `event=concurrency_admit` as `quota=0`, so a queue behind a broken read looked exactly like a queue behind a cap that admits nothing — the conflation that made a 2026-10-26 investigation misread a queue as a defect for two days. `podQuotaFor` now returns a `quotaBound` state (`none` / `ok` / `failed`) instead of a bare bool, and both the admit and the deferral line carry `quota_bound=`: a failed read reads `quota=0 cap=<max> quota_bound=failed`, a real `pods: 0` reads `quota=0 cap=0 quota_bound=ok`, and a Config naming no priority class or matching no scoping quota reads `quota_bound=none`. Admission behaviour is unchanged — a failed read still falls back to the declared cap and never blocks a spawn on its own; only its visibility changed.
+
 - fix: **the divergence check names a divergence before it names an absence.** Both classes shared one 20-line budget and were emitted in id order, so a flood of absent ids spent the budget before any divergence was reached — measured on dev 2026-10-27, 74 absent against 3 divergent, one of the three unnamed. Divergences are the finding the check exists to report, so they are named first and counted separately; the summary now carries `named` and `named_absent` rather than one ambiguous `named`. The counts themselves were never truncated and still are not.
 
 ## v0.46.0
