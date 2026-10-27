@@ -505,6 +505,26 @@ var _ = Describe("ConfigResolver", func() {
 					Expect(errors.Is(err, pkg.ErrConfigAmbiguous)).To(BeTrue())
 				},
 			)
+
+			// The designated default is read from a field on the match itself, so the
+			// answer must not depend on where that match sits in the slice the store
+			// returned. The default is deliberately at index 1: a branch that fell back
+			// to matches[0] would return a-personal for the forward order and
+			// c-personal for the reversed one, so this test fails on that branch
+			// instead of merely agreeing with it.
+			It("returns the same Config whatever order the matches arrive in", func() {
+				provider.items = designate(defaulted("a-personal", "b-personal", "c-personal"), 1)
+				forward, err := resolver.ResolveByTaskType(ctx, "shared-type", "")
+				Expect(err).To(BeNil())
+
+				provider.items = designate(defaulted("c-personal", "b-personal", "a-personal"), 1)
+				reversed, err := resolver.ResolveByTaskType(ctx, "shared-type", "")
+				Expect(err).To(BeNil())
+
+				Expect(forward.Assignee).To(Equal("b-personal"))
+				Expect(reversed.Assignee).To(Equal(forward.Assignee))
+				Expect(reversed.DefaultForTaskTypes).To(Equal(forward.DefaultForTaskTypes))
+			})
 		})
 
 		It("never matches an empty taskType", func() {
