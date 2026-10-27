@@ -266,8 +266,13 @@ no lease-manager path treats it as one.
   `none`.
 - `cluster` is always the sentinel `redrive-streak`. It must never equal a real
   executor cluster name.
-- `lease_until` is create time + 24 h. It is informational only: nothing renews
-  it and nothing expires a streak ref.
+- `lease_until` is create time + `RedriveStreakLeaseDuration` (6 h) and is a real
+  sliding window. Nothing renews a ref, so expiry is the only release path the
+  executor controls: a ref whose `lease_until` has passed is ignored by `Count`
+  and by `Snapshot` and pruned by `Record`, so a task capped by a past outage is
+  released once the window has passed. Three live refs still refuse a fourth
+  spawn inside one window, and a ref with an absent or unparseable `lease_until`
+  counts as live, so the cap never weakens.
 - No lease-manager path acts on a streak ref. Restart recovery is the only path
   that lists the whole `claims/` prefix, and it skips `claims/redrive/` keys
   explicitly; renew, fence, takeover, release and audit act only on the
