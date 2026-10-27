@@ -42,9 +42,15 @@ type ConfigResolver interface {
 	// ({preferAssignee}-{vaultName} first, then the plain preferAssignee); a
 	// single survivor is returned.
 	//
+	// When several Configs declare taskType and preferAssignee does not narrow
+	// them to one, the single Config that names taskType in
+	// Spec.DefaultForTaskTypes is returned instead. That is an explicit
+	// declaration on the Config, not a guess: zero or several Configs declaring
+	// it leave the ambiguity refusal in place.
+	//
 	// Returns ErrConfigNotFound when no Config declares taskType, and
-	// ErrConfigAmbiguous when more than one does and preferAssignee does not
-	// narrow them to exactly one.
+	// ErrConfigAmbiguous when more than one does and neither preferAssignee nor
+	// a unique designated default narrows them to exactly one.
 	ResolveByTaskType(
 		ctx context.Context,
 		taskType string,
@@ -130,7 +136,10 @@ func (r *configResolver) Resolve(
 // lookup scans every Config the executor's informer holds, keyed on the task
 // type rather than the assignee. preferAssignee only breaks a tie between
 // several type matches; it never selects a Config that does not declare
-// taskType.
+// taskType. When it does not break the tie either, the one match that declares
+// itself the designated default for taskType (Spec.DefaultForTaskTypes) is
+// returned — again only among Configs that declare taskType, and only when
+// exactly one of them declares the default.
 func (r *configResolver) ResolveByTaskType(
 	ctx context.Context,
 	taskType string,
@@ -177,6 +186,16 @@ func (r *configResolver) ResolveByTaskType(
 				preferred.Spec.Assignee,
 			)
 			return convert(ctx, preferred, r.branch.String())
+		}
+		if designated, ok := narrowByDefault(matches, taskType); ok {
+			glog.V(2).Infof(
+				"task_type %s matches %d configs: config %s declares itself the designated default (assignee %s)",
+				taskType,
+				len(matches),
+				designated.Name,
+				designated.Spec.Assignee,
+			)
+			return convert(ctx, designated, r.branch.String())
 		}
 		if preferAssignee != "" {
 			return AgentConfiguration{}, errors.Wrapf(
@@ -228,6 +247,24 @@ func (r *configResolver) narrowByAssignee(
 	return agentv1.Config{}, false
 }
 
+// narrowByDefault picks the single match that declares itself the designated
+// default for taskType in Spec.DefaultForTaskTypes. It reports false when no
+// match declares it or when several do: a default that is not unique is no
+// better than none, so the ambiguity refusal stands. It only ever considers
+// matches, so it can never select a Config that does not declare taskType.
+func narrowByDefault(matches []agentv1.Config, taskType string) (agentv1.Config, bool) {
+	var hits []agentv1.Config
+	for _, it := range matches {
+		if TaskTypeInSet(taskType, it.Spec.DefaultForTaskTypes) {
+			hits = append(hits, it)
+		}
+	}
+	if len(hits) == 1 {
+		return hits[0], true
+	}
+	return agentv1.Config{}, false
+}
+
 func convert(ctx context.Context, obj agentv1.Config, branch string) (AgentConfiguration, error) {
 	env, err := copyEnv(ctx, obj.Spec.Env)
 	if err != nil {
@@ -238,6 +275,7 @@ func convert(ctx context.Context, obj agentv1.Config, branch string) (AgentConfi
 		Type:                    obj.Spec.Type,
 		TaskType:                obj.Spec.TaskType,
 		TaskTypes:               append([]string(nil), obj.Spec.TaskTypes...),
+		DefaultForTaskTypes:     append([]string(nil), obj.Spec.DefaultForTaskTypes...),
 		Image:                   appendBranchTag(obj.Spec.Image, branch),
 		Env:                     env,
 		SecretName:              obj.Spec.SecretName,

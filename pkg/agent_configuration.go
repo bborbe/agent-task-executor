@@ -39,6 +39,11 @@ type AgentConfiguration struct {
 	// TaskTypes is the list of task_type values from ConfigSpec.TaskTypes.
 	// Nil when the CRD only sets the singular TaskType field.
 	TaskTypes []string
+	// DefaultForTaskTypes is the list of task_type values from
+	// ConfigSpec.DefaultForTaskTypes: the types this Config declares itself the
+	// designated default for. Routing metadata, carried so a resolved
+	// configuration reports the declaration it was picked by.
+	DefaultForTaskTypes []string
 	// Image is the container image base name (without tag). Tag is appended at runtime from branch.
 	Image string
 	// Env holds per-agent environment variables (e.g. API keys, config).

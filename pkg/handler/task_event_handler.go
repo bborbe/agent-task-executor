@@ -755,8 +755,18 @@ func (h *taskEventHandler) resolveConfigForReconcile(
 		return nil, false, nil
 	}
 	// previous_assignee (written at escalation) only breaks a tie between several
-	// Configs declaring this task_type; it never routes a task on its own.
-	previousAssignee, _ := task.Frontmatter.String("previous_assignee")
+	// Configs declaring this task_type; it never routes a task on its own. It is
+	// passed on only when the Config it names actually declares this type — see
+	// inTypePreviousAssignee.
+	rawPreviousAssignee, _ := task.Frontmatter.String("previous_assignee")
+	previousAssignee, err := h.inTypePreviousAssignee(
+		ctx,
+		rawPreviousAssignee,
+		string(taskType),
+	)
+	if err != nil {
+		return nil, false, err
+	}
 	resolved, err := h.resolver.ResolveByTaskType(ctx, string(taskType), previousAssignee)
 	if err != nil {
 		if stderrors.Is(err, pkg.ErrConfigNotFound) {
