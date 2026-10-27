@@ -43,6 +43,15 @@ func WithVaultAliases(aliases []string) HandlerOption {
 	}
 }
 
+// WithVaultAPIIndexClient supplies the vault-api task-index reader used by
+// the reconcile pass's view/vault divergence check. A nil client (the
+// default) skips the check, which is the no-URL deployment's shape.
+func WithVaultAPIIndexClient(client claim.VaultAPIIndexClient) HandlerOption {
+	return func(h *taskEventHandler) {
+		h.vaultIndexClient = client
+	}
+}
+
 // WithPodQuotaLimiter attaches the reader that bounds admission by the pod quota
 // of the agent's priority class. An absent limiter means no quota bound.
 func WithPodQuotaLimiter(limiter spawner.PodQuotaLimiter) HandlerOption {
