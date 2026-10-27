@@ -115,6 +115,15 @@ func (in *ConfigSpec) DeepCopyInto(out *ConfigSpec) {
 		*out = make([]string, len(*in))
 		copy(*out, *in)
 	}
+	// NOTE: hand-added 2026-10-26 — make generatek8s is still broken on master
+	// (see the ConfigMapItems block below), so this slice needs its own copy or
+	// it would share its backing array across DeepCopy calls. The codegen repair
+	// task must regenerate and confirm this block matches.
+	if in.DefaultForTaskTypes != nil {
+		in, out := &in.DefaultForTaskTypes, &out.DefaultForTaskTypes
+		*out = make([]string, len(*in))
+		copy(*out, *in)
+	}
 	if in.Resources != nil {
 		in, out := &in.Resources, &out.Resources
 		*out = new(AgentResources)
