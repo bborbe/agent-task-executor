@@ -373,11 +373,20 @@ type errorResponseBody struct {
 }
 
 func (c *vaultAPIClaimClient) setAuthHeaders(req *http.Request) {
-	if c.gatewaySecret == "" {
+	setVaultAPIAuthHeaders(req, c.gatewaySecret, c.gatewayInitiator)
+}
+
+// setVaultAPIAuthHeaders applies the gateway header pair every vault-api
+// request carries. The initiator header is misspelled "X-Gateway-Initator"
+// on purpose: the server compares that exact name, and "correcting" it makes
+// every request a 401. Both vault-api clients share this function so the pair
+// cannot drift.
+func setVaultAPIAuthHeaders(req *http.Request, secret, initiator string) {
+	if secret == "" {
 		return
 	}
-	req.Header.Set("X-Gateway-Secret", c.gatewaySecret)
-	req.Header.Set("X-Gateway-Initator", c.gatewayInitiator)
+	req.Header.Set("X-Gateway-Secret", secret)
+	req.Header.Set("X-Gateway-Initator", initiator)
 }
 
 // Acquire takes the claim for holder.
