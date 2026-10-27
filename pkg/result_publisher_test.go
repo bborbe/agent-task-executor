@@ -1181,8 +1181,11 @@ var _ = Describe("ResultPublisher", func() {
 
 			Expect(p.PublishFailure(ctx, task, "job-reason-1", "pod_oom_killed")).To(Succeed())
 
-			Expect(client.PutCallCount()).To(Equal(1))
-			_, key, _, cluster, taskID, _ := client.PutArgsForCall(0)
+			// Two writes: the streak ref (recordRedriveFailure) lands first, then
+			// the reason ref — the streak counts published failures, and the
+			// reason is the evidence that failure is classified from.
+			Expect(client.PutCallCount()).To(Equal(2))
+			_, key, _, cluster, taskID, _ := client.PutArgsForCall(1)
 			Expect(key).To(Equal(
 				"claims/redrive-reason/test-task-reason/execution/pod_oom_killed/1",
 			))
@@ -1205,7 +1208,7 @@ var _ = Describe("ResultPublisher", func() {
 				p.PublishFailure(ctx, task, "job-reason-2", "pod_oom_killed (OOMKilled/137)"),
 			).To(Succeed())
 
-			_, key, _, _, _, _ := client.PutArgsForCall(0)
+			_, key, _, _, _, _ := client.PutArgsForCall(1)
 			Expect(key).To(Equal(
 				"claims/redrive-reason/test-task-formatted/execution/pod_oom_killed/1",
 			))
@@ -1224,7 +1227,7 @@ var _ = Describe("ResultPublisher", func() {
 
 			Expect(p.PublishFailure(ctx, task, "job-reason-3", "pod OOM killed")).To(Succeed())
 
-			_, key, _, _, _, _ := client.PutArgsForCall(0)
+			_, key, _, _, _, _ := client.PutArgsForCall(1)
 			Expect(key).To(Equal(
 				"claims/redrive-reason/test-task-unparsed/execution/unknown/1",
 			))
@@ -1244,7 +1247,8 @@ var _ = Describe("ResultPublisher", func() {
 			Expect(p.PublishFailure(ctx, task, "job-reason-4", "pod_oom_killed")).To(Succeed())
 			Expect(p.PublishFailure(ctx, task, "job-reason-4", "pod_oom_killed")).To(Succeed())
 
-			Expect(client.PutCallCount()).To(Equal(1))
+			// One streak ref + one reason ref; the deduped repeat writes neither.
+			Expect(client.PutCallCount()).To(Equal(2))
 		})
 	})
 })

@@ -2,6 +2,12 @@
 
 All notable changes to this project will be documented in this file.
 
+## Unreleased
+
+- chore: bump `golang.org/x/net` to v0.62.0, clearing `GO-2026-6860` and `GO-2026-6866` (quadratic complexity coalescing text nodes, and incomplete ancestor-namespace checks rendering raw text). Both are new advisories against v0.60.0 and failed `make vulncheck` independently of this change.
+
+- fix: **a successful or human-parked spawn no longer consumes the re-drive budget.** The streak advanced on every successful `SpawnJob` while a reason was recorded only from `PublishFailure`, so a Job that exited 0 published no evidence yet still reached the cap — where the classifier had nothing to read, returned `unknown`, and refused the record forever with no abort and no release. Measured on dev 2026-10-27: 83 `class=unknown` lines across 11 distinct task ids. The streak now counts **published failures** and is written by the result publisher beside the reason, so the count and the evidence it is classified from cannot diverge; `recordRedriveSpawn` keeps only the in-memory floor used when the store is unreadable. A succeeded Job that leaves the task in the drive phase is parked to `human_review`, because with the spawn no longer counted nothing else would stop a phase-immobile park from being re-spawned on every reconcile pass.
+
 ## v0.46.1
 
 - fix: **the divergence check names a divergence before it names an absence.** Both classes shared one 20-line budget and were emitted in id order, so a flood of absent ids spent the budget before any divergence was reached — measured on dev 2026-10-27, 74 absent against 3 divergent, one of the three unnamed. Divergences are the finding the check exists to report, so they are named first and counted separately; the summary now carries `named` and `named_absent` rather than one ambiguous `named`. The counts themselves were never truncated and still are not.

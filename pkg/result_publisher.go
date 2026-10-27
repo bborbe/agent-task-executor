@@ -239,6 +239,12 @@ type resultPublisher struct {
 	// as a silent data race.
 	reasonStoreOnce sync.Once
 	reasonStore     claim.RedriveReasonStore
+	// streakStoreOnce guards the lazily-built streak store. The publisher owns
+	// the streak because the streak counts PUBLISHED FAILURES: the write happens
+	// here, beside the reason write, so the count and the evidence it is
+	// classified from can never diverge.
+	streakStoreOnce sync.Once
+	streakStore     claim.RedriveStreakStore
 }
 
 // redriveReasonStore returns the lazily-built reason store, or nil when no
@@ -256,6 +262,98 @@ func (p *resultPublisher) redriveReasonStore() claim.RedriveReasonStore {
 		p.reasonStore = claim.NewRedriveReasonStore(refClient, p.currentDateTime)
 	})
 	return p.reasonStore
+}
+
+// redriveStreakStore returns the lazily-built streak store, or nil when no claim
+// ref client factory was injected. A nil store means the streak is not tracked
+// here at all, and the handler falls back to its in-memory floor.
+func (p *resultPublisher) redriveStreakStore() claim.RedriveStreakStore {
+	if p.claimRefClientFactory == nil {
+		return nil
+	}
+	p.streakStoreOnce.Do(func() {
+		refClient := p.claimRefClientFactory()
+		if refClient == nil {
+			return
+		}
+		p.streakStore = claim.NewRedriveStreakStore(refClient, p.currentDateTime)
+	})
+	return p.streakStore
+}
+
+// recordRedriveFailure advances the task's re-drive streak by one, at its
+// current phase. It is the ONLY writer of the streak, and it runs only from
+// PublishFailure.
+//
+// That placement is the whole fix. The streak used to advance on every
+// successful spawn, while a reason was recorded only here — so a spawn that
+// published no failure (an exit-0 human park, a successful run, a reconcile
+// re-drive whose Job vanished) advanced the streak with no evidence behind it.
+// At the cap the classifier then had no reasons to read, returned unknown, and
+// refused the record forever with no abort and no release: the permanent
+// class=unknown strand. Counting failures instead of spawns makes the count and
+// the evidence the same thing, and lets a task that keeps succeeding or parks
+// for a human leave the budget entirely rather than consume it.
+//
+// When the streak is still at 0 this failure starts a new streak, so the
+// task's reason refs are cleared first: a reason set left by an earlier streak
+// would otherwise satisfy the classifier's window on partial evidence and could
+// close the record as broken. The clear must precede the Record, and the caller
+// records the new reason after this call, so the new streak's evidence starts
+// empty and gains exactly the reason being published.
+//
+// A store failure is logged and swallowed, exactly as recordRedriveReason
+// swallows one: recording evidence must never fail a failure publish.
+func (p *resultPublisher) recordRedriveFailure(ctx context.Context, task lib.Task) {
+	store := p.redriveStreakStore()
+	if store == nil {
+		return
+	}
+	phase := taskPhase(task)
+	count, countErr := store.Count(ctx, string(task.TaskIdentifier), phase)
+	switch {
+	case countErr != nil:
+		glog.Warningf(
+			"event=redrive_streak_read_failed task=%s phase=%q error=%v",
+			task.TaskIdentifier,
+			phase,
+			countErr,
+		)
+	case count == 0:
+		p.clearReasonsForNewStreak(ctx, task, phase)
+	}
+	if err := store.Record(ctx, string(task.TaskIdentifier), phase); err != nil {
+		glog.Warningf(
+			"event=redrive_streak_write_failed task=%s phase=%q error=%v",
+			task.TaskIdentifier,
+			phase,
+			err,
+		)
+	}
+}
+
+// clearReasonsForNewStreak clears the task's reason refs when the streak is
+// still at 0, i.e. the failure about to be recorded starts a new streak. A
+// reason set left by an earlier streak would otherwise satisfy the classifier's
+// window on partial evidence and could close the record as broken. Both the
+// store lookup and the clear are logged and swallowed.
+func (p *resultPublisher) clearReasonsForNewStreak(
+	ctx context.Context,
+	task lib.Task,
+	phase string,
+) {
+	reasonStore := p.redriveReasonStore()
+	if reasonStore == nil {
+		return
+	}
+	if err := reasonStore.Clear(ctx, string(task.TaskIdentifier)); err != nil {
+		glog.Warningf(
+			"event=redrive_reason_write_failed task=%s phase=%q error=%v",
+			task.TaskIdentifier,
+			phase,
+			err,
+		)
+	}
 }
 
 // recordRedriveReason persists the failure reason of the task's current phase.
@@ -425,6 +523,12 @@ func (p *resultPublisher) PublishFailure(
 	// Recorded here, after the dedupe key, so a repeated informer delivery of
 	// the same job cannot double-record. The record is swallowed on failure:
 	// evidence gathering must never turn a delivered failure into an error.
+	//
+	// The streak advances BEFORE the reason, and only on this path: the streak
+	// counts published failures, so a spawn that publishes none — an exit-0
+	// human park, a successful run, a suppressed spawn — never consumes the
+	// re-drive budget. See recordRedriveFailure.
+	p.recordRedriveFailure(ctx, task)
 	p.recordRedriveReason(ctx, task, reason)
 
 	return nil
@@ -579,6 +683,54 @@ func (p *resultPublisher) PublishParkLostClaim(
 		},
 	}
 	return p.publishRaw(ctx, taskcmd.UpdateFrontmatterCommandOperation, cmd)
+}
+
+// PublishParkStalled publishes phase human_review for a task whose Job exited 0
+// without moving the phase. Idempotent: the phase write is absolute, so a
+// repeated informer delivery for the same succeeded Job rewrites the same value.
+func (p *resultPublisher) PublishParkStalled(
+	ctx context.Context,
+	task lib.Task,
+) error {
+	cmd := taskcmd.UpdateFrontmatterCommand{
+		TaskIdentifier: task.TaskIdentifier,
+		TargetVault:    targetVaultFromTask(task),
+		Updates: lib.TaskFrontmatter{
+			"phase": string(domain.TaskPhaseHumanReview),
+		},
+	}
+	return p.publishRaw(ctx, taskcmd.UpdateFrontmatterCommandOperation, cmd)
+}
+
+// parkPublisher is the narrow surface the Job success path needs: park a record
+// whose agent exited 0 without moving the phase.
+//
+// It is deliberately NOT a method on ResultPublisher. That interface is already
+// the widest seam in this package, and every test double in pkg/ and pkg/handler
+// would have to grow a method it never exercises. The success path asserts for
+// this capability instead, so a double that does not implement it simply does
+// not park — which is the correct behaviour for a double that models no park.
+type parkPublisher interface {
+	// PublishParkStalled writes phase "human_review" onto a task whose Job
+	// exited 0 without moving the phase — a deliberate human-park, or a run that
+	// produced no result. It writes the "phase" key and nothing else.
+	//
+	// This is what keeps a parked record from looping. The re-drive streak no
+	// longer counts spawns (see recordRedriveFailure), so a phase-immobile task
+	// is eligible on every reconcile pass and nothing else would ever bound it:
+	// human_review is in the executor's terminal-phase set, so a parked task is
+	// never re-spawned and needs no second guard.
+	PublishParkStalled(ctx context.Context, task lib.Task) error
+}
+
+// parkedJob reports whether a SUCCEEDED Job left its task in the drive phase,
+// i.e. the agent exited 0 without publishing a result that moved the phase. That
+// is a deliberate human-park (the agent wrote its verdict into the task file and
+// stopped) or a run that produced nothing — either way the record must leave the
+// loop rather than be re-spawned on every reconcile pass.
+func parkedJob(task lib.Task) bool {
+	phase := task.Frontmatter.Phase()
+	return phase != nil && *phase == domain.TaskPhaseExecution
 }
 
 // PublishAbort closes a record the consecutive-re-drive cap has stopped

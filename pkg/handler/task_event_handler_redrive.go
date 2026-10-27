@@ -206,7 +206,11 @@ func (h *taskEventHandler) redriveStreakCapped(ctx context.Context, task lib.Tas
 				"event=redrive_streak_read_failed task=%s phase=%q error=%v",
 				id, phase, storeErr,
 			)
-		case stored > count:
+		default:
+			// The store is authoritative whenever it is readable: it counts
+			// published failures, while the in-memory map counts attempts. Only
+			// the failure count may bound the cap — a task that keeps succeeding,
+			// or parks for a human, must never be refused on its spawn history.
 			count = stored
 		}
 	}
@@ -385,24 +389,23 @@ func taskPhaseString(task lib.Task) string {
 	return ""
 }
 
-// recordRedriveSpawn extends this task's in-memory streak with the spawn that
-// just happened, resetting it when the task has moved phase, then records the
-// spawn in the shared store. The in-memory update happens first and always: a
-// store failure must not roll back the Job or stop the floor from counting.
+// recordRedriveSpawn extends this task's IN-MEMORY attempt streak with the spawn
+// that just happened, resetting it when the task has moved phase. It writes no
+// claim ref: the shared streak counts published failures and is written by the
+// result publisher on the failure path (resultPublisher.recordRedriveFailure).
 //
-// When the shared store says this is a NEW streak, the task's reason refs are
-// cleared before the spawn is recorded. The classifier's short-count guard
-// compares the reason count against the streak count, so a reason set left by an
-// earlier streak would satisfy the guard on partial evidence and could close the
-// record as broken. The shared Count is read directly, not through the pass
-// cache: the cache can be older than a spawn this pass already recorded, and a
-// stale 0 would discard the reasons of a streak the store already counted.
+// The split is deliberate. This map is the cap's floor for a process with no
+// claim store — claim mode off, or a store construction that failed — where
+// counting attempts is the only bound available. The shared store is
+// authoritative whenever it is readable, and it counts failures, because a spawn
+// that publishes no failure is not evidence of a broken re-drive loop. Counting
+// spawns there charged a successful or human-parked attempt to a budget that
+// exists to bound retries after failure, and left the record refused at the cap
+// with no reason to classify — the permanent class=unknown strand.
 //
 // Called only after SpawnJob returned successfully, so a suppressed, deferred
-// or capped spawn does not count — the streak measures spawns, not attempts.
-// Record's network calls run under the per-assignee spawn lock, bounded by the
-// 30 s per-request cap.
-func (h *taskEventHandler) recordRedriveSpawn(ctx context.Context, task lib.Task) {
+// or capped spawn does not count.
+func (h *taskEventHandler) recordRedriveSpawn(task lib.Task) {
 	id := task.TaskIdentifier
 	phase := taskPhaseString(task)
 	now := h.currentDateTime.Now()
@@ -423,63 +426,6 @@ func (h *taskEventHandler) recordRedriveSpawn(ctx context.Context, task lib.Task
 	}
 	h.redriveMu.Unlock()
 
-	store, err := h.redriveStreakStore(ctx)
-	if err != nil {
-		glog.Warningf(
-			"event=redrive_streak_write_failed task=%s phase=%q error=%v",
-			id, phase, err,
-		)
-		return
-	}
-	if store == nil {
-		return
-	}
-	h.clearReasonsForNewStreak(ctx, store, id, phase)
-	if recordErr := store.Record(ctx, string(id), phase); recordErr != nil {
-		glog.Warningf(
-			"event=redrive_streak_write_failed task=%s phase=%q error=%v",
-			id, phase, recordErr,
-		)
-	}
-}
-
-// clearReasonsForNewStreak clears the task's reason refs when the shared streak
-// is still at 0, i.e. the spawn about to be recorded starts a new streak. Both
-// the read and the clear are logged and swallowed.
-func (h *taskEventHandler) clearReasonsForNewStreak(
-	ctx context.Context,
-	streakStore claim.RedriveStreakStore,
-	id lib.TaskIdentifier,
-	phase string,
-) {
-	count, countErr := streakStore.Count(ctx, string(id), phase)
-	if countErr != nil {
-		glog.Warningf(
-			"event=redrive_streak_read_failed task=%s phase=%q error=%v",
-			id, phase, countErr,
-		)
-		return
-	}
-	if count != 0 {
-		return
-	}
-	reasonStore, err := h.redriveReasonStore(ctx)
-	if err != nil {
-		glog.Warningf(
-			"event=redrive_reason_write_failed task=%s phase=%q error=%v",
-			id, phase, err,
-		)
-		return
-	}
-	if reasonStore == nil {
-		return
-	}
-	if clearErr := reasonStore.Clear(ctx, string(id)); clearErr != nil {
-		glog.Warningf(
-			"event=redrive_reason_write_failed task=%s phase=%q error=%v",
-			id, phase, clearErr,
-		)
-	}
 }
 
 // clearRedriveStreak ends this task's streak in memory and in both shared

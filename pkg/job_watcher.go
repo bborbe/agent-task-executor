@@ -510,6 +510,23 @@ func (w *jobWatcher) handleSucceeded(
 		)
 		return
 	}
+	// A succeeded Job that left the task in the drive phase is a park: the agent
+	// exited 0 without moving the phase, so the record would be eligible on every
+	// later reconcile pass and — since the re-drive streak no longer counts
+	// spawns — nothing else would bound it. Park it to human_review, which is in
+	// the executor's terminal-phase set.
+	if parker, ok := w.publisher.(parkPublisher); ok &&
+		w.tracksJob(task, job.Name) && parkedJob(task) {
+		if parkErr := parker.PublishParkStalled(ctx, task); parkErr != nil {
+			glog.Errorf(
+				"publish human_review park for task %s (job %s): %v",
+				taskID,
+				job.Name,
+				parkErr,
+			)
+		}
+	}
+
 	if !w.tracksJob(task, job.Name) {
 		// Mismatch between the store's current_job and the succeeded job. Two
 		// orderings reach here: (a) the event is stale — a terminal re-delivery

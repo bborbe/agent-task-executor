@@ -544,14 +544,17 @@ var _ = Describe("claim gate", func() {
 	})
 
 	It("AC7(c): a redrive-capped task makes no additional claim request", func() {
-		harness := newClaimHarness(pkg.ClaimModeShadow)
+		// Seed the streak rather than spawning three times: the streak counts
+		// published failures and is written by the result publisher, so a spawn
+		// no longer advances it.
+		transport := newSharedClaimRefTransport()
+		client := new(mocks.FakeClaimRefClient)
+		transport.attach(client)
+		harness := newRedriveHarness(pkg.ClaimModeShadow, client)
 		task := qualifyingClaimTask()
 		task.TaskIdentifier = lib.TaskIdentifier("tid-claim-redrive")
+		seedRedriveStreak(transport, "tid-claim-redrive", "execution", 3)
 
-		for i := 0; i < 3; i++ {
-			Expect(harness.consume(task)).To(Succeed())
-		}
-		Expect(harness.spawner.SpawnJobCallCount()).To(Equal(3))
 		putCallsBefore := harness.client.PutCallCount()
 		cappedBefore := testutil.ToFloat64(
 			metrics.RedriveCappedTotal.WithLabelValues("", "execution"),
@@ -559,7 +562,7 @@ var _ = Describe("claim gate", func() {
 
 		Expect(harness.consume(task)).To(Succeed())
 
-		Expect(harness.spawner.SpawnJobCallCount()).To(Equal(3))
+		Expect(harness.spawner.SpawnJobCallCount()).To(Equal(0))
 		Expect(harness.client.PutCallCount()).To(Equal(putCallsBefore))
 		Expect(testutil.ToFloat64(
 			metrics.RedriveCappedTotal.WithLabelValues("", "execution"),
