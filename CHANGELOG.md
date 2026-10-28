@@ -2,7 +2,7 @@
 
 All notable changes to this project will be documented in this file.
 
-## Unreleased
+## v0.46.3
 
 - fix: **a successful spawn no longer consumes the re-drive budget.** The streak advanced on every successful `SpawnJob` while a reason was recorded only from `PublishFailure`, so a Job that exited 0 published no evidence yet still reached the cap — where the classifier had nothing to read, returned `unknown`, and refused the record forever with no abort and no release. Measured on dev 2026-10-27: 83 `class=unknown` lines across 11 distinct task ids. The streak now counts **published failures** and is written by the result publisher beside the reason, so the count and the evidence it is classified from cannot diverge; `recordRedriveSpawn` keeps only the in-memory floor used when the store is unreadable.
 
