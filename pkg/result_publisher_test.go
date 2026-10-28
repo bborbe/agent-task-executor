@@ -295,6 +295,65 @@ var _ = Describe("ResultPublisher", func() {
 		)
 	})
 
+	Describe("PublishStoreMissFailure", func() {
+		// A failure section under a terminal status reads as a status change that
+		// never happened, so this path states its own reason for existing. The
+		// four clauses are the ones a later reader needs, and each is asserted
+		// separately so dropping one fails here rather than in the field.
+		It("states why a record that was already terminal carries a failure", func() {
+			task := lib.Task{
+				TaskIdentifier: lib.TaskIdentifier("test-task-3"),
+				Frontmatter: lib.TaskFrontmatter{
+					"status":   "completed",
+					"phase":    "done",
+					"assignee": "github-update-go-agent",
+				},
+				Content: lib.TaskContent("update go"),
+			}
+			err := publisher.PublishStoreMissFailure(
+				ctx,
+				task,
+				"github-update-go-agent-ad12e9fb-20261028065801",
+				"pod_crash_no_stdout",
+			)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(producer.messages).To(HaveLen(2))
+
+			_, updateCmd := decodeUpdateFrontmatterCommand(producer.messages[0])
+			Expect(updateCmd.Body.Heading).To(Equal("## Failure"))
+			section := updateCmd.Body.Section
+			Expect(section).To(ContainSubstring("pod_crash_no_stdout"))
+			Expect(section).To(
+				ContainSubstring("had already reached its terminal status"),
+				"the entry must say the record was already terminal",
+			)
+			Expect(section).To(
+				ContainSubstring("The Job crashed before producing any output"),
+				"the entry must say the job crashed",
+			)
+			Expect(section).To(
+				ContainSubstring("would otherwise be silent"),
+				"the entry must say why it exists",
+			)
+			Expect(section).To(
+				ContainSubstring("The status above is unchanged"),
+				"the entry must say the status did not change",
+			)
+
+			// The note is scoped to this path: the store-hit failure must not
+			// claim the record was already terminal.
+			err = publisher.PublishFailure(
+				ctx,
+				task,
+				"github-update-go-agent-00000000000000",
+				"pod_crash_no_stdout",
+			)
+			Expect(err).NotTo(HaveOccurred())
+			_, hitCmd := decodeUpdateFrontmatterCommand(producer.messages[2])
+			Expect(hitCmd.Body.Section).NotTo(ContainSubstring("The status above is unchanged"))
+		})
+	})
+
 	Describe("PublishFailure trigger cap", func() {
 		// The cap is armed only for the crash class, and only when the key is
 		// absent. Both halves are load-bearing: arming it for every class would

@@ -379,8 +379,11 @@ var _ = Describe("JobWatcher", func() {
 
 			watcher.HandleJob(ctx, job)
 
-			Expect(fakePublisher.PublishFailureCallCount()).To(Equal(1))
-			_, calledTask, calledJobName, calledReason := fakePublisher.PublishFailureArgsForCall(0)
+			Expect(fakePublisher.PublishStoreMissFailureCallCount()).To(Equal(1))
+			Expect(fakePublisher.PublishFailureCallCount()).To(Equal(0))
+			_, calledTask, calledJobName, calledReason := fakePublisher.PublishStoreMissFailureArgsForCall(
+				0,
+			)
 			Expect(calledTask.TaskIdentifier).To(Equal(testTaskID))
 			Expect(calledJobName).To(Equal("job-fresh"))
 			Expect(calledReason).To(Equal("pod_crash_no_stdout"))
@@ -404,7 +407,7 @@ var _ = Describe("JobWatcher", func() {
 
 			watcher.HandleJob(ctx, job)
 
-			Expect(fakePublisher.PublishFailureCallCount()).To(Equal(0))
+			Expect(fakePublisher.PublishStoreMissFailureCallCount()).To(Equal(0))
 		})
 
 		It("does not publish once the failure is older than the publish window", func() {
@@ -414,7 +417,7 @@ var _ = Describe("JobWatcher", func() {
 
 			watcher.HandleJob(ctx, job)
 
-			Expect(fakePublisher.PublishFailureCallCount()).To(Equal(0))
+			Expect(fakePublisher.PublishStoreMissFailureCallCount()).To(Equal(0))
 		})
 
 		It("does not publish while another Job for the task is still active", func() {
@@ -425,7 +428,7 @@ var _ = Describe("JobWatcher", func() {
 
 			watcher.HandleJob(ctx, job)
 
-			Expect(fakePublisher.PublishFailureCallCount()).To(Equal(0))
+			Expect(fakePublisher.PublishStoreMissFailureCallCount()).To(Equal(0))
 		})
 
 		It("keeps the store-hit path unchanged for a task in the store", func() {

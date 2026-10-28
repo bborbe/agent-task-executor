@@ -665,7 +665,7 @@ func (w *jobWatcher) publishStoreMissFailure(
 		)
 		return true
 	}
-	if err := w.publisher.PublishFailure(ctx, taskFromFailedJob(taskID, job), job.Name, reason); err != nil {
+	if err := w.publisher.PublishStoreMissFailure(ctx, taskFromFailedJob(taskID, job), job.Name, reason); err != nil {
 		glog.Errorf(
 			"publish synthetic failure for task %s (job %s) — task not in store: %v",
 			taskID, job.Name, err,

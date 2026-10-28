@@ -342,8 +342,9 @@ func (errorPodNamespaceLister) Get(_ string) (*corev1.Pod, error) {
 // import cycle. It exposes the same PublishFailure call-recording API the
 // counterfeiter fake does, so the spec assertions are unchanged.
 type fakeResultPublisher struct {
-	publishFailureCalls  []resultPublisherCall
-	clearCurrentJobCalls []clearCurrentJobCall
+	publishFailureCalls       []resultPublisherCall
+	publishStoreMissFailCalls []resultPublisherCall
+	clearCurrentJobCalls      []clearCurrentJobCall
 }
 
 type clearCurrentJobCall struct {
@@ -380,6 +381,35 @@ func (f *fakeResultPublisher) PublishFailure(
 		reason:  reason,
 	})
 	return nil
+}
+
+// PublishStoreMissFailure records into its own slice so a spec can tell the two
+// failure paths apart: the store-hit path must not be used for a store miss,
+// and vice versa.
+func (f *fakeResultPublisher) PublishStoreMissFailure(
+	ctx context.Context,
+	task lib.Task,
+	jobName string,
+	reason string,
+) error {
+	f.publishStoreMissFailCalls = append(f.publishStoreMissFailCalls, resultPublisherCall{
+		ctx:     ctx,
+		task:    task,
+		jobName: jobName,
+		reason:  reason,
+	})
+	return nil
+}
+
+func (f *fakeResultPublisher) PublishStoreMissFailureCallCount() int {
+	return len(f.publishStoreMissFailCalls)
+}
+
+func (f *fakeResultPublisher) PublishStoreMissFailureArgsForCall(
+	i int,
+) (context.Context, lib.Task, string, string) {
+	call := f.publishStoreMissFailCalls[i]
+	return call.ctx, call.task, call.jobName, call.reason
 }
 
 func (f *fakeResultPublisher) PublishClearCurrentJob(

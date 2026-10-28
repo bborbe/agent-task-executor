@@ -84,6 +84,15 @@ type ResultPublisher interface {
 	// Idempotent per current_job via a TTL'd LRU; concurrent classifications for
 	// the same job emit one event.
 	PublishFailure(ctx context.Context, task lib.Task, jobName string, reason string) error
+	// PublishStoreMissFailure is PublishFailure for a Job whose task has already
+	// left the executor's in-memory store, so the record carries no failure of
+	// its own and no other path can report one. It writes the same frontmatter
+	// and the same `trigger_count` increment, plus a note stating that the record
+	// was already terminal, that the Job crashed before producing output, that
+	// the entry exists because the crash would otherwise be silent, and that the
+	// status is unchanged — the last one because a failure section under a
+	// terminal status otherwise reads as a status change that never happened.
+	PublishStoreMissFailure(ctx context.Context, task lib.Task, jobName string, reason string) error
 	// PublishClearCurrentJob clears current_job in the vault task frontmatter
 	// (writes "" only — no body section, no trigger_count bump, no status/phase
 	// touch). Used on the job-success path, where the agent already published its
@@ -475,6 +484,46 @@ func (p *resultPublisher) PublishFailure(
 	jobName string,
 	reason string,
 ) error {
+	return p.publishFailure(ctx, task, jobName, reason, "")
+}
+
+// PublishStoreMissFailure publishes the same failure as PublishFailure, with a
+// note explaining why a record that has already reached its terminal status
+// carries a failure at all.
+//
+// The reader of such a record would otherwise see a `## Failure` under a
+// `status: completed` or `status: aborted` line with nothing to reconcile the
+// two, and could reasonably read the failure as having changed the status. It
+// did not: this path writes `current_job: ""`, a `trigger_count` increment and
+// the section, exactly as the store-hit path does.
+func (p *resultPublisher) PublishStoreMissFailure(
+	ctx context.Context,
+	task lib.Task,
+	jobName string,
+	reason string,
+) error {
+	return p.publishFailure(ctx, task, jobName, reason, storeMissFailureNote)
+}
+
+// storeMissFailureNote is written into the `## Failure` body when the failure
+// was recovered from a Job whose task had already left the executor's store.
+// It states the four things a later reader needs: the record was already
+// terminal, the Job crashed before producing output, the entry exists because
+// that crash would otherwise be silent, and the status is unchanged.
+const storeMissFailureNote = "- **Note:** this record had already reached its terminal status before the Job " +
+	"above ran. The Job crashed before producing any output, so the run left no trace of " +
+	"its own on this record. This entry exists because that crash would otherwise be " +
+	"silent — the task had already left the executor's in-memory store, so no other path " +
+	"could report it. The status above is unchanged: only `current_job` was cleared and " +
+	"`trigger_count` incremented.\n"
+
+func (p *resultPublisher) publishFailure(
+	ctx context.Context,
+	task lib.Task,
+	jobName string,
+	reason string,
+	note string,
+) error {
 	if p.dedupe.checkDedupe(jobName) {
 		glog.V(2).Infof("event=zombie_dedupe job=%s task=%s", jobName, task.TaskIdentifier)
 		return nil
@@ -482,10 +531,11 @@ func (p *resultPublisher) PublishFailure(
 
 	now := p.currentDateTime.Now().UTC().Format(time.RFC3339)
 	section := fmt.Sprintf(
-		"## Failure\n\n- **Timestamp:** %s\n- **Job:** %s\n- **Reason:** %s\n",
+		"## Failure\n\n- **Timestamp:** %s\n- **Job:** %s\n- **Reason:** %s\n%s",
 		now,
 		jobName,
 		reason,
+		note,
 	)
 	updateCmd := taskcmd.UpdateFrontmatterCommand{
 		TaskIdentifier: task.TaskIdentifier,
