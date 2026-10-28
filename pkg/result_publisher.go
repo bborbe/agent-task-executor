@@ -292,8 +292,22 @@ func (p *resultPublisher) redriveStreakStore() claim.RedriveStreakStore {
 // At the cap the classifier then had no reasons to read, returned unknown, and
 // refused the record forever with no abort and no release: the permanent
 // class=unknown strand. Counting failures instead of spawns makes the count and
-// the evidence the same thing, and lets a task that keeps succeeding or parks
-// for a human leave the budget entirely rather than consume it.
+// the evidence the same KIND of thing, and lets a task that keeps succeeding or
+// parks for a human leave the budget entirely rather than consume it.
+//
+// It does not make them the same WRITE. The streak and the reason are two
+// separate git-rest puts, so a reason write that fails after a successful streak
+// write leaves count > len(reasons). That is bounded, not silent: partial
+// evidence classifies as transient and terminates at
+// maxConsecutiveRedrives+transientRedriveBudget, and a count with no reasons
+// behind it degrades to class=unknown until RedriveStreakLeaseDuration (6 h)
+// releases it. The same non-atomicity already applied to the reason path.
+//
+// The dedupe that keeps one failed Job from counting twice is ttlDedupe, an
+// in-process map, so two executor replicas that both observe the same Job's
+// terminal failure can each Record it. That tightens the cap (a premature abort)
+// rather than bypassing it, and the duplicate publish already applied to the
+// reason write before this change; it is noted rather than fixed here.
 //
 // When the streak is still at 0 this failure starts a new streak, so the
 // task's reason refs are cleared first: a reason set left by an earlier streak
