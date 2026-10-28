@@ -2,6 +2,8 @@
 
 All notable changes to this project will be documented in this file.
 
+## Unreleased
+
 ## v0.47.0
 
 - feat: **every reconcile-floor refusal is attributable to the gate that made it.** Six of the eight gates in `reconcileTask` returned silently, so a refused record was indistinguishable from one that was never in the candidate set at all. `executor_reconcile_refused_total` is a new counter labelled by a closed `gate` set — `foreign_cluster`, `unresolved_config`, `terminal_status`, `status_not_triggered`, `phase_not_triggered`, `terminal_phase`, `stage_mismatch`, `no_routing` — with all eight series pre-initialised at zero, and each refusal also emits one `event=reconcile_refused` line at V(2) carrying the task's type, phase, status, stage and cluster. The counter moves on every refusal; the log line is emitted only when a task's gate differs from the last one recorded for it, so the per-pass volume stays flat while a gate change — the actionable event — is never lost. The two gates that already logged (`unresolved_config` and `stage_mismatch`) keep their existing lines unchanged, and eligibility itself is untouched: every input that refused before still refuses and every candidate is still a candidate.
