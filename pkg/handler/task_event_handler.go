@@ -1063,7 +1063,7 @@ func (h *taskEventHandler) finishSpawn(
 	metrics.TaskEventsTotal.WithLabelValues("spawned").Inc()
 	metrics.JobsSpawnedTotal.WithLabelValues(h.spawnedNamespace(ctx, config)).Inc()
 	h.recordTaskRerun(task)
-	h.recordRedriveSpawn(ctx, task)
+	h.recordRedriveSpawn(task)
 	return nil
 }
 

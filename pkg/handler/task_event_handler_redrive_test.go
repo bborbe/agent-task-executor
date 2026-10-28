@@ -201,6 +201,42 @@ func newRedriveHarness(mode pkg.ClaimMode, client *mocks.FakeClaimRefClient) *cl
 	return h
 }
 
+// countRefs returns how many stored refs sit under prefix. Assertions about the
+// streak must use this rather than client.PutCallCount(): the claim lifecycle
+// writes its own refs through the same client, so a bare Put count says nothing
+// about the streak.
+func (t *sharedClaimRefTransport) countRefs(prefix string) int {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	n := 0
+	for key := range t.refs {
+		if strings.HasPrefix(key, prefix) {
+			n++
+		}
+	}
+	return n
+}
+
+// seedRedriveStreak pre-loads n streak refs for id at phase. The spawn path no
+// longer writes them — the streak counts published failures and is written by
+// resultPublisher.recordRedriveFailure — so a spec that needs a capped record
+// seeds the streak instead of spawning n times.
+func seedRedriveStreak(
+	transport *sharedClaimRefTransport,
+	id, phase string,
+	n int,
+) {
+	for i := 1; i <= n; i++ {
+		transport.seed(
+			fmt.Sprintf("claims/redrive/%s/%s/%d", id, phase, i),
+			fmt.Sprintf("seed-%s-%d", id, i),
+			claim.RedriveStreakCluster,
+			id,
+			"",
+		)
+	}
+}
+
 // redriveTask is a qualifying task under the given id.
 func redriveTask(id string) lib.Task {
 	task := qualifyingClaimTask()
@@ -216,11 +252,13 @@ var _ = Describe("redrive streak persistence", func() {
 		a := newRedriveHarness(pkg.ClaimModeShadow, client)
 		b := newRedriveHarness(pkg.ClaimModeShadow, client)
 		task := redriveTask("tid-redrive-shared")
+		// The streak counts PUBLISHED FAILURES and is written by the result
+		// publisher, not by the spawn. Seed three, as three failures would.
+		seedRedriveStreak(transport, "tid-redrive-shared", "execution", 3)
 
 		Expect(a.consume(task)).To(Succeed())
 		Expect(b.consume(task)).To(Succeed())
-		Expect(a.consume(task)).To(Succeed())
-		Expect(a.spawner.SpawnJobCallCount() + b.spawner.SpawnJobCallCount()).To(Equal(3))
+		Expect(a.spawner.SpawnJobCallCount() + b.spawner.SpawnJobCallCount()).To(Equal(0))
 
 		Expect(flag.Set("v", "1")).To(Succeed())
 		out := captureStderr(func() {
@@ -233,7 +271,35 @@ var _ = Describe("redrive streak persistence", func() {
 		)))
 
 		Expect(a.consume(task)).To(Succeed())
-		Expect(a.spawner.SpawnJobCallCount() + b.spawner.SpawnJobCallCount()).To(Equal(3))
+		Expect(a.spawner.SpawnJobCallCount() + b.spawner.SpawnJobCallCount()).To(Equal(0))
+	})
+
+	It("AC7(a): four successful spawns write no streak ref and never reach the cap", func() {
+		// The defect this pins: the streak used to advance on every successful
+		// SpawnJob, so three exit-0 spawns reached the cap with no reason to
+		// classify and the record was refused forever. A spawn publishes no
+		// failure, so it must write nothing — the streak counts published
+		// failures only.
+		//
+		// The FOURTH consume is the discriminating one, and it is not padding.
+		// The store is readable and reports 0, while the in-memory map has
+		// counted all three attempts. Under `max(memory, stored)` — the shape
+		// this change replaced — the fourth consume reads 3, sees the cap, and
+		// refuses; only `count = stored` lets it spawn. Three consumes pass
+		// either way, because the third is checked while memory is still 2, so
+		// a regression back to max() would go undetected.
+		transport := newSharedClaimRefTransport()
+		client := new(mocks.FakeClaimRefClient)
+		transport.attach(client)
+		a := newRedriveHarness(pkg.ClaimModeShadow, client)
+		task := redriveTask("tid-redrive-spawn-only")
+
+		for i := 0; i < 4; i++ {
+			Expect(a.consume(task)).To(Succeed())
+		}
+
+		Expect(a.spawner.SpawnJobCallCount()).To(Equal(4))
+		Expect(transport.countRefs("claims/redrive/tid-redrive-spawn-only/")).To(Equal(0))
 	})
 
 	It("AC7: a restarted pod reads the streak left by an earlier one", func() {
@@ -303,23 +369,19 @@ var _ = Describe("redrive streak persistence", func() {
 		Expect(client.DeleteCallCount()).To(Equal(0))
 	})
 
-	It("AC8(c): a failed store write still counts in memory", func() {
+	It("AC8(c): with the store unreadable the memory floor still caps", func() {
 		transport := newSharedClaimRefTransport()
-		transport.putErr = stderrors.New("git-rest down")
+		transport.listErr = stderrors.New("git-rest down")
 		client := new(mocks.FakeClaimRefClient)
 		transport.attach(client)
 		a := newRedriveHarness(pkg.ClaimModeShadow, client)
 		task := redriveTask("tid-redrive-write-fail")
 
-		out := captureStderr(func() {
-			Expect(a.consume(task)).To(Succeed())
-		})
-		Expect(a.spawner.SpawnJobCallCount()).To(Equal(1))
-		Expect(out).To(ContainSubstring(
-			"event=redrive_streak_write_failed task=" + string(task.TaskIdentifier),
-		))
-
-		for i := 0; i < 3; i++ {
+		// The store cannot be read, so the in-memory attempt floor is the only
+		// bound left. It still caps at maxConsecutiveRedrives — which is the
+		// whole point of keeping it: the failure count is unavailable, so the
+		// record must not run unbounded.
+		for i := 0; i < 4; i++ {
 			Expect(a.consume(task)).To(Succeed())
 		}
 		Expect(a.spawner.SpawnJobCallCount()).To(Equal(3))
@@ -332,11 +394,9 @@ var _ = Describe("redrive streak persistence", func() {
 		a := newRedriveHarness(pkg.ClaimModeShadow, client)
 		task := redriveTask("bad/id")
 
-		out := captureStderr(func() {
-			Expect(a.consume(task)).To(Succeed())
-		})
-		Expect(out).To(ContainSubstring("event=redrive_streak_write_failed task=bad/id"))
-
+		// The id is unparseable, so every store read fails and the in-memory
+		// floor bounds the record. Nothing is written to the store on the spawn
+		// path any more, so the old write-failure line is gone with it.
 		for i := 0; i < 3; i++ {
 			Expect(a.consume(task)).To(Succeed())
 		}
@@ -369,10 +429,7 @@ var _ = Describe("redrive streak persistence", func() {
 		transport.attach(client)
 		a := newRedriveHarness(pkg.ClaimModeShadow, client)
 		task := redriveTask("tid-redrive-labels")
-
-		for i := 0; i < 3; i++ {
-			Expect(a.consume(task)).To(Succeed())
-		}
+		seedRedriveStreak(transport, "tid-redrive-labels", "execution", 3)
 
 		before := testutil.ToFloat64(
 			metrics.RedriveCappedTotal.WithLabelValues("", "execution"),
@@ -390,14 +447,13 @@ var _ = Describe("redrive streak persistence", func() {
 		a := newRedriveHarness(pkg.ClaimModeShadow, client)
 
 		executionTask := redriveTask("tid-redrive-phase-execution")
-		for i := 0; i < 3; i++ {
-			Expect(a.consume(executionTask)).To(Succeed())
-		}
+		seedRedriveStreak(transport, "tid-redrive-phase-execution", "execution", 3)
+		Expect(a.consume(executionTask)).To(Succeed())
+
 		planningTask := redriveTask("tid-redrive-phase-planning")
 		planningTask.Frontmatter["phase"] = "planning"
-		for i := 0; i < 3; i++ {
-			Expect(a.consume(planningTask)).To(Succeed())
-		}
+		seedRedriveStreak(transport, "tid-redrive-phase-planning", "planning", 3)
+		Expect(a.consume(planningTask)).To(Succeed())
 
 		executionBefore := testutil.ToFloat64(
 			metrics.RedriveCappedTotal.WithLabelValues("", "execution"),
@@ -422,10 +478,8 @@ var _ = Describe("redrive streak persistence", func() {
 		transport.attach(client)
 		a := newRedriveHarness(pkg.ClaimModeShadow, client)
 		task := redriveTask("tid-redrive-no-type")
+		seedRedriveStreak(transport, "tid-redrive-no-type", "execution", 3)
 
-		for i := 0; i < 3; i++ {
-			Expect(a.consume(task)).To(Succeed())
-		}
 		before := testutil.ToFloat64(
 			metrics.RedriveCappedTotal.WithLabelValues("", "execution"),
 		)
@@ -445,10 +499,7 @@ var _ = Describe("redrive streak persistence", func() {
 		a := newRedriveHarness(pkg.ClaimModeShadow, client)
 		task := redriveTask("tid-redrive-typed")
 		task.Frontmatter["task_type"] = "update-go"
-
-		for i := 0; i < 3; i++ {
-			Expect(a.consume(task)).To(Succeed())
-		}
+		seedRedriveStreak(transport, "tid-redrive-typed", "execution", 3)
 
 		emptyBefore := testutil.ToFloat64(
 			metrics.RedriveCappedTotal.WithLabelValues("", "execution"),
