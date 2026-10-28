@@ -84,6 +84,15 @@ type ResultPublisher interface {
 	// Idempotent per current_job via a TTL'd LRU; concurrent classifications for
 	// the same job emit one event.
 	PublishFailure(ctx context.Context, task lib.Task, jobName string, reason string) error
+	// PublishStoreMissFailure is PublishFailure for a Job whose task has already
+	// left the executor's in-memory store, so the record carries no failure of
+	// its own and no other path can report one. It writes the same frontmatter
+	// and the same `trigger_count` increment, plus a note stating that the record
+	// was already terminal, that the Job crashed before producing output, that
+	// the entry exists because the crash would otherwise be silent, and that the
+	// status is unchanged — the last one because a failure section under a
+	// terminal status otherwise reads as a status change that never happened.
+	PublishStoreMissFailure(ctx context.Context, task lib.Task, jobName string, reason string) error
 	// PublishClearCurrentJob clears current_job in the vault task frontmatter
 	// (writes "" only — no body section, no trigger_count bump, no status/phase
 	// touch). Used on the job-success path, where the agent already published its
@@ -118,6 +127,27 @@ type ResultPublisher interface {
 	// Updates directly to the on-disk frontmatter — an explicit, intentional write
 	// rather than a stale spawn-time snapshot.
 	PublishSetTriggerScope(ctx context.Context, task lib.Task, scope string, count int) error
+	// PublishTriggerBudgetRefusal writes a scoped trigger-budget refusal onto the
+	// task record: the four trigger_refusal_* keys (count, max, scope, at) and a
+	// "## Trigger Budget" body section, and no other key. It never writes
+	// "## Failure", so the older cause a record may already carry stays visible;
+	// taskcmd.BodySection replaces a section with the same heading, which is why
+	// this path must not reuse that heading.
+	//
+	// The write is deduped per task AND refusal triple (scope, count, max) through
+	// the same TTL'd LRU as PublishAbort. Keying on the triple rather than the
+	// task alone is load-bearing: a changed scope is a changed refusal and must
+	// never be suppressed. The dedupe is needed because the handler reads an
+	// informer snapshot that does not yet show a write the controller has not
+	// applied, so without it the identical refusal would be re-published every
+	// tick.
+	PublishTriggerBudgetRefusal(
+		ctx context.Context,
+		task lib.Task,
+		scope string,
+		count int,
+		maxTriggers int,
+	) error
 	// PublishTypeMismatchFailure publishes a synthetic failure when the task's task_type
 	// is not in the agent's effective type set. Clears assignee and current_job so the
 	// task surfaces in the operator inbox via assignee=="" filter. Does not bump
@@ -135,6 +165,13 @@ type ResultPublisher interface {
 	// as they are. human_review is already in the executor's terminal-phase set,
 	// so a parked task is never re-spawned and needs no second guard.
 	PublishParkLostClaim(ctx context.Context, task lib.Task) error
+	// PublishParkSucceeded writes phase "human_review" onto a task whose Job
+	// succeeded but whose phase never moved — a deliberate human park, not a
+	// finished task. Writes the "phase" key and nothing else. human_review is
+	// already in the executor's terminal-phase set, so the reconcile pass stops
+	// re-driving it; without this write a task whose agent exits 0 without
+	// moving the phase is eligible on every pass and re-spawned forever.
+	PublishParkSucceeded(ctx context.Context, task lib.Task) error
 	// PublishAbort closes a record the consecutive-re-drive cap has decided to
 	// stop driving. It writes status aborted plus the close-out pair vault-cli
 	// requires (aborted_reason and gate_successor) and clears current_job. It
@@ -510,6 +547,77 @@ func (p *resultPublisher) PublishFailure(
 	jobName string,
 	reason string,
 ) error {
+	return p.publishFailure(ctx, task, jobName, reason, "")
+}
+
+// PublishStoreMissFailure publishes the same failure as PublishFailure, with a
+// note explaining why the record carries a failure at all.
+//
+// The reader of such a record could otherwise see a `## Failure` under a
+// `status: completed` or `status: aborted` line with nothing to reconcile the
+// two, and read the failure as having changed the status. It did not: this path
+// writes `current_job: ""`, a `trigger_count` increment and the section, exactly
+// as the store-hit path does. How much the note may claim depends on the reason
+// — see storeMissFailureNoteFor.
+func (p *resultPublisher) PublishStoreMissFailure(
+	ctx context.Context,
+	task lib.Task,
+	jobName string,
+	reason string,
+) error {
+	return p.publishFailure(ctx, task, jobName, reason, storeMissFailureNoteFor(reason))
+}
+
+// storeMissFailureNoteFor returns the note written into the `## Failure` body when
+// the failure was recovered from a Job whose task had already left the executor's
+// store.
+//
+// A store miss on its own guarantees very little: it says the task was absent from
+// the in-memory store, which is also true of a deadline_exceeded or pod_oom_killed
+// Job, and of a store evicted by a type mismatch or a restart while the vault
+// record is still in_progress. Only the pod_crash_no_stdout class died before
+// writing stdout, and only for it is the record known to have reached a terminal
+// status, so only it gets the full explanation. Everything else gets a note that
+// claims just the two things this path actually does.
+//
+// The gate is ParseZombieReason, not string equality, for the same reason
+// crashFailureUpdates uses it: a suffixed form such as "pod_oom_killed
+// (OOMKilled/137)" must classify as its own class rather than fall through a
+// literal comparison that cannot match it.
+func storeMissFailureNoteFor(reason string) string {
+	if parsed, ok := ParseZombieReason(reason); ok && parsed == ZombieReasonPodCrashNoStdout {
+		return storeMissFailureNote
+	}
+	return storeMissFailureNoteOther
+}
+
+// storeMissFailureNote is written for the pod_crash_no_stdout class. It states the
+// four things a later reader needs: the record was already terminal, the Job
+// crashed before producing output, the entry exists because that crash would
+// otherwise be silent, and the status is unchanged.
+const storeMissFailureNote = "- **Note:** this record had already reached its terminal status before the Job " +
+	"above ran. The Job crashed before producing any output, so the run left no trace of " +
+	"its own on this record. This entry exists because that crash would otherwise be " +
+	"silent — the task had already left the executor's in-memory store, so no other path " +
+	"could report it. The status above is unchanged: only `current_job` was cleared and " +
+	"`trigger_count` incremented.\n"
+
+// storeMissFailureNoteOther is written for every other store miss. It claims only
+// what the path guarantees — the task was not in the store, and the write left the
+// status alone — because a deadline_exceeded or pod_oom_killed Job may well have
+// produced output, and a store evicted by a restart may leave the record still
+// in_progress.
+const storeMissFailureNoteOther = "- **Note:** this record was not in the executor's in-memory store when the Job " +
+	"above failed. The status above is unchanged: only `current_job` was cleared and " +
+	"`trigger_count` incremented.\n"
+
+func (p *resultPublisher) publishFailure(
+	ctx context.Context,
+	task lib.Task,
+	jobName string,
+	reason string,
+	note string,
+) error {
 	if p.dedupe.checkDedupe(jobName) {
 		glog.V(2).Infof("event=zombie_dedupe job=%s task=%s", jobName, task.TaskIdentifier)
 		return nil
@@ -517,10 +625,11 @@ func (p *resultPublisher) PublishFailure(
 
 	now := p.currentDateTime.Now().UTC().Format(time.RFC3339)
 	section := fmt.Sprintf(
-		"## Failure\n\n- **Timestamp:** %s\n- **Job:** %s\n- **Reason:** %s\n",
+		"## Failure\n\n- **Timestamp:** %s\n- **Job:** %s\n- **Reason:** %s\n%s",
 		now,
 		jobName,
 		reason,
+		note,
 	)
 	updateCmd := taskcmd.UpdateFrontmatterCommand{
 		TaskIdentifier: task.TaskIdentifier,
@@ -644,6 +753,78 @@ func (p *resultPublisher) PublishSetTriggerScope(
 	return nil
 }
 
+// triggerRefusalDedupeKey namespaces the refusal triple so a changed scope, count
+// or cap is a different key and therefore a different publish.
+func triggerRefusalDedupeKey(
+	id lib.TaskIdentifier,
+	scope string,
+	count int,
+	maxTriggers int,
+) string {
+	return fmt.Sprintf("trigger_refusal:%s:%s:%d:%d", id, scope, count, maxTriggers)
+}
+
+// PublishTriggerBudgetRefusal writes the four frozen trigger_refusal_* keys and a
+// "## Trigger Budget" section, and nothing else. The section heading deliberately
+// differs from "## Failure": Markdown.ReplaceSection replaces a section carrying
+// the same heading, so writing "## Failure" here would delete the older cause.
+//
+// The dedupe key covers the refusal triple, not just the task, so a changed
+// refusal is never suppressed. It is recorded only after publishRaw succeeds: a
+// failed send must be retried on the next tick, not remembered as done.
+func (p *resultPublisher) PublishTriggerBudgetRefusal(
+	ctx context.Context,
+	task lib.Task,
+	scope string,
+	count int,
+	maxTriggers int,
+) error {
+	dedupeKey := triggerRefusalDedupeKey(task.TaskIdentifier, scope, count, maxTriggers)
+	if p.dedupe.checkDedupe(dedupeKey) {
+		glog.V(2).Infof(
+			"event=trigger_refusal_dedupe task=%s scope=%q count=%d max=%d",
+			task.TaskIdentifier,
+			scope,
+			count,
+			maxTriggers,
+		)
+		return nil
+	}
+
+	now := p.currentDateTime.Now().UTC().Format(time.RFC3339)
+	section := fmt.Sprintf(
+		"## Trigger Budget\n\n- **Timestamp:** %s\n- **Refusal:** trigger_count %d >= max_triggers %d\n- **Scope:** %s\n",
+		now,
+		count,
+		maxTriggers,
+		scope,
+	)
+	cmd := taskcmd.UpdateFrontmatterCommand{
+		TaskIdentifier: task.TaskIdentifier,
+		TargetVault:    targetVaultFromTask(task),
+		Updates: lib.TaskFrontmatter{
+			"trigger_refusal_count": count,
+			"trigger_refusal_max":   maxTriggers,
+			"trigger_refusal_scope": scope,
+			"trigger_refusal_at":    now,
+		},
+		Body: &taskcmd.BodySection{
+			Heading: "## Trigger Budget",
+			Section: section,
+		},
+	}
+	if err := p.publishRaw(ctx, taskcmd.UpdateFrontmatterCommandOperation, cmd); err != nil {
+		return errors.Wrapf(
+			ctx,
+			err,
+			"publish trigger budget refusal for task %s",
+			task.TaskIdentifier,
+		)
+	}
+	p.dedupe.recordDedupe(dedupeKey)
+	return nil
+}
+
 func (p *resultPublisher) PublishTypeMismatchFailure(
 	ctx context.Context,
 	task lib.Task,
@@ -732,6 +913,18 @@ func (p *resultPublisher) PublishParkLostClaim(
 		},
 	}
 	return p.publishRaw(ctx, taskcmd.UpdateFrontmatterCommandOperation, cmd)
+}
+
+// PublishParkSucceeded writes phase "human_review" and nothing else.
+//
+// It delegates rather than repeating the command: the two parks differ only in
+// why they fire, and the write they make is identical. Duplicating it would let
+// a future change to the park payload drift between them.
+func (p *resultPublisher) PublishParkSucceeded(
+	ctx context.Context,
+	task lib.Task,
+) error {
+	return p.PublishParkLostClaim(ctx, task)
 }
 
 // PublishAbort closes a record the consecutive-re-drive cap has stopped

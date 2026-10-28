@@ -43,11 +43,12 @@ var defaultTriggerStatuses = domain.TaskStatuses{
 // defaultRespawnGracePeriod is the window after job_started_at during which the executor
 // suppresses respawn when the K8s Job is inactive but no terminal phase has been observed.
 // The window gives the agent's terminal-phase write time to propagate through the vault pipeline.
-// defaultRespawnGracePeriod is the spawn path's half of the success window: it
-// refuses to re-spawn a task whose Job succeeded this recently. It aliases the
-// claim package's SuccessGracePeriod deliberately — the other half holds the
-// claim for the same length — so the two cannot drift apart and leave a gap
-// where the claim is gone but the spawn guard has also expired.
+// It aliases the claim package's SuccessGracePeriod deliberately, so the spawn-side
+// grace and the claim hold cannot drift apart and leave a gap where the claim is
+// gone but the spawn grace has also expired. It is NOT the success guard's window:
+// recentlySucceeded suppresses a task that already succeeded at its current phase
+// until that phase changes (or its declared cadence elapses), and no longer
+// expires on this constant.
 const defaultRespawnGracePeriod = claim.SuccessGracePeriod
 
 // taskRerunWindow is how far back a recorded success still identifies a spawn
@@ -81,7 +82,7 @@ const DefaultReconcileInterval = 60 * time.Second
 //
 // It is the bound for the case where neither of the other two engages. A task
 // with no `ref` and no `max_triggers` keeps the trigger budget disarmed by
-// design (see applyTriggerBudget — arming it would re-create the 2026-08-27
+// design (see checkTriggerBudget — arming it would re-create the 2026-08-27
 // Daily Sentry Triage incident), and a task whose scope reads as changed on
 // every spawn is handed a fresh budget of 1 each time (see triggerBudgetWrite).
 // Between them, a task that stops advancing is spawned forever.
@@ -134,32 +135,6 @@ const maxConsecutiveRedrives = 3
 // 2026-10-21 a sun executor reading the 15k-file openclaw vault aborted every
 // pass at 45s with evaluated=0.
 const DefaultReconcilePassTimeout = 45 * time.Second
-
-// terminalPhases is the set of phases that must never trigger a new spawn.
-// Extending this set requires a follow-up spec if vault-cli adds new terminal phases.
-var terminalPhases = map[domain.TaskPhase]struct{}{
-	domain.TaskPhaseHumanReview: {},
-	domain.TaskPhaseDone:        {},
-}
-
-// knownPhases contains all phase constants exported by vault-cli v0.64.3.
-// Values outside this set trigger enum-drift logging (event=unknown_phase).
-var knownPhases = map[domain.TaskPhase]struct{}{
-	domain.TaskPhaseTodo:        {},
-	domain.TaskPhasePlanning:    {},
-	domain.TaskPhaseExecution:   {}, // canonical (was TaskPhaseInProgress)
-	domain.TaskPhaseInProgress:  {}, // legacy alias — still a known phase string
-	domain.TaskPhaseAIReview:    {},
-	domain.TaskPhaseHumanReview: {},
-	domain.TaskPhaseDone:        {},
-}
-
-// IsTerminal reports whether the given phase is in the terminal set.
-// Tasks at a terminal phase must not be re-spawned; operator intervention is required.
-func IsTerminal(phase domain.TaskPhase) bool {
-	_, ok := terminalPhases[phase]
-	return ok
-}
 
 // terminalStatuses is the status-side twin of terminalPhases: the two statuses a
 // task never leaves, because the work is finished or was cancelled.
@@ -346,6 +321,10 @@ type taskEventHandler struct {
 	// beside redriveStore from the same client and nil under the same conditions.
 	// It is named redriveReasons because redriveReasonStore is its accessor.
 	redriveReasons claim.RedriveReasonStore
+	// successRecordStore is the shared success record the suppression reads after
+	// a pod restart; nil leaves the guard on the in-memory record.
+	successRecordStore claim.SuccessStore
+	successStoreOnce   sync.Once
 	// spawnGens counts Jobs created by this executor per assignee, on any path.
 	// A pass cache entry read at an older generation is refetched, so a Job
 	// spawned by the Kafka consumer or the deferred loop mid-pass is never
@@ -566,6 +545,20 @@ func (h *taskEventHandler) ConsumeMessage(ctx context.Context, msg *sarama.Consu
 		return nil
 	}
 	_, err = h.spawnIfNeeded(ctx, task, config)
+	// A refusal that could not be written must not tear the executor down. The
+	// consumer's error cancels every run func, so a transient publish failure
+	// would restart the process for every assignee at once. The spawn is already
+	// suppressed; the reconcile floor re-drives the task and retries the write,
+	// exactly as it does for a view that has not replayed yet.
+	var refusalErr *triggerRefusalWriteError
+	if stderrors.As(err, &refusalErr) {
+		glog.Warningf(
+			"event=event_refusal_write_failed task=%s err=%v: reconcile will retry",
+			task.TaskIdentifier, err,
+		)
+		metrics.TaskEventsTotal.WithLabelValues("event_refusal_write_failed").Inc()
+		return nil
+	}
 	return err
 }
 
@@ -934,7 +927,8 @@ func (h *taskEventHandler) spawnIfNeededClaimed(
 		return spawnOutcomeSuppressed, nil
 	}
 
-	if h.recentlySucceeded(task) {
+	// Suppress inside the write-back grace, park past it — one clock, one call.
+	if h.suppressOrPark(ctx, task) {
 		return spawnOutcomeSuppressed, nil
 	}
 
@@ -958,9 +952,10 @@ func (h *taskEventHandler) spawnIfNeededClaimed(
 
 	// Scoped trigger budget: check only. The counter write is published by
 	// recordTriggerSpawn after SpawnJob succeeds, so an infrastructure failure
-	// cannot burn one of the task's attempts.
-	if h.checkTriggerBudget(task) {
-		return spawnOutcomeSuppressed, nil
+	// cannot burn one of the task's attempts. A refusal writes its own reason
+	// onto the record; a failed write still suppresses the spawn.
+	if suppress, err := h.triggerBudgetRefusesSpawn(ctx, task); suppress {
+		return spawnOutcomeSuppressed, err
 	}
 
 	// Claimed replays decide under deferredMu, released before SpawnJob; the
@@ -1258,6 +1253,8 @@ func (h *taskEventHandler) ReconcileOnce(ctx context.Context) error {
 	// records a new one. Fetched lazily, so a pass with no candidates pays
 	// nothing. See redrive_streak_cache.go for the measurement.
 	passCtx = withRedriveStreakCache(passCtx)
+	// One `list refs` of the success prefix for the pass; see success_cache.go.
+	passCtx = withSuccessCache(passCtx)
 
 	if !h.view.Ready() {
 		metrics.ReconcilePassesTotal.WithLabelValues("view_not_ready").Inc()
@@ -1280,11 +1277,14 @@ func (h *taskEventHandler) ReconcileOnce(ctx context.Context) error {
 		return nil
 	}
 
-	// Once per pass: forget successes older than the re-run window, so the
-	// record stays bounded to results that may still be in flight and still
-	// long enough for a later spawn to be recognised as a re-run.
+	// Once per pass: forget successes older than the retention horizon, so the
+	// record stays bounded. The horizon is the longest declared cadence, not the
+	// re-run window: recentlySucceeded suppresses on this record and releases a
+	// recurring task only when its cadence elapses, so pruning at the 1 h re-run
+	// window would drop the record before any cadence could fire. Re-run
+	// detection is unaffected — recordTaskRerun applies its own 1 h check.
 	h.taskStore.PruneSucceededBefore(
-		h.currentDateTime.Now().Time().Add(-taskRerunWindow),
+		h.currentDateTime.Now().Time().Add(-successRecordRetention),
 	)
 	owned := ownedTasks(snapshot, h.vaultMatcher)
 	c := reconcileCounters{}
@@ -1791,65 +1791,6 @@ func triggerScope(fm lib.TaskFrontmatter) string {
 		ref = ref[:triggerScopeRefLen]
 	}
 	return phase + ":" + ref
-}
-
-// applyTriggerBudget evaluates the scoped trigger cap for one spawn decision and,
-// when the spawn may proceed, publishes exactly one counter write recording it.
-// Returns capped=true when the cap is reached and the spawn must be skipped.
-//
-// The cap default-engages for repo-backed tasks: a task whose frontmatter
-// carries a ref (written by the agents that clone a repo, alongside clone_url
-// and base_ref) scopes its budget to phase+ref via triggerScope, and that scope
-// moves with the repo, so accrual against a constant scope cannot occur — the
-// safe default-on form. An explicit max_triggers engages the cap for any task,
-// with or without a ref. A task with neither ref nor max_triggers is a
-// recurring task: it is not repo-backed, sits at a stable phase, and its scope
-// is a constant, so a default cap would accrue across re-dispatches and fire at
-// 3, re-creating the 2026-08-27 Daily Sentry Triage incident (the v0.7.1
-// regression). That task stays uncapped by default.
-//
-// The cap value is always MaxTriggers(): the explicit max_triggers field, or
-// the lib default of 3 when it is absent — a repo-backed task with no
-// max_triggers is therefore capped at 3.
-//
-// Scoping also fixes the opt-in cap's correctness: a task that opts in no
-// longer burns its budget across unrelated attempts, so an operator can set a
-// tight max_triggers without it leaking into the next phase or the next commit.
-// checkTriggerBudget reports whether the task's scoped trigger budget is
-// exhausted. It writes nothing.
-//
-// The counter write is deliberately split out into recordTriggerSpawn and
-// published only AFTER a Job was actually created. Until 2026-10-19 the
-// increment was published here, before SpawnJob, so every infrastructure
-// failure — the `spawn_error ... context deadline exceeded` this change also
-// fixes — consumed one of the task's attempts without the agent ever running.
-// That is how github-update-go tasks reached trigger_count 5-7 while producing
-// no work, and why a trigger_count reset alone could not hold.
-func (h *taskEventHandler) checkTriggerBudget(task lib.Task) bool {
-	currentScope := triggerScope(task.Frontmatter)
-	storedScope, hasScope := task.Frontmatter.String("trigger_scope")
-
-	// An ABSENT scope is not a CHANGED scope. Every task in flight today predates
-	// this field, so treating absent as changed would hand each of them a free
-	// budget reset on the first event after deploy — including one already looping
-	// at cap, which would resume for another N. Absent means "adopt the current
-	// scope, keep the count".
-	scopeChanged := hasScope && storedScope != currentScope
-
-	_, optedIn := task.Frontmatter["max_triggers"]
-	_, hasRef := task.Frontmatter.String("ref")
-	if (optedIn || hasRef) && !scopeChanged &&
-		task.Frontmatter.TriggerCount() >= task.Frontmatter.MaxTriggers() {
-		glog.V(2).Infof("skip task %s: trigger_count %d >= max_triggers %d in scope %q",
-			task.TaskIdentifier,
-			task.Frontmatter.TriggerCount(),
-			task.Frontmatter.MaxTriggers(),
-			currentScope,
-		)
-		metrics.TaskEventsTotal.WithLabelValues("skipped_trigger_cap").Inc()
-		return true
-	}
-	return false
 }
 
 // recordTriggerSpawn publishes the counter write that charges one spawn against

@@ -357,6 +357,37 @@ var _ = Describe("TaskEventHandler", func() {
 				Expect(after - before).To(Equal(float64(1)))
 			})
 
+			It("keeps a failed refusal write non-fatal instead of exiting the loop", func() {
+				// Park the task through the grace window first, so the refusal gate is
+				// not reached on this event and the publisher is still healthy.
+				currentDateTime.SetNow(libtimetest.ParseDateTime(insideGrace))
+				task := buildGraceTask(domain.TaskPhaseExecution, 4, 3)
+				Expect(h.ConsumeMessage(ctx, buildMsg(task))).To(Succeed())
+				Expect(fakeSpawner.SpawnJobCallCount()).To(Equal(0))
+
+				// Now the write fails. Without the typed carve-out this error would be
+				// returned as fatal and exit the process, starving every other entry.
+				fakeResultPublisher.PublishTriggerBudgetRefusalReturns(
+					errors.New(ctx, "kafka unavailable"),
+				)
+				before := testutil.ToFloat64(
+					metrics.TaskEventsTotal.WithLabelValues(
+						"deferred_respawn_refusal_write_failed",
+					),
+				)
+
+				currentDateTime.SetNow(libtimetest.ParseDateTime(graceExpiredR))
+				Expect(h.EvalDeferredRespawns(ctx)).To(Succeed())
+				Expect(fakeSpawner.SpawnJobCallCount()).To(Equal(0))
+				Expect(
+					testutil.ToFloat64(
+						metrics.TaskEventsTotal.WithLabelValues(
+							"deferred_respawn_refusal_write_failed",
+						),
+					) - before,
+				).To(Equal(float64(1)))
+			})
+
 			It("deferred re-eval bound: no spawn before grace+R, spawn at grace+60s", func() {
 				// Suppress inside grace window
 				currentDateTime.SetNow(libtimetest.ParseDateTime(insideGrace))

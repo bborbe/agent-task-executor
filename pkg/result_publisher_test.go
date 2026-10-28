@@ -12,6 +12,7 @@ import (
 	"io"
 	"os"
 	"strings"
+	"time"
 
 	"github.com/IBM/sarama"
 	lib "github.com/bborbe/agent"
@@ -337,6 +338,109 @@ var _ = Describe("ResultPublisher", func() {
 		)
 	})
 
+	Describe("PublishStoreMissFailure", func() {
+		// A failure section under a terminal status reads as a status change that
+		// never happened, so this path states its own reason for existing. The
+		// four clauses are the ones a later reader needs, and each is asserted
+		// separately so dropping one fails here rather than in the field.
+		It("states why a record that was already terminal carries a failure", func() {
+			task := lib.Task{
+				TaskIdentifier: lib.TaskIdentifier("test-task-3"),
+				Frontmatter: lib.TaskFrontmatter{
+					"status":   "completed",
+					"phase":    "done",
+					"assignee": "github-update-go-agent",
+				},
+				Content: lib.TaskContent("update go"),
+			}
+			err := publisher.PublishStoreMissFailure(
+				ctx,
+				task,
+				"github-update-go-agent-ad12e9fb-20261028065801",
+				"pod_crash_no_stdout",
+			)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(producer.messages).To(HaveLen(2))
+
+			_, updateCmd := decodeUpdateFrontmatterCommand(producer.messages[0])
+			Expect(updateCmd.Body.Heading).To(Equal("## Failure"))
+			section := updateCmd.Body.Section
+			Expect(section).To(ContainSubstring("pod_crash_no_stdout"))
+			Expect(section).To(
+				ContainSubstring("had already reached its terminal status"),
+				"the entry must say the record was already terminal",
+			)
+			Expect(section).To(
+				ContainSubstring("The Job crashed before producing any output"),
+				"the entry must say the job crashed",
+			)
+			Expect(section).To(
+				ContainSubstring("would otherwise be silent"),
+				"the entry must say why it exists",
+			)
+			Expect(section).To(
+				ContainSubstring("The status above is unchanged"),
+				"the entry must say the status did not change",
+			)
+
+			// The note is scoped to this path: the store-hit failure must not
+			// claim the record was already terminal.
+			err = publisher.PublishFailure(
+				ctx,
+				task,
+				"github-update-go-agent-00000000000000",
+				"pod_crash_no_stdout",
+			)
+			Expect(err).NotTo(HaveOccurred())
+			_, hitCmd := decodeUpdateFrontmatterCommand(producer.messages[2])
+			Expect(hitCmd.Body.Section).NotTo(ContainSubstring("The status above is unchanged"))
+		})
+
+		// The full note is true only of the crash class. A deadline_exceeded or
+		// pod_oom_killed Job reaches this path too and may well have produced
+		// output, and a store evicted by a restart can leave the record still
+		// in_progress — so the note must not assert a crash or a terminal record
+		// for those reasons.
+		It("claims only what the path guarantees for a non-crash reason", func() {
+			task := lib.Task{
+				TaskIdentifier: lib.TaskIdentifier("test-task-4"),
+				Frontmatter: lib.TaskFrontmatter{
+					"status":   "in_progress",
+					"phase":    "planning",
+					"assignee": "github-update-go-agent",
+				},
+				Content: lib.TaskContent("update go"),
+			}
+			err := publisher.PublishStoreMissFailure(
+				ctx,
+				task,
+				"github-update-go-agent-e009d201-20261028140856",
+				"deadline_exceeded",
+			)
+			Expect(err).NotTo(HaveOccurred())
+
+			_, updateCmd := decodeUpdateFrontmatterCommand(producer.messages[0])
+			section := updateCmd.Body.Section
+			Expect(section).To(ContainSubstring("deadline_exceeded"))
+			Expect(section).To(
+				ContainSubstring("was not in the executor's in-memory store"),
+				"the entry must say why it exists",
+			)
+			Expect(section).To(
+				ContainSubstring("The status above is unchanged"),
+				"the entry must say the status did not change",
+			)
+			Expect(section).NotTo(
+				ContainSubstring("had already reached its terminal status"),
+				"a non-crash store miss must not claim the record was already terminal",
+			)
+			Expect(section).NotTo(
+				ContainSubstring("crashed before producing any output"),
+				"a non-crash store miss must not claim the Job produced no output",
+			)
+		})
+	})
+
 	Describe("PublishFailure trigger cap", func() {
 		// The cap is armed only for the crash class, and only when the key is
 		// absent. Both halves are load-bearing: arming it for every class would
@@ -447,6 +551,27 @@ var _ = Describe("ResultPublisher", func() {
 			Expect(updateCmd.Updates).To(HaveLen(1))
 			_, hasMax := updateCmd.Updates["max_triggers"]
 			Expect(hasMax).To(BeFalse(), "a deliberate budget of 6 must not become 3")
+		})
+
+		It("leaves max_triggers alone when the key is present but unknown (nil)", func() {
+			// The job watcher publishes a failure for a task that has left its
+			// store with max_triggers present but nil: the real value is unknown,
+			// and writing the default could lower an operator-set cap.
+			task := lib.Task{
+				TaskIdentifier: lib.TaskIdentifier("test-task-store-miss"),
+				Frontmatter:    lib.TaskFrontmatter{"max_triggers": nil},
+			}
+			err := publisher.PublishFailure(
+				ctx,
+				task,
+				"claude-20260418120000",
+				"pod_crash_no_stdout (ContainerStatusUnknown/137)",
+			)
+			Expect(err).NotTo(HaveOccurred())
+
+			_, updateCmd := decodeUpdateFrontmatterCommand(producer.messages[0])
+			Expect(updateCmd.Updates).To(HaveLen(1))
+			Expect(updateCmd.Updates["current_job"]).To(Equal(""))
 		})
 
 		// A record that reaches the controller without max_triggers is
@@ -872,6 +997,53 @@ var _ = Describe("ResultPublisher", func() {
 		)
 	})
 
+	Describe("PublishParkSucceeded", func() {
+		It(
+			"writes exactly the phase key with human_review and nothing else",
+			func() {
+				// The park's whole effect is this one key: human_review is what
+				// takes the record out of the executor's drive set. A wrong key
+				// or value would leave the loop running, and every watcher-side
+				// spec asserts only that the publisher was called.
+				task := lib.Task{
+					TaskIdentifier: lib.TaskIdentifier("test-task-parked"),
+					Frontmatter: lib.TaskFrontmatter{
+						"status":       "in_progress",
+						"phase":        "execution",
+						"assignee":     "claude",
+						"current_job":  "job-1",
+						"target_vault": "work",
+					},
+				}
+				err := publisher.PublishParkSucceeded(ctx, task)
+				Expect(err).NotTo(HaveOccurred())
+
+				Expect(producer.messages).To(HaveLen(1))
+				operation, cmd := decodeUpdateFrontmatterCommand(producer.messages[0])
+
+				Expect(
+					string(operation),
+				).To(Equal(string(taskcmd.UpdateFrontmatterCommandOperation)))
+				Expect(cmd.TaskIdentifier).To(Equal(lib.TaskIdentifier("test-task-parked")))
+				Expect(cmd.TargetVault).To(Equal("work"))
+
+				Expect(cmd.Updates).To(HaveLen(1))
+				Expect(cmd.Updates["phase"]).To(Equal("human_review"))
+
+				for _, key := range []string{
+					"status",
+					"assignee",
+					"current_job",
+				} {
+					_, hasKey := cmd.Updates[key]
+					Expect(hasKey).To(BeFalse(), key+" must not be in the park update")
+				}
+				Expect(cmd.Body).To(BeNil())
+				Expect(cmd.Validate(ctx)).To(Succeed())
+			},
+		)
+	})
+
 	Describe("PublishRestoreAssignee", func() {
 		It(
 			"writes exactly one assignee key and no counter key via UpdateFrontmatterCommand",
@@ -1288,6 +1460,148 @@ var _ = Describe("ResultPublisher", func() {
 					metrics.RedriveAbortReasonTransientExhausted,
 				),
 			)).To(Equal(transientBefore))
+		})
+	})
+
+	Describe("PublishTriggerBudgetRefusal", func() {
+		refusalTask := func() lib.Task {
+			return lib.Task{
+				TaskIdentifier: lib.TaskIdentifier("test-task-refusal"),
+				Frontmatter: lib.TaskFrontmatter{
+					"status":       "in_progress",
+					"phase":        "planning",
+					"target_vault": "work",
+				},
+			}
+		}
+
+		It("writes the four trigger_refusal keys and no fifth", func() {
+			err := publisher.PublishTriggerBudgetRefusal(
+				ctx,
+				refusalTask(),
+				"planning:4963ffa6",
+				4,
+				3,
+			)
+			Expect(err).NotTo(HaveOccurred())
+
+			Expect(producer.messages).To(HaveLen(1))
+			operation, cmd := decodeUpdateFrontmatterCommand(producer.messages[0])
+			Expect(
+				string(operation),
+			).To(Equal(string(taskcmd.UpdateFrontmatterCommandOperation)))
+			Expect(cmd.Updates).To(HaveLen(4))
+			Expect(cmd.Updates["trigger_refusal_scope"]).To(Equal("planning:4963ffa6"))
+			// BeNumerically, not Equal: the command is read back through its JSON
+			// encoding, where every number decodes as float64.
+			Expect(cmd.Updates["trigger_refusal_count"]).To(BeNumerically("==", 4))
+			Expect(cmd.Updates["trigger_refusal_max"]).To(BeNumerically("==", 3))
+			Expect(cmd.Updates["trigger_refusal_at"]).To(Equal("2026-04-18T12:00:00Z"))
+			at, ok := cmd.Updates["trigger_refusal_at"].(string)
+			Expect(ok).To(BeTrue())
+			_, parseErr := time.Parse(time.RFC3339, at)
+			Expect(parseErr).NotTo(HaveOccurred())
+			Expect(cmd.TargetVault).To(Equal("work"))
+		})
+
+		It("writes a Trigger Budget section, never a Failure section", func() {
+			err := publisher.PublishTriggerBudgetRefusal(
+				ctx,
+				refusalTask(),
+				"planning:4963ffa6",
+				4,
+				3,
+			)
+			Expect(err).NotTo(HaveOccurred())
+
+			_, cmd := decodeUpdateFrontmatterCommand(producer.messages[0])
+			Expect(cmd.Body).NotTo(BeNil())
+			Expect(cmd.Body.Heading).To(Equal("## Trigger Budget"))
+			Expect(cmd.Body.Heading).NotTo(Equal("## Failure"))
+			Expect(cmd.Body.Section).To(HavePrefix("## Trigger Budget"))
+			Expect(cmd.Body.Section).To(ContainSubstring("trigger_count 4 >= max_triggers 3"))
+			Expect(cmd.Body.Section).To(ContainSubstring("planning:4963ffa6"))
+			Expect(cmd.Body.Section).To(HaveSuffix("\n"))
+		})
+
+		It("does not touch the failure section or ownership keys", func() {
+			err := publisher.PublishTriggerBudgetRefusal(
+				ctx,
+				refusalTask(),
+				"planning:4963ffa6",
+				4,
+				3,
+			)
+			Expect(err).NotTo(HaveOccurred())
+
+			_, cmd := decodeUpdateFrontmatterCommand(producer.messages[0])
+			Expect(cmd.Body.Heading).NotTo(Equal("## Failure"))
+			for _, key := range []string{
+				"status",
+				"phase",
+				"assignee",
+				"current_job",
+				"trigger_count",
+				"trigger_scope",
+				"max_triggers",
+			} {
+				_, ok := cmd.Updates[key]
+				Expect(ok).To(BeFalse(), "key %q must not be written", key)
+			}
+		})
+
+		It("publishes once for an identical refusal triple", func() {
+			task := refusalTask()
+			Expect(
+				publisher.PublishTriggerBudgetRefusal(ctx, task, "planning:4963ffa6", 4, 3),
+			).To(Succeed())
+			Expect(
+				publisher.PublishTriggerBudgetRefusal(ctx, task, "planning:4963ffa6", 4, 3),
+			).To(Succeed())
+
+			Expect(producer.messages).To(HaveLen(1))
+		})
+
+		It("publishes again when the refusal triple changes", func() {
+			task := refusalTask()
+			Expect(
+				publisher.PublishTriggerBudgetRefusal(ctx, task, "planning:4963ffa6", 4, 3),
+			).To(Succeed())
+			Expect(
+				publisher.PublishTriggerBudgetRefusal(ctx, task, "execution:bbbbbbbb", 4, 3),
+			).To(Succeed())
+			Expect(
+				publisher.PublishTriggerBudgetRefusal(ctx, task, "execution:bbbbbbbb", 5, 3),
+			).To(Succeed())
+
+			Expect(producer.messages).To(HaveLen(3))
+		})
+
+		It("does not remember a failed publish, so the next tick retries", func() {
+			partialProducer := &partialFailingSyncProducer{
+				successCount: 0,
+				err:          errors.New(context.Background(), "kafka unavailable"),
+			}
+			failingPublisher := pkg.NewResultPublisher(
+				partialProducer,
+				base.TopicPrefix("develop"),
+				currentDateTime,
+				nil,
+			)
+			task := refusalTask()
+
+			Expect(
+				failingPublisher.PublishTriggerBudgetRefusal(
+					ctx, task, "planning:4963ffa6", 4, 3,
+				),
+			).NotTo(Succeed())
+			Expect(
+				failingPublisher.PublishTriggerBudgetRefusal(
+					ctx, task, "planning:4963ffa6", 4, 3,
+				),
+			).NotTo(Succeed())
+
+			Expect(partialProducer.messages).To(HaveLen(2))
 		})
 	})
 

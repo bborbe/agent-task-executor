@@ -76,6 +76,18 @@ type FakeResultPublisher struct {
 	publishParkLostClaimReturnsOnCall map[int]struct {
 		result1 error
 	}
+	PublishParkSucceededStub        func(context.Context, lib.Task) error
+	publishParkSucceededMutex       sync.RWMutex
+	publishParkSucceededArgsForCall []struct {
+		arg1 context.Context
+		arg2 lib.Task
+	}
+	publishParkSucceededReturns struct {
+		result1 error
+	}
+	publishParkSucceededReturnsOnCall map[int]struct {
+		result1 error
+	}
 	PublishQueueEntryStub        func(context.Context, lib.Task, string) error
 	publishQueueEntryMutex       sync.RWMutex
 	publishQueueEntryArgsForCall []struct {
@@ -140,6 +152,35 @@ type FakeResultPublisher struct {
 		result1 error
 	}
 	publishSpawnNotificationReturnsOnCall map[int]struct {
+		result1 error
+	}
+	PublishStoreMissFailureStub        func(context.Context, lib.Task, string, string) error
+	publishStoreMissFailureMutex       sync.RWMutex
+	publishStoreMissFailureArgsForCall []struct {
+		arg1 context.Context
+		arg2 lib.Task
+		arg3 string
+		arg4 string
+	}
+	publishStoreMissFailureReturns struct {
+		result1 error
+	}
+	publishStoreMissFailureReturnsOnCall map[int]struct {
+		result1 error
+	}
+	PublishTriggerBudgetRefusalStub        func(context.Context, lib.Task, string, int, int) error
+	publishTriggerBudgetRefusalMutex       sync.RWMutex
+	publishTriggerBudgetRefusalArgsForCall []struct {
+		arg1 context.Context
+		arg2 lib.Task
+		arg3 string
+		arg4 int
+		arg5 int
+	}
+	publishTriggerBudgetRefusalReturns struct {
+		result1 error
+	}
+	publishTriggerBudgetRefusalReturnsOnCall map[int]struct {
 		result1 error
 	}
 	PublishTypeMismatchFailureStub        func(context.Context, lib.Task, string) error
@@ -474,6 +515,68 @@ func (fake *FakeResultPublisher) PublishParkLostClaimReturnsOnCall(i int, result
 	}{result1}
 }
 
+func (fake *FakeResultPublisher) PublishParkSucceeded(arg1 context.Context, arg2 lib.Task) error {
+	fake.publishParkSucceededMutex.Lock()
+	ret, specificReturn := fake.publishParkSucceededReturnsOnCall[len(fake.publishParkSucceededArgsForCall)]
+	fake.publishParkSucceededArgsForCall = append(fake.publishParkSucceededArgsForCall, struct {
+		arg1 context.Context
+		arg2 lib.Task
+	}{arg1, arg2})
+	stub := fake.PublishParkSucceededStub
+	fakeReturns := fake.publishParkSucceededReturns
+	fake.recordInvocation("PublishParkSucceeded", []interface{}{arg1, arg2})
+	fake.publishParkSucceededMutex.Unlock()
+	if stub != nil {
+		return stub(arg1, arg2)
+	}
+	if specificReturn {
+		return ret.result1
+	}
+	return fakeReturns.result1
+}
+
+func (fake *FakeResultPublisher) PublishParkSucceededCallCount() int {
+	fake.publishParkSucceededMutex.RLock()
+	defer fake.publishParkSucceededMutex.RUnlock()
+	return len(fake.publishParkSucceededArgsForCall)
+}
+
+func (fake *FakeResultPublisher) PublishParkSucceededCalls(stub func(context.Context, lib.Task) error) {
+	fake.publishParkSucceededMutex.Lock()
+	defer fake.publishParkSucceededMutex.Unlock()
+	fake.PublishParkSucceededStub = stub
+}
+
+func (fake *FakeResultPublisher) PublishParkSucceededArgsForCall(i int) (context.Context, lib.Task) {
+	fake.publishParkSucceededMutex.RLock()
+	defer fake.publishParkSucceededMutex.RUnlock()
+	argsForCall := fake.publishParkSucceededArgsForCall[i]
+	return argsForCall.arg1, argsForCall.arg2
+}
+
+func (fake *FakeResultPublisher) PublishParkSucceededReturns(result1 error) {
+	fake.publishParkSucceededMutex.Lock()
+	defer fake.publishParkSucceededMutex.Unlock()
+	fake.PublishParkSucceededStub = nil
+	fake.publishParkSucceededReturns = struct {
+		result1 error
+	}{result1}
+}
+
+func (fake *FakeResultPublisher) PublishParkSucceededReturnsOnCall(i int, result1 error) {
+	fake.publishParkSucceededMutex.Lock()
+	defer fake.publishParkSucceededMutex.Unlock()
+	fake.PublishParkSucceededStub = nil
+	if fake.publishParkSucceededReturnsOnCall == nil {
+		fake.publishParkSucceededReturnsOnCall = make(map[int]struct {
+			result1 error
+		})
+	}
+	fake.publishParkSucceededReturnsOnCall[i] = struct {
+		result1 error
+	}{result1}
+}
+
 func (fake *FakeResultPublisher) PublishQueueEntry(arg1 context.Context, arg2 lib.Task, arg3 string) error {
 	fake.publishQueueEntryMutex.Lock()
 	ret, specificReturn := fake.publishQueueEntryReturnsOnCall[len(fake.publishQueueEntryArgsForCall)]
@@ -786,6 +889,135 @@ func (fake *FakeResultPublisher) PublishSpawnNotificationReturnsOnCall(i int, re
 		})
 	}
 	fake.publishSpawnNotificationReturnsOnCall[i] = struct {
+		result1 error
+	}{result1}
+}
+
+func (fake *FakeResultPublisher) PublishStoreMissFailure(arg1 context.Context, arg2 lib.Task, arg3 string, arg4 string) error {
+	fake.publishStoreMissFailureMutex.Lock()
+	ret, specificReturn := fake.publishStoreMissFailureReturnsOnCall[len(fake.publishStoreMissFailureArgsForCall)]
+	fake.publishStoreMissFailureArgsForCall = append(fake.publishStoreMissFailureArgsForCall, struct {
+		arg1 context.Context
+		arg2 lib.Task
+		arg3 string
+		arg4 string
+	}{arg1, arg2, arg3, arg4})
+	stub := fake.PublishStoreMissFailureStub
+	fakeReturns := fake.publishStoreMissFailureReturns
+	fake.recordInvocation("PublishStoreMissFailure", []interface{}{arg1, arg2, arg3, arg4})
+	fake.publishStoreMissFailureMutex.Unlock()
+	if stub != nil {
+		return stub(arg1, arg2, arg3, arg4)
+	}
+	if specificReturn {
+		return ret.result1
+	}
+	return fakeReturns.result1
+}
+
+func (fake *FakeResultPublisher) PublishStoreMissFailureCallCount() int {
+	fake.publishStoreMissFailureMutex.RLock()
+	defer fake.publishStoreMissFailureMutex.RUnlock()
+	return len(fake.publishStoreMissFailureArgsForCall)
+}
+
+func (fake *FakeResultPublisher) PublishStoreMissFailureCalls(stub func(context.Context, lib.Task, string, string) error) {
+	fake.publishStoreMissFailureMutex.Lock()
+	defer fake.publishStoreMissFailureMutex.Unlock()
+	fake.PublishStoreMissFailureStub = stub
+}
+
+func (fake *FakeResultPublisher) PublishStoreMissFailureArgsForCall(i int) (context.Context, lib.Task, string, string) {
+	fake.publishStoreMissFailureMutex.RLock()
+	defer fake.publishStoreMissFailureMutex.RUnlock()
+	argsForCall := fake.publishStoreMissFailureArgsForCall[i]
+	return argsForCall.arg1, argsForCall.arg2, argsForCall.arg3, argsForCall.arg4
+}
+
+func (fake *FakeResultPublisher) PublishStoreMissFailureReturns(result1 error) {
+	fake.publishStoreMissFailureMutex.Lock()
+	defer fake.publishStoreMissFailureMutex.Unlock()
+	fake.PublishStoreMissFailureStub = nil
+	fake.publishStoreMissFailureReturns = struct {
+		result1 error
+	}{result1}
+}
+
+func (fake *FakeResultPublisher) PublishStoreMissFailureReturnsOnCall(i int, result1 error) {
+	fake.publishStoreMissFailureMutex.Lock()
+	defer fake.publishStoreMissFailureMutex.Unlock()
+	fake.PublishStoreMissFailureStub = nil
+	if fake.publishStoreMissFailureReturnsOnCall == nil {
+		fake.publishStoreMissFailureReturnsOnCall = make(map[int]struct {
+			result1 error
+		})
+	}
+	fake.publishStoreMissFailureReturnsOnCall[i] = struct {
+		result1 error
+	}{result1}
+}
+
+func (fake *FakeResultPublisher) PublishTriggerBudgetRefusal(arg1 context.Context, arg2 lib.Task, arg3 string, arg4 int, arg5 int) error {
+	fake.publishTriggerBudgetRefusalMutex.Lock()
+	ret, specificReturn := fake.publishTriggerBudgetRefusalReturnsOnCall[len(fake.publishTriggerBudgetRefusalArgsForCall)]
+	fake.publishTriggerBudgetRefusalArgsForCall = append(fake.publishTriggerBudgetRefusalArgsForCall, struct {
+		arg1 context.Context
+		arg2 lib.Task
+		arg3 string
+		arg4 int
+		arg5 int
+	}{arg1, arg2, arg3, arg4, arg5})
+	stub := fake.PublishTriggerBudgetRefusalStub
+	fakeReturns := fake.publishTriggerBudgetRefusalReturns
+	fake.recordInvocation("PublishTriggerBudgetRefusal", []interface{}{arg1, arg2, arg3, arg4, arg5})
+	fake.publishTriggerBudgetRefusalMutex.Unlock()
+	if stub != nil {
+		return stub(arg1, arg2, arg3, arg4, arg5)
+	}
+	if specificReturn {
+		return ret.result1
+	}
+	return fakeReturns.result1
+}
+
+func (fake *FakeResultPublisher) PublishTriggerBudgetRefusalCallCount() int {
+	fake.publishTriggerBudgetRefusalMutex.RLock()
+	defer fake.publishTriggerBudgetRefusalMutex.RUnlock()
+	return len(fake.publishTriggerBudgetRefusalArgsForCall)
+}
+
+func (fake *FakeResultPublisher) PublishTriggerBudgetRefusalCalls(stub func(context.Context, lib.Task, string, int, int) error) {
+	fake.publishTriggerBudgetRefusalMutex.Lock()
+	defer fake.publishTriggerBudgetRefusalMutex.Unlock()
+	fake.PublishTriggerBudgetRefusalStub = stub
+}
+
+func (fake *FakeResultPublisher) PublishTriggerBudgetRefusalArgsForCall(i int) (context.Context, lib.Task, string, int, int) {
+	fake.publishTriggerBudgetRefusalMutex.RLock()
+	defer fake.publishTriggerBudgetRefusalMutex.RUnlock()
+	argsForCall := fake.publishTriggerBudgetRefusalArgsForCall[i]
+	return argsForCall.arg1, argsForCall.arg2, argsForCall.arg3, argsForCall.arg4, argsForCall.arg5
+}
+
+func (fake *FakeResultPublisher) PublishTriggerBudgetRefusalReturns(result1 error) {
+	fake.publishTriggerBudgetRefusalMutex.Lock()
+	defer fake.publishTriggerBudgetRefusalMutex.Unlock()
+	fake.PublishTriggerBudgetRefusalStub = nil
+	fake.publishTriggerBudgetRefusalReturns = struct {
+		result1 error
+	}{result1}
+}
+
+func (fake *FakeResultPublisher) PublishTriggerBudgetRefusalReturnsOnCall(i int, result1 error) {
+	fake.publishTriggerBudgetRefusalMutex.Lock()
+	defer fake.publishTriggerBudgetRefusalMutex.Unlock()
+	fake.PublishTriggerBudgetRefusalStub = nil
+	if fake.publishTriggerBudgetRefusalReturnsOnCall == nil {
+		fake.publishTriggerBudgetRefusalReturnsOnCall = make(map[int]struct {
+			result1 error
+		})
+	}
+	fake.publishTriggerBudgetRefusalReturnsOnCall[i] = struct {
 		result1 error
 	}{result1}
 }

@@ -11,6 +11,7 @@ import (
 	lib "github.com/bborbe/agent"
 	"github.com/bborbe/cqrs/base"
 	libk8s "github.com/bborbe/k8s"
+	libtime "github.com/bborbe/time"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 	batchv1 "k8s.io/api/batch/v1"
@@ -51,6 +52,7 @@ var _ = Describe("jobWatcher backoff-limit pod detail", func() {
 			taskStore,
 			fakePublisher,
 			nil,
+			libtime.NewCurrentDateTime(),
 		)
 	})
 
@@ -262,6 +264,17 @@ var _ = Describe("jobWatcher backoff-limit pod detail", func() {
 	})
 })
 
+var _ = Describe("storeMissPublishWindow", func() {
+	It("stays inside the publisher dedupe TTL and spans a resync", func() {
+		// Inside dedupeTTL, every re-delivery of an already-published failed Job
+		// is deduped; past the window the store-miss path no longer publishes, so
+		// an expired dedupe entry cannot produce a second ## Failure.
+		Expect(storeMissPublishWindow).To(BeNumerically("<", dedupeTTL))
+		// Longer than a resync, so a failed publish is retried by a re-delivery.
+		Expect(storeMissPublishWindow).To(BeNumerically(">", jobWatcherResyncPeriod))
+	})
+})
+
 // setPodLister inserts a synced fake informer for "test-ns" seeded with the
 // given pods (Run is never called in tests, so PodLister would otherwise
 // return nil).
@@ -329,8 +342,9 @@ func (errorPodNamespaceLister) Get(_ string) (*corev1.Pod, error) {
 // import cycle. It exposes the same PublishFailure call-recording API the
 // counterfeiter fake does, so the spec assertions are unchanged.
 type fakeResultPublisher struct {
-	publishFailureCalls  []resultPublisherCall
-	clearCurrentJobCalls []clearCurrentJobCall
+	publishFailureCalls       []resultPublisherCall
+	publishStoreMissFailCalls []resultPublisherCall
+	clearCurrentJobCalls      []clearCurrentJobCall
 }
 
 type clearCurrentJobCall struct {
@@ -369,6 +383,35 @@ func (f *fakeResultPublisher) PublishFailure(
 	return nil
 }
 
+// PublishStoreMissFailure records into its own slice so a spec can tell the two
+// failure paths apart: the store-hit path must not be used for a store miss,
+// and vice versa.
+func (f *fakeResultPublisher) PublishStoreMissFailure(
+	ctx context.Context,
+	task lib.Task,
+	jobName string,
+	reason string,
+) error {
+	f.publishStoreMissFailCalls = append(f.publishStoreMissFailCalls, resultPublisherCall{
+		ctx:     ctx,
+		task:    task,
+		jobName: jobName,
+		reason:  reason,
+	})
+	return nil
+}
+
+func (f *fakeResultPublisher) PublishStoreMissFailureCallCount() int {
+	return len(f.publishStoreMissFailCalls)
+}
+
+func (f *fakeResultPublisher) PublishStoreMissFailureArgsForCall(
+	i int,
+) (context.Context, lib.Task, string, string) {
+	call := f.publishStoreMissFailCalls[i]
+	return call.ctx, call.task, call.jobName, call.reason
+}
+
 func (f *fakeResultPublisher) PublishClearCurrentJob(
 	ctx context.Context,
 	task lib.Task,
@@ -398,6 +441,16 @@ func (f *fakeResultPublisher) PublishSetTriggerScope(
 	return nil
 }
 
+func (f *fakeResultPublisher) PublishTriggerBudgetRefusal(
+	ctx context.Context,
+	task lib.Task,
+	scope string,
+	count int,
+	maxTriggers int,
+) error {
+	return nil
+}
+
 func (f *fakeResultPublisher) PublishTypeMismatchFailure(
 	ctx context.Context,
 	task lib.Task,
@@ -415,6 +468,13 @@ func (f *fakeResultPublisher) PublishRestoreAssignee(
 }
 
 func (f *fakeResultPublisher) PublishParkLostClaim(
+	ctx context.Context,
+	task lib.Task,
+) error {
+	return nil
+}
+
+func (f *fakeResultPublisher) PublishParkSucceeded(
 	ctx context.Context,
 	task lib.Task,
 ) error {

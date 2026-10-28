@@ -75,6 +75,12 @@ func (stubResultPublisher) PublishFailure(
 	return nil
 }
 
+func (stubResultPublisher) PublishStoreMissFailure(
+	context.Context, lib.Task, string, string,
+) error {
+	return nil
+}
+
 func (stubResultPublisher) PublishClearCurrentJob(
 	context.Context, lib.Task, string,
 ) error {
@@ -97,6 +103,12 @@ func (stubResultPublisher) PublishSetTriggerScope(
 	return nil
 }
 
+func (stubResultPublisher) PublishTriggerBudgetRefusal(
+	context.Context, lib.Task, string, int, int,
+) error {
+	return nil
+}
+
 func (stubResultPublisher) PublishTypeMismatchFailure(
 	context.Context, lib.Task, string,
 ) error {
@@ -110,6 +122,10 @@ func (stubResultPublisher) PublishRestoreAssignee(
 }
 
 func (stubResultPublisher) PublishParkLostClaim(context.Context, lib.Task) error {
+	return nil
+}
+
+func (stubResultPublisher) PublishParkSucceeded(context.Context, lib.Task) error {
 	return nil
 }
 

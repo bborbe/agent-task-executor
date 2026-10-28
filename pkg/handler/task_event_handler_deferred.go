@@ -104,6 +104,17 @@ func (h *taskEventHandler) evalDeferredRespawns(ctx context.Context) error {
 			// not exit the process and starve every other due entry. The entry is
 			// not re-parked; the reconcile floor re-drives the task. Every other
 			// error stays fatal.
+			var refusalErr *triggerRefusalWriteError
+			if stderrors.As(err, &refusalErr) {
+				glog.Warningf(
+					"event=deferred_respawn_refusal_write_failed task=%s err=%v",
+					entry.task.TaskIdentifier, err,
+				)
+				metrics.TaskEventsTotal.WithLabelValues("deferred_respawn_refusal_write_failed").
+					Inc()
+				h.clearQueuedAtStampIfNotDeferred(entry.task.TaskIdentifier)
+				continue
+			}
 			var spawnErr *spawnJobError
 			if stderrors.As(err, &spawnErr) {
 				glog.Warningf(
