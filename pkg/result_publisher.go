@@ -156,6 +156,13 @@ type ResultPublisher interface {
 	// as they are. human_review is already in the executor's terminal-phase set,
 	// so a parked task is never re-spawned and needs no second guard.
 	PublishParkLostClaim(ctx context.Context, task lib.Task) error
+	// PublishParkSucceeded writes phase "human_review" onto a task whose Job
+	// succeeded but whose phase never moved — a deliberate human park, not a
+	// finished task. Writes the "phase" key and nothing else. human_review is
+	// already in the executor's terminal-phase set, so the reconcile pass stops
+	// re-driving it; without this write a task whose agent exits 0 without
+	// moving the phase is eligible on every pass and re-spawned forever.
+	PublishParkSucceeded(ctx context.Context, task lib.Task) error
 	// PublishAbort closes a record the consecutive-re-drive cap has decided to
 	// stop driving. It writes status aborted plus the close-out pair vault-cli
 	// requires (aborted_reason and gate_successor) and clears current_job. It
@@ -477,15 +484,50 @@ func (p *resultPublisher) PublishSpawnNotification(
 // blind Updates apply, so writing here would clobber an operator's deliberate
 // budget — the store holds records at 5 and 6, and halving one of those is a
 // regression, not a repair.
-func crashFailureUpdates(task lib.Task, reason string) lib.TaskFrontmatter {
+//
+// Every return is logged with the values the decision tested, not just its
+// verdict. This function is the only place the crash class arms a record, and a
+// record that arrives at the controller without the key is indistinguishable
+// from one whose class never matched — both leave the escalation inert with no
+// error anywhere. Printing the raw reason, its parsed form, the task and job
+// identity, and the presence flag with the cached value is what separates "the
+// in-memory task already carried a budget the vault file does not" (a divergence
+// between two views of one task) from "the class gate rejected it". The level is
+// V(2) because both dev and prod run the executor with -v=2; a higher level
+// would make the line invisible exactly where it is needed.
+//
+// Every line is named event=crash_arm_decision and carries a decision= field,
+// because this function only DECIDES: the UpdateFrontmatterCommand it feeds is
+// published by the caller, and a failed publish returns an error there without
+// the record ever receiving the key. A line reading "armed" would then assert an
+// outcome no code here has reached, and an operator grepping for it would be
+// told the cap was armed on a write that failed — the same false green this
+// instrumentation exists to remove. Publish failure is reported by the caller.
+func crashFailureUpdates(task lib.Task, jobName, reason string) lib.TaskFrontmatter {
 	updates := lib.TaskFrontmatter{"current_job": ""}
-	parsed, ok := ParseZombieReason(reason)
-	if !ok || parsed != ZombieReasonPodCrashNoStdout {
+	parsed, parsedOK := ParseZombieReason(reason)
+	if !parsedOK || parsed != ZombieReasonPodCrashNoStdout {
+		glog.V(2).Infof(
+			"event=crash_arm_decision task=%s job=%s reason=%q parsed=%q parsed_ok=%t "+
+				"decision=not_crash_class",
+			task.TaskIdentifier, jobName, reason, parsed.String(), parsedOK,
+		)
 		return updates
 	}
-	if _, present := task.Frontmatter["max_triggers"]; present {
+	cachedMax, maxPresent := task.Frontmatter["max_triggers"]
+	if maxPresent {
+		glog.V(2).Infof(
+			"event=crash_arm_decision task=%s job=%s reason=%q parsed=%q parsed_ok=%t "+
+				"decision=max_triggers_already_present cached_max_triggers=%v",
+			task.TaskIdentifier, jobName, reason, parsed.String(), parsedOK, cachedMax,
+		)
 		return updates
 	}
+	glog.V(2).Infof(
+		"event=crash_arm_decision task=%s job=%s reason=%q parsed=%q parsed_ok=%t "+
+			"decision=arm cached_max_triggers=<absent> max_triggers=%d",
+		task.TaskIdentifier, jobName, reason, parsed.String(), parsedOK, defaultMaxTriggers,
+	)
 	updates["max_triggers"] = defaultMaxTriggers
 	return updates
 }
@@ -511,7 +553,7 @@ func (p *resultPublisher) PublishFailure(
 	updateCmd := taskcmd.UpdateFrontmatterCommand{
 		TaskIdentifier: task.TaskIdentifier,
 		TargetVault:    targetVaultFromTask(task),
-		Updates:        crashFailureUpdates(task, reason),
+		Updates:        crashFailureUpdates(task, jobName, reason),
 		Body: &taskcmd.BodySection{
 			Heading: "## Failure",
 			Section: section,
@@ -790,6 +832,18 @@ func (p *resultPublisher) PublishParkLostClaim(
 		},
 	}
 	return p.publishRaw(ctx, taskcmd.UpdateFrontmatterCommandOperation, cmd)
+}
+
+// PublishParkSucceeded writes phase "human_review" and nothing else.
+//
+// It delegates rather than repeating the command: the two parks differ only in
+// why they fire, and the write they make is identical. Duplicating it would let
+// a future change to the park payload drift between them.
+func (p *resultPublisher) PublishParkSucceeded(
+	ctx context.Context,
+	task lib.Task,
+) error {
+	return p.PublishParkLostClaim(ctx, task)
 }
 
 // PublishAbort closes a record the consecutive-re-drive cap has stopped

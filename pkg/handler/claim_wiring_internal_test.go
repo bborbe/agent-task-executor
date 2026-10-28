@@ -304,6 +304,12 @@ func unsetConfig() *pkg.AgentConfiguration {
 // internal test of handler cannot import it.
 type parkRecordingPublisher struct {
 	parked []lib.TaskIdentifier
+	// parkedSucceeded records the succeeded-Job parks, which write a different
+	// phase for a different cause and must not be conflated with the above.
+	parkedSucceeded []lib.Task
+	// failParkSucceeded makes every succeeded-Job park fail, so a spec can pin
+	// the log-and-continue branch.
+	failParkSucceeded bool
 	// failFirst makes the next failFirst park calls fail, so a test can pin the
 	// retry and the final-failure path without a second fake.
 	failFirst int
@@ -318,6 +324,19 @@ func (s *parkRecordingPublisher) PublishParkLostClaim(
 		return stderrors.New("publish failed")
 	}
 	s.parked = append(s.parked, task.TaskIdentifier)
+	return nil
+}
+
+// PublishParkSucceeded records a succeeded-Job park, so a spec can assert both
+// that it happened and what it published.
+func (s *parkRecordingPublisher) PublishParkSucceeded(
+	_ context.Context,
+	task lib.Task,
+) error {
+	if s.failParkSucceeded {
+		return stderrors.New("publish failed")
+	}
+	s.parkedSucceeded = append(s.parkedSucceeded, task)
 	return nil
 }
 
