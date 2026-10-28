@@ -406,6 +406,27 @@ var _ = Describe("ResultPublisher", func() {
 			_, hasMax := updateCmd.Updates["max_triggers"]
 			Expect(hasMax).To(BeFalse(), "a deliberate budget of 6 must not become 3")
 		})
+
+		It("leaves max_triggers alone when the key is present but unknown (nil)", func() {
+			// The job watcher publishes a failure for a task that has left its
+			// store with max_triggers present but nil: the real value is unknown,
+			// and writing the default could lower an operator-set cap.
+			task := lib.Task{
+				TaskIdentifier: lib.TaskIdentifier("test-task-store-miss"),
+				Frontmatter:    lib.TaskFrontmatter{"max_triggers": nil},
+			}
+			err := publisher.PublishFailure(
+				ctx,
+				task,
+				"claude-20260418120000",
+				"pod_crash_no_stdout (ContainerStatusUnknown/137)",
+			)
+			Expect(err).NotTo(HaveOccurred())
+
+			_, updateCmd := decodeUpdateFrontmatterCommand(producer.messages[0])
+			Expect(updateCmd.Updates).To(HaveLen(1))
+			Expect(updateCmd.Updates["current_job"]).To(Equal(""))
+		})
 	})
 
 	Describe("PublishFailure dedupe", func() {

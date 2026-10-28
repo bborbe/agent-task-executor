@@ -11,6 +11,7 @@ import (
 	lib "github.com/bborbe/agent"
 	"github.com/bborbe/cqrs/base"
 	libk8s "github.com/bborbe/k8s"
+	libtime "github.com/bborbe/time"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 	batchv1 "k8s.io/api/batch/v1"
@@ -51,6 +52,7 @@ var _ = Describe("jobWatcher backoff-limit pod detail", func() {
 			taskStore,
 			fakePublisher,
 			nil,
+			libtime.NewCurrentDateTime(),
 		)
 	})
 
@@ -259,6 +261,17 @@ var _ = Describe("jobWatcher backoff-limit pod detail", func() {
 				Expect(calledReason).To(Equal("pod_crash_no_stdout"))
 			},
 		)
+	})
+})
+
+var _ = Describe("storeMissPublishWindow", func() {
+	It("stays inside the publisher dedupe TTL and spans a resync", func() {
+		// Inside dedupeTTL, every re-delivery of an already-published failed Job
+		// is deduped; past the window the store-miss path no longer publishes, so
+		// an expired dedupe entry cannot produce a second ## Failure.
+		Expect(storeMissPublishWindow).To(BeNumerically("<", dedupeTTL))
+		// Longer than a resync, so a failed publish is retried by a re-delivery.
+		Expect(storeMissPublishWindow).To(BeNumerically(">", jobWatcherResyncPeriod))
 	})
 })
 

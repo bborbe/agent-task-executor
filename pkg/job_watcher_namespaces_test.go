@@ -193,6 +193,7 @@ func newNamespaceTestWatcher(
 		NewTaskStore(),
 		publisher,
 		nil,
+		libtime.NewCurrentDateTime(),
 	).(*jobWatcher)
 	if !ok {
 		t.Fatalf("watcher is not a *jobWatcher")
@@ -452,6 +453,7 @@ func TestJobWatcherReresolvesNamespaceSet(t *testing.T) {
 		NewTaskStore(),
 		&fakeResultPublisher{},
 		nil,
+		libtime.NewCurrentDateTime(),
 	).(*jobWatcher)
 	if !ok {
 		t.Fatalf("NewJobWatcher did not return *jobWatcher")

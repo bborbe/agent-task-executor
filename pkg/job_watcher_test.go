@@ -9,6 +9,7 @@ import (
 	"time"
 
 	lib "github.com/bborbe/agent"
+	libtime "github.com/bborbe/time"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 	batchv1 "k8s.io/api/batch/v1"
@@ -22,13 +23,15 @@ import (
 
 var _ = Describe("JobWatcher", func() {
 	var (
-		ctx            context.Context
-		fakePublisher  *mocks.FakeResultPublisher
-		taskStore      *pkg.TaskStore
-		fakeKubeClient *fake.Clientset
-		watcher        pkg.JobWatcher
-		testTask       lib.Task
-		testTaskID     lib.TaskIdentifier
+		ctx             context.Context
+		fakePublisher   *mocks.FakeResultPublisher
+		taskStore       *pkg.TaskStore
+		fakeKubeClient  *fake.Clientset
+		watcher         pkg.JobWatcher
+		testTask        lib.Task
+		testTaskID      lib.TaskIdentifier
+		currentDateTime libtime.CurrentDateTime
+		watcherStart    time.Time
 	)
 
 	BeforeEach(func() {
@@ -36,6 +39,9 @@ var _ = Describe("JobWatcher", func() {
 		fakePublisher = &mocks.FakeResultPublisher{}
 		taskStore = pkg.NewTaskStore()
 		fakeKubeClient = fake.NewClientset()
+		watcherStart = time.Date(2026, 10, 28, 6, 0, 0, 0, time.UTC)
+		currentDateTime = libtime.NewCurrentDateTime()
+		currentDateTime.SetNow(libtime.DateTime(watcherStart))
 		testTaskID = lib.TaskIdentifier("test-task-uuid-1234")
 		testTask = lib.Task{
 			TaskIdentifier: testTaskID,
@@ -52,6 +58,7 @@ var _ = Describe("JobWatcher", func() {
 			taskStore,
 			fakePublisher,
 			nil,
+			currentDateTime,
 		)
 	})
 
@@ -340,6 +347,114 @@ var _ = Describe("JobWatcher", func() {
 			Expect(fakePublisher.PublishFailureCallCount()).To(Equal(1))
 			_, _, _, calledReason := fakePublisher.PublishFailureArgsForCall(0)
 			Expect(calledReason).To(Equal("pod_crash_no_stdout"))
+		})
+	})
+
+	Describe("HandleJob for a failed Job whose task is not in the store", func() {
+		// Regression for the silent crashes of task ad12e9fb (2026-10-28, job
+		// github-update-go-agent-ad12e9fb-20261028065801, pod_crash_no_stdout
+		// ContainerStatusUnknown/137) and task 9371a3d2 (2026-10-27): the store
+		// entry had already been evicted, so the failure was logged at V(3) and
+		// dropped, leaving the record with a dead current_job and no ## Failure.
+		failedAt := func(at time.Time) batchv1.JobCondition {
+			return batchv1.JobCondition{
+				Type:               batchv1.JobFailed,
+				Status:             corev1.ConditionTrue,
+				LastTransitionTime: metav1.NewTime(at),
+			}
+		}
+
+		createJob := func(job *batchv1.Job) {
+			_, err := fakeKubeClient.BatchV1().
+				Jobs("test-ns").
+				Create(ctx, job, metav1.CreateOptions{})
+			Expect(err).To(BeNil())
+		}
+
+		It("publishes the failure when the Job failed after the watcher started", func() {
+			job := makeJob("job-fresh", string(testTaskID), failedAt(watcherStart.Add(time.Minute)))
+			job.Annotations = map[string]string{pkg.TaskPhaseAnnotationKey: "execution"}
+			createJob(job)
+			currentDateTime.SetNow(libtime.DateTime(watcherStart.Add(2 * time.Minute)))
+
+			watcher.HandleJob(ctx, job)
+
+			Expect(fakePublisher.PublishFailureCallCount()).To(Equal(1))
+			_, calledTask, calledJobName, calledReason := fakePublisher.PublishFailureArgsForCall(0)
+			Expect(calledTask.TaskIdentifier).To(Equal(testTaskID))
+			Expect(calledJobName).To(Equal("job-fresh"))
+			Expect(calledReason).To(Equal("pod_crash_no_stdout"))
+			// The phase keys the re-drive streak and reason refs exactly as the
+			// store-hit path would.
+			Expect(calledTask.Frontmatter["phase"]).To(Equal("execution"))
+			// The real max_triggers is unknown here; carrying the key keeps the
+			// publisher from writing its default over an operator-set cap.
+			_, hasMaxTriggers := calledTask.Frontmatter["max_triggers"]
+			Expect(hasMaxTriggers).To(BeTrue())
+		})
+
+		It("does not publish when the Job failed before the watcher started", func() {
+			job := makeJob(
+				"job-stale",
+				string(testTaskID),
+				failedAt(watcherStart.Add(-time.Minute)),
+			)
+			createJob(job)
+			currentDateTime.SetNow(libtime.DateTime(watcherStart.Add(2 * time.Minute)))
+
+			watcher.HandleJob(ctx, job)
+
+			Expect(fakePublisher.PublishFailureCallCount()).To(Equal(0))
+		})
+
+		It("does not publish once the failure is older than the publish window", func() {
+			job := makeJob("job-old", string(testTaskID), failedAt(watcherStart.Add(time.Minute)))
+			createJob(job)
+			currentDateTime.SetNow(libtime.DateTime(watcherStart.Add(2 * time.Hour)))
+
+			watcher.HandleJob(ctx, job)
+
+			Expect(fakePublisher.PublishFailureCallCount()).To(Equal(0))
+		})
+
+		It("does not publish while another Job for the task is still active", func() {
+			job := makeJob("job-fresh", string(testTaskID), failedAt(watcherStart.Add(time.Minute)))
+			createJob(job)
+			createJob(makeJob("job-newer", string(testTaskID)))
+			currentDateTime.SetNow(libtime.DateTime(watcherStart.Add(2 * time.Minute)))
+
+			watcher.HandleJob(ctx, job)
+
+			Expect(fakePublisher.PublishFailureCallCount()).To(Equal(0))
+		})
+
+		It("keeps the store-hit path unchanged for a task in the store", func() {
+			job := makeJob("job-hit", string(testTaskID), failedAt(watcherStart.Add(time.Minute)))
+			createJob(job)
+			taskStore.Store(testTaskID, testTask)
+			currentDateTime.SetNow(libtime.DateTime(watcherStart.Add(2 * time.Minute)))
+
+			watcher.HandleJob(ctx, job)
+
+			Expect(fakePublisher.PublishFailureCallCount()).To(Equal(1))
+			_, calledTask, calledJobName, calledReason := fakePublisher.PublishFailureArgsForCall(0)
+			Expect(calledTask).To(Equal(testTask))
+			Expect(calledJobName).To(Equal("job-hit"))
+			Expect(calledReason).To(Equal("pod_crash_no_stdout"))
+			_, ok := taskStore.Load(testTaskID)
+			Expect(ok).To(BeFalse())
+		})
+
+		It("does not publish a failure for a succeeded Job with an empty store", func() {
+			completedAt := metav1.NewTime(watcherStart.Add(time.Minute))
+			job := makeJob("job-ok", string(testTaskID), succeededCondition())
+			job.Status.CompletionTime = &completedAt
+			createJob(job)
+			currentDateTime.SetNow(libtime.DateTime(watcherStart.Add(2 * time.Minute)))
+
+			watcher.HandleJob(ctx, job)
+
+			Expect(fakePublisher.PublishFailureCallCount()).To(Equal(0))
 		})
 	})
 

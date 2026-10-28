@@ -14,6 +14,7 @@ import (
 
 	lib "github.com/bborbe/agent"
 	libk8s "github.com/bborbe/k8s"
+	libtime "github.com/bborbe/time"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 	corev1 "k8s.io/api/core/v1"
@@ -90,6 +91,7 @@ var _ = Describe("JobWatcher (envtest)", func() {
 			store,
 			publisher,
 			nil,
+			libtime.NewCurrentDateTime(),
 		)
 
 		runErrCh := make(chan error, 1)

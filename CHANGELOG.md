@@ -2,6 +2,10 @@
 
 All notable changes to this project will be documented in this file.
 
+## Unreleased
+
+- fix: **publish a failure for a failed Job whose task has left the in-memory store, instead of dropping it silently.** The job watcher published a synthetic failure only when the task was still in its `TaskStore`; otherwise it logged at V(3) and dropped it. The entry is evicted by any terminal-status event, a type mismatch or a restart, so a failed Job routinely outlives it: task `ad12e9fb` (2026-10-28, `pod_crash_no_stdout (ContainerStatusUnknown/137)`) and task `9371a3d2` (2026-10-27) kept a dead `current_job` and never got a `## Failure`. A store miss now publishes from a minimal task built from the Job (task-id label, phase annotation, empty target vault) when the failure is newer than the watcher's start and under 30 minutes old, and no other Job for the task is active. Older failures keep the old log-and-drop, because a store miss is also the normal state for a failure already published: inside the window the publisher's 1 h per-job dedupe absorbs every resync re-delivery, and past it the path no longer publishes. `max_triggers` is not armed on this path — its real value is unknown, and writing the default could lower an operator-set cap.
+
 ## v0.46.3
 
 - fix: **a successful spawn no longer consumes the re-drive budget.** The streak advanced on every successful `SpawnJob` while a reason was recorded only from `PublishFailure`, so a Job that exited 0 published no evidence yet still reached the cap — where the classifier had nothing to read, returned `unknown`, and refused the record forever with no abort and no release. Measured on dev 2026-10-27: 83 `class=unknown` lines across 11 distinct task ids. The streak now counts **published failures** and is written by the result publisher beside the reason, so the count and the evidence it is classified from cannot diverge; `recordRedriveSpawn` keeps only the in-memory floor used when the store is unreadable.
