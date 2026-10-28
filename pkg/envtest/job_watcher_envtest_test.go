@@ -91,6 +91,7 @@ var _ = Describe("JobWatcher (envtest)", func() {
 			publisher,
 			nil,
 			nil,
+			nil,
 		)
 
 		runErrCh := make(chan error, 1)

@@ -80,6 +80,7 @@ var _ = Describe("respawned-second-success race", func() {
 			fakeResultPublisher,
 			nil,
 			nil,
+			nil,
 		)
 	})
 

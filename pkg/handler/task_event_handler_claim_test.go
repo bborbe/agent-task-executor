@@ -162,6 +162,7 @@ func (h *claimHarness) watcher() pkg.JobWatcher {
 		h.publisher,
 		h.eventHandler,
 		nil,
+		nil,
 	)
 }
 

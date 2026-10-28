@@ -14,6 +14,7 @@ import (
 	lib "github.com/bborbe/agent"
 	"github.com/bborbe/errors"
 	libk8s "github.com/bborbe/k8s"
+	libtime "github.com/bborbe/time"
 	"github.com/golang/glog"
 	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
@@ -58,6 +59,7 @@ func NewJobWatcher(
 	publisher ResultPublisher,
 	claimReleaser ClaimReleaser,
 	taskView TaskPhaseReader,
+	currentDateTime libtime.CurrentDateTimeGetter,
 ) JobWatcher {
 	w := &jobWatcher{
 		kubeClient:           kubeClient,
@@ -67,6 +69,7 @@ func NewJobWatcher(
 		publisher:            publisher,
 		claimReleaser:        claimReleaser,
 		taskView:             taskView,
+		currentDateTime:      currentDateTime,
 		newNamespaceInformer: newJobWatcherNamespaceInformer,
 	}
 	w.watched = map[libk8s.Namespace]bool{namespace: true}
@@ -83,6 +86,7 @@ type jobWatcher struct {
 	publisher            ResultPublisher
 	claimReleaser        ClaimReleaser
 	taskView             TaskPhaseReader
+	currentDateTime      libtime.CurrentDateTimeGetter
 	mu                   sync.Mutex
 	watched              map[libk8s.Namespace]bool
 	synced               map[libk8s.Namespace]bool

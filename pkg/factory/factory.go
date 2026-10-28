@@ -67,6 +67,7 @@ func CreateJobWatcher(
 	publisher pkg.ResultPublisher,
 	claimReleaser pkg.ClaimReleaser,
 	taskView handler.TaskView,
+	currentDateTime libtime.CurrentDateTimeGetter,
 ) pkg.JobWatcher {
 	return pkg.NewJobWatcher(
 		kubeClient,
@@ -76,6 +77,7 @@ func CreateJobWatcher(
 		publisher,
 		claimReleaser,
 		taskView,
+		currentDateTime,
 	)
 }
 
