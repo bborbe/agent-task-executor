@@ -379,12 +379,13 @@ func (w *jobWatcher) releaseClaimAfterSuccess(
 	ctx context.Context,
 	taskID lib.TaskIdentifier,
 	jobName string,
+	phase string,
 	completedAt time.Time,
 ) {
 	if !w.claimReleaseAllowed(taskID, jobName) {
 		return
 	}
-	w.claimReleaser.ReleaseTaskClaimAfterSuccess(ctx, taskID, completedAt)
+	w.claimReleaser.ReleaseTaskClaimAfterSuccess(ctx, taskID, phase, completedAt)
 }
 
 // releaseSucceededJobClaim releases the claim of a succeeded Job, holding it for
@@ -406,7 +407,13 @@ func (w *jobWatcher) releaseSucceededJobClaim(
 		w.releaseClaim(ctx, taskID, job.Name)
 		return
 	}
-	w.releaseClaimAfterSuccess(ctx, taskID, job.Name, job.Status.CompletionTime.Time)
+	w.releaseClaimAfterSuccess(
+		ctx,
+		taskID,
+		job.Name,
+		job.Annotations[TaskPhaseAnnotationKey],
+		job.Status.CompletionTime.Time,
+	)
 }
 
 // claimReleaseAllowed reports whether this Job's terminal event may release the

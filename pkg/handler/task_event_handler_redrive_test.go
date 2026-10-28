@@ -343,10 +343,12 @@ var _ = Describe("redrive streak persistence", func() {
 
 			// The spawn is still refused from the in-memory floor, but reaching the
 			// cap no longer short-circuits: the capped event reads the streak and then
-			// the reasons, so the classifier can run on the ordinary path. Two extra
-			// list calls are that pair of reads.
+			// the reasons, so the classifier can run on the ordinary path. A third
+			// read is the shared success record, which the guard consults whenever the
+			// pod's own memory has no record for the task — one list per event on that
+			// path, and one per PASS on the reconcile path, which reads a snapshot.
 			Expect(a.spawner.SpawnJobCallCount()).To(Equal(3))
-			Expect(client.ListCallCount()).To(Equal(listCalls + 2))
+			Expect(client.ListCallCount()).To(Equal(listCalls + 3))
 		},
 	)
 

@@ -136,32 +136,6 @@ const maxConsecutiveRedrives = 3
 // pass at 45s with evaluated=0.
 const DefaultReconcilePassTimeout = 45 * time.Second
 
-// terminalPhases is the set of phases that must never trigger a new spawn.
-// Extending this set requires a follow-up spec if vault-cli adds new terminal phases.
-var terminalPhases = map[domain.TaskPhase]struct{}{
-	domain.TaskPhaseHumanReview: {},
-	domain.TaskPhaseDone:        {},
-}
-
-// knownPhases contains all phase constants exported by vault-cli v0.64.3.
-// Values outside this set trigger enum-drift logging (event=unknown_phase).
-var knownPhases = map[domain.TaskPhase]struct{}{
-	domain.TaskPhaseTodo:        {},
-	domain.TaskPhasePlanning:    {},
-	domain.TaskPhaseExecution:   {}, // canonical (was TaskPhaseInProgress)
-	domain.TaskPhaseInProgress:  {}, // legacy alias — still a known phase string
-	domain.TaskPhaseAIReview:    {},
-	domain.TaskPhaseHumanReview: {},
-	domain.TaskPhaseDone:        {},
-}
-
-// IsTerminal reports whether the given phase is in the terminal set.
-// Tasks at a terminal phase must not be re-spawned; operator intervention is required.
-func IsTerminal(phase domain.TaskPhase) bool {
-	_, ok := terminalPhases[phase]
-	return ok
-}
-
 // terminalStatuses is the status-side twin of terminalPhases: the two statuses a
 // task never leaves, because the work is finished or was cancelled.
 //
@@ -343,6 +317,10 @@ type taskEventHandler struct {
 	// beside redriveStore from the same client and nil under the same conditions.
 	// It is named redriveReasons because redriveReasonStore is its accessor.
 	redriveReasons claim.RedriveReasonStore
+	// successRecordStore is the shared success record the suppression reads after
+	// a pod restart; nil leaves the guard on the in-memory record.
+	successRecordStore claim.SuccessStore
+	successStoreOnce   sync.Once
 	// spawnGens counts Jobs created by this executor per assignee, on any path.
 	// A pass cache entry read at an older generation is refetched, so a Job
 	// spawned by the Kafka consumer or the deferred loop mid-pass is never
@@ -931,7 +909,7 @@ func (h *taskEventHandler) spawnIfNeededClaimed(
 		return spawnOutcomeSuppressed, nil
 	}
 
-	if h.recentlySucceeded(task) {
+	if h.recentlySucceeded(ctx, task) {
 		return spawnOutcomeSuppressed, nil
 	}
 
@@ -1255,6 +1233,8 @@ func (h *taskEventHandler) ReconcileOnce(ctx context.Context) error {
 	// records a new one. Fetched lazily, so a pass with no candidates pays
 	// nothing. See redrive_streak_cache.go for the measurement.
 	passCtx = withRedriveStreakCache(passCtx)
+	// One `list refs` of the success prefix for the pass; see success_cache.go.
+	passCtx = withSuccessCache(passCtx)
 
 	if !h.view.Ready() {
 		metrics.ReconcilePassesTotal.WithLabelValues("view_not_ready").Inc()

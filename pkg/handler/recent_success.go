@@ -5,12 +5,14 @@
 package handler
 
 import (
+	"context"
 	"strings"
 	"time"
 
 	lib "github.com/bborbe/agent"
 	"github.com/golang/glog"
 
+	pkg "github.com/bborbe/agent-task-executor/pkg"
 	"github.com/bborbe/agent-task-executor/pkg/metrics"
 )
 
@@ -36,9 +38,10 @@ import (
 // occurrences and a permanent suppression would stop it for good. A task with no
 // recognised token is not recurring, and the suppression holds until its phase
 // changes.
-func (h *taskEventHandler) recentlySucceeded(task lib.Task) bool {
-	succeeded, ok := h.taskStore.LastSucceeded(task.TaskIdentifier)
-	if !ok || succeeded.Phase != taskPhase(task) {
+func (h *taskEventHandler) recentlySucceeded(ctx context.Context, task lib.Task) bool {
+	phase := taskPhase(task)
+	succeeded, ok := h.lastSuccess(ctx, task, phase)
+	if !ok {
 		return false
 	}
 	elapsed := h.currentDateTime.Now().Time().Sub(succeeded.CompletedAt)
@@ -57,6 +60,35 @@ func (h *taskEventHandler) recentlySucceeded(task lib.Task) bool {
 	)
 	metrics.TaskEventsTotal.WithLabelValues("skipped_recent_success").Inc()
 	return true
+}
+
+// lastSuccess returns the task's latest successful Job at phase.
+//
+// The pod's own memory is asked first: it is written the moment the Job watcher
+// sees the success, so on the pod that ran the Job it is both cheaper and more
+// current than a store read. Only a miss — the fresh-store case, a pod that
+// started after the Job completed — reaches the shared record, and a hit there is
+// written back into memory so every later attempt on this pod is free.
+//
+// The write-back is what keeps the two halves on one retention horizon: the
+// reconcile prune bounds the map, and the shared record's lease bounds the store,
+// and both use successRecordRetention, so a record does not reappear from the
+// store after the map has forgotten it.
+func (h *taskEventHandler) lastSuccess(
+	ctx context.Context,
+	task lib.Task,
+	phase string,
+) (pkg.SucceededJob, bool) {
+	if succeeded, ok := h.taskStore.LastSucceeded(task.TaskIdentifier); ok &&
+		succeeded.Phase == phase {
+		return succeeded, true
+	}
+	completedAt, ok := h.sharedSuccess(ctx, task.TaskIdentifier, phase)
+	if !ok {
+		return pkg.SucceededJob{}, false
+	}
+	h.taskStore.MarkSucceeded(task.TaskIdentifier, phase, completedAt.Time())
+	return pkg.SucceededJob{Phase: phase, CompletedAt: completedAt.Time()}, true
 }
 
 // recurringCadences maps the declared `recurring:` token to the period after

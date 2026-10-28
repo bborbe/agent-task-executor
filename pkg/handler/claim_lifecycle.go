@@ -62,8 +62,14 @@ func (h *taskEventHandler) ReleaseTaskClaim(ctx context.Context, taskID lib.Task
 func (h *taskEventHandler) ReleaseTaskClaimAfterSuccess(
 	ctx context.Context,
 	taskID lib.TaskIdentifier,
+	phase string,
 	completedAt time.Time,
 ) {
+	// Recorded first, and in every claim mode. The hold below covers the peer
+	// window; the record covers the restart — a fresh pod has never heard of the
+	// success, so without it the suppression is lost on every deploy. The two are
+	// written through one end point rather than a second parallel path.
+	h.recordTaskSuccess(ctx, taskID, phase, completedAt)
 	if h.claimMode == pkg.ClaimModeOff {
 		return
 	}
