@@ -8,7 +8,6 @@ import (
 	"context"
 	"encoding/json"
 	stderrors "errors"
-	"time"
 
 	"github.com/IBM/sarama"
 	lib "github.com/bborbe/agent"
@@ -165,15 +164,10 @@ var _ = Describe("Trigger budget refusal write", func() {
 			Expect(
 				string(operation),
 			).To(Equal(string(taskcmd.UpdateFrontmatterCommandOperation)))
-			Expect(cmd.Updates).To(HaveLen(4))
-			Expect(cmd.Updates["trigger_refusal_scope"]).To(Equal("planning:4963ffa6"))
-			Expect(cmd.Updates["trigger_refusal_count"]).To(BeNumerically("==", 4))
-			Expect(cmd.Updates["trigger_refusal_max"]).To(BeNumerically("==", 3))
-			Expect(cmd.Updates["trigger_refusal_at"]).To(Equal("2026-10-28T11:00:00Z"))
-			at, ok := cmd.Updates["trigger_refusal_at"].(string)
-			Expect(ok).To(BeTrue())
-			_, parseErr := time.Parse(time.RFC3339, at)
-			Expect(parseErr).NotTo(HaveOccurred())
+			// No frontmatter keys: vault-api's typedTaskFields allowlist refuses
+			// the whole command when any key is outside it, and the
+			// trigger_refusal_* names are not in it. The numbers live in the body.
+			Expect(cmd.Updates).To(BeEmpty())
 
 			Expect(cmd.Body).NotTo(BeNil())
 			Expect(cmd.Body.Heading).To(Equal("## Trigger Budget"))
