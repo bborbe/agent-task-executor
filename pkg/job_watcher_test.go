@@ -6,9 +6,12 @@ package pkg_test
 
 import (
 	"context"
+	"errors"
 	"time"
 
 	lib "github.com/bborbe/agent"
+	base "github.com/bborbe/cqrs/base"
+	libtime "github.com/bborbe/time"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 	batchv1 "k8s.io/api/batch/v1"
@@ -24,6 +27,7 @@ var _ = Describe("JobWatcher", func() {
 	var (
 		ctx            context.Context
 		fakePublisher  *mocks.FakeResultPublisher
+		fakeTaskView   *mocks.FakeTaskView
 		taskStore      *pkg.TaskStore
 		fakeKubeClient *fake.Clientset
 		watcher        pkg.JobWatcher
@@ -34,6 +38,7 @@ var _ = Describe("JobWatcher", func() {
 	BeforeEach(func() {
 		ctx = context.Background()
 		fakePublisher = &mocks.FakeResultPublisher{}
+		fakeTaskView = &mocks.FakeTaskView{}
 		taskStore = pkg.NewTaskStore()
 		fakeKubeClient = fake.NewClientset()
 		testTaskID = lib.TaskIdentifier("test-task-uuid-1234")
@@ -52,6 +57,7 @@ var _ = Describe("JobWatcher", func() {
 			taskStore,
 			fakePublisher,
 			nil,
+			fakeTaskView,
 		)
 	})
 
@@ -87,6 +93,106 @@ var _ = Describe("JobWatcher", func() {
 			Status: corev1.ConditionTrue,
 		}
 	}
+
+	Describe("parking a succeeded Job whose phase did not move", func() {
+		var (
+			completedAt time.Time
+			job         *batchv1.Job
+		)
+
+		// viewTask builds the fresh-read entry the guard consults. modified is
+		// the moment the controller last published the task, which is what
+		// decides whether the phase can be trusted.
+		viewTask := func(phase string, modified time.Time) lib.Task {
+			return lib.Task{
+				Object: base.Object[base.Identifier]{
+					Modified: libtime.DateTime(modified),
+				},
+				TaskIdentifier: testTaskID,
+				Frontmatter:    lib.TaskFrontmatter{"phase": phase},
+			}
+		}
+
+		BeforeEach(func() {
+			completedAt = time.Date(2026, 10, 28, 10, 0, 0, 0, time.UTC)
+			job = makeJob("job-park", string(testTaskID), succeededCondition())
+			completedMeta := metav1.NewTime(completedAt)
+			job.Status.CompletionTime = &completedMeta
+			// The spawn-time snapshot deliberately carries NO phase. A guard
+			// pointed at it therefore reads a nil phase and parks nothing, so
+			// the "publishes" spec below fails on the stale-snapshot build.
+			// That is the mutation this suite exists to make visible.
+			taskStore.Store(testTaskID, testTask)
+			fakeTaskView.ReadyReturns(true)
+		})
+
+		It("publishes human_review when the fresh phase is still a drive phase", func() {
+			fakeTaskView.GetReturns(viewTask("execution", completedAt.Add(-time.Minute)), true)
+
+			watcher.HandleJob(ctx, job)
+
+			Expect(fakePublisher.PublishParkSucceededCallCount()).To(Equal(1))
+			_, parkedTask := fakePublisher.PublishParkSucceededArgsForCall(0)
+			Expect(string(parkedTask.TaskIdentifier)).To(Equal(string(testTaskID)))
+		})
+
+		It("does not park a task that already reached done", func() {
+			fakeTaskView.GetReturns(viewTask("done", completedAt.Add(-time.Minute)), true)
+
+			watcher.HandleJob(ctx, job)
+
+			Expect(fakePublisher.PublishParkSucceededCallCount()).To(Equal(0))
+		})
+
+		It("does not park a task that already reached human_review", func() {
+			fakeTaskView.GetReturns(viewTask("human_review", completedAt.Add(-time.Minute)), true)
+
+			watcher.HandleJob(ctx, job)
+
+			Expect(fakePublisher.PublishParkSucceededCallCount()).To(Equal(0))
+		})
+
+		It("does not park when the task was updated after the job finished", func() {
+			fakeTaskView.GetReturns(viewTask("execution", completedAt.Add(time.Minute)), true)
+
+			watcher.HandleJob(ctx, job)
+
+			Expect(fakePublisher.PublishParkSucceededCallCount()).To(Equal(0))
+		})
+
+		It("does not park while the view is not ready", func() {
+			fakeTaskView.ReadyReturns(false)
+			fakeTaskView.GetReturns(viewTask("execution", completedAt.Add(-time.Minute)), true)
+
+			watcher.HandleJob(ctx, job)
+
+			Expect(fakePublisher.PublishParkSucceededCallCount()).To(Equal(0))
+		})
+
+		It("does not park when the view holds no entry", func() {
+			fakeTaskView.GetReturns(lib.Task{}, false)
+
+			watcher.HandleJob(ctx, job)
+
+			Expect(fakePublisher.PublishParkSucceededCallCount()).To(Equal(0))
+		})
+
+		It("does not park when the entry carries no stamped modified time", func() {
+			fakeTaskView.GetReturns(viewTask("execution", time.Time{}), true)
+
+			watcher.HandleJob(ctx, job)
+
+			Expect(fakePublisher.PublishParkSucceededCallCount()).To(Equal(0))
+		})
+
+		It("logs the publish failure and still completes the success path", func() {
+			fakeTaskView.GetReturns(viewTask("execution", completedAt.Add(-time.Minute)), true)
+			fakePublisher.PublishParkSucceededReturns(errors.New("publish failed"))
+
+			Expect(func() { watcher.HandleJob(ctx, job) }).NotTo(Panic())
+			Expect(fakePublisher.PublishParkSucceededCallCount()).To(Equal(1))
+		})
+	})
 
 	Describe("HandleJob", func() {
 		It("records the success time even when the task is not in the store", func() {

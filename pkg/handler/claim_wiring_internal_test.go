@@ -321,6 +321,15 @@ func (s *parkRecordingPublisher) PublishParkLostClaim(
 	return nil
 }
 
+// PublishParkSucceeded is a no-op here: this fake exists for the lost-claim
+// park, and no spec in this file drives the succeeded-Job park.
+func (s *parkRecordingPublisher) PublishParkSucceeded(
+	_ context.Context,
+	_ lib.Task,
+) error {
+	return nil
+}
+
 func (s *parkRecordingPublisher) PublishSpawnNotification(
 	context.Context, lib.Task, string,
 ) error {

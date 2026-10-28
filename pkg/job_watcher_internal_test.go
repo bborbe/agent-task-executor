@@ -51,6 +51,7 @@ var _ = Describe("jobWatcher backoff-limit pod detail", func() {
 			taskStore,
 			fakePublisher,
 			nil,
+			nil,
 		)
 	})
 
@@ -415,6 +416,13 @@ func (f *fakeResultPublisher) PublishRestoreAssignee(
 }
 
 func (f *fakeResultPublisher) PublishParkLostClaim(
+	ctx context.Context,
+	task lib.Task,
+) error {
+	return nil
+}
+
+func (f *fakeResultPublisher) PublishParkSucceeded(
 	ctx context.Context,
 	task lib.Task,
 ) error {

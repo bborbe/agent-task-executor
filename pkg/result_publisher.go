@@ -135,6 +135,13 @@ type ResultPublisher interface {
 	// as they are. human_review is already in the executor's terminal-phase set,
 	// so a parked task is never re-spawned and needs no second guard.
 	PublishParkLostClaim(ctx context.Context, task lib.Task) error
+	// PublishParkSucceeded writes phase "human_review" onto a task whose Job
+	// succeeded but whose phase never moved — a deliberate human park, not a
+	// finished task. Writes the "phase" key and nothing else. human_review is
+	// already in the executor's terminal-phase set, so the reconcile pass stops
+	// re-driving it; without this write a task whose agent exits 0 without
+	// moving the phase is eligible on every pass and re-spawned forever.
+	PublishParkSucceeded(ctx context.Context, task lib.Task) error
 	// PublishAbort closes a record the consecutive-re-drive cap has decided to
 	// stop driving. It writes status aborted plus the close-out pair vault-cli
 	// requires (aborted_reason and gate_successor) and clears current_job. It
@@ -686,6 +693,27 @@ func (p *resultPublisher) PublishRestoreAssignee(
 
 // PublishParkLostClaim writes phase "human_review" and nothing else.
 func (p *resultPublisher) PublishParkLostClaim(
+	ctx context.Context,
+	task lib.Task,
+) error {
+	cmd := taskcmd.UpdateFrontmatterCommand{
+		TaskIdentifier: task.TaskIdentifier,
+		TargetVault:    targetVaultFromTask(task),
+		Updates: lib.TaskFrontmatter{
+			"phase": string(domain.TaskPhaseHumanReview),
+		},
+	}
+	return p.publishRaw(ctx, taskcmd.UpdateFrontmatterCommandOperation, cmd)
+}
+
+// PublishParkSucceeded writes phase "human_review" and nothing else.
+//
+// No dedupe is needed: the guard that calls this stops as soon as the task view
+// carries the parked phase, so the informer's ~5 min terminal re-delivery finds
+// a non-drive phase and does not republish. The write is idempotent in the
+// window before the view catches up, because every attempt writes the same
+// value.
+func (p *resultPublisher) PublishParkSucceeded(
 	ctx context.Context,
 	task lib.Task,
 ) error {

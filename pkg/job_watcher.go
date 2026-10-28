@@ -57,6 +57,7 @@ func NewJobWatcher(
 	taskStore *TaskStore,
 	publisher ResultPublisher,
 	claimReleaser ClaimReleaser,
+	taskView TaskPhaseReader,
 ) JobWatcher {
 	w := &jobWatcher{
 		kubeClient:           kubeClient,
@@ -65,6 +66,7 @@ func NewJobWatcher(
 		taskStore:            taskStore,
 		publisher:            publisher,
 		claimReleaser:        claimReleaser,
+		taskView:             taskView,
 		newNamespaceInformer: newJobWatcherNamespaceInformer,
 	}
 	w.watched = map[libk8s.Namespace]bool{namespace: true}
@@ -80,6 +82,7 @@ type jobWatcher struct {
 	taskStore            *TaskStore
 	publisher            ResultPublisher
 	claimReleaser        ClaimReleaser
+	taskView             TaskPhaseReader
 	mu                   sync.Mutex
 	watched              map[libk8s.Namespace]bool
 	synced               map[libk8s.Namespace]bool
@@ -472,6 +475,10 @@ func (w *jobWatcher) HandleJob(ctx context.Context, job *batchv1.Job) {
 			)
 		}
 		w.releaseSucceededJobClaim(ctx, taskID, job)
+		// Parked before the store gate: a task whose phase did not move is a
+		// deliberate human park and must leave the loop whether or not the
+		// store still holds an entry for it.
+		w.parkIfPhaseDidNotMove(ctx, taskID, job)
 		if task, ok := w.taskStore.Load(taskID); ok {
 			w.handleSucceeded(ctx, taskID, task, job)
 		}
