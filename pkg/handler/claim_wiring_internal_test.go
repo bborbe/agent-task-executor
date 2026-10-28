@@ -352,6 +352,12 @@ func (s *parkRecordingPublisher) PublishFailure(
 	return nil
 }
 
+func (s *parkRecordingPublisher) PublishStoreMissFailure(
+	context.Context, lib.Task, string, string,
+) error {
+	return nil
+}
+
 func (s *parkRecordingPublisher) PublishClearCurrentJob(
 	context.Context, lib.Task, string,
 ) error {
