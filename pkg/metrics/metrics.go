@@ -300,6 +300,11 @@ func init() {
 	TaskEventsTotal.WithLabelValues("unknown_phase").Add(0)
 	TaskEventsTotal.WithLabelValues("respawn_grace_window").Add(0)
 	TaskEventsTotal.WithLabelValues("skipped_foreign_job").Add(0)
+	// The claim probe's only failure value. Seeded for the reason the whole block
+	// exists: this series is the sole signal that a fleet is holding spawns
+	// because its claim store is unreadable, and an absent series makes a
+	// `rate(...) == 0` alert on it skip silently.
+	TaskEventsTotal.WithLabelValues("claim_probe_failed").Add(0)
 	TaskEventsTotal.WithLabelValues("respawn_after_grace_window").Add(0)
 	TaskEventsTotal.WithLabelValues("deferred_concurrency_cap").Add(0)
 	TaskEventsTotal.WithLabelValues("deferred_claim_invalidated").Add(0)

@@ -317,6 +317,9 @@ type taskEventHandler struct {
 	claimManagerOnce sync.Once
 	claimManager     claim.LeaseManager
 	claimManagerErr  error
+	// probeState is the read-only claim client the foreign-current_job probe
+	// uses, built lazily and separately from the lease manager.
+	probeState claimProbeState
 	// spawnPendingSet marks tasks whose spawn is between taking the claim and
 	// recording the new Job. A terminal event for the previous Job arriving in
 	// that window names the only Job the store knows, so without this marker it
@@ -486,16 +489,6 @@ func (h *taskEventHandler) spawnPendingFor(taskID lib.TaskIdentifier) bool {
 func (h *taskEventHandler) staleEventForTask(task lib.Task) bool {
 	storedJob := h.storedCurrentJob(task)
 	return storedJob != "" && storedJob != task.Frontmatter.CurrentJob()
-}
-
-// storedCurrentJob returns the store entry's current_job, or "" when the store
-// holds no entry for the task.
-func (h *taskEventHandler) storedCurrentJob(task lib.Task) string {
-	stored, ok := h.taskStore.Load(task.TaskIdentifier)
-	if !ok {
-		return ""
-	}
-	return stored.Frontmatter.CurrentJob()
 }
 
 // cleanupTerminalTask clears in-flight state when a task has reached a terminal
