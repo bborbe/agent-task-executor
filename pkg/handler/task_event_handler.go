@@ -43,11 +43,12 @@ var defaultTriggerStatuses = domain.TaskStatuses{
 // defaultRespawnGracePeriod is the window after job_started_at during which the executor
 // suppresses respawn when the K8s Job is inactive but no terminal phase has been observed.
 // The window gives the agent's terminal-phase write time to propagate through the vault pipeline.
-// defaultRespawnGracePeriod is the spawn path's half of the success window: it
-// refuses to re-spawn a task whose Job succeeded this recently. It aliases the
-// claim package's SuccessGracePeriod deliberately — the other half holds the
-// claim for the same length — so the two cannot drift apart and leave a gap
-// where the claim is gone but the spawn guard has also expired.
+// It aliases the claim package's SuccessGracePeriod deliberately, so the spawn-side
+// grace and the claim hold cannot drift apart and leave a gap where the claim is
+// gone but the spawn grace has also expired. It is NOT the success guard's window:
+// recentlySucceeded suppresses a task that already succeeded at its current phase
+// until that phase changes (or its declared cadence elapses), and no longer
+// expires on this constant.
 const defaultRespawnGracePeriod = claim.SuccessGracePeriod
 
 // taskRerunWindow is how far back a recorded success still identifies a spawn
@@ -1276,11 +1277,14 @@ func (h *taskEventHandler) ReconcileOnce(ctx context.Context) error {
 		return nil
 	}
 
-	// Once per pass: forget successes older than the re-run window, so the
-	// record stays bounded to results that may still be in flight and still
-	// long enough for a later spawn to be recognised as a re-run.
+	// Once per pass: forget successes older than the retention horizon, so the
+	// record stays bounded. The horizon is the longest declared cadence, not the
+	// re-run window: recentlySucceeded suppresses on this record and releases a
+	// recurring task only when its cadence elapses, so pruning at the 1 h re-run
+	// window would drop the record before any cadence could fire. Re-run
+	// detection is unaffected — recordTaskRerun applies its own 1 h check.
 	h.taskStore.PruneSucceededBefore(
-		h.currentDateTime.Now().Time().Add(-taskRerunWindow),
+		h.currentDateTime.Now().Time().Add(-successRecordRetention),
 	)
 	owned := ownedTasks(snapshot, h.vaultMatcher)
 	c := reconcileCounters{}

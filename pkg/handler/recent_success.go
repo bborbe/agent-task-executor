@@ -5,6 +5,9 @@
 package handler
 
 import (
+	"strings"
+	"time"
+
 	lib "github.com/bborbe/agent"
 	"github.com/golang/glog"
 
@@ -12,19 +15,27 @@ import (
 )
 
 // recentlySucceeded reports whether a Job for the task, spawned for the phase
-// the task is still at, succeeded within the respawn grace window. Such a
-// task's result is still on its way to the vault: the file keeps reading the
-// phase the Job ran for until the controller's write-back syncs, and the spawn
-// notification carrying current_job may not have landed either, so
-// checkActiveCurrentJob's grace never engages. Without this the reconcile floor
-// re-spawned a finished task every tick until the write-back arrived (measured
-// nuke dev 2026-10-21: task a055d019 spawned 3x, ~60 s apart, each Job done in
-// ~20 s).
+// the task is still at, has already succeeded and must not be spawned again
+// until that phase changes.
 //
-// Scoped by phase so a task the agent advanced (success at planning, file now
+// This is a suppression, not a throttle. It began as a 300 s window covering the
+// gap before the controller's write-back syncs (measured nuke dev 2026-10-21:
+// task a055d019 spawned 3x, ~60 s apart, each Job done in ~20 s), but a window
+// that lapses re-spawns the same unit of work for as long as the phase stays
+// put — and for a task whose phase never advances that is forever, bounded only
+// by maxConsecutiveRedrives. The success record is the authority: a task that
+// succeeded at the phase it is still at has nothing left to do there.
+//
+// Scoped by phase, so a task the agent advanced (success at planning, file now
 // at execution) is spawned for its next phase at once. A failed Job records
-// nothing, so it is still re-driven; a task still eligible after the window is
-// spawned as before.
+// nothing, so it is still re-driven.
+//
+// The one release besides a phase change is a recurring task type: a task
+// declaring `recurring: daily|weekdays|weekly|monthly|quarterly` runs again once
+// that period has elapsed, because its phase does not advance between
+// occurrences and a permanent suppression would stop it for good. A task with no
+// recognised token is not recurring, and the suppression holds until its phase
+// changes.
 func (h *taskEventHandler) recentlySucceeded(task lib.Task) bool {
 	succeeded, ok := h.taskStore.LastSucceeded(task.TaskIdentifier)
 	if !ok || succeeded.Phase != taskPhase(task) {
@@ -37,7 +48,7 @@ func (h *taskEventHandler) recentlySucceeded(task lib.Task) bool {
 		// just completed, which keeps the guard engaged.
 		elapsed = 0
 	}
-	if elapsed >= defaultRespawnGracePeriod {
+	if recurringReleased(task.Frontmatter, elapsed) {
 		return false
 	}
 	glog.Infof(
@@ -46,6 +57,64 @@ func (h *taskEventHandler) recentlySucceeded(task lib.Task) bool {
 	)
 	metrics.TaskEventsTotal.WithLabelValues("skipped_recent_success").Inc()
 	return true
+}
+
+// recurringTokenKey is the frontmatter key carrying a task's declared cadence.
+const recurringTokenKey = "recurring"
+
+// recurringCadences maps the declared `recurring:` token to the period after
+// which a recurring task may run again at an unchanged phase. The token is the
+// operator-facing vocabulary task files already carry; the durations are the
+// fixed reading of each token, not tunables.
+var recurringCadences = map[string]time.Duration{
+	"daily":     24 * time.Hour,
+	"weekdays":  24 * time.Hour,
+	"weekly":    7 * 24 * time.Hour,
+	"monthly":   30 * 24 * time.Hour,
+	"quarterly": 90 * 24 * time.Hour,
+}
+
+// successRecordRetention is how long a success record is kept before the
+// reconcile pass prunes it. It must cover the longest declared cadence, not the
+// re-run window: the suppression is driven by the record, and a recurring task
+// is released only when its cadence elapses, so pruning at taskRerunWindow (1 h)
+// would forget the record long before any cadence could fire and make the
+// release unreachable. Derived from recurringCadences so the two cannot drift.
+var successRecordRetention = func() time.Duration {
+	longest := taskRerunWindow
+	for _, period := range recurringCadences {
+		if period > longest {
+			longest = period
+		}
+	}
+	return longest
+}()
+
+// recurringReleased reports whether a task that recorded success at its current
+// phase has served the cadence it declares and may run again.
+//
+// An absent or empty token means the task is not recurring. An unrecognised
+// token is treated the same way and logged, never defaulted to a period:
+// inventing a cadence for a token we do not understand would suppress that task
+// forever, which is the failure this release exists to prevent.
+func recurringReleased(frontmatter lib.TaskFrontmatter, elapsed time.Duration) bool {
+	token, ok := frontmatter.String(recurringTokenKey)
+	if !ok {
+		return false
+	}
+	trimmed := strings.TrimSpace(token)
+	if trimmed == "" || trimmed == "<nil>" {
+		return false
+	}
+	period, known := recurringCadences[strings.ToLower(trimmed)]
+	if !known {
+		glog.Warningf(
+			"event=unknown_recurring_token token=%q elapsed=%.0fs treating as not recurring",
+			token, elapsed.Seconds(),
+		)
+		return false
+	}
+	return elapsed >= period
 }
 
 // recordTaskRerun counts a spawn whose task already succeeded at the phase it

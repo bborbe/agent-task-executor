@@ -220,6 +220,14 @@ var _ = Describe("TaskEventHandler reconcile loop", func() {
 		// current_job, and every 60 s reconcile tick spawned it again.
 		var now time.Time
 
+		// recurringTask is eligibleTask plus a declared cadence, the shape a task
+		// file carries when its type recurs on a clock rather than advancing phase.
+		recurringTask := func(phase domain.TaskPhase, cadence string) lib.Task {
+			task := eligibleTask(phase)
+			task.Frontmatter["recurring"] = cadence
+			return task
+		}
+
 		BeforeEach(func() {
 			now = time.Date(2026, 10, 21, 5, 56, 23, 0, time.UTC)
 			currentDateTime.SetNow(libtime.DateTime(now))
@@ -252,11 +260,50 @@ var _ = Describe("TaskEventHandler reconcile loop", func() {
 			Expect(fakeSpawner.SpawnJobCallCount()).To(Equal(1))
 		})
 
-		It("is re-driven once the grace window has passed", func() {
-			taskStore.MarkSucceeded("tid-a", "execution", now.Add(-10*time.Minute))
+		It(
+			"is not re-driven after the grace window has passed while the phase is unchanged",
+			func() {
+				// The guard is a suppression, not a throttle: a task that succeeded at
+				// the phase it is still at has nothing left to do there, however long
+				// ago that was. Measured on dev 2026-10-27, every observed re-run
+				// (360 s to 1395 s) landed after the old 300 s window had lapsed.
+				taskStore.MarkSucceeded("tid-a", "execution", now.Add(-10*time.Minute))
+
+				Expect(h.ReconcileOnce(ctx)).To(BeNil())
+				Expect(fakeSpawner.SpawnJobCallCount()).To(Equal(0))
+			},
+		)
+
+		It("is not released before a recurring task's declared cadence has elapsed", func() {
+			fakeView.SnapshotReturns([]lib.Task{recurringTask(domain.TaskPhaseExecution, "weekly")})
+			taskStore.MarkSucceeded("tid-a", "execution", now.Add(-6*24*time.Hour))
+
+			Expect(h.ReconcileOnce(ctx)).To(BeNil())
+			Expect(fakeSpawner.SpawnJobCallCount()).To(Equal(0))
+		})
+
+		It("is released once a recurring task's declared cadence has elapsed", func() {
+			// A recurring task's phase does not advance between occurrences, so a
+			// phase-only release would suppress it for good — the failure the
+			// cadence exists to prevent.
+			fakeView.SnapshotReturns([]lib.Task{recurringTask(domain.TaskPhaseExecution, "weekly")})
+			taskStore.MarkSucceeded("tid-a", "execution", now.Add(-8*24*time.Hour))
 
 			Expect(h.ReconcileOnce(ctx)).To(BeNil())
 			Expect(fakeSpawner.SpawnJobCallCount()).To(Equal(1))
+		})
+
+		It("treats an unrecognised recurring token as not recurring", func() {
+			// Defaulting an unknown token to a period would invent a cadence and
+			// suppress the task forever; the suppression holds instead, and the
+			// token is logged.
+			fakeView.SnapshotReturns(
+				[]lib.Task{recurringTask(domain.TaskPhaseExecution, "fortnightly")},
+			)
+			taskStore.MarkSucceeded("tid-a", "execution", now.Add(-10*24*time.Hour))
+
+			Expect(h.ReconcileOnce(ctx)).To(BeNil())
+			Expect(fakeSpawner.SpawnJobCallCount()).To(Equal(0))
 		})
 
 		It("still re-drives a task whose Job failed, up to the redrive cap", func() {
