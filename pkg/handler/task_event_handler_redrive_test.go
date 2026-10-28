@@ -274,23 +274,31 @@ var _ = Describe("redrive streak persistence", func() {
 		Expect(a.spawner.SpawnJobCallCount() + b.spawner.SpawnJobCallCount()).To(Equal(0))
 	})
 
-	It("AC7(a): three successful spawns write no streak ref at all", func() {
+	It("AC7(a): four successful spawns write no streak ref and never reach the cap", func() {
 		// The defect this pins: the streak used to advance on every successful
 		// SpawnJob, so three exit-0 spawns reached the cap with no reason to
 		// classify and the record was refused forever. A spawn publishes no
 		// failure, so it must write nothing — the streak counts published
 		// failures only.
+		//
+		// The FOURTH consume is the discriminating one, and it is not padding.
+		// The store is readable and reports 0, while the in-memory map has
+		// counted all three attempts. Under `max(memory, stored)` — the shape
+		// this change replaced — the fourth consume reads 3, sees the cap, and
+		// refuses; only `count = stored` lets it spawn. Three consumes pass
+		// either way, because the third is checked while memory is still 2, so
+		// a regression back to max() would go undetected.
 		transport := newSharedClaimRefTransport()
 		client := new(mocks.FakeClaimRefClient)
 		transport.attach(client)
 		a := newRedriveHarness(pkg.ClaimModeShadow, client)
 		task := redriveTask("tid-redrive-spawn-only")
 
-		for i := 0; i < 3; i++ {
+		for i := 0; i < 4; i++ {
 			Expect(a.consume(task)).To(Succeed())
 		}
 
-		Expect(a.spawner.SpawnJobCallCount()).To(Equal(3))
+		Expect(a.spawner.SpawnJobCallCount()).To(Equal(4))
 		Expect(transport.countRefs("claims/redrive/tid-redrive-spawn-only/")).To(Equal(0))
 	})
 
