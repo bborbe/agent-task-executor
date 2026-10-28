@@ -143,7 +143,7 @@ func (r *healthcheckRunner) Run(ctx context.Context) error {
 				// The executor then reads a stale (hours/days old) current_job whose grace
 				// window has long elapsed and respawns 2-3 jobs for a single probe, and the
 				// zombie sweeper fires a phantom deadline_exceeded on the ancient job ref.
-				// Resetting these alongside the counters makes every re-trigger start clean.
+				// Resetting these alongside trigger_count makes every re-trigger start clean.
 				"current_job":        "",
 				"job_started_at":     "",
 				"spawn_notification": false,

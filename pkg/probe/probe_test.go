@@ -306,6 +306,9 @@ var _ = Describe("HealthcheckRunner", func() {
 				Expect(updateCmd.Updates).To(HaveKeyWithValue("job_started_at", ""))
 				Expect(updateCmd.Updates).To(HaveKeyWithValue("spawn_notification", false))
 				Expect(updateCmd.Updates).To(HaveKeyWithValue("trigger_count", 0))
+				// retry_count is retired: the probe must not re-create it on every
+				// healthcheck re-trigger. This assertion fails if the key comes back.
+				Expect(updateCmd.Updates).NotTo(HaveKey("retry_count"))
 			},
 		)
 
