@@ -97,6 +97,12 @@ func (stubResultPublisher) PublishSetTriggerScope(
 	return nil
 }
 
+func (stubResultPublisher) PublishTriggerBudgetRefusal(
+	context.Context, lib.Task, string, int, int,
+) error {
+	return nil
+}
+
 func (stubResultPublisher) PublishTypeMismatchFailure(
 	context.Context, lib.Task, string,
 ) error {

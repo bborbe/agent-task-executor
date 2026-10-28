@@ -8,6 +8,7 @@ import (
 	"context"
 	"encoding/json"
 	stderrors "errors"
+	"time"
 
 	"github.com/IBM/sarama"
 	lib "github.com/bborbe/agent"
@@ -1156,6 +1157,148 @@ var _ = Describe("ResultPublisher", func() {
 					metrics.RedriveAbortReasonTransientExhausted,
 				),
 			)).To(Equal(transientBefore))
+		})
+	})
+
+	Describe("PublishTriggerBudgetRefusal", func() {
+		refusalTask := func() lib.Task {
+			return lib.Task{
+				TaskIdentifier: lib.TaskIdentifier("test-task-refusal"),
+				Frontmatter: lib.TaskFrontmatter{
+					"status":       "in_progress",
+					"phase":        "planning",
+					"target_vault": "work",
+				},
+			}
+		}
+
+		It("writes the four trigger_refusal keys and no fifth", func() {
+			err := publisher.PublishTriggerBudgetRefusal(
+				ctx,
+				refusalTask(),
+				"planning:4963ffa6",
+				4,
+				3,
+			)
+			Expect(err).NotTo(HaveOccurred())
+
+			Expect(producer.messages).To(HaveLen(1))
+			operation, cmd := decodeUpdateFrontmatterCommand(producer.messages[0])
+			Expect(
+				string(operation),
+			).To(Equal(string(taskcmd.UpdateFrontmatterCommandOperation)))
+			Expect(cmd.Updates).To(HaveLen(4))
+			Expect(cmd.Updates["trigger_refusal_scope"]).To(Equal("planning:4963ffa6"))
+			// BeNumerically, not Equal: the command is read back through its JSON
+			// encoding, where every number decodes as float64.
+			Expect(cmd.Updates["trigger_refusal_count"]).To(BeNumerically("==", 4))
+			Expect(cmd.Updates["trigger_refusal_max"]).To(BeNumerically("==", 3))
+			Expect(cmd.Updates["trigger_refusal_at"]).To(Equal("2026-04-18T12:00:00Z"))
+			at, ok := cmd.Updates["trigger_refusal_at"].(string)
+			Expect(ok).To(BeTrue())
+			_, parseErr := time.Parse(time.RFC3339, at)
+			Expect(parseErr).NotTo(HaveOccurred())
+			Expect(cmd.TargetVault).To(Equal("work"))
+		})
+
+		It("writes a Trigger Budget section, never a Failure section", func() {
+			err := publisher.PublishTriggerBudgetRefusal(
+				ctx,
+				refusalTask(),
+				"planning:4963ffa6",
+				4,
+				3,
+			)
+			Expect(err).NotTo(HaveOccurred())
+
+			_, cmd := decodeUpdateFrontmatterCommand(producer.messages[0])
+			Expect(cmd.Body).NotTo(BeNil())
+			Expect(cmd.Body.Heading).To(Equal("## Trigger Budget"))
+			Expect(cmd.Body.Heading).NotTo(Equal("## Failure"))
+			Expect(cmd.Body.Section).To(HavePrefix("## Trigger Budget"))
+			Expect(cmd.Body.Section).To(ContainSubstring("trigger_count 4 >= max_triggers 3"))
+			Expect(cmd.Body.Section).To(ContainSubstring("planning:4963ffa6"))
+			Expect(cmd.Body.Section).To(HaveSuffix("\n"))
+		})
+
+		It("does not touch the failure section or ownership keys", func() {
+			err := publisher.PublishTriggerBudgetRefusal(
+				ctx,
+				refusalTask(),
+				"planning:4963ffa6",
+				4,
+				3,
+			)
+			Expect(err).NotTo(HaveOccurred())
+
+			_, cmd := decodeUpdateFrontmatterCommand(producer.messages[0])
+			Expect(cmd.Body.Heading).NotTo(Equal("## Failure"))
+			for _, key := range []string{
+				"status",
+				"phase",
+				"assignee",
+				"current_job",
+				"trigger_count",
+				"trigger_scope",
+				"max_triggers",
+			} {
+				_, ok := cmd.Updates[key]
+				Expect(ok).To(BeFalse(), "key %q must not be written", key)
+			}
+		})
+
+		It("publishes once for an identical refusal triple", func() {
+			task := refusalTask()
+			Expect(
+				publisher.PublishTriggerBudgetRefusal(ctx, task, "planning:4963ffa6", 4, 3),
+			).To(Succeed())
+			Expect(
+				publisher.PublishTriggerBudgetRefusal(ctx, task, "planning:4963ffa6", 4, 3),
+			).To(Succeed())
+
+			Expect(producer.messages).To(HaveLen(1))
+		})
+
+		It("publishes again when the refusal triple changes", func() {
+			task := refusalTask()
+			Expect(
+				publisher.PublishTriggerBudgetRefusal(ctx, task, "planning:4963ffa6", 4, 3),
+			).To(Succeed())
+			Expect(
+				publisher.PublishTriggerBudgetRefusal(ctx, task, "execution:bbbbbbbb", 4, 3),
+			).To(Succeed())
+			Expect(
+				publisher.PublishTriggerBudgetRefusal(ctx, task, "execution:bbbbbbbb", 5, 3),
+			).To(Succeed())
+
+			Expect(producer.messages).To(HaveLen(3))
+		})
+
+		It("does not remember a failed publish, so the next tick retries", func() {
+			partialProducer := &partialFailingSyncProducer{
+				successCount: 0,
+				err:          errors.New(context.Background(), "kafka unavailable"),
+			}
+			failingPublisher := pkg.NewResultPublisher(
+				partialProducer,
+				base.TopicPrefix("develop"),
+				currentDateTime,
+				nil,
+			)
+			task := refusalTask()
+
+			Expect(
+				failingPublisher.PublishTriggerBudgetRefusal(
+					ctx, task, "planning:4963ffa6", 4, 3,
+				),
+			).NotTo(Succeed())
+			Expect(
+				failingPublisher.PublishTriggerBudgetRefusal(
+					ctx, task, "planning:4963ffa6", 4, 3,
+				),
+			).NotTo(Succeed())
+
+			Expect(partialProducer.messages).To(HaveLen(2))
 		})
 	})
 

@@ -1,7 +1,9 @@
 ---
-status: draft
-kind: bug
-created: "2026-10-28"
+status: prompted
+approved: "2026-10-28T10:59:02Z"
+generating: "2026-10-28T11:05:52Z"
+prompted: "2026-10-28T11:18:10Z"
+branch: dark-factory/bug-trigger-budget-refusal-is-written-to-the-record
 ---
 
 ## Summary
@@ -33,7 +35,7 @@ A task refused by the scoped trigger budget states, on the record itself, that i
 - [ ] **Post-Deploy (Rung-2): AC4 — the write happens once per refusal state, not once per tick.** A record refused repeatedly carries one write: `grep 'trigger_refusal_at' <task-file>` read twice, with at least three further `skip task <id>` lines observed in the log between the two reads, returns the same value both times. Evidence: state comparison — the two reads are identical while the refusals continue.
   - `deploy_check:` `kubectlnukedev -n agent get deploy/agent-task-executor-personal -o jsonpath='{.spec.template.spec.containers[0].image}' | sed 's/.*://'`
   - `deploy_target:` `$(git describe --tags --abbrev=0 origin/master)`
-- [ ] **AC5 — the published command is pinned by a unit test.** A test asserts that a refusal publishes one `UpdateFrontmatterCommand` whose `Updates` carry the four `trigger_refusal_*` fields and whose body section is headed `## Trigger Budget`. Evidence: exit code — `go test ./pkg/handler/... -ginkgo.v -ginkgo.focus='publishes one trigger budget refusal'` exits 0 and the run prints `Ran 1 of`.
+- [ ] **AC5 — the published command is pinned by a unit test.** A test asserts that a refusal publishes one `UpdateFrontmatterCommand` whose `Updates` carry the four `trigger_refusal_*` fields and whose body section is headed `## Trigger Budget`. Evidence: exit code — `go test ./pkg/handler/... -v -ginkgo.v -ginkgo.focus='publishes one trigger budget refusal'` exits 0 and the run prints `Ran 1 of` (`-v` is required: without it `go test` discards the Ginkgo summary on success, so the count would be invisible and the criterion unobservable).
 - [ ] **AC6 — the repo's gate passes.** Evidence: exit code — `make precommit` exits 0.
 
 ## Verification
