@@ -259,19 +259,32 @@ func (s *successStore) Snapshot(
 	return records, nil
 }
 
-// keepOnly removes every parsed record of taskID except keep, so the task holds
-// exactly one record.
+// keepOnly removes the records of taskID that `keep` supersedes, so the task
+// holds one record and the newer completion is never destroyed.
 //
 // This is the store's bound, and it replaces a prune of expired refs alone: the
 // key carries the completion second, so a recurring task would accumulate one ref
 // per occurrence for the whole retention window, and Snapshot lists the entire
-// prefix on every reconcile pass. Deleting every superseded ref — older same-phase
-// ones, other-phase ones, and expired ones — keeps the store at one ref per task.
+// prefix on every reconcile pass.
+//
+// Only a STRICTLY OLDER completion is deleted, and that distinction is the whole
+// safety property. Deleting every other ref of the task destroys the record in
+// two reachable interleavings: two pods recording C1 and C2 can each list after
+// both Puts, so a "delete everything but mine" rule has each one delete the
+// other's — leaving no record at all; and a stale caller recording an older
+// completion (an informer re-delivering a pre-upgrade Job, whose missing phase
+// annotation normalises to `none`) would wipe the live record at the real phase.
+// Keeping anything at or after `keep` makes both harmless: the newest write
+// survives whichever side lists last.
 //
 // Best-effort: a failed delete is logged and never fails the Record, because the
 // success it records has already happened, and the read side filters expired refs
 // if a delete is ever missed.
 func (s *successStore) keepOnly(ctx context.Context, taskID string, keep string) {
+	_, _, keepAt, keepOK := parseSuccessRef(keep)
+	if !keepOK {
+		return
+	}
 	refs, err := redriveListForTask(ctx, s.refClient, SuccessRecordPrefix, taskID)
 	if err != nil {
 		glog.Warningf(
@@ -280,11 +293,14 @@ func (s *successStore) keepOnly(ctx context.Context, taskID string, keep string)
 		return
 	}
 	for _, ref := range refs {
-		refTaskID, _, _, ok := parseSuccessRef(ref.Ref)
+		refTaskID, _, refAt, ok := parseSuccessRef(ref.Ref)
 		if !ok || refTaskID != taskID {
 			continue
 		}
 		if strings.TrimPrefix(ref.Ref, "refs/") == keep {
+			continue
+		}
+		if !refAt.Time().Before(keepAt.Time()) {
 			continue
 		}
 		redriveDeleteRef(ctx, s.refClient, "success_record_prune_failed", taskID, ref)

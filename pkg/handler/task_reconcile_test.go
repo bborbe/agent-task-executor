@@ -303,6 +303,43 @@ var _ = Describe("TaskEventHandler reconcile loop", func() {
 			Expect(fakeResultPublisher.PublishParkSucceededCallCount()).To(Equal(0))
 		})
 
+		It("does not release a weekdays task over the weekend", func() {
+			// `weekdays` names a schedule, not a duration. A flat 24 h would release a
+			// Friday completion on Saturday, and this table is the only schedule
+			// control on the suppression path — nothing downstream re-imposes the
+			// weekday constraint.
+			taskStore.MarkSucceeded(
+				"tid-a", "execution", time.Date(2026, 10, 30, 18, 0, 0, 0, time.UTC),
+			)
+			fakeView.SnapshotReturns(
+				[]lib.Task{recurringTask(domain.TaskPhaseExecution, "weekdays")},
+			)
+
+			// Saturday evening: past the nominal 24 h, and still not released.
+			now = time.Date(2026, 10, 31, 19, 0, 0, 0, time.UTC)
+			currentDateTime.SetNow(libtime.DateTime(now))
+
+			Expect(h.ReconcileOnce(ctx)).To(BeNil())
+			Expect(fakeSpawner.SpawnJobCallCount()).To(Equal(0))
+		})
+
+		It("releases a weekdays task on the next weekday", func() {
+			// The discriminating half: the weekend skip must not suppress for good.
+			taskStore.MarkSucceeded(
+				"tid-a", "execution", time.Date(2026, 10, 30, 18, 0, 0, 0, time.UTC),
+			)
+			fakeView.SnapshotReturns(
+				[]lib.Task{recurringTask(domain.TaskPhaseExecution, "weekdays")},
+			)
+
+			now = time.Date(2026, 11, 2, 19, 0, 0, 0, time.UTC)
+			currentDateTime.SetNow(libtime.DateTime(now))
+
+			Expect(h.ReconcileOnce(ctx)).To(BeNil())
+			Expect(fakeSpawner.SpawnJobCallCount()).To(Equal(1))
+			Expect(fakeResultPublisher.PublishParkSucceededCallCount()).To(Equal(0))
+		})
+
 		It("treats an unrecognised recurring token as not recurring", func() {
 			// Defaulting an unknown token to a period would invent a cadence and
 			// suppress the task forever. Treated as not recurring, it parks like any

@@ -48,8 +48,8 @@ func (h *taskEventHandler) recentlySucceeded(ctx context.Context, task lib.Task)
 		// just completed, which keeps the guard engaged.
 		elapsed = 0
 	}
-	if period, recurring := recurringPeriod(task.Frontmatter); recurring {
-		if elapsed >= period {
+	if next, recurring := recurringNextRun(task.Frontmatter, succeeded.CompletedAt); recurring {
+		if !h.currentDateTime.Now().Time().Before(next) {
 			return false
 		}
 	} else if elapsed >= defaultRespawnGracePeriod {
@@ -146,23 +146,59 @@ var successRecordRetention = func() time.Duration {
 // inventing a cadence for a token we do not understand would suppress that task
 // forever, which is the failure this release exists to prevent.
 func recurringPeriod(frontmatter lib.TaskFrontmatter) (time.Duration, bool) {
-	token, ok := frontmatter.String("recurring")
+	token, ok := recurringToken(frontmatter)
 	if !ok {
 		return 0, false
 	}
-	trimmed := strings.TrimSpace(token)
-	if trimmed == "" || trimmed == "<nil>" {
-		return 0, false
+	return recurringCadences[token], true
+}
+
+// recurringToken returns the task's declared cadence token, normalised, and
+// whether it declares a recognised one at all.
+func recurringToken(frontmatter lib.TaskFrontmatter) (string, bool) {
+	token, ok := frontmatter.String("recurring")
+	if !ok {
+		return "", false
 	}
-	period, known := recurringCadences[strings.ToLower(trimmed)]
-	if !known {
+	trimmed := strings.ToLower(strings.TrimSpace(token))
+	if trimmed == "" || trimmed == "<nil>" {
+		return "", false
+	}
+	if _, known := recurringCadences[trimmed]; !known {
 		glog.Warningf(
 			"event=unknown_recurring_token token=%q treating as not recurring",
 			token,
 		)
-		return 0, false
+		return "", false
 	}
-	return period, true
+	return trimmed, true
+}
+
+// recurringNextRun returns the earliest time a task that recorded success at
+// completedAt may run again, and whether the task is recurring at all.
+//
+// `weekdays` is the one token whose name is a schedule rather than a duration: a
+// flat 24 h would release a Friday completion on Saturday, and nothing downstream
+// re-imposes the weekday constraint — this is the only schedule control on the
+// suppression path. So the nominal day is advanced over the weekend. The other
+// tokens keep their fixed durations; `monthly` and `quarterly` drift a day or two
+// from calendar months, which is the approximation the declared token already
+// carries rather than the wrong day class.
+func recurringNextRun(
+	frontmatter lib.TaskFrontmatter,
+	completedAt time.Time,
+) (time.Time, bool) {
+	token, ok := recurringToken(frontmatter)
+	if !ok {
+		return time.Time{}, false
+	}
+	next := completedAt.Add(recurringCadences[token])
+	if token == "weekdays" {
+		for next.Weekday() == time.Saturday || next.Weekday() == time.Sunday {
+			next = next.AddDate(0, 0, 1)
+		}
+	}
+	return next, true
 }
 
 // recordTaskRerun counts a spawn whose task already succeeded at the phase it

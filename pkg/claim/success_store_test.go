@@ -103,6 +103,31 @@ var _ = Describe("SuccessStore", func() {
 			Expect(planningExists).To(BeFalse())
 		})
 
+		It("keeps a newer record a peer wrote, rather than deleting it", func() {
+			// Two pods can each list after both Puts. A "delete everything but mine"
+			// rule has each side delete the other's record, leaving the task with none
+			// at all — so only a strictly OLDER completion is superseded. The same
+			// guard covers a stale writer: an informer re-delivering a pre-upgrade Job
+			// records an older completion at a normalised phase, and it must not wipe
+			// the live record at the real phase.
+			newer := leaseTestT0.Add(-1 * libtime.Hour).Time()
+			older := leaseTestT0.Add(-2 * libtime.Hour).Time()
+			seedSuccess("tid-a", "execution", newer, leaseTestT0.Add(retention))
+
+			Expect(store.Record(ctx, "tid-a", "execution", libtime.DateTime(older))).
+				To(Succeed())
+
+			_, newerExists := fake.Ref(successRef("tid-a", "execution", newer))
+			Expect(newerExists).To(BeTrue())
+			_, olderExists := fake.Ref(successRef("tid-a", "execution", older))
+			Expect(olderExists).To(BeTrue())
+
+			got, ok, err := store.Lookup(ctx, "tid-a", "execution")
+			Expect(err).ToNot(HaveOccurred())
+			Expect(ok).To(BeTrue())
+			Expect(got.Time().Equal(newer)).To(BeTrue())
+		})
+
 		It("treats a repeated completion as already recorded, not an error", func() {
 			// The informer re-delivers a terminal Job every few minutes and two pods
 			// can observe one success; the second write must not fail the caller.
