@@ -930,7 +930,10 @@ func (h *taskEventHandler) spawnIfNeededClaimed(
 		return spawnOutcomeSuppressed, nil
 	}
 
-	if h.recentlySucceeded(task) {
+	// One decision, one clock: inside the write-back grace recentlySucceeded
+	// suppresses, and past it a phase that never moved is parked. Nothing
+	// reaches the spawn below for a phase that never moved.
+	if h.suppressOrPark(ctx, task) {
 		return spawnOutcomeSuppressed, nil
 	}
 

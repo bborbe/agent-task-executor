@@ -51,8 +51,6 @@ var _ = Describe("jobWatcher backoff-limit pod detail", func() {
 			taskStore,
 			fakePublisher,
 			nil,
-			nil,
-			nil,
 		)
 	})
 
