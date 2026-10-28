@@ -121,7 +121,7 @@ type ResultPublisher interface {
 	// PublishTypeMismatchFailure publishes a synthetic failure when the task's task_type
 	// is not in the agent's effective type set. Clears assignee and current_job so the
 	// task surfaces in the operator inbox via assignee=="" filter. Does not bump
-	// trigger_count or retry_count.
+	// trigger_count.
 	PublishTypeMismatchFailure(ctx context.Context, task lib.Task, reason string) error
 	// PublishRestoreAssignee writes the resolved configuration's assignee back
 	// onto a task whose routing value was cleared, so the controller applies the

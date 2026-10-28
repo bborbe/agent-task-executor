@@ -137,7 +137,6 @@ func (r *healthcheckRunner) Run(ctx context.Context) error {
 				"status":        "in_progress",
 				"phase":         "in_progress",
 				"trigger_count": 0,
-				"retry_count":   0,
 				// Clear the executor-owned run-state from the PRIOR run. Probe files are
 				// reused per (agent, stage), so without this the re-trigger reopens the
 				// task while current_job / job_started_at still point at last week's job.
