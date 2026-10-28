@@ -2,7 +2,7 @@
 
 All notable changes to this project will be documented in this file.
 
-## Unreleased
+## v0.47.1
 
 - fix: **the crash-escalation arming path logs the values its early return tested.** A `pod_crash_no_stdout` record that reaches the controller without `max_triggers` is indistinguishable from one whose class never matched: both leave the trigger cap disarmed and the escalation inert, with no error anywhere, and the only evidence is an absent key. `crashFailureUpdates` now emits one V(2) line on every return carrying the raw `reason` and its parsed `ZombieReason`, the `task_identifier` and `job` that identify the record, and the presence flag with the cached `max_triggers` value — so "the in-memory task already carried a budget the vault file does not" is separable from "the class gate rejected it". Every line is `event=crash_arm_decision` with a `decision=` field, because the function only decides: the command it feeds is published by its caller, and a failed publish returns an error there without the record ever receiving the key, so a line reading "armed" would assert an outcome no code here has reached. `decision=max_triggers_already_present` names the divergence with the cached value; `decision=not_crash_class` names the gate with the parsed reason; `decision=arm` records the arming decision, which previously emitted nothing at all. The level is V(2) because both dev and prod run the executor with `-v=2`, so a higher level would make the line invisible exactly where it is needed. Behaviour is unchanged: the same classes arm, an operator-set budget is still preserved, and no return value moved.
 
