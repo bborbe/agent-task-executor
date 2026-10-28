@@ -2,7 +2,7 @@
 
 All notable changes to this project will be documented in this file.
 
-## Unreleased
+## v0.46.3
 
 - fix: **a recorded success suppresses re-spawns until the phase changes, instead of lapsing after 300 s.** `recentlySucceeded` refused a re-spawn only inside `defaultRespawnGracePeriod`, so a task whose Job had succeeded but whose phase had not advanced became eligible again the moment that window expired — and for a task whose phase never advances, forever. Measured on dev 2026-10-27: 7 `event=task_rerun` lines across five ids in 24 h, every one between 360 s and 1395 s, i.e. all of them after the 300 s guard had lapsed. The guard is now a suppression: a task that succeeded at the phase it is still at is not spawned again until that phase changes. A recurring task type is released at the cadence it declares in its `recurring:` frontmatter key (`daily` and `weekdays` 24 h, `weekly` 7 d, `monthly` 30 d, `quarterly` 90 d), because its phase does not advance between occurrences and a permanent suppression would stop it for good; an unrecognised token is treated as not recurring and logged rather than defaulted to a period, since inventing a cadence would suppress that task forever. Phase-change release is unchanged, and a failed Job still records nothing so it is still re-driven. `event=skip_recent_success` remains the observable — no new event name.
 
