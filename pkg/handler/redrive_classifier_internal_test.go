@@ -580,3 +580,26 @@ func TestClearRedriveStreakSwallowsStoreErrors(t *testing.T) {
 		t.Fatalf("expected a redrive_reason_write_failed log line, got %q", out)
 	}
 }
+
+// TestRedriveBudgetsArePinned is the assertion that raising either re-drive
+// bound fails a test rather than quietly widening it. Every other spec derives
+// its seeds from these constants, so they all move with a raise and none of
+// them can catch one — verified 2026-10-28 by setting transientRedriveBudget
+// to 4 and running this package: it stayed green, so the raise was invisible.
+//
+// The cap is not a tunable. It is the only bound on a task that keeps failing,
+// and widening it trades a stranded record for a longer, costlier loop.
+func TestRedriveBudgetsArePinned(t *testing.T) {
+	if maxConsecutiveRedrives != 3 {
+		t.Fatalf(
+			"maxConsecutiveRedrives = %d; want 3 — the cap is not a tunable, and raising it masks the defect it bounds",
+			maxConsecutiveRedrives,
+		)
+	}
+	if transientRedriveBudget != 3 {
+		t.Fatalf(
+			"transientRedriveBudget = %d; want 3 — raising the extension widens the budget the cap exists to enforce",
+			transientRedriveBudget,
+		)
+	}
+}
