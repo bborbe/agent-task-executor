@@ -2,7 +2,7 @@
 
 All notable changes to this project will be documented in this file.
 
-## Unreleased
+## v0.48.1
 
 - fix: **a trigger-budget refusal now reaches the record, as a `## Trigger Budget` body section only.** v0.48.0 wrote the refusal as four `trigger_refusal_*` frontmatter keys plus the section, and the record never changed: `bborbe/vault-api` keeps `typedTaskFields`, an allowlist that refuses the **whole** request when any named key is outside it, and it does not carry those names — so the command was discarded body section included, while `publishRaw` reported success and the dedupe then suppressed every retry for its TTL. Measured on dev against v0.48.0: 105 `event=trigger_refusal_dedupe` hits, one publish, and a controller `400 unknown_field: trigger_refusal_at`; no record in any vault carried `trigger_refusal_count`. The count, cap, scope and RFC3339 timestamp now live in the section alone, which the controller applies as ordinary markdown. The `## Trigger Budget` heading still differs from `## Failure` so `Markdown.ReplaceSection` cannot delete the older cause, and the write stays deduped on task id **and** the refusal triple. The four keys are owed to that allowlist and a follow-up restores them once it carries them — a representation debt, not a dropped requirement.
 
