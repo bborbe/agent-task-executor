@@ -352,6 +352,50 @@ var _ = Describe("ResultPublisher", func() {
 			_, hitCmd := decodeUpdateFrontmatterCommand(producer.messages[2])
 			Expect(hitCmd.Body.Section).NotTo(ContainSubstring("The status above is unchanged"))
 		})
+
+		// The full note is true only of the crash class. A deadline_exceeded or
+		// pod_oom_killed Job reaches this path too and may well have produced
+		// output, and a store evicted by a restart can leave the record still
+		// in_progress — so the note must not assert a crash or a terminal record
+		// for those reasons.
+		It("claims only what the path guarantees for a non-crash reason", func() {
+			task := lib.Task{
+				TaskIdentifier: lib.TaskIdentifier("test-task-4"),
+				Frontmatter: lib.TaskFrontmatter{
+					"status":   "in_progress",
+					"phase":    "planning",
+					"assignee": "github-update-go-agent",
+				},
+				Content: lib.TaskContent("update go"),
+			}
+			err := publisher.PublishStoreMissFailure(
+				ctx,
+				task,
+				"github-update-go-agent-e009d201-20261028140856",
+				"deadline_exceeded",
+			)
+			Expect(err).NotTo(HaveOccurred())
+
+			_, updateCmd := decodeUpdateFrontmatterCommand(producer.messages[0])
+			section := updateCmd.Body.Section
+			Expect(section).To(ContainSubstring("deadline_exceeded"))
+			Expect(section).To(
+				ContainSubstring("was not in the executor's in-memory store"),
+				"the entry must say why it exists",
+			)
+			Expect(section).To(
+				ContainSubstring("The status above is unchanged"),
+				"the entry must say the status did not change",
+			)
+			Expect(section).NotTo(
+				ContainSubstring("had already reached its terminal status"),
+				"a non-crash store miss must not claim the record was already terminal",
+			)
+			Expect(section).NotTo(
+				ContainSubstring("crashed before producing any output"),
+				"a non-crash store miss must not claim the Job produced no output",
+			)
+		})
 	})
 
 	Describe("PublishFailure trigger cap", func() {

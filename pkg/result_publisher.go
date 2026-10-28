@@ -488,33 +488,64 @@ func (p *resultPublisher) PublishFailure(
 }
 
 // PublishStoreMissFailure publishes the same failure as PublishFailure, with a
-// note explaining why a record that has already reached its terminal status
-// carries a failure at all.
+// note explaining why the record carries a failure at all.
 //
-// The reader of such a record would otherwise see a `## Failure` under a
+// The reader of such a record could otherwise see a `## Failure` under a
 // `status: completed` or `status: aborted` line with nothing to reconcile the
-// two, and could reasonably read the failure as having changed the status. It
-// did not: this path writes `current_job: ""`, a `trigger_count` increment and
-// the section, exactly as the store-hit path does.
+// two, and read the failure as having changed the status. It did not: this path
+// writes `current_job: ""`, a `trigger_count` increment and the section, exactly
+// as the store-hit path does. How much the note may claim depends on the reason
+// — see storeMissFailureNoteFor.
 func (p *resultPublisher) PublishStoreMissFailure(
 	ctx context.Context,
 	task lib.Task,
 	jobName string,
 	reason string,
 ) error {
-	return p.publishFailure(ctx, task, jobName, reason, storeMissFailureNote)
+	return p.publishFailure(ctx, task, jobName, reason, storeMissFailureNoteFor(reason))
 }
 
-// storeMissFailureNote is written into the `## Failure` body when the failure
-// was recovered from a Job whose task had already left the executor's store.
-// It states the four things a later reader needs: the record was already
-// terminal, the Job crashed before producing output, the entry exists because
-// that crash would otherwise be silent, and the status is unchanged.
+// storeMissFailureNoteFor returns the note written into the `## Failure` body when
+// the failure was recovered from a Job whose task had already left the executor's
+// store.
+//
+// A store miss on its own guarantees very little: it says the task was absent from
+// the in-memory store, which is also true of a deadline_exceeded or pod_oom_killed
+// Job, and of a store evicted by a type mismatch or a restart while the vault
+// record is still in_progress. Only the pod_crash_no_stdout class died before
+// writing stdout, and only for it is the record known to have reached a terminal
+// status, so only it gets the full explanation. Everything else gets a note that
+// claims just the two things this path actually does.
+//
+// The gate is ParseZombieReason, not string equality, for the same reason
+// crashFailureUpdates uses it: a suffixed form such as "pod_oom_killed
+// (OOMKilled/137)" must classify as its own class rather than fall through a
+// literal comparison that cannot match it.
+func storeMissFailureNoteFor(reason string) string {
+	if parsed, ok := ParseZombieReason(reason); ok && parsed == ZombieReasonPodCrashNoStdout {
+		return storeMissFailureNote
+	}
+	return storeMissFailureNoteOther
+}
+
+// storeMissFailureNote is written for the pod_crash_no_stdout class. It states the
+// four things a later reader needs: the record was already terminal, the Job
+// crashed before producing output, the entry exists because that crash would
+// otherwise be silent, and the status is unchanged.
 const storeMissFailureNote = "- **Note:** this record had already reached its terminal status before the Job " +
 	"above ran. The Job crashed before producing any output, so the run left no trace of " +
 	"its own on this record. This entry exists because that crash would otherwise be " +
 	"silent — the task had already left the executor's in-memory store, so no other path " +
 	"could report it. The status above is unchanged: only `current_job` was cleared and " +
+	"`trigger_count` incremented.\n"
+
+// storeMissFailureNoteOther is written for every other store miss. It claims only
+// what the path guarantees — the task was not in the store, and the write left the
+// status alone — because a deadline_exceeded or pod_oom_killed Job may well have
+// produced output, and a store evicted by a restart may leave the record still
+// in_progress.
+const storeMissFailureNoteOther = "- **Note:** this record was not in the executor's in-memory store when the Job " +
+	"above failed. The status above is unchanged: only `current_job` was cleared and " +
 	"`trigger_count` incremented.\n"
 
 func (p *resultPublisher) publishFailure(
