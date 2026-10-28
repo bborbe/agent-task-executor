@@ -134,7 +134,7 @@ var _ = Describe("JobWatcher", func() {
 			_, calledTask, calledJobName, calledReason := fakePublisher.PublishFailureArgsForCall(0)
 			Expect(string(calledTask.TaskIdentifier)).To(Equal(string(testTaskID)))
 			Expect(calledJobName).To(Equal("job-1"))
-			Expect(calledReason).To(Equal("pod_crash_no_stdout"))
+			Expect(calledReason).To(Equal("JobFailed"))
 
 			_, err = fakeKubeClient.BatchV1().Jobs("test-ns").Get(ctx, "job-1", metav1.GetOptions{})
 			Expect(err).To(BeNil())
@@ -331,7 +331,7 @@ var _ = Describe("JobWatcher", func() {
 			Expect(err).To(BeNil())
 		})
 
-		It("uses pod_crash_no_stdout when condition has no message", func() {
+		It("uses the JobFailed literal when the condition has no reason", func() {
 			job := makeJob("job-7", string(testTaskID), batchv1.JobCondition{
 				Type:   batchv1.JobFailed,
 				Status: corev1.ConditionTrue,
@@ -346,7 +346,7 @@ var _ = Describe("JobWatcher", func() {
 
 			Expect(fakePublisher.PublishFailureCallCount()).To(Equal(1))
 			_, _, _, calledReason := fakePublisher.PublishFailureArgsForCall(0)
-			Expect(calledReason).To(Equal("pod_crash_no_stdout"))
+			Expect(calledReason).To(Equal("JobFailed"))
 		})
 	})
 
@@ -386,7 +386,7 @@ var _ = Describe("JobWatcher", func() {
 			)
 			Expect(calledTask.TaskIdentifier).To(Equal(testTaskID))
 			Expect(calledJobName).To(Equal("job-fresh"))
-			Expect(calledReason).To(Equal("pod_crash_no_stdout"))
+			Expect(calledReason).To(Equal("JobFailed"))
 			// The phase keys the re-drive streak and reason refs exactly as the
 			// store-hit path would.
 			Expect(calledTask.Frontmatter["phase"]).To(Equal("execution"))
@@ -443,7 +443,7 @@ var _ = Describe("JobWatcher", func() {
 			_, calledTask, calledJobName, calledReason := fakePublisher.PublishFailureArgsForCall(0)
 			Expect(calledTask).To(Equal(testTask))
 			Expect(calledJobName).To(Equal("job-hit"))
-			Expect(calledReason).To(Equal("pod_crash_no_stdout"))
+			Expect(calledReason).To(Equal("JobFailed"))
 			_, ok := taskStore.Load(testTaskID)
 			Expect(ok).To(BeFalse())
 		})
@@ -483,7 +483,7 @@ var _ = Describe("JobWatcher", func() {
 		})
 
 		It(
-			"maps BackoffLimitExceeded job condition to pod_crash_no_stdout (no resolvable pod)",
+			"maps an unresolvable-pod BackoffLimitExceeded to its condition plus the unresolved marker",
 			func() {
 				job := makeJob("job-backoff", string(testTaskID), batchv1.JobCondition{
 					Type:    batchv1.JobFailed,
@@ -501,7 +501,7 @@ var _ = Describe("JobWatcher", func() {
 
 				Expect(fakePublisher.PublishFailureCallCount()).To(Equal(1))
 				_, _, _, calledReason := fakePublisher.PublishFailureArgsForCall(0)
-				Expect(calledReason).To(Equal("pod_crash_no_stdout"))
+				Expect(calledReason).To(Equal("BackoffLimitExceeded (pod-unresolved)"))
 			},
 		)
 	})
