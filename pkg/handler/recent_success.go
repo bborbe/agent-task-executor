@@ -17,27 +17,24 @@ import (
 )
 
 // recentlySucceeded reports whether a Job for the task, spawned for the phase
-// the task is still at, has already succeeded and must not be spawned again
-// until that phase changes.
+// the task is still at, has already succeeded and this pass must not spawn it
+// again.
 //
-// This is a suppression, not a throttle. It began as a 300 s window covering the
-// gap before the controller's write-back syncs (measured nuke dev 2026-10-21:
-// task a055d019 spawned 3x, ~60 s apart, each Job done in ~20 s), but a window
-// that lapses re-spawns the same unit of work for as long as the phase stays
-// put — and for a task whose phase never advances that is forever, bounded only
-// by maxConsecutiveRedrives. The success record is the authority: a task that
-// succeeded at the phase it is still at has nothing left to do there.
+// It answers for two windows, not one. A recurring task is suppressed until the
+// cadence it declares has elapsed, because its phase does not advance between
+// occurrences and anything shorter would stop it for good. Every other task is
+// suppressed only inside the write-back grace; past that window
+// parkSucceededWithoutPhaseMove takes over and publishes human_review, so the
+// record leaves the loop and reaches a human instead of being suppressed in
+// silence forever.
+//
+// The success record is the authority, and it is shared: a pod that replaced the
+// one which ran the Job reads the same record, which is what makes either
+// outcome survive a restart.
 //
 // Scoped by phase, so a task the agent advanced (success at planning, file now
 // at execution) is spawned for its next phase at once. A failed Job records
 // nothing, so it is still re-driven.
-//
-// The one release besides a phase change is a recurring task type: a task
-// declaring `recurring: daily|weekdays|weekly|monthly|quarterly` runs again once
-// that period has elapsed, because its phase does not advance between
-// occurrences and a permanent suppression would stop it for good. A task with no
-// recognised token is not recurring, and the suppression holds until its phase
-// changes.
 func (h *taskEventHandler) recentlySucceeded(ctx context.Context, task lib.Task) bool {
 	phase := taskPhase(task)
 	succeeded, ok := h.lastSuccess(ctx, task, phase)
@@ -51,7 +48,14 @@ func (h *taskEventHandler) recentlySucceeded(ctx context.Context, task lib.Task)
 		// just completed, which keeps the guard engaged.
 		elapsed = 0
 	}
-	if recurringReleased(task.Frontmatter, elapsed) {
+	if period, recurring := recurringPeriod(task.Frontmatter); recurring {
+		if elapsed >= period {
+			return false
+		}
+	} else if elapsed >= defaultRespawnGracePeriod {
+		// Past the write-back window a non-recurring task is not suppressed here:
+		// the caller parks it, which suppresses the spawn just as firmly and
+		// leaves a record a human can see.
 		return false
 	}
 	glog.Infof(
@@ -119,31 +123,31 @@ var successRecordRetention = func() time.Duration {
 	return longest
 }()
 
-// recurringReleased reports whether a task that recorded success at its current
-// phase has served the cadence it declares and may run again.
+// recurringPeriod returns the cadence the task declares in its `recurring:`
+// frontmatter key, and whether the task is recurring at all.
 //
 // An absent or empty token means the task is not recurring. An unrecognised
 // token is treated the same way and logged, never defaulted to a period:
 // inventing a cadence for a token we do not understand would suppress that task
 // forever, which is the failure this release exists to prevent.
-func recurringReleased(frontmatter lib.TaskFrontmatter, elapsed time.Duration) bool {
+func recurringPeriod(frontmatter lib.TaskFrontmatter) (time.Duration, bool) {
 	token, ok := frontmatter.String("recurring")
 	if !ok {
-		return false
+		return 0, false
 	}
 	trimmed := strings.TrimSpace(token)
 	if trimmed == "" || trimmed == "<nil>" {
-		return false
+		return 0, false
 	}
 	period, known := recurringCadences[strings.ToLower(trimmed)]
 	if !known {
 		glog.Warningf(
-			"event=unknown_recurring_token token=%q elapsed=%.0fs treating as not recurring",
-			token, elapsed.Seconds(),
+			"event=unknown_recurring_token token=%q treating as not recurring",
+			token,
 		)
-		return false
+		return 0, false
 	}
-	return elapsed >= period
+	return period, true
 }
 
 // recordTaskRerun counts a spawn whose task already succeeded at the phase it

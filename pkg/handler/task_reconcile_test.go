@@ -260,19 +260,24 @@ var _ = Describe("TaskEventHandler reconcile loop", func() {
 			Expect(fakeSpawner.SpawnJobCallCount()).To(Equal(1))
 		})
 
-		It(
-			"is not re-driven after the grace window has passed while the phase is unchanged",
-			func() {
-				// The guard is a suppression, not a throttle: a task that succeeded at
-				// the phase it is still at has nothing left to do there, however long
-				// ago that was. Measured on dev 2026-10-27, every observed re-run
-				// (360 s to 1395 s) landed after the old 300 s window had lapsed.
-				taskStore.MarkSucceeded("tid-a", "execution", now.Add(-10*time.Minute))
+		It("is parked, not re-driven, once the grace window has passed", func() {
+			// The task is still at the phase its last Job succeeded for, so the
+			// agent exited 0 without moving it: a deliberate human park. This
+			// used to be re-driven — the redrive cap was what eventually stopped
+			// it — but v0.46.3 stopped charging a successful spawn against that
+			// cap, so the re-drive became unbounded and the park is now what
+			// ends the loop. A lost write-back is indistinguishable from a park
+			// at this distance, and parking leaves that to a human rather than
+			// silently re-running the work.
+			// The park reads the task from the view, not from the reconcile's
+			// own snapshot, so the view must hold it for this path to fire.
+			fakeView.GetReturns(eligibleTask(domain.TaskPhaseExecution), true)
+			taskStore.MarkSucceeded("tid-a", "execution", now.Add(-10*time.Minute))
 
-				Expect(h.ReconcileOnce(ctx)).To(BeNil())
-				Expect(fakeSpawner.SpawnJobCallCount()).To(Equal(0))
-			},
-		)
+			Expect(h.ReconcileOnce(ctx)).To(BeNil())
+			Expect(fakeSpawner.SpawnJobCallCount()).To(Equal(0))
+			Expect(fakeResultPublisher.PublishParkSucceededCallCount()).To(Equal(1))
+		})
 
 		It("is not released before a recurring task's declared cadence has elapsed", func() {
 			fakeView.SnapshotReturns([]lib.Task{recurringTask(domain.TaskPhaseExecution, "weekly")})
@@ -280,6 +285,10 @@ var _ = Describe("TaskEventHandler reconcile loop", func() {
 
 			Expect(h.ReconcileOnce(ctx)).To(BeNil())
 			Expect(fakeSpawner.SpawnJobCallCount()).To(Equal(0))
+			// Suppressed, not parked: a recurring task's phase does not advance
+			// between occurrences, so parking it would send a human to the same
+			// record on every run.
+			Expect(fakeResultPublisher.PublishParkSucceededCallCount()).To(Equal(0))
 		})
 
 		It("is released once a recurring task's declared cadence has elapsed", func() {
@@ -291,19 +300,23 @@ var _ = Describe("TaskEventHandler reconcile loop", func() {
 
 			Expect(h.ReconcileOnce(ctx)).To(BeNil())
 			Expect(fakeSpawner.SpawnJobCallCount()).To(Equal(1))
+			Expect(fakeResultPublisher.PublishParkSucceededCallCount()).To(Equal(0))
 		})
 
 		It("treats an unrecognised recurring token as not recurring", func() {
 			// Defaulting an unknown token to a period would invent a cadence and
-			// suppress the task forever; the suppression holds instead, and the
-			// token is logged.
+			// suppress the task forever. Treated as not recurring, it parks like any
+			// other one-shot record, and the token is logged.
 			fakeView.SnapshotReturns(
 				[]lib.Task{recurringTask(domain.TaskPhaseExecution, "fortnightly")},
 			)
+			// The park reads the task from the view, so the view must hold it.
+			fakeView.GetReturns(eligibleTask(domain.TaskPhaseExecution), true)
 			taskStore.MarkSucceeded("tid-a", "execution", now.Add(-10*24*time.Hour))
 
 			Expect(h.ReconcileOnce(ctx)).To(BeNil())
 			Expect(fakeSpawner.SpawnJobCallCount()).To(Equal(0))
+			Expect(fakeResultPublisher.PublishParkSucceededCallCount()).To(Equal(1))
 		})
 
 		It("still re-drives a task whose Job failed, up to the redrive cap", func() {

@@ -196,11 +196,12 @@ var _ = Describe("the shared success record", func() {
 		refs = newMemoryRefClient()
 	})
 
-	It("suppresses a re-spawn from a fresh store after a restart", func() {
+	It("parks a re-spawn from a fresh store after a restart", func() {
 		// SC2's restart half. A per-pod map returns "never succeeded" on a new
-		// instance, so an in-memory-only suppression re-opens the duplicate on
-		// every deploy. The record is written by the pod that ran the Job and read
-		// by the pod that replaced it.
+		// instance, so an in-memory-only record re-opens the duplicate on every
+		// deploy. The record is written by the pod that ran the Job and read by the
+		// pod that replaced it — and because the park is what fires past the grace,
+		// reaching it at all proves the read came from the shared store.
 		first := newHandler(pkg.NewTaskStore())
 		first.ReleaseTaskClaimAfterSuccess(
 			ctx, "tid-a", "execution", now.Add(-2*time.Hour),
@@ -208,17 +209,19 @@ var _ = Describe("the shared success record", func() {
 
 		restarted := newHandler(pkg.NewTaskStore())
 		fakeView.SnapshotReturns([]lib.Task{eligibleTask(domain.TaskPhaseExecution)})
+		fakeView.GetReturns(eligibleTask(domain.TaskPhaseExecution), true)
 		fakeSpawner.IsJobActiveReturns(false, nil)
 
 		Expect(restarted.ReconcileOnce(ctx)).To(BeNil())
 		Expect(fakeSpawner.SpawnJobCallCount()).To(Equal(0))
+		Expect(fakeResultPublisher.PublishParkSucceededCallCount()).To(Equal(1))
 	})
 
-	It("suppresses after the pod rewrites trigger_scope and job_started_at", func() {
+	It("parks after the pod rewrites trigger_scope and job_started_at", func() {
 		// SC2's rewrite half. The agent pods rewrite the frontmatter from a
 		// snapshot taken at the start of their run, so trigger_scope and
-		// job_started_at come back at their pre-spawn values. A suppression that
-		// lived in either field would read as "not yet run" and spawn again.
+		// job_started_at come back at their pre-spawn values. A record that lived
+		// in either field would read as "not yet run" and spawn again.
 		first := newHandler(pkg.NewTaskStore())
 		first.ReleaseTaskClaimAfterSuccess(
 			ctx, "tid-a", "execution", now.Add(-2*time.Hour),
@@ -230,10 +233,12 @@ var _ = Describe("the shared success record", func() {
 
 		restarted := newHandler(pkg.NewTaskStore())
 		fakeView.SnapshotReturns([]lib.Task{rewritten})
+		fakeView.GetReturns(rewritten, true)
 		fakeSpawner.IsJobActiveReturns(false, nil)
 
 		Expect(restarted.ReconcileOnce(ctx)).To(BeNil())
 		Expect(fakeSpawner.SpawnJobCallCount()).To(Equal(0))
+		Expect(fakeResultPublisher.PublishParkSucceededCallCount()).To(Equal(1))
 	})
 
 	It("does not suppress a restart's first pass when no record was written", func() {
@@ -264,9 +269,10 @@ var _ = Describe("the shared success record", func() {
 		Expect(fakeSpawner.SpawnJobCallCount()).To(Equal(1))
 	})
 
-	It("suppresses from a shared record when the pod's memory is empty", func() {
+	It("parks from a shared record when the pod's memory is empty", func() {
 		// The read path itself, with no ref client in play: a store that answers
-		// with a completion at the task's phase suppresses the spawn.
+		// with a completion at the task's phase suppresses the spawn — by parking,
+		// since a non-recurring record past the grace is a human's to look at.
 		store := new(mocks.FakeSuccessStore)
 		// Inside a reconcile pass the read is the pass snapshot, not Lookup.
 		store.SnapshotReturns(
@@ -277,10 +283,12 @@ var _ = Describe("the shared success record", func() {
 		)
 
 		fakeView.SnapshotReturns([]lib.Task{eligibleTask(domain.TaskPhaseExecution)})
+		fakeView.GetReturns(eligibleTask(domain.TaskPhaseExecution), true)
 		fakeSpawner.IsJobActiveReturns(false, nil)
 
 		Expect(newHandlerWithStore(store).ReconcileOnce(ctx)).To(BeNil())
 		Expect(fakeSpawner.SpawnJobCallCount()).To(Equal(0))
+		Expect(fakeResultPublisher.PublishParkSucceededCallCount()).To(Equal(1))
 	})
 
 	It("falls back to memory when the shared read fails", func() {
@@ -299,7 +307,9 @@ var _ = Describe("the shared success record", func() {
 
 	It("releases a recurring task once its cadence elapsed, across a restart", func() {
 		// The cadence release must survive the restart too, or a recurring task
-		// whose record is shared is suppressed on every new pod for good.
+		// whose record is shared is suppressed on every new pod for good. It is
+		// released, never parked: a recurring task's phase does not advance between
+		// occurrences, so a park would send a human to the same record every run.
 		first := newHandler(pkg.NewTaskStore())
 		first.ReleaseTaskClaimAfterSuccess(
 			ctx, "tid-a", "execution", now.Add(-8*24*time.Hour),
@@ -310,9 +320,11 @@ var _ = Describe("the shared success record", func() {
 
 		restarted := newHandler(pkg.NewTaskStore())
 		fakeView.SnapshotReturns([]lib.Task{task})
+		fakeView.GetReturns(task, true)
 		fakeSpawner.IsJobActiveReturns(false, nil)
 
 		Expect(restarted.ReconcileOnce(ctx)).To(BeNil())
 		Expect(fakeSpawner.SpawnJobCallCount()).To(Equal(1))
+		Expect(fakeResultPublisher.PublishParkSucceededCallCount()).To(Equal(0))
 	})
 })
