@@ -132,3 +132,29 @@ func TestParkSucceededWithoutPhaseMoveReportsFalseWhenThePublishFails(t *testing
 		t.Fatal("parkSucceededWithoutPhaseMove = true; want false when the publish fails")
 	}
 }
+
+// The recovery path for a park is an operator moving the phase back to the drive
+// phase. That task matches the same success record the park consumed, so the
+// record must not outlive the park — otherwise the re-arm is silently undone on
+// the next pass and the documented way out of the terminal state does nothing
+// until the record is pruned an hour later.
+func TestParkSucceededWithoutPhaseMoveConsumesTheRecordSoAReArmIsNotReParked(t *testing.T) {
+	h, publisher, task, now := parkFixture(t, "execution")
+	h.taskStore.MarkSucceeded(task.TaskIdentifier, "execution", now.Add(-longAgo))
+
+	if !h.parkSucceededWithoutPhaseMove(context.Background(), task) {
+		t.Fatal("first pass did not park")
+	}
+	if got := len(publisher.parkedSucceeded); got != 1 {
+		t.Fatalf("park count = %d; want 1", got)
+	}
+
+	// The operator re-arms by putting the task back at the drive phase. The
+	// next pass must let it spawn, not park it again.
+	if h.parkSucceededWithoutPhaseMove(context.Background(), task) {
+		t.Fatal("re-armed task was parked again; the success record outlived its park")
+	}
+	if got := len(publisher.parkedSucceeded); got != 1 {
+		t.Fatalf("park count = %d; want 1 after a re-arm", got)
+	}
+}

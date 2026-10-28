@@ -708,23 +708,14 @@ func (p *resultPublisher) PublishParkLostClaim(
 
 // PublishParkSucceeded writes phase "human_review" and nothing else.
 //
-// No dedupe is needed: the guard that calls this stops as soon as the task view
-// carries the parked phase, so the informer's ~5 min terminal re-delivery finds
-// a non-drive phase and does not republish. The write is idempotent in the
-// window before the view catches up, because every attempt writes the same
-// value.
+// It delegates rather than repeating the command: the two parks differ only in
+// why they fire, and the write they make is identical. Duplicating it would let
+// a future change to the park payload drift between them.
 func (p *resultPublisher) PublishParkSucceeded(
 	ctx context.Context,
 	task lib.Task,
 ) error {
-	cmd := taskcmd.UpdateFrontmatterCommand{
-		TaskIdentifier: task.TaskIdentifier,
-		TargetVault:    targetVaultFromTask(task),
-		Updates: lib.TaskFrontmatter{
-			"phase": string(domain.TaskPhaseHumanReview),
-		},
-	}
-	return p.publishRaw(ctx, taskcmd.UpdateFrontmatterCommandOperation, cmd)
+	return p.PublishParkLostClaim(ctx, task)
 }
 
 // PublishAbort closes a record the consecutive-re-drive cap has stopped

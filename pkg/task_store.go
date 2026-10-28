@@ -58,6 +58,19 @@ func (s *TaskStore) MarkSucceeded(id lib.TaskIdentifier, phase string, at time.T
 	s.succeeded[id] = SucceededJob{Phase: phase, CompletedAt: at}
 }
 
+// ClearSucceeded drops the task's success record.
+//
+// Called once a record has been consumed by a park. Without it the record
+// outlives its meaning: an operator who re-arms a parked task by moving its
+// phase back to the phase that succeeded would match the same stale record and
+// be re-parked on the very next pass, so the documented recovery path would do
+// nothing until PruneSucceededBefore dropped the record an hour later.
+func (s *TaskStore) ClearSucceeded(id lib.TaskIdentifier) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	delete(s.succeeded, id)
+}
+
 // LastSucceeded returns the task's latest successful Job, if one is recorded.
 func (s *TaskStore) LastSucceeded(id lib.TaskIdentifier) (SucceededJob, bool) {
 	s.mu.RLock()

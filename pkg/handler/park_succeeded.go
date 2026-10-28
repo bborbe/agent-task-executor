@@ -99,5 +99,12 @@ func (h *taskEventHandler) parkSucceededWithoutPhaseMove(
 		elapsed.Seconds(),
 	)
 	metrics.TaskEventsTotal.WithLabelValues("parked_succeeded").Inc()
+	// Consume the record. It exists to answer "did this task's last Job move the
+	// phase", and it has just been answered. Left in place it would answer the
+	// same question again for a task an operator has since re-armed — the
+	// recovery path is moving the phase back to the drive phase, and that task
+	// would match this same record and be re-parked on the next pass, silently
+	// undoing the re-arm until the record is pruned an hour later.
+	h.taskStore.ClearSucceeded(task.TaskIdentifier)
 	return true
 }
