@@ -59,9 +59,6 @@ func (h *taskEventHandler) recentlySucceeded(task lib.Task) bool {
 	return true
 }
 
-// recurringTokenKey is the frontmatter key carrying a task's declared cadence.
-const recurringTokenKey = "recurring"
-
 // recurringCadences maps the declared `recurring:` token to the period after
 // which a recurring task may run again at an unchanged phase. The token is the
 // operator-facing vocabulary task files already carry; the durations are the
@@ -98,7 +95,7 @@ var successRecordRetention = func() time.Duration {
 // inventing a cadence for a token we do not understand would suppress that task
 // forever, which is the failure this release exists to prevent.
 func recurringReleased(frontmatter lib.TaskFrontmatter, elapsed time.Duration) bool {
-	token, ok := frontmatter.String(recurringTokenKey)
+	token, ok := frontmatter.String("recurring")
 	if !ok {
 		return false
 	}
