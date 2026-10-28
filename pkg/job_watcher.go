@@ -14,6 +14,7 @@ import (
 	lib "github.com/bborbe/agent"
 	"github.com/bborbe/errors"
 	libk8s "github.com/bborbe/k8s"
+	libtime "github.com/bborbe/time"
 	"github.com/golang/glog"
 	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
@@ -57,15 +58,18 @@ func NewJobWatcher(
 	taskStore *TaskStore,
 	publisher ResultPublisher,
 	claimReleaser ClaimReleaser,
+	currentDateTimeGetter libtime.CurrentDateTimeGetter,
 ) JobWatcher {
 	w := &jobWatcher{
-		kubeClient:           kubeClient,
-		namespace:            namespace,
-		configProvider:       configProvider,
-		taskStore:            taskStore,
-		publisher:            publisher,
-		claimReleaser:        claimReleaser,
-		newNamespaceInformer: newJobWatcherNamespaceInformer,
+		kubeClient:            kubeClient,
+		namespace:             namespace,
+		configProvider:        configProvider,
+		taskStore:             taskStore,
+		publisher:             publisher,
+		claimReleaser:         claimReleaser,
+		currentDateTimeGetter: currentDateTimeGetter,
+		startedAt:             currentDateTimeGetter.Now(),
+		newNamespaceInformer:  newJobWatcherNamespaceInformer,
 	}
 	w.watched = map[libk8s.Namespace]bool{namespace: true}
 	w.synced = map[libk8s.Namespace]bool{namespace: true}
@@ -74,17 +78,21 @@ func NewJobWatcher(
 }
 
 type jobWatcher struct {
-	kubeClient           kubernetes.Interface
-	namespace            libk8s.Namespace
-	configProvider       libk8s.Provider[agentv1.Config]
-	taskStore            *TaskStore
-	publisher            ResultPublisher
-	claimReleaser        ClaimReleaser
-	mu                   sync.Mutex
-	watched              map[libk8s.Namespace]bool
-	synced               map[libk8s.Namespace]bool
-	informers            map[libk8s.Namespace]jobWatcherNamespaceInformer
-	newNamespaceInformer func(kubernetes.Interface, libk8s.Namespace) (jobWatcherNamespaceInformer, error)
+	kubeClient     kubernetes.Interface
+	namespace      libk8s.Namespace
+	configProvider libk8s.Provider[agentv1.Config]
+	taskStore      *TaskStore
+	publisher      ResultPublisher
+	claimReleaser  ClaimReleaser
+	// currentDateTimeGetter and startedAt bound which failed Jobs may be
+	// published without a store entry: see publishStoreMissFailure.
+	currentDateTimeGetter libtime.CurrentDateTimeGetter
+	startedAt             libtime.DateTime
+	mu                    sync.Mutex
+	watched               map[libk8s.Namespace]bool
+	synced                map[libk8s.Namespace]bool
+	informers             map[libk8s.Namespace]jobWatcherNamespaceInformer
+	newNamespaceInformer  func(kubernetes.Interface, libk8s.Namespace) (jobWatcherNamespaceInformer, error)
 }
 
 const (
@@ -601,7 +609,125 @@ func (w *jobWatcher) handleTerminal(
 		w.publishSyntheticFailure(ctx, taskID, task, job, reason)
 		return
 	}
+	if alwaysPublish && w.publishStoreMissFailure(ctx, taskID, job, reason) {
+		return
+	}
 	w.logMissingTask(taskID, job, alwaysPublish)
+}
+
+// storeMissPublishWindow bounds how old a failure may be and still be published
+// without a store entry. It must stay below dedupeTTL: within the window every
+// informer re-delivery of an already-published Job lands inside PublishFailure's
+// per-job dedupe, and past the window the store-miss path stops publishing
+// before the dedupe entry can expire. It must exceed jobWatcherResyncPeriod so a
+// publish that failed is retried by the next re-delivery.
+const storeMissPublishWindow = 30 * time.Minute
+
+// publishStoreMissFailure publishes the failure of a Job whose task has already
+// left the TaskStore, and reports whether it handled the Job.
+//
+// The store entry is evicted by any terminal-status event for the task, by a
+// type mismatch, and by an executor restart, so a failed Job routinely outlives
+// it. Dropping the failure there made crashes silent: task ad12e9fb (2026-10-28,
+// pod_crash_no_stdout ContainerStatusUnknown/137) and task 9371a3d2 (2026-10-27)
+// kept a dead current_job and never got a ## Failure section.
+//
+// A store miss is also the normal state for a failure that was ALREADY
+// published — the store-hit path evicts after publishing, and the informer
+// re-delivers every terminal Job each resync and re-lists all of them after a
+// restart. Only a failure newer than this watcher's start and inside
+// storeMissPublishWindow is published: an older one was either handled by this
+// process (and is deduped) or belongs to a previous process, which keeps the
+// old log-and-drop behaviour rather than risk a second ## Failure and a second
+// trigger_count bump.
+//
+// A task with another Job still active is left alone: the failure clears
+// current_job, and clearing it under a running Job would make the task look idle.
+func (w *jobWatcher) publishStoreMissFailure(
+	ctx context.Context,
+	taskID lib.TaskIdentifier,
+	job *batchv1.Job,
+	reason string,
+) bool {
+	failedAt, ok := jobFailedAt(job)
+	if !ok || !w.freshStoreMissFailure(failedAt) {
+		return false
+	}
+	active, err := w.taskHasActiveJob(ctx, job.Namespace, taskID)
+	if err != nil {
+		glog.Errorf("check active job for task %s before store-miss failure: %v", taskID, err)
+		return false
+	}
+	if active {
+		glog.V(2).Infof(
+			"skip store-miss failure for task %s (job %s): another job is still active",
+			taskID, job.Name,
+		)
+		return true
+	}
+	if err := w.publisher.PublishStoreMissFailure(ctx, taskFromFailedJob(taskID, job), job.Name, reason); err != nil {
+		glog.Errorf(
+			"publish synthetic failure for task %s (job %s) — task not in store: %v",
+			taskID, job.Name, err,
+		)
+		return true
+	}
+	glog.V(2).Infof(
+		"published synthetic failure for task %s (job %s) — task not in store",
+		taskID, job.Name,
+	)
+	return true
+}
+
+// freshStoreMissFailure reports whether failedAt is after the watcher started
+// and inside storeMissPublishWindow.
+func (w *jobWatcher) freshStoreMissFailure(failedAt time.Time) bool {
+	if !failedAt.After(w.startedAt.Time()) {
+		return false
+	}
+	return w.currentDateTimeGetter.Now().Time().Sub(failedAt) < storeMissPublishWindow
+}
+
+// jobFailedAt returns when the Job failed: its JobFailed condition's
+// LastTransitionTime, else its CompletionTime. ok is false when neither is set;
+// an unknown failure time is treated as stale.
+func jobFailedAt(job *batchv1.Job) (time.Time, bool) {
+	for _, c := range job.Status.Conditions {
+		if c.Type == batchv1.JobFailed && c.Status == corev1.ConditionTrue &&
+			!c.LastTransitionTime.IsZero() {
+			return c.LastTransitionTime.Time, true
+		}
+	}
+	if job.Status.CompletionTime != nil && !job.Status.CompletionTime.IsZero() {
+		return job.Status.CompletionTime.Time, true
+	}
+	return time.Time{}, false
+}
+
+// taskFromFailedJob builds the minimal task PublishFailure needs when the
+// original task content is gone.
+//
+//   - TaskIdentifier comes from the Job's task-id label.
+//   - phase comes from the Job's phase annotation, so the re-drive streak and
+//     reason refs are keyed exactly as on the store-hit path. A Job spawned before
+//     the annotation existed carries none and records under the "none" phase.
+//   - target_vault is left unset. The Job does not carry it, and the executor
+//     serves every vault and has none of its own; an empty TargetVault is
+//     processed by every controller, and those without the task file skip it.
+//   - max_triggers is present with a nil value. crashFailureUpdates arms the
+//     cap only when the key is absent, and the controller applies Updates
+//     blindly, so an absent key here would overwrite an operator-set cap of 5 or
+//     6 with the default 3. The real value is unknown, so the cap is not armed on
+//     this path; the next failure seen with the task in the store arms it.
+func taskFromFailedJob(taskID lib.TaskIdentifier, job *batchv1.Job) lib.Task {
+	frontmatter := lib.TaskFrontmatter{"max_triggers": nil}
+	if phase := job.Annotations[TaskPhaseAnnotationKey]; phase != "" {
+		frontmatter["phase"] = phase
+	}
+	return lib.Task{
+		TaskIdentifier: taskID,
+		Frontmatter:    frontmatter,
+	}
 }
 
 func (w *jobWatcher) publishSyntheticFailure(
@@ -646,7 +772,8 @@ func (w *jobWatcher) logMissingTask(
 		// V(3), not Warning: the Job informer re-delivers an already-handled terminal
 		// Job every ~5 minutes, so a failed Job whose task was already deleted from the
 		// store re-enters this branch repeatedly and the old Warning read as a failure.
-		// The synthetic failure was already published on the first (real) observation.
+		// Only failures publishStoreMissFailure judged stale reach here: they predate
+		// this process or its publish window.
 		glog.V(3).Infof(
 			"task %s not in task store; job %s/%s failed but cannot publish synthetic failure (no original task content)",
 			taskID,

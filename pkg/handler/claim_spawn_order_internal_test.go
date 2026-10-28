@@ -75,6 +75,12 @@ func (stubResultPublisher) PublishFailure(
 	return nil
 }
 
+func (stubResultPublisher) PublishStoreMissFailure(
+	context.Context, lib.Task, string, string,
+) error {
+	return nil
+}
+
 func (stubResultPublisher) PublishClearCurrentJob(
 	context.Context, lib.Task, string,
 ) error {

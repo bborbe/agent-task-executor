@@ -161,6 +161,7 @@ func (h *claimHarness) watcher() pkg.JobWatcher {
 		h.taskStore,
 		h.publisher,
 		h.eventHandler,
+		libtime.NewCurrentDateTime(),
 	)
 }
 
