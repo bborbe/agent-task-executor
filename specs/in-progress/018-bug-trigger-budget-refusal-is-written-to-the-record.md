@@ -1,8 +1,9 @@
 ---
-status: prompted
+status: verifying
 approved: "2026-10-28T10:59:02Z"
 generating: "2026-10-28T11:05:52Z"
 prompted: "2026-10-28T11:18:10Z"
+verifying: "2026-10-28T12:30:41Z"
 branch: dark-factory/bug-trigger-budget-refusal-is-written-to-the-record
 ---
 
