@@ -76,6 +76,18 @@ type FakeResultPublisher struct {
 	publishParkLostClaimReturnsOnCall map[int]struct {
 		result1 error
 	}
+	PublishParkSucceededStub        func(context.Context, lib.Task) error
+	publishParkSucceededMutex       sync.RWMutex
+	publishParkSucceededArgsForCall []struct {
+		arg1 context.Context
+		arg2 lib.Task
+	}
+	publishParkSucceededReturns struct {
+		result1 error
+	}
+	publishParkSucceededReturnsOnCall map[int]struct {
+		result1 error
+	}
 	PublishQueueEntryStub        func(context.Context, lib.Task, string) error
 	publishQueueEntryMutex       sync.RWMutex
 	publishQueueEntryArgsForCall []struct {
@@ -484,6 +496,68 @@ func (fake *FakeResultPublisher) PublishParkLostClaimReturnsOnCall(i int, result
 		})
 	}
 	fake.publishParkLostClaimReturnsOnCall[i] = struct {
+		result1 error
+	}{result1}
+}
+
+func (fake *FakeResultPublisher) PublishParkSucceeded(arg1 context.Context, arg2 lib.Task) error {
+	fake.publishParkSucceededMutex.Lock()
+	ret, specificReturn := fake.publishParkSucceededReturnsOnCall[len(fake.publishParkSucceededArgsForCall)]
+	fake.publishParkSucceededArgsForCall = append(fake.publishParkSucceededArgsForCall, struct {
+		arg1 context.Context
+		arg2 lib.Task
+	}{arg1, arg2})
+	stub := fake.PublishParkSucceededStub
+	fakeReturns := fake.publishParkSucceededReturns
+	fake.recordInvocation("PublishParkSucceeded", []interface{}{arg1, arg2})
+	fake.publishParkSucceededMutex.Unlock()
+	if stub != nil {
+		return stub(arg1, arg2)
+	}
+	if specificReturn {
+		return ret.result1
+	}
+	return fakeReturns.result1
+}
+
+func (fake *FakeResultPublisher) PublishParkSucceededCallCount() int {
+	fake.publishParkSucceededMutex.RLock()
+	defer fake.publishParkSucceededMutex.RUnlock()
+	return len(fake.publishParkSucceededArgsForCall)
+}
+
+func (fake *FakeResultPublisher) PublishParkSucceededCalls(stub func(context.Context, lib.Task) error) {
+	fake.publishParkSucceededMutex.Lock()
+	defer fake.publishParkSucceededMutex.Unlock()
+	fake.PublishParkSucceededStub = stub
+}
+
+func (fake *FakeResultPublisher) PublishParkSucceededArgsForCall(i int) (context.Context, lib.Task) {
+	fake.publishParkSucceededMutex.RLock()
+	defer fake.publishParkSucceededMutex.RUnlock()
+	argsForCall := fake.publishParkSucceededArgsForCall[i]
+	return argsForCall.arg1, argsForCall.arg2
+}
+
+func (fake *FakeResultPublisher) PublishParkSucceededReturns(result1 error) {
+	fake.publishParkSucceededMutex.Lock()
+	defer fake.publishParkSucceededMutex.Unlock()
+	fake.PublishParkSucceededStub = nil
+	fake.publishParkSucceededReturns = struct {
+		result1 error
+	}{result1}
+}
+
+func (fake *FakeResultPublisher) PublishParkSucceededReturnsOnCall(i int, result1 error) {
+	fake.publishParkSucceededMutex.Lock()
+	defer fake.publishParkSucceededMutex.Unlock()
+	fake.PublishParkSucceededStub = nil
+	if fake.publishParkSucceededReturnsOnCall == nil {
+		fake.publishParkSucceededReturnsOnCall = make(map[int]struct {
+			result1 error
+		})
+	}
+	fake.publishParkSucceededReturnsOnCall[i] = struct {
 		result1 error
 	}{result1}
 }

@@ -8,6 +8,10 @@ import (
 	"context"
 	"encoding/json"
 	stderrors "errors"
+	"flag"
+	"io"
+	"os"
+	"strings"
 
 	"github.com/IBM/sarama"
 	lib "github.com/bborbe/agent"
@@ -18,6 +22,7 @@ import (
 	libtime "github.com/bborbe/time"
 	libtimetest "github.com/bborbe/time/test"
 	"github.com/bborbe/vault-cli/pkg/domain"
+	"github.com/golang/glog"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 	"github.com/prometheus/client_golang/prometheus/testutil"
@@ -27,6 +32,43 @@ import (
 	"github.com/bborbe/agent-task-executor/pkg/claim"
 	"github.com/bborbe/agent-task-executor/pkg/metrics"
 )
+
+// captureGlogStderr runs fn with glog writing at V(2) to stderr and returns
+// everything written. crashFailureUpdates logs at V(2), so the verbosity flag
+// must be raised here too: without it the line is filtered out and an assertion
+// would pass vacuously against an empty string. The suite runs serially, so the
+// global os.Stderr swap cannot race another spec's logging.
+func captureGlogStderr(fn func()) string {
+	GinkgoHelper()
+	Expect(flag.Set("logtostderr", "true")).To(Succeed())
+	Expect(flag.Set("v", "2")).To(Succeed())
+	defer func() {
+		// Deliberately not Expect: this runs during the panic unwinding that
+		// follows a failed spec assertion, and a second failure here would
+		// replace the real one with "Test Panicked".
+		_ = flag.Set("logtostderr", "false")
+		_ = flag.Set("v", "0")
+	}()
+
+	original := os.Stderr
+	reader, writer, err := os.Pipe()
+	Expect(err).ToNot(HaveOccurred())
+	os.Stderr = writer
+	// Deferred, not sequential: fn() calls PublishFailure with Expect inside it,
+	// and a failed Expect panics. A sequential restore would then be skipped and
+	// the pipe would stay installed as the process stderr for the rest of the
+	// suite, so the failure diagnostics are exactly what disappears.
+	defer func() { os.Stderr = original }()
+
+	fn()
+	glog.Flush()
+
+	Expect(writer.Close()).To(Succeed())
+	out, err := io.ReadAll(reader)
+	Expect(err).ToNot(HaveOccurred())
+	Expect(reader.Close()).To(Succeed())
+	return string(out)
+}
 
 // capturingSyncProducer implements libkafka.SyncProducer and records sent messages.
 type capturingSyncProducer struct {
@@ -530,6 +572,96 @@ var _ = Describe("ResultPublisher", func() {
 			Expect(updateCmd.Updates).To(HaveLen(1))
 			Expect(updateCmd.Updates["current_job"]).To(Equal(""))
 		})
+
+		// A record that reaches the controller without max_triggers is
+		// indistinguishable from one whose class never matched, so the log line
+		// has to carry the inputs the decision tested rather than its verdict.
+		// These two specs are what pin that: the early return names the cached
+		// value it saw, and the arming path names the absence it acted on.
+		It("logs the values it tested when it returns early on an already-present max_triggers",
+			func() {
+				task := lib.Task{
+					TaskIdentifier: lib.TaskIdentifier("test-task-log-early-return"),
+					Frontmatter: lib.TaskFrontmatter{
+						"status":       "in_progress",
+						"max_triggers": 6,
+					},
+					Content: lib.TaskContent("do the work"),
+				}
+
+				out := captureGlogStderr(func() {
+					err := publisher.PublishFailure(
+						ctx, task, "pr-reviewer-agent-1234", "pod_crash_no_stdout",
+					)
+					Expect(err).NotTo(HaveOccurred())
+				})
+
+				Expect(out).To(ContainSubstring("event=crash_arm_decision task="))
+				Expect(out).To(ContainSubstring("decision=max_triggers_already_present"))
+				Expect(out).To(ContainSubstring("task=test-task-log-early-return"))
+				Expect(out).To(ContainSubstring("job=pr-reviewer-agent-1234"))
+				Expect(out).To(ContainSubstring(`reason="pod_crash_no_stdout"`))
+				Expect(out).To(ContainSubstring(`parsed="pod_crash_no_stdout"`))
+				Expect(out).To(ContainSubstring("parsed_ok=true"))
+				Expect(out).To(ContainSubstring("cached_max_triggers=6"))
+				// Exactly once, so a doubled log call or a second emitting path
+				// cannot pass on presence alone.
+				Expect(strings.Count(out, "event=crash_arm_decision ")).To(Equal(1))
+			},
+		)
+
+		It("logs the tested values on the arming path too", func() {
+			task := lib.Task{
+				TaskIdentifier: lib.TaskIdentifier("test-task-log-arm"),
+				Frontmatter: lib.TaskFrontmatter{
+					"status": "in_progress",
+				},
+				Content: lib.TaskContent("do the work"),
+			}
+
+			out := captureGlogStderr(func() {
+				err := publisher.PublishFailure(
+					ctx, task, "pr-reviewer-agent-5678", "pod_crash_no_stdout",
+				)
+				Expect(err).NotTo(HaveOccurred())
+			})
+
+			Expect(out).To(ContainSubstring("event=crash_arm_decision task="))
+			Expect(out).To(ContainSubstring("decision=arm cached_max_triggers=<absent>"))
+			Expect(out).To(ContainSubstring("task=test-task-log-arm"))
+			// Leading space anchors the field boundary: without it this is also a
+			// substring of "cached_max_triggers=3" and would silently start
+			// accepting the early-return branch if the line above were removed.
+			Expect(out).To(ContainSubstring(" max_triggers=3"))
+			Expect(strings.Count(out, "event=crash_arm_decision ")).To(Equal(1))
+		})
+
+		It("logs a rejected class with its parsed value so a miss is not silent", func() {
+			task := lib.Task{
+				TaskIdentifier: lib.TaskIdentifier("test-task-log-other-class"),
+				Frontmatter: lib.TaskFrontmatter{
+					"status": "in_progress",
+				},
+				Content: lib.TaskContent("do the work"),
+			}
+
+			out := captureGlogStderr(func() {
+				err := publisher.PublishFailure(
+					ctx, task, "pr-reviewer-agent-9999", "pod_oom_killed (OOMKilled/137)",
+				)
+				Expect(err).NotTo(HaveOccurred())
+			})
+
+			Expect(out).To(ContainSubstring("event=crash_arm_decision task="))
+			Expect(out).To(ContainSubstring("decision=not_crash_class"))
+			// Both the raw and the parsed form, which is the distinction this
+			// spec exists to pin: the suffixed reason must classify, and the line
+			// must still show what actually arrived.
+			Expect(out).To(ContainSubstring(`reason="pod_oom_killed (OOMKilled/137)"`))
+			Expect(out).To(ContainSubstring(`parsed="pod_oom_killed"`))
+			Expect(out).To(ContainSubstring("parsed_ok=true"))
+			Expect(strings.Count(out, "event=crash_arm_decision ")).To(Equal(1))
+		})
 	})
 
 	Describe("PublishFailure dedupe", func() {
@@ -860,6 +992,53 @@ var _ = Describe("ResultPublisher", func() {
 
 				Expect(cmd.Body).NotTo(BeNil())
 				Expect(cmd.Body.Section).To(ContainSubstring("reason=type_mismatch"))
+			},
+		)
+	})
+
+	Describe("PublishParkSucceeded", func() {
+		It(
+			"writes exactly the phase key with human_review and nothing else",
+			func() {
+				// The park's whole effect is this one key: human_review is what
+				// takes the record out of the executor's drive set. A wrong key
+				// or value would leave the loop running, and every watcher-side
+				// spec asserts only that the publisher was called.
+				task := lib.Task{
+					TaskIdentifier: lib.TaskIdentifier("test-task-parked"),
+					Frontmatter: lib.TaskFrontmatter{
+						"status":       "in_progress",
+						"phase":        "execution",
+						"assignee":     "claude",
+						"current_job":  "job-1",
+						"target_vault": "work",
+					},
+				}
+				err := publisher.PublishParkSucceeded(ctx, task)
+				Expect(err).NotTo(HaveOccurred())
+
+				Expect(producer.messages).To(HaveLen(1))
+				operation, cmd := decodeUpdateFrontmatterCommand(producer.messages[0])
+
+				Expect(
+					string(operation),
+				).To(Equal(string(taskcmd.UpdateFrontmatterCommandOperation)))
+				Expect(cmd.TaskIdentifier).To(Equal(lib.TaskIdentifier("test-task-parked")))
+				Expect(cmd.TargetVault).To(Equal("work"))
+
+				Expect(cmd.Updates).To(HaveLen(1))
+				Expect(cmd.Updates["phase"]).To(Equal("human_review"))
+
+				for _, key := range []string{
+					"status",
+					"assignee",
+					"current_job",
+				} {
+					_, hasKey := cmd.Updates[key]
+					Expect(hasKey).To(BeFalse(), key+" must not be in the park update")
+				}
+				Expect(cmd.Body).To(BeNil())
+				Expect(cmd.Validate(ctx)).To(Succeed())
 			},
 		)
 	})

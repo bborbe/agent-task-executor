@@ -144,6 +144,51 @@ var ViewDivergenceTotal = promauto.NewCounterVec(
 	[]string{"result"},
 )
 
+// The eight gates of the reconcile eligibility filter, in the order
+// reconcileTask applies them. The vocabulary is closed at compile time, which is
+// what lets ReconcileRefusedTotal be pre-initialised: every series exists before
+// the first refusal, so a gate that never fires is distinguishable from a
+// counter that was never wired up.
+const (
+	// ReconcileRefusedGateForeignCluster means the task names another cluster.
+	ReconcileRefusedGateForeignCluster = "foreign_cluster"
+	// ReconcileRefusedGateUnresolvedConfig means neither the assignee nor the
+	// declared task_type resolved to a Config.
+	ReconcileRefusedGateUnresolvedConfig = "unresolved_config"
+	// ReconcileRefusedGateTerminalStatus means the task's status is terminal.
+	ReconcileRefusedGateTerminalStatus = "terminal_status"
+	// ReconcileRefusedGateStatusNotTriggered means the Config's trigger.statuses
+	// does not list the task's status.
+	ReconcileRefusedGateStatusNotTriggered = "status_not_triggered"
+	// ReconcileRefusedGatePhaseNotTriggered means the Config's trigger.phases
+	// does not list the task's phase.
+	ReconcileRefusedGatePhaseNotTriggered = "phase_not_triggered"
+	// ReconcileRefusedGateTerminalPhase means the task's phase is terminal.
+	ReconcileRefusedGateTerminalPhase = "terminal_phase"
+	// ReconcileRefusedGateStageMismatch means the task's stage sits outside this
+	// executor's pool.
+	ReconcileRefusedGateStageMismatch = "stage_mismatch"
+	// ReconcileRefusedGateNoRouting means the task carries neither an assignee
+	// nor a declared task_type.
+	ReconcileRefusedGateNoRouting = "no_routing"
+)
+
+// ReconcileRefusedTotal counts reconcile-floor refusals by the eligibility gate
+// that refused them.
+//
+// Before this counter six of the eight gates returned silently, so a refused
+// record was indistinguishable from one that was never in the candidate set at
+// all. The gate label is a closed compile-time domain — never a task id, cluster,
+// stage or assignee — so all eight series are pre-initialised at zero and a
+// `rate(...) == 0` read on any one gate is honest rather than empty.
+var ReconcileRefusedTotal = promauto.NewCounterVec(
+	prometheus.CounterOpts{
+		Name: "executor_reconcile_refused_total",
+		Help: "Total number of reconcile-floor refusals by the eligibility gate that refused them.",
+	},
+	[]string{"gate"},
+)
+
 // SkippedUnknownAssigneeTotal counts tasks skipped because their assignee
 // matches no agent Config CR, labelled by the unknown assignee name. The bare
 // TaskEventsTotal{result="skipped_unknown_assignee"} counter says a skip
@@ -286,6 +331,7 @@ func init() {
 	TaskEventsTotal.WithLabelValues("skipped_unknown_assignee").Add(0)
 	TaskEventsTotal.WithLabelValues("skipped_active_job").Add(0)
 	TaskEventsTotal.WithLabelValues("skipped_recent_success").Add(0)
+	TaskEventsTotal.WithLabelValues("parked_succeeded").Add(0)
 	TaskEventsTotal.WithLabelValues("skipped_stage").Add(0)
 	TaskEventsTotal.WithLabelValues("pin_outside_pool").Add(0)
 	TaskEventsTotal.WithLabelValues("skipped_foreign_cluster").Add(0)
@@ -326,6 +372,21 @@ func init() {
 	// the never-ran case indistinguishable from a healthy quiet fleet.
 	for _, result := range []string{"ok", "mismatch", "absent", "read_error"} {
 		ViewDivergenceTotal.WithLabelValues(result).Add(0)
+	}
+	// Pre-initialise the closed reconcile-refusal gate set: the gate vocabulary
+	// is fixed at compile time, so every gate can be registered before the first
+	// refusal and an absent series never masquerades as a healthy zero.
+	for _, gate := range []string{
+		ReconcileRefusedGateForeignCluster,
+		ReconcileRefusedGateUnresolvedConfig,
+		ReconcileRefusedGateTerminalStatus,
+		ReconcileRefusedGateStatusNotTriggered,
+		ReconcileRefusedGatePhaseNotTriggered,
+		ReconcileRefusedGateTerminalPhase,
+		ReconcileRefusedGateStageMismatch,
+		ReconcileRefusedGateNoRouting,
+	} {
+		ReconcileRefusedTotal.WithLabelValues(gate).Add(0)
 	}
 	// Pre-initialise the closed abort vocabulary so both series are visible
 	// before any abort. Unlike RedriveCappedTotal, whose labels are unbounded.
