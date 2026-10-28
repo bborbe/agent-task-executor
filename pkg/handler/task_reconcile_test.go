@@ -220,6 +220,14 @@ var _ = Describe("TaskEventHandler reconcile loop", func() {
 		// current_job, and every 60 s reconcile tick spawned it again.
 		var now time.Time
 
+		// recurringTask is eligibleTask plus a declared cadence, the shape a task
+		// file carries when its type recurs on a clock rather than advancing phase.
+		recurringTask := func(phase domain.TaskPhase, cadence string) lib.Task {
+			task := eligibleTask(phase)
+			task.Frontmatter["recurring"] = cadence
+			return task
+		}
+
 		BeforeEach(func() {
 			now = time.Date(2026, 10, 21, 5, 56, 23, 0, time.UTC)
 			currentDateTime.SetNow(libtime.DateTime(now))
@@ -265,6 +273,83 @@ var _ = Describe("TaskEventHandler reconcile loop", func() {
 			// own snapshot, so the view must hold it for this path to fire.
 			fakeView.GetReturns(eligibleTask(domain.TaskPhaseExecution), true)
 			taskStore.MarkSucceeded("tid-a", "execution", now.Add(-10*time.Minute))
+
+			Expect(h.ReconcileOnce(ctx)).To(BeNil())
+			Expect(fakeSpawner.SpawnJobCallCount()).To(Equal(0))
+			Expect(fakeResultPublisher.PublishParkSucceededCallCount()).To(Equal(1))
+		})
+
+		It("is not released before a recurring task's declared cadence has elapsed", func() {
+			fakeView.SnapshotReturns([]lib.Task{recurringTask(domain.TaskPhaseExecution, "weekly")})
+			taskStore.MarkSucceeded("tid-a", "execution", now.Add(-6*24*time.Hour))
+
+			Expect(h.ReconcileOnce(ctx)).To(BeNil())
+			Expect(fakeSpawner.SpawnJobCallCount()).To(Equal(0))
+			// Suppressed, not parked: a recurring task's phase does not advance
+			// between occurrences, so parking it would send a human to the same
+			// record on every run.
+			Expect(fakeResultPublisher.PublishParkSucceededCallCount()).To(Equal(0))
+		})
+
+		It("is released once a recurring task's declared cadence has elapsed", func() {
+			// A recurring task's phase does not advance between occurrences, so a
+			// phase-only release would suppress it for good — the failure the
+			// cadence exists to prevent.
+			fakeView.SnapshotReturns([]lib.Task{recurringTask(domain.TaskPhaseExecution, "weekly")})
+			taskStore.MarkSucceeded("tid-a", "execution", now.Add(-8*24*time.Hour))
+
+			Expect(h.ReconcileOnce(ctx)).To(BeNil())
+			Expect(fakeSpawner.SpawnJobCallCount()).To(Equal(1))
+			Expect(fakeResultPublisher.PublishParkSucceededCallCount()).To(Equal(0))
+		})
+
+		It("does not release a weekdays task over the weekend", func() {
+			// `weekdays` names a schedule, not a duration. A flat 24 h would release a
+			// Friday completion on Saturday, and this table is the only schedule
+			// control on the suppression path — nothing downstream re-imposes the
+			// weekday constraint.
+			taskStore.MarkSucceeded(
+				"tid-a", "execution", time.Date(2026, 10, 30, 18, 0, 0, 0, time.UTC),
+			)
+			fakeView.SnapshotReturns(
+				[]lib.Task{recurringTask(domain.TaskPhaseExecution, "weekdays")},
+			)
+
+			// Saturday evening: past the nominal 24 h, and still not released.
+			now = time.Date(2026, 10, 31, 19, 0, 0, 0, time.UTC)
+			currentDateTime.SetNow(libtime.DateTime(now))
+
+			Expect(h.ReconcileOnce(ctx)).To(BeNil())
+			Expect(fakeSpawner.SpawnJobCallCount()).To(Equal(0))
+		})
+
+		It("releases a weekdays task on the next weekday", func() {
+			// The discriminating half: the weekend skip must not suppress for good.
+			taskStore.MarkSucceeded(
+				"tid-a", "execution", time.Date(2026, 10, 30, 18, 0, 0, 0, time.UTC),
+			)
+			fakeView.SnapshotReturns(
+				[]lib.Task{recurringTask(domain.TaskPhaseExecution, "weekdays")},
+			)
+
+			now = time.Date(2026, 11, 2, 19, 0, 0, 0, time.UTC)
+			currentDateTime.SetNow(libtime.DateTime(now))
+
+			Expect(h.ReconcileOnce(ctx)).To(BeNil())
+			Expect(fakeSpawner.SpawnJobCallCount()).To(Equal(1))
+			Expect(fakeResultPublisher.PublishParkSucceededCallCount()).To(Equal(0))
+		})
+
+		It("treats an unrecognised recurring token as not recurring", func() {
+			// Defaulting an unknown token to a period would invent a cadence and
+			// suppress the task forever. Treated as not recurring, it parks like any
+			// other one-shot record, and the token is logged.
+			fakeView.SnapshotReturns(
+				[]lib.Task{recurringTask(domain.TaskPhaseExecution, "fortnightly")},
+			)
+			// The park reads the task from the view, so the view must hold it.
+			fakeView.GetReturns(eligibleTask(domain.TaskPhaseExecution), true)
+			taskStore.MarkSucceeded("tid-a", "execution", now.Add(-10*24*time.Hour))
 
 			Expect(h.ReconcileOnce(ctx)).To(BeNil())
 			Expect(fakeSpawner.SpawnJobCallCount()).To(Equal(0))

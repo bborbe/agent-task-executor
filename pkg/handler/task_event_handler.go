@@ -43,11 +43,12 @@ var defaultTriggerStatuses = domain.TaskStatuses{
 // defaultRespawnGracePeriod is the window after job_started_at during which the executor
 // suppresses respawn when the K8s Job is inactive but no terminal phase has been observed.
 // The window gives the agent's terminal-phase write time to propagate through the vault pipeline.
-// defaultRespawnGracePeriod is the spawn path's half of the success window: it
-// refuses to re-spawn a task whose Job succeeded this recently. It aliases the
-// claim package's SuccessGracePeriod deliberately — the other half holds the
-// claim for the same length — so the two cannot drift apart and leave a gap
-// where the claim is gone but the spawn guard has also expired.
+// It aliases the claim package's SuccessGracePeriod deliberately, so the spawn-side
+// grace and the claim hold cannot drift apart and leave a gap where the claim is
+// gone but the spawn grace has also expired. It is NOT the success guard's window:
+// recentlySucceeded suppresses a task that already succeeded at its current phase
+// until that phase changes (or its declared cadence elapses), and no longer
+// expires on this constant.
 const defaultRespawnGracePeriod = claim.SuccessGracePeriod
 
 // taskRerunWindow is how far back a recorded success still identifies a spawn
@@ -134,32 +135,6 @@ const maxConsecutiveRedrives = 3
 // 2026-10-21 a sun executor reading the 15k-file openclaw vault aborted every
 // pass at 45s with evaluated=0.
 const DefaultReconcilePassTimeout = 45 * time.Second
-
-// terminalPhases is the set of phases that must never trigger a new spawn.
-// Extending this set requires a follow-up spec if vault-cli adds new terminal phases.
-var terminalPhases = map[domain.TaskPhase]struct{}{
-	domain.TaskPhaseHumanReview: {},
-	domain.TaskPhaseDone:        {},
-}
-
-// knownPhases contains all phase constants exported by vault-cli v0.64.3.
-// Values outside this set trigger enum-drift logging (event=unknown_phase).
-var knownPhases = map[domain.TaskPhase]struct{}{
-	domain.TaskPhaseTodo:        {},
-	domain.TaskPhasePlanning:    {},
-	domain.TaskPhaseExecution:   {}, // canonical (was TaskPhaseInProgress)
-	domain.TaskPhaseInProgress:  {}, // legacy alias — still a known phase string
-	domain.TaskPhaseAIReview:    {},
-	domain.TaskPhaseHumanReview: {},
-	domain.TaskPhaseDone:        {},
-}
-
-// IsTerminal reports whether the given phase is in the terminal set.
-// Tasks at a terminal phase must not be re-spawned; operator intervention is required.
-func IsTerminal(phase domain.TaskPhase) bool {
-	_, ok := terminalPhases[phase]
-	return ok
-}
 
 // terminalStatuses is the status-side twin of terminalPhases: the two statuses a
 // task never leaves, because the work is finished or was cancelled.
@@ -346,6 +321,10 @@ type taskEventHandler struct {
 	// beside redriveStore from the same client and nil under the same conditions.
 	// It is named redriveReasons because redriveReasonStore is its accessor.
 	redriveReasons claim.RedriveReasonStore
+	// successRecordStore is the shared success record the suppression reads after
+	// a pod restart; nil leaves the guard on the in-memory record.
+	successRecordStore claim.SuccessStore
+	successStoreOnce   sync.Once
 	// spawnGens counts Jobs created by this executor per assignee, on any path.
 	// A pass cache entry read at an older generation is refetched, so a Job
 	// spawned by the Kafka consumer or the deferred loop mid-pass is never
@@ -1259,6 +1238,8 @@ func (h *taskEventHandler) ReconcileOnce(ctx context.Context) error {
 	// records a new one. Fetched lazily, so a pass with no candidates pays
 	// nothing. See redrive_streak_cache.go for the measurement.
 	passCtx = withRedriveStreakCache(passCtx)
+	// One `list refs` of the success prefix for the pass; see success_cache.go.
+	passCtx = withSuccessCache(passCtx)
 
 	if !h.view.Ready() {
 		metrics.ReconcilePassesTotal.WithLabelValues("view_not_ready").Inc()
@@ -1281,11 +1262,14 @@ func (h *taskEventHandler) ReconcileOnce(ctx context.Context) error {
 		return nil
 	}
 
-	// Once per pass: forget successes older than the re-run window, so the
-	// record stays bounded to results that may still be in flight and still
-	// long enough for a later spawn to be recognised as a re-run.
+	// Once per pass: forget successes older than the retention horizon, so the
+	// record stays bounded. The horizon is the longest declared cadence, not the
+	// re-run window: recentlySucceeded suppresses on this record and releases a
+	// recurring task only when its cadence elapses, so pruning at the 1 h re-run
+	// window would drop the record before any cadence could fire. Re-run
+	// detection is unaffected — recordTaskRerun applies its own 1 h check.
 	h.taskStore.PruneSucceededBefore(
-		h.currentDateTime.Now().Time().Add(-taskRerunWindow),
+		h.currentDateTime.Now().Time().Add(-successRecordRetention),
 	)
 	owned := ownedTasks(snapshot, h.vaultMatcher)
 	c := reconcileCounters{}
