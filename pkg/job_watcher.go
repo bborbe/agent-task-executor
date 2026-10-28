@@ -14,7 +14,6 @@ import (
 	lib "github.com/bborbe/agent"
 	"github.com/bborbe/errors"
 	libk8s "github.com/bborbe/k8s"
-	libtime "github.com/bborbe/time"
 	"github.com/golang/glog"
 	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
@@ -58,8 +57,6 @@ func NewJobWatcher(
 	taskStore *TaskStore,
 	publisher ResultPublisher,
 	claimReleaser ClaimReleaser,
-	taskView TaskPhaseReader,
-	currentDateTime libtime.CurrentDateTimeGetter,
 ) JobWatcher {
 	w := &jobWatcher{
 		kubeClient:           kubeClient,
@@ -68,8 +65,6 @@ func NewJobWatcher(
 		taskStore:            taskStore,
 		publisher:            publisher,
 		claimReleaser:        claimReleaser,
-		taskView:             taskView,
-		currentDateTime:      currentDateTime,
 		newNamespaceInformer: newJobWatcherNamespaceInformer,
 	}
 	w.watched = map[libk8s.Namespace]bool{namespace: true}
@@ -85,8 +80,6 @@ type jobWatcher struct {
 	taskStore            *TaskStore
 	publisher            ResultPublisher
 	claimReleaser        ClaimReleaser
-	taskView             TaskPhaseReader
-	currentDateTime      libtime.CurrentDateTimeGetter
 	mu                   sync.Mutex
 	watched              map[libk8s.Namespace]bool
 	synced               map[libk8s.Namespace]bool
@@ -479,10 +472,6 @@ func (w *jobWatcher) HandleJob(ctx context.Context, job *batchv1.Job) {
 			)
 		}
 		w.releaseSucceededJobClaim(ctx, taskID, job)
-		// Parked before the store gate: a task whose phase did not move is a
-		// deliberate human park and must leave the loop whether or not the
-		// store still holds an entry for it.
-		w.parkIfPhaseDidNotMove(ctx, taskID, job)
 		if task, ok := w.taskStore.Load(taskID); ok {
 			w.handleSucceeded(ctx, taskID, task, job)
 		}

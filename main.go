@@ -423,8 +423,6 @@ func (a *application) Run(ctx context.Context, sentryClient libsentry.Client) er
 		taskStore,
 		resultPublisher,
 		taskEventHandler,
-		taskView,
-		currentDateTimeGetter,
 	)
 
 	zombieSweeper := factory.CreateZombieSweeper(

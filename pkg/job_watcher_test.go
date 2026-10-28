@@ -6,12 +6,9 @@ package pkg_test
 
 import (
 	"context"
-	"errors"
 	"time"
 
 	lib "github.com/bborbe/agent"
-	base "github.com/bborbe/cqrs/base"
-	libtime "github.com/bborbe/time"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 	batchv1 "k8s.io/api/batch/v1"
@@ -21,27 +18,22 @@ import (
 
 	"github.com/bborbe/agent-task-executor/mocks"
 	"github.com/bborbe/agent-task-executor/pkg"
-	"github.com/bborbe/agent-task-executor/pkg/claim"
 )
 
 var _ = Describe("JobWatcher", func() {
 	var (
-		ctx             context.Context
-		fakePublisher   *mocks.FakeResultPublisher
-		fakeTaskView    *mocks.FakeTaskView
-		currentDateTime libtime.CurrentDateTime
-		taskStore       *pkg.TaskStore
-		fakeKubeClient  *fake.Clientset
-		watcher         pkg.JobWatcher
-		testTask        lib.Task
-		testTaskID      lib.TaskIdentifier
+		ctx            context.Context
+		fakePublisher  *mocks.FakeResultPublisher
+		taskStore      *pkg.TaskStore
+		fakeKubeClient *fake.Clientset
+		watcher        pkg.JobWatcher
+		testTask       lib.Task
+		testTaskID     lib.TaskIdentifier
 	)
 
 	BeforeEach(func() {
 		ctx = context.Background()
 		fakePublisher = &mocks.FakeResultPublisher{}
-		fakeTaskView = &mocks.FakeTaskView{}
-		currentDateTime = libtime.NewCurrentDateTime()
 		taskStore = pkg.NewTaskStore()
 		fakeKubeClient = fake.NewClientset()
 		testTaskID = lib.TaskIdentifier("test-task-uuid-1234")
@@ -60,8 +52,6 @@ var _ = Describe("JobWatcher", func() {
 			taskStore,
 			fakePublisher,
 			nil,
-			fakeTaskView,
-			currentDateTime,
 		)
 	})
 
@@ -97,176 +87,6 @@ var _ = Describe("JobWatcher", func() {
 			Status: corev1.ConditionTrue,
 		}
 	}
-
-	Describe("parking a succeeded Job whose phase did not move", func() {
-		var (
-			completedAt time.Time
-			job         *batchv1.Job
-		)
-
-		// viewTask builds the fresh-read entry the guard consults. target_vault
-		// is carried only on the view task, so a spec can prove the guard
-		// published the VIEW task and not the spawn-time store snapshot.
-		viewTask := func(phase string, modified time.Time) lib.Task {
-			return lib.Task{
-				Object: base.Object[base.Identifier]{
-					Modified: libtime.DateTime(modified),
-				},
-				TaskIdentifier: testTaskID,
-				Frontmatter: lib.TaskFrontmatter{
-					"phase":        phase,
-					"status":       "in_progress",
-					"assignee":     "claude",
-					"target_vault": "private-agent",
-				},
-			}
-		}
-
-		BeforeEach(func() {
-			completedAt = time.Date(2026, 10, 28, 10, 0, 0, 0, time.UTC)
-			job = makeJob("job-park", string(testTaskID), succeededCondition())
-			completedMeta := metav1.NewTime(completedAt)
-			job.Status.CompletionTime = &completedMeta
-			job.Annotations = map[string]string{pkg.TaskPhaseAnnotationKey: "execution"}
-			// The spawn-time snapshot deliberately carries NO phase. A guard
-			// pointed at it therefore reads a nil phase and parks nothing, so
-			// the "publishes" spec below fails on the stale-snapshot build.
-			// That is the mutation this suite exists to make visible.
-			taskStore.Store(testTaskID, testTask)
-			fakeTaskView.ReadyReturns(true)
-			// Past the success grace: the controller's write-back has landed, so
-			// a phase the agent advanced is visible instead of still in flight.
-			currentDateTime.SetNow(
-				libtime.DateTime(completedAt.Add(claim.SuccessGracePeriod + time.Minute)),
-			)
-		})
-
-		It(
-			"publishes human_review when the phase is still the one the Job was spawned for",
-			func() {
-				fakeTaskView.GetReturns(viewTask("execution", completedAt.Add(-time.Minute)), true)
-
-				watcher.HandleJob(ctx, job)
-
-				Expect(fakePublisher.PublishParkSucceededCallCount()).To(Equal(1))
-				_, parkedTask := fakePublisher.PublishParkSucceededArgsForCall(0)
-				Expect(string(parkedTask.TaskIdentifier)).To(Equal(string(testTaskID)))
-				// target_vault exists only on the view task, so this proves the
-				// published task is the fresh one and not the store snapshot —
-				// which is what decides the vault the write lands in.
-				targetVault, found := parkedTask.Frontmatter.String("target_vault")
-				Expect(found).To(BeTrue())
-				Expect(targetVault).To(Equal("private-agent"))
-			},
-		)
-
-		It("does not park a task the agent advanced inside the same Job", func() {
-			// Spawned for planning; the agent finished planning, wrote
-			// phase: execution, and exited 0. Parking here would stall every
-			// multi-phase agent at its first phase.
-			job.Annotations = map[string]string{pkg.TaskPhaseAnnotationKey: "planning"}
-			fakeTaskView.GetReturns(viewTask("execution", completedAt.Add(-time.Minute)), true)
-
-			watcher.HandleJob(ctx, job)
-
-			Expect(fakePublisher.PublishParkSucceededCallCount()).To(Equal(0))
-		})
-
-		It("does not park a task that already reached done", func() {
-			fakeTaskView.GetReturns(viewTask("done", completedAt.Add(-time.Minute)), true)
-
-			watcher.HandleJob(ctx, job)
-
-			Expect(fakePublisher.PublishParkSucceededCallCount()).To(Equal(0))
-		})
-
-		It(
-			"does not park inside the success grace, where the write-back may still be in flight",
-			func() {
-				fakeTaskView.GetReturns(viewTask("execution", completedAt.Add(-time.Minute)), true)
-				currentDateTime.SetNow(
-					libtime.DateTime(completedAt.Add(claim.SuccessGracePeriod / 2)),
-				)
-
-				watcher.HandleJob(ctx, job)
-
-				Expect(fakePublisher.PublishParkSucceededCallCount()).To(Equal(0))
-			},
-		)
-
-		It("does not park a task re-spawned under a newer Job", func() {
-			superseded := viewTask("execution", completedAt.Add(-time.Minute))
-			superseded.Frontmatter["current_job"] = "job-newer"
-			fakeTaskView.GetReturns(superseded, true)
-
-			watcher.HandleJob(ctx, job)
-
-			Expect(fakePublisher.PublishParkSucceededCallCount()).To(Equal(0))
-		})
-
-		It("does not park when the Job carries no spawn-phase annotation", func() {
-			job.Annotations = nil
-			fakeTaskView.GetReturns(viewTask("execution", completedAt.Add(-time.Minute)), true)
-
-			watcher.HandleJob(ctx, job)
-
-			Expect(fakePublisher.PublishParkSucceededCallCount()).To(Equal(0))
-		})
-
-		It(
-			"does not park a task whose assignee was cleared, which is already out of the loop",
-			func() {
-				needsInput := viewTask("execution", completedAt.Add(-time.Minute))
-				needsInput.Frontmatter["assignee"] = ""
-				fakeTaskView.GetReturns(needsInput, true)
-
-				watcher.HandleJob(ctx, job)
-
-				Expect(fakePublisher.PublishParkSucceededCallCount()).To(Equal(0))
-			},
-		)
-
-		It("does not park a task that is no longer in progress", func() {
-			notRunning := viewTask("execution", completedAt.Add(-time.Minute))
-			notRunning.Frontmatter["status"] = "hold"
-			fakeTaskView.GetReturns(notRunning, true)
-
-			watcher.HandleJob(ctx, job)
-
-			Expect(fakePublisher.PublishParkSucceededCallCount()).To(Equal(0))
-		})
-
-		It("does not park while the view is not ready", func() {
-			fakeTaskView.ReadyReturns(false)
-			fakeTaskView.GetReturns(viewTask("execution", completedAt.Add(-time.Minute)), true)
-
-			watcher.HandleJob(ctx, job)
-
-			Expect(fakePublisher.PublishParkSucceededCallCount()).To(Equal(0))
-		})
-
-		It("does not park when the view holds no entry", func() {
-			fakeTaskView.GetReturns(lib.Task{}, false)
-
-			watcher.HandleJob(ctx, job)
-
-			Expect(fakePublisher.PublishParkSucceededCallCount()).To(Equal(0))
-		})
-
-		It("logs the publish failure and still completes the success path", func() {
-			fakeTaskView.GetReturns(viewTask("execution", completedAt.Add(-time.Minute)), true)
-			fakePublisher.PublishParkSucceededReturns(errors.New("publish failed"))
-
-			watcher.HandleJob(ctx, job)
-
-			Expect(fakePublisher.PublishParkSucceededCallCount()).To(Equal(1))
-			// The success path is what must survive a failed park: the
-			// current_job clear still goes out and the store entry is evicted.
-			Expect(fakePublisher.PublishClearCurrentJobCallCount()).To(Equal(1))
-			_, evicted := taskStore.Load(testTaskID)
-			Expect(evicted).To(BeFalse())
-		})
-	})
 
 	Describe("HandleJob", func() {
 		It("records the success time even when the task is not in the store", func() {
