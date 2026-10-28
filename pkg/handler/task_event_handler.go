@@ -81,7 +81,7 @@ const DefaultReconcileInterval = 60 * time.Second
 //
 // It is the bound for the case where neither of the other two engages. A task
 // with no `ref` and no `max_triggers` keeps the trigger budget disarmed by
-// design (see applyTriggerBudget — arming it would re-create the 2026-08-27
+// design (see checkTriggerBudget — arming it would re-create the 2026-08-27
 // Daily Sentry Triage incident), and a task whose scope reads as changed on
 // every spawn is handed a fresh budget of 1 each time (see triggerBudgetWrite).
 // Between them, a task that stops advancing is spawned forever.
@@ -959,9 +959,10 @@ func (h *taskEventHandler) spawnIfNeededClaimed(
 
 	// Scoped trigger budget: check only. The counter write is published by
 	// recordTriggerSpawn after SpawnJob succeeds, so an infrastructure failure
-	// cannot burn one of the task's attempts.
-	if h.checkTriggerBudget(task) {
-		return spawnOutcomeSuppressed, nil
+	// cannot burn one of the task's attempts. A refusal writes its own reason
+	// onto the record; a failed write still suppresses the spawn.
+	if suppress, err := h.triggerBudgetRefusesSpawn(ctx, task); suppress {
+		return spawnOutcomeSuppressed, err
 	}
 
 	// Claimed replays decide under deferredMu, released before SpawnJob; the
@@ -1792,65 +1793,6 @@ func triggerScope(fm lib.TaskFrontmatter) string {
 		ref = ref[:triggerScopeRefLen]
 	}
 	return phase + ":" + ref
-}
-
-// applyTriggerBudget evaluates the scoped trigger cap for one spawn decision and,
-// when the spawn may proceed, publishes exactly one counter write recording it.
-// Returns capped=true when the cap is reached and the spawn must be skipped.
-//
-// The cap default-engages for repo-backed tasks: a task whose frontmatter
-// carries a ref (written by the agents that clone a repo, alongside clone_url
-// and base_ref) scopes its budget to phase+ref via triggerScope, and that scope
-// moves with the repo, so accrual against a constant scope cannot occur — the
-// safe default-on form. An explicit max_triggers engages the cap for any task,
-// with or without a ref. A task with neither ref nor max_triggers is a
-// recurring task: it is not repo-backed, sits at a stable phase, and its scope
-// is a constant, so a default cap would accrue across re-dispatches and fire at
-// 3, re-creating the 2026-08-27 Daily Sentry Triage incident (the v0.7.1
-// regression). That task stays uncapped by default.
-//
-// The cap value is always MaxTriggers(): the explicit max_triggers field, or
-// the lib default of 3 when it is absent — a repo-backed task with no
-// max_triggers is therefore capped at 3.
-//
-// Scoping also fixes the opt-in cap's correctness: a task that opts in no
-// longer burns its budget across unrelated attempts, so an operator can set a
-// tight max_triggers without it leaking into the next phase or the next commit.
-// checkTriggerBudget reports whether the task's scoped trigger budget is
-// exhausted. It writes nothing.
-//
-// The counter write is deliberately split out into recordTriggerSpawn and
-// published only AFTER a Job was actually created. Until 2026-10-19 the
-// increment was published here, before SpawnJob, so every infrastructure
-// failure — the `spawn_error ... context deadline exceeded` this change also
-// fixes — consumed one of the task's attempts without the agent ever running.
-// That is how github-update-go tasks reached trigger_count 5-7 while producing
-// no work, and why a trigger_count reset alone could not hold.
-func (h *taskEventHandler) checkTriggerBudget(task lib.Task) bool {
-	currentScope := triggerScope(task.Frontmatter)
-	storedScope, hasScope := task.Frontmatter.String("trigger_scope")
-
-	// An ABSENT scope is not a CHANGED scope. Every task in flight today predates
-	// this field, so treating absent as changed would hand each of them a free
-	// budget reset on the first event after deploy — including one already looping
-	// at cap, which would resume for another N. Absent means "adopt the current
-	// scope, keep the count".
-	scopeChanged := hasScope && storedScope != currentScope
-
-	_, optedIn := task.Frontmatter["max_triggers"]
-	_, hasRef := task.Frontmatter.String("ref")
-	if (optedIn || hasRef) && !scopeChanged &&
-		task.Frontmatter.TriggerCount() >= task.Frontmatter.MaxTriggers() {
-		glog.V(2).Infof("skip task %s: trigger_count %d >= max_triggers %d in scope %q",
-			task.TaskIdentifier,
-			task.Frontmatter.TriggerCount(),
-			task.Frontmatter.MaxTriggers(),
-			currentScope,
-		)
-		metrics.TaskEventsTotal.WithLabelValues("skipped_trigger_cap").Inc()
-		return true
-	}
-	return false
 }
 
 // recordTriggerSpawn publishes the counter write that charges one spawn against

@@ -1,7 +1,13 @@
 ---
-status: draft
+status: completed
 spec: [018-bug-trigger-budget-refusal-is-written-to-the-record]
+summary: Moved the scoped trigger budget gate into a new file, made it publish a deduped refusal onto the record, and added unit/Ginkgo coverage plus a changelog entry
+execution_id: agent-task-executor-trigger-refusal-exec-048-spec-018-handler-trigger-refusal
+dark-factory-version: v0.198.7
 created: "2026-10-28T11:10:14Z"
+queued: "2026-10-28T13:22:18Z"
+started: "2026-10-28T13:23:40Z"
+completed: "2026-10-28T13:32:46Z"
 branch: dark-factory/bug-trigger-budget-refusal-is-written-to-the-record
 ---
 
