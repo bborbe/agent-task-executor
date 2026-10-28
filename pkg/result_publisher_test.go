@@ -7,6 +7,7 @@ package pkg_test
 import (
 	"context"
 	"encoding/json"
+	stderrors "errors"
 
 	"github.com/IBM/sarama"
 	lib "github.com/bborbe/agent"
@@ -1249,6 +1250,133 @@ var _ = Describe("ResultPublisher", func() {
 
 			// One streak ref + one reason ref; the deduped repeat writes neither.
 			Expect(client.PutCallCount()).To(Equal(2))
+		})
+	})
+
+	// recordRedriveFailure is the ONLY writer of the re-drive streak, and it is
+	// unexported, so its branches are exercised through PublishFailure — the one
+	// call site. The streak ref is always the first Put: it is written before the
+	// reason, so the new streak's evidence starts empty and gains exactly the
+	// reason being published.
+	Describe("recordRedriveFailure", func() {
+		streakPublisher := func(client claim.ClaimRefClient) pkg.ResultPublisher {
+			return pkg.NewResultPublisher(
+				producer,
+				base.TopicPrefix("develop"),
+				currentDateTime,
+				func() claim.ClaimRefClient { return client },
+			)
+		}
+		failingTask := func(id string) lib.Task {
+			return lib.Task{
+				TaskIdentifier: lib.TaskIdentifier(id),
+				Frontmatter: lib.TaskFrontmatter{
+					"status": "in_progress",
+					"phase":  "execution",
+				},
+			}
+		}
+		// listByTaskPrefix serves refs per list prefix. The stores list
+		// "<prefix><taskID>" with no trailing separator, so the key is exact.
+		listByTaskPrefix := func(
+			byPrefix map[string][]claim.ClaimRef,
+		) func(context.Context, string) ([]claim.ClaimRef, error) {
+			return func(_ context.Context, prefix string) ([]claim.ClaimRef, error) {
+				return byPrefix[prefix], nil
+			}
+		}
+
+		It("records the streak even when the count cannot be read", func() {
+			client := new(mocks.FakeClaimRefClient)
+			client.ListReturns(nil, nil)
+			// The first List is Count's; a read failure must not skip the write.
+			client.ListReturnsOnCall(0, nil, stderrors.New("list boom"))
+			p := streakPublisher(client)
+
+			Expect(
+				p.PublishFailure(
+					ctx,
+					failingTask("test-task-streak-read-fail"),
+					"job-srf-1",
+					"pod_oom_killed",
+				),
+			).To(Succeed())
+
+			// The count is unknown, so the new-streak clear is skipped: no Delete.
+			// The streak and the reason are still recorded.
+			Expect(client.DeleteCallCount()).To(Equal(0))
+			Expect(client.PutCallCount()).To(Equal(2))
+			_, key, _, _, _, _ := client.PutArgsForCall(0)
+			Expect(key).To(Equal(
+				"claims/redrive/test-task-streak-read-fail/execution/1",
+			))
+		})
+
+		It("clears the previous streak's reasons when a new streak starts", func() {
+			client := new(mocks.FakeClaimRefClient)
+			client.ListCalls(listByTaskPrefix(map[string][]claim.ClaimRef{
+				"claims/redrive-reason/test-task-new-streak": {
+					{
+						Ref: "refs/claims/redrive-reason/test-task-new-streak" +
+							"/execution/pod_oom_killed/1",
+					},
+				},
+			}))
+			p := streakPublisher(client)
+
+			Expect(
+				p.PublishFailure(
+					ctx,
+					failingTask("test-task-new-streak"),
+					"job-ns-1",
+					"pod_oom_killed",
+				),
+			).To(Succeed())
+
+			// A reason set left by an earlier streak would otherwise satisfy the
+			// classifier's window on partial evidence and could close the record
+			// as broken.
+			Expect(client.DeleteCallCount()).To(Equal(1))
+			_, key, _ := client.DeleteArgsForCall(0)
+			Expect(key).To(Equal(
+				"claims/redrive-reason/test-task-new-streak/execution/pod_oom_killed/1",
+			))
+			_, streakKey, _, _, _, _ := client.PutArgsForCall(0)
+			Expect(streakKey).To(Equal(
+				"claims/redrive/test-task-new-streak/execution/1",
+			))
+		})
+
+		It("keeps the previous reasons when the streak is already running", func() {
+			client := new(mocks.FakeClaimRefClient)
+			client.ListCalls(listByTaskPrefix(map[string][]claim.ClaimRef{
+				"claims/redrive/test-task-running-streak": {
+					{Ref: "refs/claims/redrive/test-task-running-streak/execution/1"},
+				},
+				"claims/redrive-reason/test-task-running-streak": {
+					{
+						Ref: "refs/claims/redrive-reason/test-task-running-streak" +
+							"/execution/pod_oom_killed/1",
+					},
+				},
+			}))
+			p := streakPublisher(client)
+
+			Expect(
+				p.PublishFailure(
+					ctx,
+					failingTask("test-task-running-streak"),
+					"job-rs-1",
+					"pod_oom_killed",
+				),
+			).To(Succeed())
+
+			// Mid-streak the evidence must accumulate, so nothing is cleared.
+			Expect(client.DeleteCallCount()).To(Equal(0))
+			_, streakKey, _, _, _, _ := client.PutArgsForCall(0)
+			Expect(streakKey).To(Equal(
+				"claims/redrive/test-task-running-streak/execution/2",
+			))
 		})
 	})
 })
