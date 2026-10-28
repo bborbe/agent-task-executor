@@ -2,7 +2,7 @@
 
 All notable changes to this project will be documented in this file.
 
-## Unreleased
+## v0.48.2
 
 - fix: **a failed Job now names its own `JobFailed` condition instead of publishing the bare `pod_crash_no_stdout`.** `failureReason` resolved the pod's terminated reason and exit code for `BackoffLimitExceeded` only; every other failed condition fell through to the unconditional `return` in `JobFailureReason`, and even the `BackoffLimitExceeded` branch returned `base.String()` when `terminalPodDetail` found no pod — so 61% of the crash population (113 of 185 records over 72 h) carried no cause at all, and the class could not be steered. The fallthrough now publishes the Job's actual condition with the pod's terminated reason and exit code appended when the pod still resolves; a reasonless `JobFailed` publishes the `JobFailed` literal rather than a blank; and an unresolvable `BackoffLimitExceeded` pod publishes `BackoffLimitExceeded (pod-unresolved)`. `DeadlineExceeded` and the resolvable-pod `BackoffLimitExceeded` output stay byte-identical. `ParseZombieReason` gains `jobFailedConditionAliases`, mapping the Kubernetes condition vocabulary onto `ZombieReasonPodCrashNoStdout` — without it every newly-named value would parse false and `crashFailureUpdates` would log `decision=not_crash_class`, silently disarming the crash escalation this vocabulary drives. The failure log line carries `condition=` alongside `reason=`, because failed Jobs are not retained and the record store keeps only the collapsed reason, so the raw condition is otherwise unrecoverable.
 
