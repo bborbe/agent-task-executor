@@ -27,6 +27,14 @@ type TaskStore struct {
 	mu        sync.RWMutex
 	tasks     map[lib.TaskIdentifier]lib.Task
 	succeeded map[lib.TaskIdentifier]SucceededJob
+	// parked records which success each task has already been parked for,
+	// keyed by the completion time that identifies it. A consumed set rather
+	// than a deletion: the Job informer re-delivers a terminal Job every
+	// resync for the Job's whole TTL and MarkSucceeded re-stamps the identical
+	// record each time, so deleting the record would be undone within minutes.
+	// Keyed by completion time because that is the only part of the record a
+	// re-mark cannot change — a genuinely new success carries a later one.
+	parked map[lib.TaskIdentifier]time.Time
 }
 
 // SucceededJob is the latest successful Job of a task: the phase it was spawned
@@ -42,6 +50,7 @@ func NewTaskStore() *TaskStore {
 	return &TaskStore{
 		tasks:     make(map[lib.TaskIdentifier]lib.Task),
 		succeeded: make(map[lib.TaskIdentifier]SucceededJob),
+		parked:    make(map[lib.TaskIdentifier]time.Time),
 	}
 }
 
@@ -58,17 +67,28 @@ func (s *TaskStore) MarkSucceeded(id lib.TaskIdentifier, phase string, at time.T
 	s.succeeded[id] = SucceededJob{Phase: phase, CompletedAt: at}
 }
 
-// ClearSucceeded drops the task's success record.
+// MarkParkConsumed records that the task has been parked for the success that
+// completed at completedAt, so that success cannot park it a second time.
 //
-// Called once a record has been consumed by a park. Without it the record
-// outlives its meaning: an operator who re-arms a parked task by moving its
-// phase back to the phase that succeeded would match the same stale record and
-// be re-parked on the very next pass, so the documented recovery path would do
-// nothing until PruneSucceededBefore dropped the record an hour later.
-func (s *TaskStore) ClearSucceeded(id lib.TaskIdentifier) {
+// This is what makes the recovery path work. An operator un-parks a task by
+// moving its phase back to the drive phase, and that task still matches the same
+// success record — the informer re-stamps it on every resync and MarkSucceeded
+// keeps the earlier completion, so the record never goes away on its own.
+// Consuming by completion time lets the re-armed task spawn while leaving a
+// genuinely later success free to park again.
+func (s *TaskStore) MarkParkConsumed(id lib.TaskIdentifier, completedAt time.Time) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	delete(s.succeeded, id)
+	s.parked[id] = completedAt
+}
+
+// ParkConsumed reports whether the task has already been parked for the success
+// that completed at completedAt.
+func (s *TaskStore) ParkConsumed(id lib.TaskIdentifier, completedAt time.Time) bool {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	parkedAt, ok := s.parked[id]
+	return ok && parkedAt.Equal(completedAt)
 }
 
 // LastSucceeded returns the task's latest successful Job, if one is recorded.

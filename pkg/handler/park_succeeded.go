@@ -28,12 +28,14 @@ func (h *taskEventHandler) suppressOrPark(ctx context.Context, task lib.Task) bo
 // last Job succeeded at the phase the task is still at, and reports whether it
 // parked.
 //
-// It runs in the reconcile decision, immediately after recentlySucceeded, and
-// that placement is the whole point. A succeeded Job whose phase never moved is
-// a deliberate human park: the agent exited 0 without advancing the task, so
-// nothing will ever move it, and without this the reconcile finds it eligible on
-// every pass and re-spawns it forever. v0.46.3 removed the cap charge that used
-// to bound that loop, so nothing else stops it.
+// It runs in the shared spawn funnel, immediately after recentlySucceeded — the
+// funnel every spawn path goes through (the reconcile, the Kafka consumer and
+// the deferred-respawn loop), not the reconcile alone. That placement is the
+// whole point: a succeeded Job whose phase never moved is a deliberate human
+// park — the agent exited 0 without advancing the task, so nothing will ever
+// move it, and without this the reconcile finds it eligible on every pass and
+// re-spawns it forever. v0.46.3 removed the cap charge that used to bound that
+// loop, so nothing else stops it.
 //
 // Why here and not on the succeeded-Job path in the job watcher: the decision has
 // to wait out the write-back, because a succeeded Job means the agent published
@@ -81,16 +83,23 @@ func (h *taskEventHandler) parkSucceededWithoutPhaseMove(
 		// this pass, and the phase may still be about to move.
 		return false
 	}
+	if h.taskStore.ParkConsumed(task.TaskIdentifier, succeeded.CompletedAt) {
+		// Already parked for this success. The task matching it now means an
+		// operator moved its phase back to the drive phase — the documented way
+		// out of human_review — so let it spawn.
+		return false
+	}
 	if err := h.resultPublisher.PublishParkSucceeded(ctx, task); err != nil {
-		// Not a failure of the pass: the record is left to the next one, which
-		// re-evaluates the same conditions and retries the publish.
+		// Suppress this pass rather than fall through to the spawn: spawning is
+		// the loop the park exists to end, so a park that could not be written
+		// must not re-run the work. The next pass re-evaluates and retries.
 		glog.Errorf(
 			"publish park for task %s (phase %s): %v",
 			task.TaskIdentifier,
 			succeeded.Phase,
 			err,
 		)
-		return false
+		return true
 	}
 	glog.Infof(
 		"event=parked_succeeded task=%s phase=%s elapsed=%.0fs",
@@ -99,12 +108,10 @@ func (h *taskEventHandler) parkSucceededWithoutPhaseMove(
 		elapsed.Seconds(),
 	)
 	metrics.TaskEventsTotal.WithLabelValues("parked_succeeded").Inc()
-	// Consume the record. It exists to answer "did this task's last Job move the
-	// phase", and it has just been answered. Left in place it would answer the
-	// same question again for a task an operator has since re-armed — the
-	// recovery path is moving the phase back to the drive phase, and that task
-	// would match this same record and be re-parked on the next pass, silently
-	// undoing the re-arm until the record is pruned an hour later.
-	h.taskStore.ClearSucceeded(task.TaskIdentifier)
+	// Consume the success, keyed by its completion time. Deleting the record
+	// would not work: the Job informer re-delivers the terminal Job every
+	// resync for its whole TTL and re-stamps the identical record, so the
+	// deletion is undone within minutes and the re-armed task is parked again.
+	h.taskStore.MarkParkConsumed(task.TaskIdentifier, succeeded.CompletedAt)
 	return true
 }

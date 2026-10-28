@@ -84,12 +84,16 @@ func TestParkSucceededWithoutPhaseMoveDoesNotParkInsideTheGrace(t *testing.T) {
 	}
 }
 
-func TestParkSucceededWithoutPhaseMoveParksExactlyAtTheGraceBoundary(t *testing.T) {
+// The exact `>=` edge is not pinnable here: the fixture's clock is the real one,
+// so the second read of Now() inside the guard is strictly later than the first
+// and "exactly at the grace" cannot be constructed. The inside-grace spec above
+// and this one bracket the transition, which is what the behaviour depends on.
+func TestParkSucceededWithoutPhaseMoveParksOncePastTheGrace(t *testing.T) {
 	h, publisher, task, now := parkFixture(t, "execution")
 	h.taskStore.MarkSucceeded(task.TaskIdentifier, "execution", now.Add(-defaultRespawnGracePeriod))
 
 	if !h.parkSucceededWithoutPhaseMove(context.Background(), task) {
-		t.Fatal("parkSucceededWithoutPhaseMove = false; want true at the grace boundary")
+		t.Fatal("parkSucceededWithoutPhaseMove = false; want true past the grace")
 	}
 	if got := len(publisher.parkedSucceeded); got != 1 {
 		t.Fatalf("park count = %d; want 1", got)
@@ -123,24 +127,33 @@ func TestParkSucceededWithoutPhaseMoveDoesNotParkATaskWithoutAPhase(t *testing.T
 	}
 }
 
-func TestParkSucceededWithoutPhaseMoveReportsFalseWhenThePublishFails(t *testing.T) {
+func TestParkSucceededWithoutPhaseMoveSuppressesThePassWhenThePublishFails(t *testing.T) {
 	h, publisher, task, now := parkFixture(t, "execution")
 	h.taskStore.MarkSucceeded(task.TaskIdentifier, "execution", now.Add(-longAgo))
 	publisher.failParkSucceeded = true
 
-	if h.parkSucceededWithoutPhaseMove(context.Background(), task) {
-		t.Fatal("parkSucceededWithoutPhaseMove = true; want false when the publish fails")
+	// True = this pass must not spawn. Spawning is the loop the park exists to
+	// end, so a park that could not be written must not re-run the work.
+	if !h.parkSucceededWithoutPhaseMove(context.Background(), task) {
+		t.Fatal(
+			"parkSucceededWithoutPhaseMove = false; want true (suppress) when the publish fails",
+		)
+	}
+	// Nothing is consumed, so the next pass re-evaluates and retries.
+	if h.taskStore.ParkConsumed(task.TaskIdentifier, now.Add(-longAgo)) {
+		t.Fatal("a failed publish must not consume the success")
 	}
 }
 
 // The recovery path for a park is an operator moving the phase back to the drive
-// phase. That task matches the same success record the park consumed, so the
-// record must not outlive the park — otherwise the re-arm is silently undone on
-// the next pass and the documented way out of the terminal state does nothing
-// until the record is pruned an hour later.
-func TestParkSucceededWithoutPhaseMoveConsumesTheRecordSoAReArmIsNotReParked(t *testing.T) {
+// phase. That task still matches the same success record, so the park must
+// consume the success by identity — and stay consumed even when the Job informer
+// re-stamps the identical record on its next resync, which it does every few
+// minutes for the Job's whole TTL.
+func TestParkSucceededWithoutPhaseMoveConsumesTheSuccessSoAReArmIsNotReParked(t *testing.T) {
 	h, publisher, task, now := parkFixture(t, "execution")
-	h.taskStore.MarkSucceeded(task.TaskIdentifier, "execution", now.Add(-longAgo))
+	completedAt := now.Add(-longAgo)
+	h.taskStore.MarkSucceeded(task.TaskIdentifier, "execution", completedAt)
 
 	if !h.parkSucceededWithoutPhaseMove(context.Background(), task) {
 		t.Fatal("first pass did not park")
@@ -149,12 +162,34 @@ func TestParkSucceededWithoutPhaseMoveConsumesTheRecordSoAReArmIsNotReParked(t *
 		t.Fatalf("park count = %d; want 1", got)
 	}
 
+	// The informer re-delivers the terminal Job and MarkSucceeded re-stamps the
+	// same record. A deletion-based fix would be undone here.
+	h.taskStore.MarkSucceeded(task.TaskIdentifier, "execution", completedAt)
+
 	// The operator re-arms by putting the task back at the drive phase. The
 	// next pass must let it spawn, not park it again.
 	if h.parkSucceededWithoutPhaseMove(context.Background(), task) {
-		t.Fatal("re-armed task was parked again; the success record outlived its park")
+		t.Fatal("re-armed task was parked again; the consumed success did not survive the re-mark")
 	}
 	if got := len(publisher.parkedSucceeded); got != 1 {
 		t.Fatalf("park count = %d; want 1 after a re-arm", got)
+	}
+}
+
+// A genuinely later success is a different unit of work and may park again.
+func TestParkSucceededWithoutPhaseMoveParksAgainForALaterSuccess(t *testing.T) {
+	h, publisher, task, now := parkFixture(t, "execution")
+	h.taskStore.MarkSucceeded(task.TaskIdentifier, "execution", now.Add(-longAgo))
+
+	if !h.parkSucceededWithoutPhaseMove(context.Background(), task) {
+		t.Fatal("first pass did not park")
+	}
+	h.taskStore.MarkSucceeded(task.TaskIdentifier, "execution", now.Add(-longAgo/2))
+
+	if !h.parkSucceededWithoutPhaseMove(context.Background(), task) {
+		t.Fatal("a later success was not parked")
+	}
+	if got := len(publisher.parkedSucceeded); got != 2 {
+		t.Fatalf("park count = %d; want 2", got)
 	}
 }
