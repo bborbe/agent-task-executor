@@ -137,6 +137,33 @@ var _ = Describe("the shared success record", func() {
 		)
 	}
 
+	// newHandlerWithBoth builds a handler over the supplied task store AND shared
+	// record, so a spec can seed both sides and see which one wins.
+	newHandlerWithBoth := func(
+		taskStore *pkg.TaskStore,
+		store claim.SuccessStore,
+	) handler.ClaimLifecycleEventHandler {
+		return handler.NewTaskEventHandler(
+			fakeSpawner,
+			"dev",
+			base.Branch("prod"),
+			"",
+			true,
+			true,
+			fakeResolver,
+			fakeResultPublisher,
+			taskStore,
+			currentDateTime,
+			fakeView,
+			testTaskVault,
+			handler.DefaultReconcilePassTimeout,
+			handler.DefaultReconcileInterval,
+			pkg.ClaimModeShadow,
+			func() claim.ClaimRefClient { return refs },
+			handler.WithSuccessStore(store),
+		)
+	}
+
 	// newHandlerWithStore builds a handler whose shared record is the supplied
 	// fake, so a spec can drive the store's error and hit paths directly.
 	newHandlerWithStore := func(store claim.SuccessStore) handler.ClaimLifecycleEventHandler {
@@ -303,6 +330,36 @@ var _ = Describe("the shared success record", func() {
 
 		Expect(newHandlerWithStore(store).ReconcileOnce(ctx)).To(BeNil())
 		Expect(fakeSpawner.SpawnJobCallCount()).To(Equal(1))
+	})
+
+	It("uses a newer shared record over a stale memory one", func() {
+		// The multi-cluster case the shared record exists for. This pod cached the
+		// completion it saw; a peer recorded a newer success at the same phase. On a
+		// memory-only read the cached older completion is what the cadence is
+		// measured against, so a weekly task that succeeded a minute ago looks eight
+		// days stale and the peer's work is spawned a second time. The later
+		// completion has to win.
+		store := new(mocks.FakeSuccessStore)
+		store.SnapshotReturns(
+			map[string]map[string]libtime.DateTime{
+				"tid-a": {"execution": libtime.DateTime(now.Add(-1 * time.Minute))},
+			},
+			nil,
+		)
+
+		taskStore := pkg.NewTaskStore()
+		taskStore.MarkSucceeded("tid-a", "execution", now.Add(-8*24*time.Hour))
+
+		task := eligibleTask(domain.TaskPhaseExecution)
+		task.Frontmatter["recurring"] = "weekly"
+
+		fakeView.SnapshotReturns([]lib.Task{task})
+		fakeView.GetReturns(task, true)
+		fakeSpawner.IsJobActiveReturns(false, nil)
+
+		Expect(newHandlerWithBoth(taskStore, store).ReconcileOnce(ctx)).To(BeNil())
+		Expect(fakeSpawner.SpawnJobCallCount()).To(Equal(0))
+		Expect(fakeResultPublisher.PublishParkSucceededCallCount()).To(Equal(0))
 	})
 
 	It("releases a recurring task once its cadence elapsed, across a restart", func() {

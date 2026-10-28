@@ -25,12 +25,19 @@ import (
 // and the suppression is in-memory only — a limitation of that configuration,
 // stated rather than hidden.
 func (h *taskEventHandler) successStore() claim.SuccessStore {
-	// An injected store wins, so a caller can supply a fake without the factory
-	// and without racing the Once.
-	if h.successRecordStore != nil {
-		return h.successRecordStore
-	}
 	h.successStoreOnce.Do(func() {
+		// An injected store wins, so a caller can supply a fake without the factory.
+		//
+		// Both checks live INSIDE the Once. Reading the field before Do and writing
+		// it inside has no happens-before edge between them, which is the classic
+		// unsafe double-checked-locking race — and here it is a live one, because the
+		// reconcile pass, the Kafka consumer and the deferred-respawn loop can all
+		// reach this method for the first time concurrently. Calling Do
+		// unconditionally and reading the field only afterwards is the shape
+		// leaseManager already uses.
+		if h.successRecordStore != nil {
+			return
+		}
 		if !h.claimMode.TakesClaim() || h.claimRefClientFactory == nil {
 			return
 		}

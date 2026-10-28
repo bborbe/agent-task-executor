@@ -68,31 +68,46 @@ func (h *taskEventHandler) recentlySucceeded(ctx context.Context, task lib.Task)
 
 // lastSuccess returns the task's latest successful Job at phase.
 //
-// The pod's own memory is asked first: it is written the moment the Job watcher
-// sees the success, so on the pod that ran the Job it is both cheaper and more
-// current than a store read. Only a miss — the fresh-store case, a pod that
-// started after the Job completed — reaches the shared record, and a hit there is
-// written back into memory so every later attempt on this pod is free.
+// Both sources are consulted and the later completion wins. Memory alone is not
+// enough: a pod caches the completion it saw, so a peer cluster that recorded a
+// newer success at the same phase is invisible to it. On a recurring task that is
+// a duplicate, not a stale read — the peer's newer success is what should hold the
+// cadence, and evaluating on the cached older one makes the cadence look elapsed
+// and spawns a second Job for work already done. Comparing the two is what makes
+// the shared record the authority it was added to be.
 //
-// The write-back is what keeps the two halves on one retention horizon: the
-// reconcile prune bounds the map, and the shared record's lease bounds the store,
-// and both use successRecordRetention, so a record does not reappear from the
-// store after the map has forgotten it.
+// The read is cheap where it matters: inside a reconcile pass the shared side is
+// the pass snapshot (one list for every candidate), and on the event paths it is
+// one Lookup per event, cached back into memory on a hit so the next event on this
+// pod is free.
+//
+// A failed shared read falls back to memory rather than to "no record": a store
+// that cannot be read is not evidence the task has not succeeded, and treating it
+// as one would strand the task behind an unreachable store.
 func (h *taskEventHandler) lastSuccess(
 	ctx context.Context,
 	task lib.Task,
 	phase string,
 ) (pkg.SucceededJob, bool) {
-	if succeeded, ok := h.taskStore.LastSucceeded(task.TaskIdentifier); ok &&
-		succeeded.Phase == phase {
-		return succeeded, true
+	memory, hasMemory := h.taskStore.LastSucceeded(task.TaskIdentifier)
+	if hasMemory && memory.Phase != phase {
+		hasMemory = false
 	}
-	completedAt, ok := h.sharedSuccess(ctx, task.TaskIdentifier, phase)
-	if !ok {
-		return pkg.SucceededJob{}, false
+	shared, hasShared := h.sharedSuccess(ctx, task.TaskIdentifier, phase)
+	switch {
+	case hasMemory && hasShared:
+		if shared.Time().After(memory.CompletedAt) {
+			h.taskStore.MarkSucceeded(task.TaskIdentifier, phase, shared.Time())
+			return pkg.SucceededJob{Phase: phase, CompletedAt: shared.Time()}, true
+		}
+		return memory, true
+	case hasShared:
+		h.taskStore.MarkSucceeded(task.TaskIdentifier, phase, shared.Time())
+		return pkg.SucceededJob{Phase: phase, CompletedAt: shared.Time()}, true
+	case hasMemory:
+		return memory, true
 	}
-	h.taskStore.MarkSucceeded(task.TaskIdentifier, phase, completedAt.Time())
-	return pkg.SucceededJob{Phase: phase, CompletedAt: completedAt.Time()}, true
+	return pkg.SucceededJob{}, false
 }
 
 // recurringCadences maps the declared `recurring:` token to the period after
