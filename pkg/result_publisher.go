@@ -135,6 +135,13 @@ type ResultPublisher interface {
 	// as they are. human_review is already in the executor's terminal-phase set,
 	// so a parked task is never re-spawned and needs no second guard.
 	PublishParkLostClaim(ctx context.Context, task lib.Task) error
+	// PublishParkSucceeded writes phase "human_review" onto a task whose Job
+	// succeeded but whose phase never moved — a deliberate human park, not a
+	// finished task. Writes the "phase" key and nothing else. human_review is
+	// already in the executor's terminal-phase set, so the reconcile pass stops
+	// re-driving it; without this write a task whose agent exits 0 without
+	// moving the phase is eligible on every pass and re-spawned forever.
+	PublishParkSucceeded(ctx context.Context, task lib.Task) error
 	// PublishAbort closes a record the consecutive-re-drive cap has decided to
 	// stop driving. It writes status aborted plus the close-out pair vault-cli
 	// requires (aborted_reason and gate_successor) and clears current_job. It
@@ -732,6 +739,18 @@ func (p *resultPublisher) PublishParkLostClaim(
 		},
 	}
 	return p.publishRaw(ctx, taskcmd.UpdateFrontmatterCommandOperation, cmd)
+}
+
+// PublishParkSucceeded writes phase "human_review" and nothing else.
+//
+// It delegates rather than repeating the command: the two parks differ only in
+// why they fire, and the write they make is identical. Duplicating it would let
+// a future change to the park payload drift between them.
+func (p *resultPublisher) PublishParkSucceeded(
+	ctx context.Context,
+	task lib.Task,
+) error {
+	return p.PublishParkLostClaim(ctx, task)
 }
 
 // PublishAbort closes a record the consecutive-re-drive cap has stopped

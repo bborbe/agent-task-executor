@@ -934,7 +934,8 @@ func (h *taskEventHandler) spawnIfNeededClaimed(
 		return spawnOutcomeSuppressed, nil
 	}
 
-	if h.recentlySucceeded(task) {
+	// Suppress inside the write-back grace, park past it — one clock, one call.
+	if h.suppressOrPark(ctx, task) {
 		return spawnOutcomeSuppressed, nil
 	}
 
