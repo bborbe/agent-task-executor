@@ -65,7 +65,7 @@ func (h *taskEventHandler) ReleaseTaskClaimAfterSuccess(
 	phase string,
 	completedAt time.Time,
 ) {
-	// Recorded first, and in every claim mode. The hold below covers the peer
+	// Recorded first, and in every claim-taking mode. The hold below covers the peer
 	// window; the record covers the restart — a fresh pod has never heard of the
 	// success, so without it the suppression is lost on every deploy. The two are
 	// written through one end point rather than a second parallel path.

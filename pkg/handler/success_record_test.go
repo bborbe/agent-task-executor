@@ -6,6 +6,7 @@ package handler_test
 
 import (
 	"context"
+	stderrors "errors"
 	"strconv"
 	"strings"
 	"sync"
@@ -136,6 +137,30 @@ var _ = Describe("the shared success record", func() {
 		)
 	}
 
+	// newHandlerWithStore builds a handler whose shared record is the supplied
+	// fake, so a spec can drive the store's error and hit paths directly.
+	newHandlerWithStore := func(store claim.SuccessStore) handler.ClaimLifecycleEventHandler {
+		return handler.NewTaskEventHandler(
+			fakeSpawner,
+			"dev",
+			base.Branch("prod"),
+			"",
+			true,
+			true,
+			fakeResolver,
+			fakeResultPublisher,
+			pkg.NewTaskStore(),
+			currentDateTime,
+			fakeView,
+			testTaskVault,
+			handler.DefaultReconcilePassTimeout,
+			handler.DefaultReconcileInterval,
+			pkg.ClaimModeShadow,
+			func() claim.ClaimRefClient { return refs },
+			handler.WithSuccessStore(store),
+		)
+	}
+
 	// eligibleTask mirrors the shape every other reconcile spec uses: status
 	// in_progress, a triggerable phase, an assignee, the executor's branch stage,
 	// no current_job, stamped with this executor's vault.
@@ -236,6 +261,39 @@ var _ = Describe("the shared success record", func() {
 		fakeSpawner.IsJobActiveReturns(false, nil)
 
 		Expect(restarted.ReconcileOnce(ctx)).To(BeNil())
+		Expect(fakeSpawner.SpawnJobCallCount()).To(Equal(1))
+	})
+
+	It("suppresses from a shared record when the pod's memory is empty", func() {
+		// The read path itself, with no ref client in play: a store that answers
+		// with a completion at the task's phase suppresses the spawn.
+		store := new(mocks.FakeSuccessStore)
+		// Inside a reconcile pass the read is the pass snapshot, not Lookup.
+		store.SnapshotReturns(
+			map[string]map[string]libtime.DateTime{
+				"tid-a": {"execution": libtime.DateTime(now.Add(-2 * time.Hour))},
+			},
+			nil,
+		)
+
+		fakeView.SnapshotReturns([]lib.Task{eligibleTask(domain.TaskPhaseExecution)})
+		fakeSpawner.IsJobActiveReturns(false, nil)
+
+		Expect(newHandlerWithStore(store).ReconcileOnce(ctx)).To(BeNil())
+		Expect(fakeSpawner.SpawnJobCallCount()).To(Equal(0))
+	})
+
+	It("falls back to memory when the shared read fails", func() {
+		// A store that cannot be read is not evidence either way. Suppressing on a
+		// failed read would strand a task behind an unreachable store, so the guard
+		// behaves exactly as it did before the record existed.
+		store := new(mocks.FakeSuccessStore)
+		store.SnapshotReturns(nil, stderrors.New("git-rest down"))
+
+		fakeView.SnapshotReturns([]lib.Task{eligibleTask(domain.TaskPhaseExecution)})
+		fakeSpawner.IsJobActiveReturns(false, nil)
+
+		Expect(newHandlerWithStore(store).ReconcileOnce(ctx)).To(BeNil())
 		Expect(fakeSpawner.SpawnJobCallCount()).To(Equal(1))
 	})
 

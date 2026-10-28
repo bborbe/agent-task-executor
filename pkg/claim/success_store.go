@@ -46,10 +46,20 @@ const (
 // time rides in the key rather than in a body because the git-rest ref API
 // carries no free-text payload — the PUT body holds only the compare-and-swap
 // sha, the cluster, the task id and the lease.
+//counterfeiter:generate -o ../../mocks/success_store.go --fake-name FakeSuccessStore . SuccessStore
+
 type SuccessStore interface {
 	// Record stores that a Job for taskID succeeded at phase at completedAt, and
-	// drops the task's records at every other phase: a phase advance supersedes
-	// the previous occurrence, so the guard cannot read a stale phase.
+	// leaves that one ref as the task's ONLY record: every other ref of the task,
+	// at any phase and any age, is deleted.
+	//
+	// One record per task is what bounds the store. The key carries the completion
+	// second, so a task that succeeds repeatedly — a recurring task over the
+	// retention window — would otherwise accumulate one ref per completion, and
+	// Snapshot lists the whole prefix on every reconcile pass. Deleting the
+	// superseded refs on write also drops expired ones, so the store is bounded by
+	// the task set rather than by the number of completions; the read-side expiry
+	// filter stays as the belt for refs a failed delete left behind.
 	//
 	// Recording the same completion twice is not an error — the informer
 	// re-delivers a terminal Job every few minutes, and two pods observe one
@@ -168,7 +178,7 @@ func (s *successStore) Record(
 			taskID, component, completedAt.Time().UTC().Format("2006-01-02T15:04:05Z"),
 		)
 	}
-	s.deleteOtherPhases(ctx, taskID, component)
+	s.keepOnly(ctx, taskID, key)
 	return nil
 }
 
@@ -249,11 +259,19 @@ func (s *successStore) Snapshot(
 	return records, nil
 }
 
-// deleteOtherPhases removes taskID's records at every phase but component, so a
-// phase advance supersedes the occurrence it replaces. Best-effort: a failed
-// delete is logged and never fails the Record, because the success it records
-// has already happened.
-func (s *successStore) deleteOtherPhases(ctx context.Context, taskID string, component string) {
+// keepOnly removes every parsed record of taskID except keep, so the task holds
+// exactly one record.
+//
+// This is the store's bound, and it replaces a prune of expired refs alone: the
+// key carries the completion second, so a recurring task would accumulate one ref
+// per occurrence for the whole retention window, and Snapshot lists the entire
+// prefix on every reconcile pass. Deleting every superseded ref — older same-phase
+// ones, other-phase ones, and expired ones — keeps the store at one ref per task.
+//
+// Best-effort: a failed delete is logged and never fails the Record, because the
+// success it records has already happened, and the read side filters expired refs
+// if a delete is ever missed.
+func (s *successStore) keepOnly(ctx context.Context, taskID string, keep string) {
 	refs, err := redriveListForTask(ctx, s.refClient, SuccessRecordPrefix, taskID)
 	if err != nil {
 		glog.Warningf(
@@ -262,8 +280,11 @@ func (s *successStore) deleteOtherPhases(ctx context.Context, taskID string, com
 		return
 	}
 	for _, ref := range refs {
-		refTaskID, refPhase, _, ok := parseSuccessRef(ref.Ref)
-		if !ok || refTaskID != taskID || refPhase == component {
+		refTaskID, _, _, ok := parseSuccessRef(ref.Ref)
+		if !ok || refTaskID != taskID {
+			continue
+		}
+		if strings.TrimPrefix(ref.Ref, "refs/") == keep {
 			continue
 		}
 		redriveDeleteRef(ctx, s.refClient, "success_record_prune_failed", taskID, ref)

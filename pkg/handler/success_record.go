@@ -25,6 +25,11 @@ import (
 // and the suppression is in-memory only — a limitation of that configuration,
 // stated rather than hidden.
 func (h *taskEventHandler) successStore() claim.SuccessStore {
+	// An injected store wins, so a caller can supply a fake without the factory
+	// and without racing the Once.
+	if h.successRecordStore != nil {
+		return h.successRecordStore
+	}
 	h.successStoreOnce.Do(func() {
 		if !h.claimMode.TakesClaim() || h.claimRefClientFactory == nil {
 			return
