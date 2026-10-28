@@ -11,6 +11,7 @@ import (
 	"flag"
 	"io"
 	"os"
+	"strings"
 
 	"github.com/IBM/sarama"
 	lib "github.com/bborbe/agent"
@@ -38,22 +39,30 @@ import (
 // would pass vacuously against an empty string. The suite runs serially, so the
 // global os.Stderr swap cannot race another spec's logging.
 func captureGlogStderr(fn func()) string {
+	GinkgoHelper()
 	Expect(flag.Set("logtostderr", "true")).To(Succeed())
 	Expect(flag.Set("v", "2")).To(Succeed())
 	defer func() {
-		Expect(flag.Set("logtostderr", "false")).To(Succeed())
-		Expect(flag.Set("v", "0")).To(Succeed())
+		// Deliberately not Expect: this runs during the panic unwinding that
+		// follows a failed spec assertion, and a second failure here would
+		// replace the real one with "Test Panicked".
+		_ = flag.Set("logtostderr", "false")
+		_ = flag.Set("v", "0")
 	}()
 
 	original := os.Stderr
 	reader, writer, err := os.Pipe()
 	Expect(err).ToNot(HaveOccurred())
 	os.Stderr = writer
+	// Deferred, not sequential: fn() calls PublishFailure with Expect inside it,
+	// and a failed Expect panics. A sequential restore would then be skipped and
+	// the pipe would stay installed as the process stderr for the rest of the
+	// suite, so the failure diagnostics are exactly what disappears.
+	defer func() { os.Stderr = original }()
 
 	fn()
 	glog.Flush()
 
-	os.Stderr = original
 	Expect(writer.Close()).To(Succeed())
 	out, err := io.ReadAll(reader)
 	Expect(err).ToNot(HaveOccurred())
@@ -463,7 +472,7 @@ var _ = Describe("ResultPublisher", func() {
 					Expect(err).NotTo(HaveOccurred())
 				})
 
-				Expect(out).To(ContainSubstring("event=crash_arm_skip task="))
+				Expect(out).To(ContainSubstring("event=crash_arm_decision task="))
 				Expect(out).To(ContainSubstring("decision=max_triggers_already_present"))
 				Expect(out).To(ContainSubstring("task=test-task-log-early-return"))
 				Expect(out).To(ContainSubstring("job=pr-reviewer-agent-1234"))
@@ -471,6 +480,9 @@ var _ = Describe("ResultPublisher", func() {
 				Expect(out).To(ContainSubstring(`parsed="pod_crash_no_stdout"`))
 				Expect(out).To(ContainSubstring("parsed_ok=true"))
 				Expect(out).To(ContainSubstring("cached_max_triggers=6"))
+				// Exactly once, so a doubled log call or a second emitting path
+				// cannot pass on presence alone.
+				Expect(strings.Count(out, "event=crash_arm_decision ")).To(Equal(1))
 			},
 		)
 
@@ -490,10 +502,14 @@ var _ = Describe("ResultPublisher", func() {
 				Expect(err).NotTo(HaveOccurred())
 			})
 
-			Expect(out).To(ContainSubstring("event=crash_arm task="))
+			Expect(out).To(ContainSubstring("event=crash_arm_decision task="))
 			Expect(out).To(ContainSubstring("decision=arm cached_max_triggers=<absent>"))
 			Expect(out).To(ContainSubstring("task=test-task-log-arm"))
-			Expect(out).To(ContainSubstring("max_triggers=3"))
+			// Leading space anchors the field boundary: without it this is also a
+			// substring of "cached_max_triggers=3" and would silently start
+			// accepting the early-return branch if the line above were removed.
+			Expect(out).To(ContainSubstring(" max_triggers=3"))
+			Expect(strings.Count(out, "event=crash_arm_decision ")).To(Equal(1))
 		})
 
 		It("logs a rejected class with its parsed value so a miss is not silent", func() {
@@ -512,10 +528,15 @@ var _ = Describe("ResultPublisher", func() {
 				Expect(err).NotTo(HaveOccurred())
 			})
 
-			Expect(out).To(ContainSubstring("event=crash_arm_skip task="))
+			Expect(out).To(ContainSubstring("event=crash_arm_decision task="))
 			Expect(out).To(ContainSubstring("decision=not_crash_class"))
+			// Both the raw and the parsed form, which is the distinction this
+			// spec exists to pin: the suffixed reason must classify, and the line
+			// must still show what actually arrived.
+			Expect(out).To(ContainSubstring(`reason="pod_oom_killed (OOMKilled/137)"`))
 			Expect(out).To(ContainSubstring(`parsed="pod_oom_killed"`))
 			Expect(out).To(ContainSubstring("parsed_ok=true"))
+			Expect(strings.Count(out, "event=crash_arm_decision ")).To(Equal(1))
 		})
 	})
 

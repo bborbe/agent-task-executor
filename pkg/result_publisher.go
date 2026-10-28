@@ -467,12 +467,20 @@ func (p *resultPublisher) PublishSpawnNotification(
 // between two views of one task) from "the class gate rejected it". The level is
 // V(2) because both dev and prod run the executor with -v=2; a higher level
 // would make the line invisible exactly where it is needed.
+//
+// Every line is named event=crash_arm_decision and carries a decision= field,
+// because this function only DECIDES: the UpdateFrontmatterCommand it feeds is
+// published by the caller, and a failed publish returns an error there without
+// the record ever receiving the key. A line reading "armed" would then assert an
+// outcome no code here has reached, and an operator grepping for it would be
+// told the cap was armed on a write that failed — the same false green this
+// instrumentation exists to remove. Publish failure is reported by the caller.
 func crashFailureUpdates(task lib.Task, jobName, reason string) lib.TaskFrontmatter {
 	updates := lib.TaskFrontmatter{"current_job": ""}
 	parsed, parsedOK := ParseZombieReason(reason)
 	if !parsedOK || parsed != ZombieReasonPodCrashNoStdout {
 		glog.V(2).Infof(
-			"event=crash_arm_skip task=%s job=%s reason=%q parsed=%q parsed_ok=%t "+
+			"event=crash_arm_decision task=%s job=%s reason=%q parsed=%q parsed_ok=%t "+
 				"decision=not_crash_class",
 			task.TaskIdentifier, jobName, reason, parsed.String(), parsedOK,
 		)
@@ -481,14 +489,14 @@ func crashFailureUpdates(task lib.Task, jobName, reason string) lib.TaskFrontmat
 	cachedMax, maxPresent := task.Frontmatter["max_triggers"]
 	if maxPresent {
 		glog.V(2).Infof(
-			"event=crash_arm_skip task=%s job=%s reason=%q parsed=%q parsed_ok=%t "+
+			"event=crash_arm_decision task=%s job=%s reason=%q parsed=%q parsed_ok=%t "+
 				"decision=max_triggers_already_present cached_max_triggers=%v",
 			task.TaskIdentifier, jobName, reason, parsed.String(), parsedOK, cachedMax,
 		)
 		return updates
 	}
 	glog.V(2).Infof(
-		"event=crash_arm task=%s job=%s reason=%q parsed=%q parsed_ok=%t "+
+		"event=crash_arm_decision task=%s job=%s reason=%q parsed=%q parsed_ok=%t "+
 			"decision=arm cached_max_triggers=<absent> max_triggers=%d",
 		task.TaskIdentifier, jobName, reason, parsed.String(), parsedOK, defaultMaxTriggers,
 	)
