@@ -467,37 +467,3 @@ func (f *fakeResultPublisher) PublishClearCurrentJobArgsForCall(
 	c := f.clearCurrentJobCalls[i]
 	return c.ctx, c.task, c.jobName
 }
-
-var _ = Describe("parkedJob", func() {
-	It("reports a succeeded Job that left the task in the drive phase", func() {
-		task := lib.Task{Frontmatter: lib.TaskFrontmatter{"phase": "execution"}}
-		Expect(parkedJob(task)).To(BeTrue())
-	})
-
-	It("does not report a task that already moved on to human_review", func() {
-		task := lib.Task{Frontmatter: lib.TaskFrontmatter{"phase": "human_review"}}
-		Expect(parkedJob(task)).To(BeFalse())
-	})
-
-	It("does not report a task carrying no phase", func() {
-		Expect(parkedJob(lib.Task{Frontmatter: lib.TaskFrontmatter{}})).To(BeFalse())
-	})
-})
-
-var _ = Describe("parkedJob status guard", func() {
-	It("does not park a task whose status is already terminal", func() {
-		task := lib.Task{Frontmatter: lib.TaskFrontmatter{
-			"phase":  "execution",
-			"status": "completed",
-		}}
-		Expect(parkedJob(task)).To(BeFalse())
-	})
-
-	It("parks a task still in the planning drive phase", func() {
-		task := lib.Task{Frontmatter: lib.TaskFrontmatter{
-			"phase":  "planning",
-			"status": "in_progress",
-		}}
-		Expect(parkedJob(task)).To(BeTrue())
-	})
-})

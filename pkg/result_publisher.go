@@ -685,66 +685,6 @@ func (p *resultPublisher) PublishParkLostClaim(
 	return p.publishRaw(ctx, taskcmd.UpdateFrontmatterCommandOperation, cmd)
 }
 
-// PublishParkStalled publishes phase human_review for a task whose Job exited 0
-// without moving the phase. Idempotent: the phase write is absolute, so a
-// repeated informer delivery for the same succeeded Job rewrites the same value.
-func (p *resultPublisher) PublishParkStalled(
-	ctx context.Context,
-	task lib.Task,
-) error {
-	cmd := taskcmd.UpdateFrontmatterCommand{
-		TaskIdentifier: task.TaskIdentifier,
-		TargetVault:    targetVaultFromTask(task),
-		Updates: lib.TaskFrontmatter{
-			"phase": string(domain.TaskPhaseHumanReview),
-		},
-	}
-	return p.publishRaw(ctx, taskcmd.UpdateFrontmatterCommandOperation, cmd)
-}
-
-// parkPublisher is the narrow surface the Job success path needs: park a record
-// whose agent exited 0 without moving the phase.
-//
-// It is deliberately NOT a method on ResultPublisher. That interface is already
-// the widest seam in this package, and every test double in pkg/ and pkg/handler
-// would have to grow a method it never exercises. The success path asserts for
-// this capability instead, so a double that does not implement it simply does
-// not park — which is the correct behaviour for a double that models no park.
-type parkPublisher interface {
-	// PublishParkStalled writes phase "human_review" onto a task whose Job
-	// exited 0 without moving the phase — a deliberate human-park, or a run that
-	// produced no result. It writes the "phase" key and nothing else.
-	//
-	// This is what keeps a parked record from looping. The re-drive streak no
-	// longer counts spawns (see recordRedriveFailure), so a phase-immobile task
-	// is eligible on every reconcile pass and nothing else would ever bound it:
-	// human_review is in the executor's terminal-phase set, so a parked task is
-	// never re-spawned and needs no second guard.
-	PublishParkStalled(ctx context.Context, task lib.Task) error
-}
-
-// parkedJob reports whether a SUCCEEDED Job left its task in the drive phase,
-// i.e. the agent exited 0 without publishing a result that moved the phase. That
-// is a deliberate human-park (the agent wrote its verdict into the task file and
-// stopped) or a run that produced nothing — either way the record must leave the
-// loop rather than be re-spawned on every reconcile pass.
-// A terminal status short-circuits: the store entry is updated by Kafka events,
-// which can lag the agent's own write, so a task that already completed would
-// otherwise be dragged back to human_review by its own success.
-func parkedJob(task lib.Task) bool {
-	status := task.Frontmatter.Status()
-	if status == domain.TaskStatusCompleted || status == domain.TaskStatusAborted {
-		return false
-	}
-	phase := task.Frontmatter.Phase()
-	if phase == nil {
-		return false
-	}
-	// Both drive phases: the executor spawns for a planning-phase task as well as
-	// an execution-phase one, so a park in either would otherwise loop.
-	return *phase == domain.TaskPhasePlanning || *phase == domain.TaskPhaseExecution
-}
-
 // PublishAbort closes a record the consecutive-re-drive cap has stopped
 // driving. It writes status, aborted_reason, gate_successor and current_job and
 // touches no other key.
