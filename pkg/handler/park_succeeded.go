@@ -18,8 +18,14 @@ import (
 // write-back grace recentlySucceeded suppresses, and past it a task still at the
 // phase its last Job succeeded for is parked.
 func (h *taskEventHandler) suppressOrPark(ctx context.Context, task lib.Task) bool {
-	if h.recentlySucceeded(task) {
+	if h.recentlySucceeded(ctx, task) {
 		return true
+	}
+	if _, recurring := recurringPeriod(task.Frontmatter); recurring {
+		// A recurring task is released at its cadence and is never parked. Its phase
+		// does not advance between occurrences, so a park would send a human to the
+		// same record on every run — the outcome the cadence release exists to avoid.
+		return false
 	}
 	return h.parkSucceededWithoutPhaseMove(ctx, task)
 }
@@ -65,8 +71,11 @@ func (h *taskEventHandler) parkSucceededWithoutPhaseMove(
 	ctx context.Context,
 	task lib.Task,
 ) bool {
-	succeeded, ok := h.taskStore.LastSucceeded(task.TaskIdentifier)
-	if !ok {
+	// A handler built without a view cannot park: there is no fresh phase to
+	// compare against, and parking on the caller's snapshot would rewrite
+	// human_review over a task that has since advanced. Every deployed handler has
+	// one; this guard keeps the funnel safe for the ones a test builds bare.
+	if h.view == nil {
 		return false
 	}
 	// Re-read from the view rather than trusting the caller's task. Two of the
@@ -79,7 +88,14 @@ func (h *taskEventHandler) parkSucceededWithoutPhaseMove(
 	if !ok {
 		return false
 	}
-	if succeeded.Phase != taskPhase(current) {
+	// The success comes from the shared record, not the pod's own memory: the pod
+	// that ran the Job may be gone, and a restart must not turn a record that was
+	// due to be parked back into an eligible one. lastSuccess is phase-scoped, so
+	// it answers exactly the question this park asks — did this task succeed at the
+	// phase it is still at — and writes a shared hit back into memory, so the next
+	// pass on this pod is free.
+	succeeded, ok := h.lastSuccess(ctx, current, taskPhase(current))
+	if !ok {
 		return false
 	}
 	now := h.currentDateTime.Now().Time()
