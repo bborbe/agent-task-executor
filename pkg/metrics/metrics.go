@@ -317,6 +317,20 @@ var TaskViewSkippedTotal = promauto.NewCounter(prometheus.CounterOpts{
 	Help: "Total number of task event messages the task view could not decode.",
 })
 
+// seedDeferredAndRefusalOutcomes pre-initialises the closed set of deferred-respawn
+// and refusal-write outcomes. Same reason as the blocks in init: an absent series
+// makes a `rate(...) == 0` alert skip silently instead of firing on a fleet where
+// the outcome never happened. The two refusal-write labels are the same failure
+// surfaced on its two non-fatal paths — the deferred-respawn loop and the Kafka
+// consumer — and neither may be allowed to look like a healthy zero.
+func seedDeferredAndRefusalOutcomes() {
+	TaskEventsTotal.WithLabelValues("deferred_concurrency_cap").Add(0)
+	TaskEventsTotal.WithLabelValues("deferred_claim_invalidated").Add(0)
+	TaskEventsTotal.WithLabelValues("deferred_respawn_spawn_failed").Add(0)
+	TaskEventsTotal.WithLabelValues("deferred_respawn_refusal_write_failed").Add(0)
+	TaskEventsTotal.WithLabelValues("event_refusal_write_failed").Add(0)
+}
+
 func init() {
 	// Only the fixed sentinel is seeded. The namespace vocabulary is unbounded, so
 	// seeding it is not possible — but a CounterVec with no series registers no
@@ -352,9 +366,7 @@ func init() {
 	// `rate(...) == 0` alert on it skip silently.
 	TaskEventsTotal.WithLabelValues("claim_probe_failed").Add(0)
 	TaskEventsTotal.WithLabelValues("respawn_after_grace_window").Add(0)
-	TaskEventsTotal.WithLabelValues("deferred_concurrency_cap").Add(0)
-	TaskEventsTotal.WithLabelValues("deferred_claim_invalidated").Add(0)
-	TaskEventsTotal.WithLabelValues("deferred_respawn_spawn_failed").Add(0)
+	seedDeferredAndRefusalOutcomes()
 	// Pre-initialise every reconcile outcome so rate() sees a 0 series rather
 	// than no data — an absent series makes `rate(...)==0` skip silently and the
 	// "backstop never succeeds" alert never fire.

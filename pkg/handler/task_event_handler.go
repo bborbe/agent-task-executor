@@ -566,6 +566,20 @@ func (h *taskEventHandler) ConsumeMessage(ctx context.Context, msg *sarama.Consu
 		return nil
 	}
 	_, err = h.spawnIfNeeded(ctx, task, config)
+	// A refusal that could not be written must not tear the executor down. The
+	// consumer's error cancels every run func, so a transient publish failure
+	// would restart the process for every assignee at once. The spawn is already
+	// suppressed; the reconcile floor re-drives the task and retries the write,
+	// exactly as it does for a view that has not replayed yet.
+	var refusalErr *triggerRefusalWriteError
+	if stderrors.As(err, &refusalErr) {
+		glog.Warningf(
+			"event=event_refusal_write_failed task=%s err=%v: reconcile will retry",
+			task.TaskIdentifier, err,
+		)
+		metrics.TaskEventsTotal.WithLabelValues("event_refusal_write_failed").Inc()
+		return nil
+	}
 	return err
 }
 
