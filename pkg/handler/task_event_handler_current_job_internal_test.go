@@ -219,7 +219,9 @@ func TestJobProvablyFinishedDoesNotProbeInShadowMode(t *testing.T) {
 		t.Fatalf("jobProvablyFinished returned %v; want nil", err)
 	}
 	if !finished {
-		t.Fatal("provably finished = false in shadow mode; want true — shadow never blocks a dispatch")
+		t.Fatal(
+			"provably finished = false in shadow mode; want true — shadow never blocks a dispatch",
+		)
 	}
 	if asked {
 		t.Error("the claim store was read in shadow mode; want no read")

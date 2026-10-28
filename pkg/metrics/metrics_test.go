@@ -180,6 +180,41 @@ var _ = Describe("Metrics", func() {
 		}
 	})
 
+	It("pre-initialises exactly the eight reconcile-refusal gates at zero", func() {
+		mfs, err := prometheus.DefaultGatherer.Gather()
+		Expect(err).NotTo(HaveOccurred())
+
+		Expect(
+			gatherLabels(mfs, "executor_reconcile_refused_total", "gate"),
+		).To(ConsistOf(
+			"foreign_cluster",
+			"unresolved_config",
+			"terminal_status",
+			"status_not_triggered",
+			"phase_not_triggered",
+			"terminal_phase",
+			"stage_mismatch",
+			"no_routing",
+		))
+
+		// The series are pre-initialised, so ToFloat64 on the bare collector
+		// panics; read each child series instead.
+		for _, gate := range []string{
+			metrics.ReconcileRefusedGateForeignCluster,
+			metrics.ReconcileRefusedGateUnresolvedConfig,
+			metrics.ReconcileRefusedGateTerminalStatus,
+			metrics.ReconcileRefusedGateStatusNotTriggered,
+			metrics.ReconcileRefusedGatePhaseNotTriggered,
+			metrics.ReconcileRefusedGateTerminalPhase,
+			metrics.ReconcileRefusedGateStageMismatch,
+			metrics.ReconcileRefusedGateNoRouting,
+		} {
+			Expect(testutil.ToFloat64(
+				metrics.ReconcileRefusedTotal.WithLabelValues(gate),
+			)).To(Equal(float64(0)), "gate=%s", gate)
+		}
+	})
+
 	It("labels the redrive-cap counter with task_type then phase", func() {
 		// The touch is required: this vec is deliberately not pre-initialised,
 		// so it emits no metric family until a label pair is observed. The two
