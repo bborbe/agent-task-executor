@@ -12,7 +12,6 @@ import (
 	"io"
 	"os"
 	"strings"
-	"time"
 
 	"github.com/IBM/sarama"
 	lib "github.com/bborbe/agent"
@@ -1490,17 +1489,12 @@ var _ = Describe("ResultPublisher", func() {
 			Expect(
 				string(operation),
 			).To(Equal(string(taskcmd.UpdateFrontmatterCommandOperation)))
-			Expect(cmd.Updates).To(HaveLen(4))
-			Expect(cmd.Updates["trigger_refusal_scope"]).To(Equal("planning:4963ffa6"))
-			// BeNumerically, not Equal: the command is read back through its JSON
-			// encoding, where every number decodes as float64.
-			Expect(cmd.Updates["trigger_refusal_count"]).To(BeNumerically("==", 4))
-			Expect(cmd.Updates["trigger_refusal_max"]).To(BeNumerically("==", 3))
-			Expect(cmd.Updates["trigger_refusal_at"]).To(Equal("2026-04-18T12:00:00Z"))
-			at, ok := cmd.Updates["trigger_refusal_at"].(string)
-			Expect(ok).To(BeTrue())
-			_, parseErr := time.Parse(time.RFC3339, at)
-			Expect(parseErr).NotTo(HaveOccurred())
+			// No frontmatter keys at all: vault-api's typedTaskFields allowlist
+			// refuses the WHOLE command when any named key is outside it, and it
+			// does not carry the trigger_refusal_* names — a command with them is
+			// discarded body section included. Pinned here so a future
+			// "helpfully" restored key cannot silently reintroduce that.
+			Expect(cmd.Updates).To(BeEmpty())
 			Expect(cmd.TargetVault).To(Equal("work"))
 		})
 

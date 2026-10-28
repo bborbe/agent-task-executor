@@ -764,10 +764,20 @@ func triggerRefusalDedupeKey(
 	return fmt.Sprintf("trigger_refusal:%s:%s:%d:%d", id, scope, count, maxTriggers)
 }
 
-// PublishTriggerBudgetRefusal writes the four frozen trigger_refusal_* keys and a
-// "## Trigger Budget" section, and nothing else. The section heading deliberately
-// differs from "## Failure": Markdown.ReplaceSection replaces a section carrying
-// the same heading, so writing "## Failure" here would delete the older cause.
+// PublishTriggerBudgetRefusal writes a "## Trigger Budget" section and nothing
+// else. The section heading deliberately differs from "## Failure":
+// Markdown.ReplaceSection replaces a section carrying the same heading, so
+// writing "## Failure" here would delete the older cause.
+//
+// ⚠️ It writes NO frontmatter keys. vault-api's typedTaskFields allowlist
+// (pkg/handler/task_content.go) refuses the WHOLE request when any named key is
+// outside the set, and it does not carry the trigger_refusal_* names — so a
+// command carrying them is discarded entirely, body section included, and the
+// record stays silent while publishRaw reports success. Measured on dev
+// 2026-10-28 against v0.48.0: 105 dedupe hits, one publish, and a controller
+// 400 `unknown_field: trigger_refusal_at`. The count, cap, scope and timestamp
+// therefore live in the body section only; the keys are owed to that allowlist
+// and a follow-up restores them once it carries them.
 //
 // The dedupe key covers the refusal triple, not just the task, so a changed
 // refusal is never suppressed. It is recorded only after publishRaw succeeds: a
@@ -799,15 +809,11 @@ func (p *resultPublisher) PublishTriggerBudgetRefusal(
 		maxTriggers,
 		scope,
 	)
+	// Updates stays empty on purpose — see the doc comment: any key outside
+	// vault-api's allowlist discards the whole command, body section included.
 	cmd := taskcmd.UpdateFrontmatterCommand{
 		TaskIdentifier: task.TaskIdentifier,
 		TargetVault:    targetVaultFromTask(task),
-		Updates: lib.TaskFrontmatter{
-			"trigger_refusal_count": count,
-			"trigger_refusal_max":   maxTriggers,
-			"trigger_refusal_scope": scope,
-			"trigger_refusal_at":    now,
-		},
 		Body: &taskcmd.BodySection{
 			Heading: "## Trigger Budget",
 			Section: section,
