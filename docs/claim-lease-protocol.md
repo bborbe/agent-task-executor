@@ -6,6 +6,37 @@ of the task's claim. This document describes the protocol implemented by
 `pkg/claim`. The constants below are invariants, not configuration — there is
 no knob, flag or opt-out for any of them.
 
+## The spawn guard reads a claim, it never writes one
+
+A task's frontmatter carries a `current_job`, and it is shared through the
+vault, so it can name a Job another cluster created. `IsJobActive` lists only
+this cluster's Jobs, so "no active Job here" does not mean the Job is over.
+
+When this executor's own store has no entry for the task — a restart, or a task
+it never spawned — the guard reads the task's claim (`GET` on the claim route)
+and treats a live claim as proof that some cluster is still running the task:
+the spawn is suppressed and re-deferred. `claim_free` lets the respawn proceed,
+a claim past its lease **by the takeover grace** counts as free — not one merely
+past its lease, because inside that grace the protocol still treats the holder as
+possibly running — an unreadable lease counts as held, and a failed read
+suppresses and retries on the next pass. The read is
+one request per dispatch pass on a task whose store entry is empty, and none
+otherwise. Only claim mode `on` probes: `shadow` takes claims but never blocks a
+dispatch, so a held claim must not suppress a spawn there, and treating shadow as
+unavailable is what keeps the probe from quietly turning it into `on`.
+
+⚠️ **Two residuals, both real.** Claim mode `off` keeps no claim at all, so the
+guard falls back to local evidence and says so in
+`event=foreign_job_unprobeable`. And a claim's absence only proves that no
+*claim-taking* cluster holds the task: a peer running claim mode off, or an image
+older than `v0.26.2`, writes no claim, so a task it is running stays invisible
+here and the respawn can still duplicate it. That gap closes when every cluster
+takes claims, not by anything this side can read.
+
+This is why the success hold matters beyond the peer's `Claim` being refused:
+the held claim is also what stops a cold peer from respawning the task inside
+the success grace.
+
 ## Constants
 
 | Constant | Value | Meaning |

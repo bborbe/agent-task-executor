@@ -255,6 +255,7 @@ func NewTaskEventHandler(
 		currentDateTime:         currentDateTime,
 		deferredRespawns:        make(map[lib.TaskIdentifier]deferredEntry),
 		deferredEpochs:          make(map[lib.TaskIdentifier]uint64),
+		refusedGates:            make(map[lib.TaskIdentifier]string),
 		queuedAtStamps:          make(map[lib.TaskIdentifier]string),
 		spawnLocks:              make(map[string]*sync.Mutex),
 		view:                    view,
@@ -285,6 +286,9 @@ type taskEventHandler struct {
 	currentDateTime  libtime.CurrentDateTimeGetter
 	deferredMu       sync.Mutex
 	deferredRespawns map[lib.TaskIdentifier]deferredEntry
+	// refusedMu guards refusedGates: the last reconcile gate that refused each task.
+	refusedMu    sync.Mutex
+	refusedGates map[lib.TaskIdentifier]string
 	// deferredEpochs counts removals per task, so a replay collected before an
 	// eviction can detect it. Entries are never deleted: resetting an epoch would
 	// re-validate a stale claim.
@@ -317,6 +321,9 @@ type taskEventHandler struct {
 	claimManagerOnce sync.Once
 	claimManager     claim.LeaseManager
 	claimManagerErr  error
+	// probeState is the read-only claim client the foreign-current_job probe
+	// uses, built lazily and separately from the lease manager.
+	probeState claimProbeState
 	// spawnPendingSet marks tasks whose spawn is between taking the claim and
 	// recording the new Job. A terminal event for the previous Job arriving in
 	// that window names the only Job the store knows, so without this marker it
@@ -486,16 +493,6 @@ func (h *taskEventHandler) spawnPendingFor(taskID lib.TaskIdentifier) bool {
 func (h *taskEventHandler) staleEventForTask(task lib.Task) bool {
 	storedJob := h.storedCurrentJob(task)
 	return storedJob != "" && storedJob != task.Frontmatter.CurrentJob()
-}
-
-// storedCurrentJob returns the store entry's current_job, or "" when the store
-// holds no entry for the task.
-func (h *taskEventHandler) storedCurrentJob(task lib.Task) string {
-	stored, ok := h.taskStore.Load(task.TaskIdentifier)
-	if !ok {
-		return ""
-	}
-	return stored.Frontmatter.CurrentJob()
 }
 
 // cleanupTerminalTask clears in-flight state when a task has reached a terminal
@@ -1070,7 +1067,7 @@ func (h *taskEventHandler) finishSpawn(
 	metrics.TaskEventsTotal.WithLabelValues("spawned").Inc()
 	metrics.JobsSpawnedTotal.WithLabelValues(h.spawnedNamespace(ctx, config)).Inc()
 	h.recordTaskRerun(task)
-	h.recordRedriveSpawn(ctx, task)
+	h.recordRedriveSpawn(task)
 	return nil
 }
 
@@ -1663,14 +1660,14 @@ func (h *taskEventHandler) reconcileTask(
 		// Backstop for a reconcile-driven cap deferral that stored the pre-retag
 		// snapshot after the Kafka retag event was already consumed.
 		h.removeDeferredEntry(task.TaskIdentifier)
-		return task, nil, false, nil
+		return h.refuseReconcile(task, metrics.ReconcileRefusedGateForeignCluster)
 	}
 	config, skip, err := h.resolveConfigForReconcile(ctx, task)
 	if err != nil {
 		return task, nil, false, err
 	}
 	if skip {
-		return task, nil, false, nil
+		return h.refuseReconcile(task, metrics.ReconcileRefusedGateUnresolvedConfig)
 	}
 	// A task whose status is terminal is never a candidate, even when a Config
 	// lists that status in trigger.statuses — the status-side twin of the
@@ -1682,14 +1679,14 @@ func (h *taskEventHandler) reconcileTask(
 	// transition that clears a streak fires on the event path and this task's
 	// happened before the executor was listening for it.
 	if IsTerminalStatus(task.Frontmatter.Status()) {
-		return task, nil, false, nil
+		return h.refuseReconcile(task, metrics.ReconcileRefusedGateTerminalStatus)
 	}
 	if !effectiveTriggerStatuses(config).Contains(task.Frontmatter.Status()) {
-		return task, nil, false, nil
+		return h.refuseReconcile(task, metrics.ReconcileRefusedGateStatusNotTriggered)
 	}
 	phase := task.Frontmatter.Phase()
 	if phase == nil || !effectiveTriggerPhases(config).Contains(*phase) {
-		return task, nil, false, nil
+		return h.refuseReconcile(task, metrics.ReconcileRefusedGatePhaseNotTriggered)
 	}
 	// A terminal task is never driven, even when a Config lists its phase in
 	// trigger.phases. The event path already refuses these in applyPhaseGate; this
@@ -1697,22 +1694,23 @@ func (h *taskEventHandler) reconcileTask(
 	// while it can still spawn, so driving a terminal task here would hand the
 	// agent an empty task file instead of the task text.
 	if IsTerminal(*phase) {
-		return task, nil, false, nil
+		return h.refuseReconcile(task, metrics.ReconcileRefusedGateTerminalPhase)
 	}
 	if h.stageFilter && task.Frontmatter.Stage() != string(h.branch) {
 		if h.pinOutsidePool(task, task.Frontmatter.Stage()) {
 			h.logPinOutsidePool(task, task.Frontmatter.Stage())
 			metrics.TaskEventsTotal.WithLabelValues("pin_outside_pool").Inc()
 		}
-		return task, nil, false, nil
+		return h.refuseReconcile(task, metrics.ReconcileRefusedGateStageMismatch)
 	}
 	// A parked task (empty routing value) is eligible when its declared
 	// task_type resolved to a Config on this floor-only path. resolveConfig
 	// returns no Config for an empty assignee, so a non-nil config here means
 	// the declared type resolved. A task with neither is still ineligible.
 	if task.Frontmatter.Assignee() == "" && config == nil {
-		return task, nil, false, nil
+		return h.refuseReconcile(task, metrics.ReconcileRefusedGateNoRouting)
 	}
+	h.clearReconcileRefusal(task.TaskIdentifier)
 	return task, config, true, nil
 }
 

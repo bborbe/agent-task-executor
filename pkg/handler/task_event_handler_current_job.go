@@ -74,7 +74,7 @@ func (h *taskEventHandler) checkActiveCurrentJob(
 		// pass and every deferred replay, like redriveStreakCapped. The
 		// skipped_foreign_job counter is the alerting signal.
 		glog.V(1).Infof(
-			"event=respawn_foreign_job task=%s current_job=%s: this executor spawned a different Job for the task; suppressing spawn",
+			"event=respawn_foreign_job task=%s current_job=%s: the Job is not provably over here — another cluster's Job, or a live claim on the task; suppressing spawn",
 			task.TaskIdentifier,
 			currentJob,
 		)
@@ -95,6 +95,16 @@ func (h *taskEventHandler) checkActiveCurrentJob(
 	return false, nil
 }
 
+// storedCurrentJob returns the store entry's current_job, or "" when the store
+// holds no entry for the task.
+func (h *taskEventHandler) storedCurrentJob(task lib.Task) string {
+	stored, ok := h.taskStore.Load(task.TaskIdentifier)
+	if !ok {
+		return ""
+	}
+	return stored.Frontmatter.CurrentJob()
+}
+
 // jobProvablyFinished reports whether the Job named in current_job has certainly
 // ended, given that no Job for this task is active in this cluster.
 //
@@ -106,12 +116,20 @@ func (h *taskEventHandler) checkActiveCurrentJob(
 // processed, which is also what clears current_job. A store entry naming a
 // different Job therefore proves the frontmatter's Job belongs to someone else.
 //
-// With no store entry (a restart, or a spawn this executor never made) there is
-// nothing local to distinguish a foreign Job from a finished one, so the
-// previous behaviour stands: the grace window is the only bound, and a respawn
-// after it proceeds. Bounding that case by the Job's deadline instead was tried
-// and reverted — it withholds a legitimate respawn for up to 30 minutes, which
-// the deferred-respawn contract does not allow.
+// With no store entry (a restart, or a spawn this executor never made) nothing
+// LOCAL distinguishes a foreign Job from a finished one — which is why the
+// store alone cannot settle that case. Bounding it by the Job's deadline was
+// tried and reverted: it withholds a legitimate respawn for up to 30 minutes,
+// which the deferred-respawn contract does not allow.
+//
+// What does settle it is the claim. A claim is written to the shared ref store
+// before a Job is created and released when that Job ends (held for the success
+// grace after a success), so a live claim proves some cluster is still running
+// the task while its absence proves none is — including the cluster whose Job
+// the frontmatter names. That is the same artefact the exactly-once work relies
+// on, read instead of written. Claim mode off leaves no such record, so there
+// the previous behaviour stands unchanged, and this function says so rather than
+// reading the absence of a claim it never had as proof.
 //
 // A store entry can also LEAK, which the mismatch rule alone would turn into
 // permanent suppression. Nothing clears an entry except the job informer
@@ -128,8 +146,11 @@ func (h *taskEventHandler) jobProvablyFinished(
 	namespace libk8s.Namespace,
 ) (bool, error) {
 	stored := h.storedCurrentJob(task)
-	if stored == "" || stored == currentJob {
+	if stored != "" && stored == currentJob {
 		return true, nil
+	}
+	if stored == "" {
+		return h.currentJobFinishedWithoutStoreEntry(ctx, task)
 	}
 	exists, err := h.jobSpawner.JobExists(ctx, namespace, stored)
 	if err != nil {
@@ -150,4 +171,42 @@ func (h *taskEventHandler) jobProvablyFinished(
 	// drop that entry and leave its Job unclaimed and invisible to the release path.
 	h.taskStore.DeleteIfCurrentJob(task.TaskIdentifier, stored)
 	return true, nil
+}
+
+// currentJobFinishedWithoutStoreEntry decides the case the store cannot: no
+// entry names this task, so the Job in current_job is either this executor's
+// own from before a restart, or one another cluster created. Nothing local
+// separates them; the claim does.
+func (h *taskEventHandler) currentJobFinishedWithoutStoreEntry(
+	ctx context.Context,
+	task lib.Task,
+) (bool, error) {
+	probe, err := h.claimProbe(ctx, task)
+	if err != nil {
+		// A failed read is not evidence of absence — suppress and retry on the
+		// next pass, the same direction the failed Job lookup takes. Not fatal:
+		// a vault-api blip must not restart the executor for every assignee. The
+		// probe already counted and logged it, with the stage that failed.
+		return false, nil
+	}
+	switch probe {
+	case claimProbeHeld:
+		glog.V(2).Infof(
+			"event=foreign_job_claimed_elsewhere task=%s: a live claim shows the task is still running somewhere this cluster cannot see",
+			task.TaskIdentifier,
+		)
+		return false, nil
+	case claimProbeFree:
+		return true, nil
+	default:
+		// Claim mode off keeps no shared record, so the ambiguity cannot be
+		// resolved here. Stated rather than hidden: the respawn proceeds on
+		// local evidence alone, which is the pre-existing behaviour.
+		glog.V(2).Infof(
+			"event=foreign_job_unprobeable task=%s mode=%s: no claim is kept to read; respawn proceeds on local evidence",
+			task.TaskIdentifier,
+			h.claimMode,
+		)
+		return true, nil
+	}
 }

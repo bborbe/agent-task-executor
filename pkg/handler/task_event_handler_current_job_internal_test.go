@@ -9,6 +9,7 @@ package handler
 
 import (
 	"context"
+	stderrors "errors"
 	"testing"
 	"time"
 
@@ -18,8 +19,45 @@ import (
 	"github.com/prometheus/client_golang/prometheus/testutil"
 
 	pkg "github.com/bborbe/agent-task-executor/pkg"
+	"github.com/bborbe/agent-task-executor/pkg/claim"
 	"github.com/bborbe/agent-task-executor/pkg/metrics"
 )
+
+// readOnlyClaimClient is a claim.ClaimClient whose Read is the test's, and whose
+// writes panic: the probe must never write, so a write reaching this fake is a
+// defect rather than an unexpected call. It is defined here rather than taken
+// from the mocks package, which imports pkg/handler and so cannot be imported by
+// an internal test of it.
+type readOnlyClaimClient struct {
+	read func(context.Context, claim.ClaimTarget) (*claim.Claim, error)
+}
+
+func (c readOnlyClaimClient) Read(
+	ctx context.Context,
+	target claim.ClaimTarget,
+) (*claim.Claim, error) {
+	return c.read(ctx, target)
+}
+
+func (readOnlyClaimClient) Acquire(
+	context.Context, claim.ClaimTarget, string, string, int,
+) (*claim.Claim, error) {
+	panic("the claim probe must not acquire")
+}
+
+func (readOnlyClaimClient) Renew(
+	context.Context, claim.ClaimTarget, string, string, string, int,
+) (*claim.Claim, error) {
+	panic("the claim probe must not renew")
+}
+
+func (readOnlyClaimClient) List(context.Context, string) ([]claim.Claim, error) {
+	panic("the claim probe must not list")
+}
+
+func (readOnlyClaimClient) Release(context.Context, claim.ClaimTarget, string) error {
+	panic("the claim probe must not release")
+}
 
 // inactiveSpawner reports no active Job for any task, which is the state this
 // guard exists for: a Job that runs somewhere this cluster cannot see.
@@ -131,13 +169,358 @@ func TestJobProvablyFinishedAcceptsItsOwnJob(t *testing.T) {
 	}
 }
 
-// TestJobProvablyFinishedWithoutStoreEntryKeepsPriorBehaviour pins the boundary
-// of the guard: with no store entry (a restart, or a spawn this executor never
-// made) nothing local distinguishes a foreign Job from a finished one, so the
-// respawn proceeds as it did before. Bounding this case by the Job deadline was
-// tried and reverted — it withholds a legitimate respawn for up to 30 minutes,
-// which the deferred-respawn contract does not allow.
-func TestJobProvablyFinishedWithoutStoreEntryKeepsPriorBehaviour(t *testing.T) {
+// claimedCurrentJobHandler is newCurrentJobHandler with claim mode on and the
+// given claim read installed: the shared record the no-store-entry case is
+// decided on.
+func claimedCurrentJobHandler(
+	read func(context.Context, claim.ClaimTarget) (*claim.Claim, error),
+) *taskEventHandler {
+	h := newCurrentJobHandler()
+	h.claimMode = pkg.ClaimModeOn
+	h.claimClientFactory = func() claim.ClaimClient {
+		return readOnlyClaimClient{read: read}
+	}
+	return h
+}
+
+// liveClaim is a claim another cluster holds right now.
+func liveClaim() *claim.Claim {
+	return &claim.Claim{
+		Holder:     "sun",
+		LeaseUntil: libtime.DateTime(time.Now().Add(2 * time.Minute)),
+	}
+}
+
+// TestJobProvablyFinishedDoesNotProbeInShadowMode pins the shadow contract: a
+// shadow executor takes claims but never blocks a dispatch, so a live claim must
+// not suppress its spawn. Without this the probe would silently promote shadow
+// to on.
+func TestJobProvablyFinishedDoesNotProbeInShadowMode(t *testing.T) {
+	asked := false
+	h := newCurrentJobHandler()
+	h.claimMode = pkg.ClaimModeShadow
+	h.claimClientFactory = func() claim.ClaimClient {
+		return readOnlyClaimClient{
+			read: func(context.Context, claim.ClaimTarget) (*claim.Claim, error) {
+				asked = true
+				return liveClaim(), nil
+			},
+		}
+	}
+	task := currentJobTask("pr-reviewer-agent-94c1801c-20261022205503", 7*time.Minute)
+
+	finished, err := h.jobProvablyFinished(
+		context.Background(),
+		task,
+		"pr-reviewer-agent-94c1801c-20261022205503",
+		libk8s.Namespace("dev"),
+	)
+	if err != nil {
+		t.Fatalf("jobProvablyFinished returned %v; want nil", err)
+	}
+	if !finished {
+		t.Fatal(
+			"provably finished = false in shadow mode; want true — shadow never blocks a dispatch",
+		)
+	}
+	if asked {
+		t.Error("the claim store was read in shadow mode; want no read")
+	}
+}
+
+// TestJobProvablyFinishedSuppressesWhenTheClaimClientCannotBeBuilt covers the
+// two fail-closed branches of client construction. Both must suppress and count:
+// a regression that turned either into "free" would authorise exactly the
+// duplicate spawn this guard exists to prevent.
+func TestJobProvablyFinishedSuppressesWhenTheClaimClientCannotBeBuilt(t *testing.T) {
+	cases := map[string]func() claim.ClaimClient{
+		"nil factory": nil,
+		"factory nil": func() claim.ClaimClient { return nil },
+	}
+	for name, factory := range cases {
+		t.Run(name, func(t *testing.T) {
+			h := newCurrentJobHandler()
+			h.claimMode = pkg.ClaimModeOn
+			h.claimClientFactory = factory
+			task := currentJobTask("pr-reviewer-agent-94c1801c-20261022205503", 7*time.Minute)
+			before := testutil.ToFloat64(
+				metrics.TaskEventsTotal.WithLabelValues("claim_probe_failed"),
+			)
+
+			finished, err := h.jobProvablyFinished(
+				context.Background(),
+				task,
+				"pr-reviewer-agent-94c1801c-20261022205503",
+				libk8s.Namespace("dev"),
+			)
+			if err != nil {
+				t.Fatalf("jobProvablyFinished returned %v; want nil", err)
+			}
+			if finished {
+				t.Fatal("provably finished = true without a claim client; want false")
+			}
+			after := testutil.ToFloat64(
+				metrics.TaskEventsTotal.WithLabelValues("claim_probe_failed"),
+			)
+			if delta := after - before; delta != 1 {
+				t.Errorf("claim_probe_failed delta = %v; want 1", delta)
+			}
+		})
+	}
+}
+
+// TestJobProvablyFinishedRejectsAClaimedForeignJobWithNoStoreEntry is SC1's
+// case: the store is empty (a cold pod, or a spawn this executor never made),
+// so nothing local can tell another cluster's running Job from this executor's
+// finished one. The live claim is the shared fact that can, and it says the
+// task is running — so the respawn must not proceed.
+func TestJobProvablyFinishedRejectsAClaimedForeignJobWithNoStoreEntry(t *testing.T) {
+	h := claimedCurrentJobHandler(
+		func(context.Context, claim.ClaimTarget) (*claim.Claim, error) {
+			return liveClaim(), nil
+		},
+	)
+	task := currentJobTask("pr-reviewer-agent-94c1801c-20261022205503", 7*time.Minute)
+
+	finished, err := h.jobProvablyFinished(
+		context.Background(),
+		task,
+		"pr-reviewer-agent-94c1801c-20261022205503",
+		libk8s.Namespace("dev"),
+	)
+	if err != nil {
+		t.Fatalf("jobProvablyFinished returned %v; want nil", err)
+	}
+	if finished {
+		t.Fatal("provably finished = true while a live claim holds the task; want false")
+	}
+}
+
+// TestJobProvablyFinishedAcceptsAnUnclaimedJobWithNoStoreEntry is SC2's
+// negative control: a genuine restart, where the previous Job really has
+// finished and its claim is gone. Suppressing here would strand the task
+// forever, so the respawn must proceed.
+func TestJobProvablyFinishedAcceptsAnUnclaimedJobWithNoStoreEntry(t *testing.T) {
+	h := claimedCurrentJobHandler(
+		func(context.Context, claim.ClaimTarget) (*claim.Claim, error) {
+			return nil, claim.ErrClaimFree
+		},
+	)
+	task := currentJobTask("pr-reviewer-agent-94c1801c-20261022205503", 7*time.Minute)
+
+	finished, err := h.jobProvablyFinished(
+		context.Background(),
+		task,
+		"pr-reviewer-agent-94c1801c-20261022205503",
+		libk8s.Namespace("dev"),
+	)
+	if err != nil {
+		t.Fatalf("jobProvablyFinished returned %v; want nil", err)
+	}
+	if !finished {
+		t.Fatal("provably finished = false with no claim held; want true so a restart respawns")
+	}
+}
+
+// TestJobProvablyFinishedAsksForTheTasksOwnClaim asserts the probe reads the
+// claim the task's spawn would take, not some other key: a probe that reads the
+// wrong target returns "free" on every input and would pass both tests above
+// while distinguishing nothing.
+func TestJobProvablyFinishedAsksForTheTasksOwnClaim(t *testing.T) {
+	var asked claim.ClaimTarget
+	h := claimedCurrentJobHandler(
+		func(_ context.Context, target claim.ClaimTarget) (*claim.Claim, error) {
+			asked = target
+			return nil, claim.ErrClaimFree
+		},
+	)
+	task := currentJobTask("pr-reviewer-agent-94c1801c-20261022205503", 7*time.Minute)
+
+	if _, err := h.jobProvablyFinished(
+		context.Background(),
+		task,
+		"pr-reviewer-agent-94c1801c-20261022205503",
+		libk8s.Namespace("dev"),
+	); err != nil {
+		t.Fatalf("jobProvablyFinished returned %v; want nil", err)
+	}
+	if asked.TaskID != string(task.TaskIdentifier) {
+		t.Errorf(
+			"claim read for task id %q; want %q",
+			asked.TaskID,
+			task.TaskIdentifier,
+		)
+	}
+}
+
+// TestJobProvablyFinishedTreatsAClaimInsideTheTakeoverGraceAsHeld pins the
+// boundary the protocol actually draws: a claim is takeable at lease end PLUS
+// the takeover grace, not at lease end. Inside that grace a holder that has not
+// renewed yet may still be running, so the probe must keep suppressing — reading
+// it as free would reopen a 30 s window for the duplicate it exists to prevent.
+func TestJobProvablyFinishedTreatsAClaimInsideTheTakeoverGraceAsHeld(t *testing.T) {
+	h := claimedCurrentJobHandler(
+		func(context.Context, claim.ClaimTarget) (*claim.Claim, error) {
+			return &claim.Claim{
+				Holder:     "sun",
+				LeaseUntil: libtime.DateTime(time.Now().Add(-10 * time.Second)),
+			}, nil
+		},
+	)
+	task := currentJobTask("pr-reviewer-agent-94c1801c-20261022205503", 7*time.Minute)
+
+	finished, err := h.jobProvablyFinished(
+		context.Background(),
+		task,
+		"pr-reviewer-agent-94c1801c-20261022205503",
+		libk8s.Namespace("dev"),
+	)
+	if err != nil {
+		t.Fatalf("jobProvablyFinished returned %v; want nil", err)
+	}
+	if finished {
+		t.Fatal("provably finished = true inside the takeover grace; want false")
+	}
+}
+
+// TestJobProvablyFinishedTreatsAnUnreadableLeaseAsHeld covers the fail-closed
+// half of the lease check: a claim whose lease nobody can read has not been
+// proven dropped, so it must keep suppressing rather than read as free.
+func TestJobProvablyFinishedTreatsAnUnreadableLeaseAsHeld(t *testing.T) {
+	h := claimedCurrentJobHandler(
+		func(context.Context, claim.ClaimTarget) (*claim.Claim, error) {
+			return &claim.Claim{Holder: "sun", LeaseUnreadable: true}, nil
+		},
+	)
+	task := currentJobTask("pr-reviewer-agent-94c1801c-20261022205503", 7*time.Minute)
+
+	finished, err := h.jobProvablyFinished(
+		context.Background(),
+		task,
+		"pr-reviewer-agent-94c1801c-20261022205503",
+		libk8s.Namespace("dev"),
+	)
+	if err != nil {
+		t.Fatalf("jobProvablyFinished returned %v; want nil", err)
+	}
+	if finished {
+		t.Fatal("provably finished = true for an unreadable lease; want false")
+	}
+}
+
+// TestJobProvablyFinishedSuppressesWhenTheClaimKeyCannotBeDerived covers the
+// derive-error branch: a task whose claim key cannot be built has no claim to
+// read, and "cannot tell" must suppress rather than read as free.
+func TestJobProvablyFinishedSuppressesWhenTheClaimKeyCannotBeDerived(t *testing.T) {
+	h := claimedCurrentJobHandler(
+		func(context.Context, claim.ClaimTarget) (*claim.Claim, error) {
+			t.Fatal("the claim store was read for a task whose key cannot be derived")
+			return nil, nil
+		},
+	)
+	// A repo-keyed task type with no repo and no clone_url fails key derivation:
+	// DeriveClaimKey rejects the empty owner component.
+	task := lib.Task{
+		TaskIdentifier: lib.TaskIdentifier("tid-current-job-1"),
+		Frontmatter: lib.TaskFrontmatter{
+			"current_job": "pr-reviewer-agent-94c1801c-20261022205503",
+			"task_type":   "update-go",
+		},
+	}
+	before := testutil.ToFloat64(
+		metrics.TaskEventsTotal.WithLabelValues("claim_probe_failed"),
+	)
+
+	finished, err := h.jobProvablyFinished(
+		context.Background(),
+		task,
+		"pr-reviewer-agent-94c1801c-20261022205503",
+		libk8s.Namespace("dev"),
+	)
+	if err != nil {
+		t.Fatalf("jobProvablyFinished returned %v; want nil", err)
+	}
+	if finished {
+		t.Fatal("provably finished = true when the claim key cannot be derived; want false")
+	}
+	after := testutil.ToFloat64(
+		metrics.TaskEventsTotal.WithLabelValues("claim_probe_failed"),
+	)
+	if delta := after - before; delta != 1 {
+		t.Errorf("claim_probe_failed delta = %v; want 1", delta)
+	}
+}
+
+// TestJobProvablyFinishedTreatsAnExpiredClaimAsFinished covers the takeover
+// rule: a claim past its lease is one nobody renewed, so it is not evidence that
+// anything is still running.
+func TestJobProvablyFinishedTreatsAnExpiredClaimAsFinished(t *testing.T) {
+	h := claimedCurrentJobHandler(
+		func(context.Context, claim.ClaimTarget) (*claim.Claim, error) {
+			return &claim.Claim{
+				Holder:     "sun",
+				LeaseUntil: libtime.DateTime(time.Now().Add(-time.Minute)),
+			}, nil
+		},
+	)
+	task := currentJobTask("pr-reviewer-agent-94c1801c-20261022205503", 7*time.Minute)
+
+	finished, err := h.jobProvablyFinished(
+		context.Background(),
+		task,
+		"pr-reviewer-agent-94c1801c-20261022205503",
+		libk8s.Namespace("dev"),
+	)
+	if err != nil {
+		t.Fatalf("jobProvablyFinished returned %v; want nil", err)
+	}
+	if !finished {
+		t.Fatal("provably finished = false for an expired claim; want true")
+	}
+}
+
+// TestJobProvablyFinishedTreatsAnUnreadableClaimAsUnfinished pins the failure
+// direction: a claim store that cannot be read is not evidence that no one holds
+// the task. Suppressing is safe because the next pass retries, and the counter
+// is what makes a fleet held by a broken claim read visible.
+func TestJobProvablyFinishedTreatsAnUnreadableClaimAsUnfinished(t *testing.T) {
+	h := claimedCurrentJobHandler(
+		func(context.Context, claim.ClaimTarget) (*claim.Claim, error) {
+			return nil, stderrors.New("vault-api unreachable")
+		},
+	)
+	task := currentJobTask("pr-reviewer-agent-94c1801c-20261022205503", 7*time.Minute)
+	before := testutil.ToFloat64(
+		metrics.TaskEventsTotal.WithLabelValues("claim_probe_failed"),
+	)
+
+	finished, err := h.jobProvablyFinished(
+		context.Background(),
+		task,
+		"pr-reviewer-agent-94c1801c-20261022205503",
+		libk8s.Namespace("dev"),
+	)
+	if err != nil {
+		t.Fatalf("jobProvablyFinished returned %v; want nil (the read is retried, not fatal)", err)
+	}
+	if finished {
+		t.Fatal("provably finished = true after a failed claim read; want false")
+	}
+	after := testutil.ToFloat64(
+		metrics.TaskEventsTotal.WithLabelValues("claim_probe_failed"),
+	)
+	if delta := after - before; delta != 1 {
+		t.Errorf("claim_probe_failed delta = %v; want 1", delta)
+	}
+}
+
+// TestJobProvablyFinishedWithoutAClaimStoreKeepsPriorBehaviour states the
+// residual, rather than leaving it implicit: claim mode off keeps no shared
+// record, so the ambiguity cannot be resolved and the pre-existing behaviour
+// stands. Bounding the case by the Job's deadline instead was tried and
+// reverted — it withholds a legitimate respawn for up to 30 minutes, which the
+// deferred-respawn contract does not allow.
+func TestJobProvablyFinishedWithoutAClaimStoreKeepsPriorBehaviour(t *testing.T) {
 	h := newCurrentJobHandler()
 	task := currentJobTask("pr-reviewer-agent-94c1801c-20261022205503", 7*time.Minute)
 
@@ -151,7 +534,7 @@ func TestJobProvablyFinishedWithoutStoreEntryKeepsPriorBehaviour(t *testing.T) {
 		t.Fatalf("jobProvablyFinished returned %v; want nil", err)
 	}
 	if !finished {
-		t.Fatal("provably finished = false with an empty store; want true (prior behaviour)")
+		t.Fatal("provably finished = false with no claim store; want true (prior behaviour)")
 	}
 }
 
@@ -241,6 +624,55 @@ func TestCheckActiveCurrentJobSuppressesAForeignJob(t *testing.T) {
 	entry, ok := h.deferredRespawns[task.TaskIdentifier]
 	if !ok {
 		t.Fatal("no deferred entry stored; the task would not be re-checked")
+	}
+	if entry.retryAfter.IsZero() {
+		t.Error("deferred entry retryAfter = zero; want a future re-check")
+	}
+}
+
+// TestCheckActiveCurrentJobSuppressesAClaimedForeignJobWithNoStoreEntry is the
+// end-to-end half of SC1: a dispatch pass on a cold pod — empty store, no local
+// Job — must not spawn while the task is claimed elsewhere, and must re-defer it
+// so the decision is revisited rather than dropped.
+//
+// It is also SC1(b): the deferral is only worth anything because the check it
+// defers to returns the distinguishing result, which the sibling test above
+// (claimed vs free) pins directly. This one asserts the deferral fires.
+func TestCheckActiveCurrentJobSuppressesAClaimedForeignJobWithNoStoreEntry(t *testing.T) {
+	ctx := context.Background()
+	h := claimedCurrentJobHandler(
+		func(context.Context, claim.ClaimTarget) (*claim.Claim, error) {
+			return liveClaim(), nil
+		},
+	)
+	task := currentJobTask("pr-reviewer-agent-94c1801c-20261022205503", 7*time.Minute)
+	before := testutil.ToFloat64(
+		metrics.TaskEventsTotal.WithLabelValues("skipped_foreign_job"),
+	)
+
+	suppress, err := h.checkActiveCurrentJob(
+		ctx,
+		task,
+		"pr-reviewer-agent-94c1801c-20261022205503",
+		jobConfig(),
+		nil,
+	)
+
+	if err != nil {
+		t.Fatalf("checkActiveCurrentJob: %v", err)
+	}
+	if !suppress {
+		t.Fatal("suppress = false for a task claimed by another cluster; want true")
+	}
+	after := testutil.ToFloat64(
+		metrics.TaskEventsTotal.WithLabelValues("skipped_foreign_job"),
+	)
+	if delta := after - before; delta != 1 {
+		t.Errorf("skipped_foreign_job delta = %v; want 1", delta)
+	}
+	entry, ok := h.deferredRespawns[task.TaskIdentifier]
+	if !ok {
+		t.Fatal("no deferred entry stored; the task would never be re-checked")
 	}
 	if entry.retryAfter.IsZero() {
 		t.Error("deferred entry retryAfter = zero; want a future re-check")

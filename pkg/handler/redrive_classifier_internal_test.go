@@ -553,72 +553,14 @@ func (s *erroringStreakStore) Record(context.Context, string, string) error { re
 
 func (s *erroringStreakStore) Clear(context.Context, string) error { return s.clearErr }
 
-// TestRecordRedriveSpawnSwallowsReasonClearFailure pins that a reason-store
-// failure while clearing a new streak is logged and never stops the spawn's
-// streak from being recorded.
-func TestRecordRedriveSpawnSwallowsReasonClearFailure(t *testing.T) {
-	h, _ := newDecisionHandler(t, 0, nil, &abortRecordingPublisher{})
-	h.redriveReasons = &erroringReasonStore{clearErr: stderrors.New("clear failed")}
+// The reason-clear and the streak read both moved off the spawn path with the
+// streak write itself: they now run inside resultPublisher.recordRedriveFailure,
+// and their coverage lives in pkg/result_publisher_test.go. recordRedriveSpawn
+// touches only the in-memory floor, so there is nothing left here to fail.
 
-	out := captureInternalStderr(func() {
-		h.recordRedriveSpawn(context.Background(), cappedTestTask())
-	})
-
-	if !strings.Contains(out, "event=redrive_reason_write_failed") {
-		t.Fatalf("expected a redrive_reason_write_failed log line, got %q", out)
-	}
-}
-
-// TestRecordRedriveSpawnSwallowsStreakReadFailure pins that a failed shared
-// Count skips the reason clear and still records the spawn.
-func TestRecordRedriveSpawnSwallowsStreakReadFailure(t *testing.T) {
-	h, _ := newDecisionHandler(t, 0, nil, &abortRecordingPublisher{})
-	h.redriveStore = &erroringStreakStore{}
-
-	out := captureInternalStderr(func() {
-		h.recordRedriveSpawn(context.Background(), cappedTestTask())
-	})
-
-	if !strings.Contains(out, "event=redrive_streak_read_failed") {
-		t.Fatalf("expected a redrive_streak_read_failed log line, got %q", out)
-	}
-}
-
-// TestClearReasonsForNewStreakHandlesNoReasonStore pins the nil-store branch: a
-// nil store means "no evidence", never an error.
-func TestClearReasonsForNewStreakHandlesNoReasonStore(t *testing.T) {
-	h, _ := newDecisionHandler(t, 0, nil, &abortRecordingPublisher{})
-	h.claimMode = pkg.ClaimModeOff
-
-	out := captureInternalStderr(func() {
-		h.clearReasonsForNewStreak(
-			context.Background(),
-			&stubRedriveStreakStore{count: 0},
-			lib.TaskIdentifier("task-capped"),
-			"execution",
-		)
-	})
-	if strings.Contains(out, "redrive_reason_write_failed") {
-		t.Fatalf("a nil store must not log a write failure, got %q", out)
-	}
-}
-
-// TestClearReasonsForNewStreakLogsAccessorError pins the accessor-error branch.
-func TestClearReasonsForNewStreakLogsAccessorError(t *testing.T) {
-	h := &taskEventHandler{claimMode: pkg.ClaimMode("garbage")}
-
-	out := captureInternalStderr(func() {
-		h.clearReasonsForNewStreak(
-			context.Background(),
-			&stubRedriveStreakStore{count: 0},
-			lib.TaskIdentifier("task-capped"),
-			"execution",
-		)
-	})
-	if !strings.Contains(out, "event=redrive_reason_write_failed") {
-		t.Fatalf("expected a redrive_reason_write_failed log line, got %q", out)
-	}
-}
+// The clearReasonsForNewStreak specs moved to pkg/result_publisher_test.go with
+// the function itself: the reason-clear now runs on the failure path, inside
+// recordRedriveFailure, because the streak counts published failures.
 
 // TestClearRedriveStreakSwallowsStoreErrors pins that a terminal clear logs each
 // failed store and never blocks the terminal handling.
@@ -636,5 +578,28 @@ func TestClearRedriveStreakSwallowsStoreErrors(t *testing.T) {
 	}
 	if !strings.Contains(out, "event=redrive_reason_write_failed") {
 		t.Fatalf("expected a redrive_reason_write_failed log line, got %q", out)
+	}
+}
+
+// TestRedriveBudgetsArePinned is the assertion that raising either re-drive
+// bound fails a test rather than quietly widening it. Every other spec derives
+// its seeds from these constants, so they all move with a raise and none of
+// them can catch one — verified 2026-10-28 by setting transientRedriveBudget
+// to 4 and running this package: it stayed green, so the raise was invisible.
+//
+// The cap is not a tunable. It is the only bound on a task that keeps failing,
+// and widening it trades a stranded record for a longer, costlier loop.
+func TestRedriveBudgetsArePinned(t *testing.T) {
+	if maxConsecutiveRedrives != 3 {
+		t.Fatalf(
+			"maxConsecutiveRedrives = %d; want 3 — the cap is not a tunable, and raising it masks the defect it bounds",
+			maxConsecutiveRedrives,
+		)
+	}
+	if transientRedriveBudget != 3 {
+		t.Fatalf(
+			"transientRedriveBudget = %d; want 3 — raising the extension widens the budget the cap exists to enforce",
+			transientRedriveBudget,
+		)
 	}
 }
