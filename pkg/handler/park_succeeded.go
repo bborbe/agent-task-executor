@@ -69,10 +69,21 @@ func (h *taskEventHandler) parkSucceededWithoutPhaseMove(
 	if !ok {
 		return false
 	}
-	if succeeded.Phase != taskPhase(task) {
+	// Re-read from the view rather than trusting the caller's task. Two of the
+	// three callers of this funnel pass a snapshot taken earlier: the Kafka
+	// consumer hands over the decoded event, and the deferred-respawn loop hands
+	// over the entry stored when the task was deferred. Either can be minutes
+	// stale on a replayed or backlogged event, and parking on a stale phase would
+	// rewrite human_review over a task that has since advanced.
+	current, ok := h.view.Get(task.TaskIdentifier)
+	if !ok {
 		return false
 	}
-	elapsed := h.currentDateTime.Now().Time().Sub(succeeded.CompletedAt)
+	if succeeded.Phase != taskPhase(current) {
+		return false
+	}
+	now := h.currentDateTime.Now().Time()
+	elapsed := now.Sub(succeeded.CompletedAt)
 	if elapsed < 0 {
 		// CompletedAt is stamped by the API server, "now" by this pod; a small
 		// skew must not read as a Job that finished in the future.
@@ -83,13 +94,27 @@ func (h *taskEventHandler) parkSucceededWithoutPhaseMove(
 		// this pass, and the phase may still be about to move.
 		return false
 	}
-	if h.taskStore.ParkConsumed(task.TaskIdentifier, succeeded.CompletedAt) {
-		// Already parked for this success. The task matching it now means an
-		// operator moved its phase back to the drive phase — the documented way
-		// out of human_review — so let it spawn.
+	// A park already published for this success is never published again. The
+	// window decides only what this pass does, because the task reading this
+	// phase has exactly two meanings and the window is what separates them:
+	// inside it the controller has not applied the park yet, so suppress; past it
+	// the park landed and an operator re-armed the task — the documented way out
+	// of human_review — so let it spawn.
+	if publishedAt, ok := h.taskStore.ParkPublishedAt(
+		task.TaskIdentifier,
+		succeeded.CompletedAt,
+	); ok {
+		if now.Sub(publishedAt) < defaultRespawnGracePeriod {
+			glog.V(2).Infof(
+				"event=park_awaiting_write_back task=%s elapsed=%.0fs",
+				task.TaskIdentifier,
+				now.Sub(publishedAt).Seconds(),
+			)
+			return true
+		}
 		return false
 	}
-	if err := h.resultPublisher.PublishParkSucceeded(ctx, task); err != nil {
+	if err := h.resultPublisher.PublishParkSucceeded(ctx, current); err != nil {
 		// Suppress this pass rather than fall through to the spawn: spawning is
 		// the loop the park exists to end, so a park that could not be written
 		// must not re-run the work. The next pass re-evaluates and retries.
@@ -108,10 +133,10 @@ func (h *taskEventHandler) parkSucceededWithoutPhaseMove(
 		elapsed.Seconds(),
 	)
 	metrics.TaskEventsTotal.WithLabelValues("parked_succeeded").Inc()
-	// Consume the success, keyed by its completion time. Deleting the record
-	// would not work: the Job informer re-delivers the terminal Job every
-	// resync for its whole TTL and re-stamps the identical record, so the
-	// deletion is undone within minutes and the re-armed task is parked again.
-	h.taskStore.MarkParkConsumed(task.TaskIdentifier, succeeded.CompletedAt)
+	// Record the publish, keyed by the success it acted on and carrying when it
+	// went out. The time is load-bearing: until the controller applies the write
+	// the task still reads this phase, and only the window distinguishes that lag
+	// from an operator re-arming the task to the same phase.
+	h.taskStore.MarkParkPublished(task.TaskIdentifier, succeeded.CompletedAt, now)
 	return true
 }

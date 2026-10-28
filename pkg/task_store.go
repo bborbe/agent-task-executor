@@ -27,14 +27,17 @@ type TaskStore struct {
 	mu        sync.RWMutex
 	tasks     map[lib.TaskIdentifier]lib.Task
 	succeeded map[lib.TaskIdentifier]SucceededJob
-	// parked records which success each task has already been parked for,
-	// keyed by the completion time that identifies it. A consumed set rather
-	// than a deletion: the Job informer re-delivers a terminal Job every
-	// resync for the Job's whole TTL and MarkSucceeded re-stamps the identical
-	// record each time, so deleting the record would be undone within minutes.
-	// Keyed by completion time because that is the only part of the record a
-	// re-mark cannot change — a genuinely new success carries a later one.
-	parked map[lib.TaskIdentifier]time.Time
+	// parked records the last park published for a task: which success it was
+	// for, and when it went out. Keyed by the success's completion time because
+	// that is the only part a re-mark by the informer cannot change.
+	parked map[lib.TaskIdentifier]parkRecord
+}
+
+// parkRecord is one published park: the success it acted on and when the
+// publish went out.
+type parkRecord struct {
+	CompletedAt time.Time
+	PublishedAt time.Time
 }
 
 // SucceededJob is the latest successful Job of a task: the phase it was spawned
@@ -50,7 +53,7 @@ func NewTaskStore() *TaskStore {
 	return &TaskStore{
 		tasks:     make(map[lib.TaskIdentifier]lib.Task),
 		succeeded: make(map[lib.TaskIdentifier]SucceededJob),
-		parked:    make(map[lib.TaskIdentifier]time.Time),
+		parked:    make(map[lib.TaskIdentifier]parkRecord),
 	}
 }
 
@@ -67,28 +70,42 @@ func (s *TaskStore) MarkSucceeded(id lib.TaskIdentifier, phase string, at time.T
 	s.succeeded[id] = SucceededJob{Phase: phase, CompletedAt: at}
 }
 
-// MarkParkConsumed records that the task has been parked for the success that
-// completed at completedAt, so that success cannot park it a second time.
+// MarkParkPublished records that a park for the success that completed at
+// completedAt went out at publishedAt.
 //
-// This is what makes the recovery path work. An operator un-parks a task by
-// moving its phase back to the drive phase, and that task still matches the same
-// success record — the informer re-stamps it on every resync and MarkSucceeded
-// keeps the earlier completion, so the record never goes away on its own.
-// Consuming by completion time lets the re-armed task spawn while leaving a
-// genuinely later success free to park again.
-func (s *TaskStore) MarkParkConsumed(id lib.TaskIdentifier, completedAt time.Time) {
+// The publish time is what the caller needs, not just the fact: the phase only
+// becomes human_review once the controller applies the write, so between the
+// publish and that write-back the task still reads the phase it succeeded at.
+// A caller that saw only "a park was published" could not tell that window apart
+// from an operator re-arming the task to the same phase — and treating the
+// former as a re-arm re-spawns the very work the park exists to stop.
+//
+// Keyed by completion time because the Job informer re-stamps the identical
+// success record on every resync for the Job's whole TTL; a deletion-based
+// marker would be undone within minutes.
+func (s *TaskStore) MarkParkPublished(
+	id lib.TaskIdentifier,
+	completedAt time.Time,
+	publishedAt time.Time,
+) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	s.parked[id] = completedAt
+	s.parked[id] = parkRecord{CompletedAt: completedAt, PublishedAt: publishedAt}
 }
 
-// ParkConsumed reports whether the task has already been parked for the success
-// that completed at completedAt.
-func (s *TaskStore) ParkConsumed(id lib.TaskIdentifier, completedAt time.Time) bool {
+// ParkPublishedAt returns when the park for the success that completed at
+// completedAt went out, and whether such a park is recorded.
+func (s *TaskStore) ParkPublishedAt(
+	id lib.TaskIdentifier,
+	completedAt time.Time,
+) (time.Time, bool) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
-	parkedAt, ok := s.parked[id]
-	return ok && parkedAt.Equal(completedAt)
+	record, ok := s.parked[id]
+	if !ok || !record.CompletedAt.Equal(completedAt) {
+		return time.Time{}, false
+	}
+	return record.PublishedAt, true
 }
 
 // LastSucceeded returns the task's latest successful Job, if one is recorded.
