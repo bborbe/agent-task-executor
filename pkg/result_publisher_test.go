@@ -740,6 +740,53 @@ var _ = Describe("ResultPublisher", func() {
 		)
 	})
 
+	Describe("PublishParkSucceeded", func() {
+		It(
+			"writes exactly the phase key with human_review and nothing else",
+			func() {
+				// The park's whole effect is this one key: human_review is what
+				// takes the record out of the executor's drive set. A wrong key
+				// or value would leave the loop running, and every watcher-side
+				// spec asserts only that the publisher was called.
+				task := lib.Task{
+					TaskIdentifier: lib.TaskIdentifier("test-task-parked"),
+					Frontmatter: lib.TaskFrontmatter{
+						"status":       "in_progress",
+						"phase":        "execution",
+						"assignee":     "claude",
+						"current_job":  "job-1",
+						"target_vault": "work",
+					},
+				}
+				err := publisher.PublishParkSucceeded(ctx, task)
+				Expect(err).NotTo(HaveOccurred())
+
+				Expect(producer.messages).To(HaveLen(1))
+				operation, cmd := decodeUpdateFrontmatterCommand(producer.messages[0])
+
+				Expect(
+					string(operation),
+				).To(Equal(string(taskcmd.UpdateFrontmatterCommandOperation)))
+				Expect(cmd.TaskIdentifier).To(Equal(lib.TaskIdentifier("test-task-parked")))
+				Expect(cmd.TargetVault).To(Equal("work"))
+
+				Expect(cmd.Updates).To(HaveLen(1))
+				Expect(cmd.Updates["phase"]).To(Equal("human_review"))
+
+				for _, key := range []string{
+					"status",
+					"assignee",
+					"current_job",
+				} {
+					_, hasKey := cmd.Updates[key]
+					Expect(hasKey).To(BeFalse(), key+" must not be in the park update")
+				}
+				Expect(cmd.Body).To(BeNil())
+				Expect(cmd.Validate(ctx)).To(Succeed())
+			},
+		)
+	})
+
 	Describe("PublishRestoreAssignee", func() {
 		It(
 			"writes exactly one assignee key and no counter key via UpdateFrontmatterCommand",
