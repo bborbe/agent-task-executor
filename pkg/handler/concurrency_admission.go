@@ -37,11 +37,11 @@ func (h *taskEventHandler) deferIfAtConcurrencyCap(
 		// increment on both sides would count this failure twice.
 		return false, err
 	}
-	quota, quotaBounded := h.podQuotaFor(ctx, namespace, config)
+	quota, quotaState := h.podQuotaFor(ctx, namespace, config)
 	capacity, capacityBounded := effectiveConcurrencyCap(
 		config.MaxConcurrentJobs,
 		quota,
-		quotaBounded,
+		quotaState.bounds(),
 	)
 	// Only an unbounded zero is "uncapped". A bounded zero is a quota that admits
 	// no pod, and it must defer rather than admit.
@@ -70,9 +70,9 @@ func (h *taskEventHandler) deferIfAtConcurrencyCap(
 		// race went unnoticed until 17 Jobs existed against a cap of 1.
 		// Same V(1) rationale as the deferral log below.
 		glog.V(1).Infof(
-			"event=concurrency_admit task=%s assignee=%s running=%d cap=%d max=%d quota=%d",
+			"event=concurrency_admit task=%s assignee=%s running=%d cap=%d max=%d quota=%d quota_bound=%s",
 			task.TaskIdentifier, config.Assignee, running, capacity,
-			config.MaxConcurrentJobs, quota,
+			config.MaxConcurrentJobs, quota, quotaState,
 		)
 		return false, nil
 	}
@@ -92,9 +92,9 @@ func (h *taskEventHandler) deferIfAtConcurrencyCap(
 	// stays visible to an operator looking — unlike the V(3) skip that hid the
 	// wedge fixed in #12.
 	glog.V(1).Infof(
-		"event=concurrency_cap task=%s assignee=%s running=%d cap=%d max=%d quota=%d retry_after=%s",
+		"event=concurrency_cap task=%s assignee=%s running=%d cap=%d max=%d quota=%d quota_bound=%s retry_after=%s",
 		task.TaskIdentifier, config.Assignee, running, capacity,
-		config.MaxConcurrentJobs, quota, concurrencyCapRetryDelay,
+		config.MaxConcurrentJobs, quota, quotaState, concurrencyCapRetryDelay,
 	)
 	metrics.TaskEventsTotal.WithLabelValues("deferred_concurrency_cap").Inc()
 	// The bare counter above is kept for continuity; this one carries the
