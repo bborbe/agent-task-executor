@@ -2,7 +2,7 @@
 
 All notable changes to this project will be documented in this file.
 
-## Unreleased
+## v0.47.2
 
 - fix: **a succeeded Job whose phase never moved is parked, not re-driven forever.** v0.46.3 made the re-drive streak count published failures instead of spawns, which correctly stopped charging a successful spawn — but it also removed the only thing that bounded a task whose agent exits 0 without moving the phase. Such a record is a deliberate human park, and the reconcile found it eligible on every pass: an unbounded spawn loop where there used to be a strand. The reconcile now publishes `phase: human_review` for it, which is already in the executor's terminal-phase set, so the record leaves the loop the way any terminal phase does.
   The decision lives in the **shared spawn funnel**, immediately after `recentlySucceeded` — the funnel the reconcile, the Kafka consumer and the deferred-respawn loop all go through, not the reconcile alone. That placement is the fix. The park has to wait out the write-back — a succeeded Job means the agent published its result, but the vault learns about it on the controller's own cycle, so for up to `SuccessGracePeriod` the task file still reads the phase the Job ran for and an in-flight write is invisible. That is exactly the window `recentlySucceeded` suppresses re-drive in, so a park evaluated anywhere slower — the job watcher's informer resync is 5 minutes against the reconcile's 60 seconds — would become possible at the instant the re-drive resumes and lose the race almost every time. Sharing the decision point makes the two mutually exclusive by construction: one pass either suppresses, parks, or spawns.
