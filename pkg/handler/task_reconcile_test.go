@@ -421,7 +421,7 @@ var _ = Describe("TaskEventHandler reconcile loop", func() {
 			// Observed on dev 2026-10-13 and again 2026-10-14: a parked task
 			// carrying neither `ref` nor `max_triggers` produced a new Job every
 			// 15-30 min indefinitely. The trigger budget cannot bound it — with
-			// neither field set, applyTriggerBudget's cap branch is disarmed by
+			// neither field set, checkTriggerBudget's cap branch is disarmed by
 			// design (arming it re-creates the 2026-08-27 Daily Sentry Triage
 			// incident) — and the agent pods rewrite the frontmatter from their
 			// run-start snapshot on every completion, so trigger_scope is clobbered

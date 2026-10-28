@@ -168,6 +168,21 @@ type FakeResultPublisher struct {
 	publishStoreMissFailureReturnsOnCall map[int]struct {
 		result1 error
 	}
+	PublishTriggerBudgetRefusalStub        func(context.Context, lib.Task, string, int, int) error
+	publishTriggerBudgetRefusalMutex       sync.RWMutex
+	publishTriggerBudgetRefusalArgsForCall []struct {
+		arg1 context.Context
+		arg2 lib.Task
+		arg3 string
+		arg4 int
+		arg5 int
+	}
+	publishTriggerBudgetRefusalReturns struct {
+		result1 error
+	}
+	publishTriggerBudgetRefusalReturnsOnCall map[int]struct {
+		result1 error
+	}
 	PublishTypeMismatchFailureStub        func(context.Context, lib.Task, string) error
 	publishTypeMismatchFailureMutex       sync.RWMutex
 	publishTypeMismatchFailureArgsForCall []struct {
@@ -938,6 +953,71 @@ func (fake *FakeResultPublisher) PublishStoreMissFailureReturnsOnCall(i int, res
 		})
 	}
 	fake.publishStoreMissFailureReturnsOnCall[i] = struct {
+		result1 error
+	}{result1}
+}
+
+func (fake *FakeResultPublisher) PublishTriggerBudgetRefusal(arg1 context.Context, arg2 lib.Task, arg3 string, arg4 int, arg5 int) error {
+	fake.publishTriggerBudgetRefusalMutex.Lock()
+	ret, specificReturn := fake.publishTriggerBudgetRefusalReturnsOnCall[len(fake.publishTriggerBudgetRefusalArgsForCall)]
+	fake.publishTriggerBudgetRefusalArgsForCall = append(fake.publishTriggerBudgetRefusalArgsForCall, struct {
+		arg1 context.Context
+		arg2 lib.Task
+		arg3 string
+		arg4 int
+		arg5 int
+	}{arg1, arg2, arg3, arg4, arg5})
+	stub := fake.PublishTriggerBudgetRefusalStub
+	fakeReturns := fake.publishTriggerBudgetRefusalReturns
+	fake.recordInvocation("PublishTriggerBudgetRefusal", []interface{}{arg1, arg2, arg3, arg4, arg5})
+	fake.publishTriggerBudgetRefusalMutex.Unlock()
+	if stub != nil {
+		return stub(arg1, arg2, arg3, arg4, arg5)
+	}
+	if specificReturn {
+		return ret.result1
+	}
+	return fakeReturns.result1
+}
+
+func (fake *FakeResultPublisher) PublishTriggerBudgetRefusalCallCount() int {
+	fake.publishTriggerBudgetRefusalMutex.RLock()
+	defer fake.publishTriggerBudgetRefusalMutex.RUnlock()
+	return len(fake.publishTriggerBudgetRefusalArgsForCall)
+}
+
+func (fake *FakeResultPublisher) PublishTriggerBudgetRefusalCalls(stub func(context.Context, lib.Task, string, int, int) error) {
+	fake.publishTriggerBudgetRefusalMutex.Lock()
+	defer fake.publishTriggerBudgetRefusalMutex.Unlock()
+	fake.PublishTriggerBudgetRefusalStub = stub
+}
+
+func (fake *FakeResultPublisher) PublishTriggerBudgetRefusalArgsForCall(i int) (context.Context, lib.Task, string, int, int) {
+	fake.publishTriggerBudgetRefusalMutex.RLock()
+	defer fake.publishTriggerBudgetRefusalMutex.RUnlock()
+	argsForCall := fake.publishTriggerBudgetRefusalArgsForCall[i]
+	return argsForCall.arg1, argsForCall.arg2, argsForCall.arg3, argsForCall.arg4, argsForCall.arg5
+}
+
+func (fake *FakeResultPublisher) PublishTriggerBudgetRefusalReturns(result1 error) {
+	fake.publishTriggerBudgetRefusalMutex.Lock()
+	defer fake.publishTriggerBudgetRefusalMutex.Unlock()
+	fake.PublishTriggerBudgetRefusalStub = nil
+	fake.publishTriggerBudgetRefusalReturns = struct {
+		result1 error
+	}{result1}
+}
+
+func (fake *FakeResultPublisher) PublishTriggerBudgetRefusalReturnsOnCall(i int, result1 error) {
+	fake.publishTriggerBudgetRefusalMutex.Lock()
+	defer fake.publishTriggerBudgetRefusalMutex.Unlock()
+	fake.PublishTriggerBudgetRefusalStub = nil
+	if fake.publishTriggerBudgetRefusalReturnsOnCall == nil {
+		fake.publishTriggerBudgetRefusalReturnsOnCall = make(map[int]struct {
+			result1 error
+		})
+	}
+	fake.publishTriggerBudgetRefusalReturnsOnCall[i] = struct {
 		result1 error
 	}{result1}
 }

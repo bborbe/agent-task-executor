@@ -376,6 +376,12 @@ func (s *parkRecordingPublisher) PublishSetTriggerScope(
 	return nil
 }
 
+func (s *parkRecordingPublisher) PublishTriggerBudgetRefusal(
+	context.Context, lib.Task, string, int, int,
+) error {
+	return nil
+}
+
 func (s *parkRecordingPublisher) PublishTypeMismatchFailure(
 	context.Context, lib.Task, string,
 ) error {

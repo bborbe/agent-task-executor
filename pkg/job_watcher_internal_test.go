@@ -441,6 +441,16 @@ func (f *fakeResultPublisher) PublishSetTriggerScope(
 	return nil
 }
 
+func (f *fakeResultPublisher) PublishTriggerBudgetRefusal(
+	ctx context.Context,
+	task lib.Task,
+	scope string,
+	count int,
+	maxTriggers int,
+) error {
+	return nil
+}
+
 func (f *fakeResultPublisher) PublishTypeMismatchFailure(
 	ctx context.Context,
 	task lib.Task,

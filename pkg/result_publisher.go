@@ -127,6 +127,27 @@ type ResultPublisher interface {
 	// Updates directly to the on-disk frontmatter — an explicit, intentional write
 	// rather than a stale spawn-time snapshot.
 	PublishSetTriggerScope(ctx context.Context, task lib.Task, scope string, count int) error
+	// PublishTriggerBudgetRefusal writes a scoped trigger-budget refusal onto the
+	// task record: the four trigger_refusal_* keys (count, max, scope, at) and a
+	// "## Trigger Budget" body section, and no other key. It never writes
+	// "## Failure", so the older cause a record may already carry stays visible;
+	// taskcmd.BodySection replaces a section with the same heading, which is why
+	// this path must not reuse that heading.
+	//
+	// The write is deduped per task AND refusal triple (scope, count, max) through
+	// the same TTL'd LRU as PublishAbort. Keying on the triple rather than the
+	// task alone is load-bearing: a changed scope is a changed refusal and must
+	// never be suppressed. The dedupe is needed because the handler reads an
+	// informer snapshot that does not yet show a write the controller has not
+	// applied, so without it the identical refusal would be re-published every
+	// tick.
+	PublishTriggerBudgetRefusal(
+		ctx context.Context,
+		task lib.Task,
+		scope string,
+		count int,
+		maxTriggers int,
+	) error
 	// PublishTypeMismatchFailure publishes a synthetic failure when the task's task_type
 	// is not in the agent's effective type set. Clears assignee and current_job so the
 	// task surfaces in the operator inbox via assignee=="" filter. Does not bump
@@ -729,6 +750,78 @@ func (p *resultPublisher) PublishSetTriggerScope(
 			task.TaskIdentifier,
 		)
 	}
+	return nil
+}
+
+// triggerRefusalDedupeKey namespaces the refusal triple so a changed scope, count
+// or cap is a different key and therefore a different publish.
+func triggerRefusalDedupeKey(
+	id lib.TaskIdentifier,
+	scope string,
+	count int,
+	maxTriggers int,
+) string {
+	return fmt.Sprintf("trigger_refusal:%s:%s:%d:%d", id, scope, count, maxTriggers)
+}
+
+// PublishTriggerBudgetRefusal writes the four frozen trigger_refusal_* keys and a
+// "## Trigger Budget" section, and nothing else. The section heading deliberately
+// differs from "## Failure": Markdown.ReplaceSection replaces a section carrying
+// the same heading, so writing "## Failure" here would delete the older cause.
+//
+// The dedupe key covers the refusal triple, not just the task, so a changed
+// refusal is never suppressed. It is recorded only after publishRaw succeeds: a
+// failed send must be retried on the next tick, not remembered as done.
+func (p *resultPublisher) PublishTriggerBudgetRefusal(
+	ctx context.Context,
+	task lib.Task,
+	scope string,
+	count int,
+	maxTriggers int,
+) error {
+	dedupeKey := triggerRefusalDedupeKey(task.TaskIdentifier, scope, count, maxTriggers)
+	if p.dedupe.checkDedupe(dedupeKey) {
+		glog.V(2).Infof(
+			"event=trigger_refusal_dedupe task=%s scope=%q count=%d max=%d",
+			task.TaskIdentifier,
+			scope,
+			count,
+			maxTriggers,
+		)
+		return nil
+	}
+
+	now := p.currentDateTime.Now().UTC().Format(time.RFC3339)
+	section := fmt.Sprintf(
+		"## Trigger Budget\n\n- **Timestamp:** %s\n- **Refusal:** trigger_count %d >= max_triggers %d\n- **Scope:** %s\n",
+		now,
+		count,
+		maxTriggers,
+		scope,
+	)
+	cmd := taskcmd.UpdateFrontmatterCommand{
+		TaskIdentifier: task.TaskIdentifier,
+		TargetVault:    targetVaultFromTask(task),
+		Updates: lib.TaskFrontmatter{
+			"trigger_refusal_count": count,
+			"trigger_refusal_max":   maxTriggers,
+			"trigger_refusal_scope": scope,
+			"trigger_refusal_at":    now,
+		},
+		Body: &taskcmd.BodySection{
+			Heading: "## Trigger Budget",
+			Section: section,
+		},
+	}
+	if err := p.publishRaw(ctx, taskcmd.UpdateFrontmatterCommandOperation, cmd); err != nil {
+		return errors.Wrapf(
+			ctx,
+			err,
+			"publish trigger budget refusal for task %s",
+			task.TaskIdentifier,
+		)
+	}
+	p.dedupe.recordDedupe(dedupeKey)
 	return nil
 }
 
