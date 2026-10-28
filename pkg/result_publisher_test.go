@@ -8,6 +8,9 @@ import (
 	"context"
 	"encoding/json"
 	stderrors "errors"
+	"flag"
+	"io"
+	"os"
 
 	"github.com/IBM/sarama"
 	lib "github.com/bborbe/agent"
@@ -18,6 +21,7 @@ import (
 	libtime "github.com/bborbe/time"
 	libtimetest "github.com/bborbe/time/test"
 	"github.com/bborbe/vault-cli/pkg/domain"
+	"github.com/golang/glog"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 	"github.com/prometheus/client_golang/prometheus/testutil"
@@ -27,6 +31,35 @@ import (
 	"github.com/bborbe/agent-task-executor/pkg/claim"
 	"github.com/bborbe/agent-task-executor/pkg/metrics"
 )
+
+// captureGlogStderr runs fn with glog writing at V(2) to stderr and returns
+// everything written. crashFailureUpdates logs at V(2), so the verbosity flag
+// must be raised here too: without it the line is filtered out and an assertion
+// would pass vacuously against an empty string. The suite runs serially, so the
+// global os.Stderr swap cannot race another spec's logging.
+func captureGlogStderr(fn func()) string {
+	Expect(flag.Set("logtostderr", "true")).To(Succeed())
+	Expect(flag.Set("v", "2")).To(Succeed())
+	defer func() {
+		Expect(flag.Set("logtostderr", "false")).To(Succeed())
+		Expect(flag.Set("v", "0")).To(Succeed())
+	}()
+
+	original := os.Stderr
+	reader, writer, err := os.Pipe()
+	Expect(err).ToNot(HaveOccurred())
+	os.Stderr = writer
+
+	fn()
+	glog.Flush()
+
+	os.Stderr = original
+	Expect(writer.Close()).To(Succeed())
+	out, err := io.ReadAll(reader)
+	Expect(err).ToNot(HaveOccurred())
+	Expect(reader.Close()).To(Succeed())
+	return string(out)
+}
 
 // capturingSyncProducer implements libkafka.SyncProducer and records sent messages.
 type capturingSyncProducer struct {
@@ -405,6 +438,84 @@ var _ = Describe("ResultPublisher", func() {
 			Expect(updateCmd.Updates).To(HaveLen(1))
 			_, hasMax := updateCmd.Updates["max_triggers"]
 			Expect(hasMax).To(BeFalse(), "a deliberate budget of 6 must not become 3")
+		})
+
+		// A record that reaches the controller without max_triggers is
+		// indistinguishable from one whose class never matched, so the log line
+		// has to carry the inputs the decision tested rather than its verdict.
+		// These two specs are what pin that: the early return names the cached
+		// value it saw, and the arming path names the absence it acted on.
+		It("logs the values it tested when it returns early on an already-present max_triggers",
+			func() {
+				task := lib.Task{
+					TaskIdentifier: lib.TaskIdentifier("test-task-log-early-return"),
+					Frontmatter: lib.TaskFrontmatter{
+						"status":       "in_progress",
+						"max_triggers": 6,
+					},
+					Content: lib.TaskContent("do the work"),
+				}
+
+				out := captureGlogStderr(func() {
+					err := publisher.PublishFailure(
+						ctx, task, "pr-reviewer-agent-1234", "pod_crash_no_stdout",
+					)
+					Expect(err).NotTo(HaveOccurred())
+				})
+
+				Expect(out).To(ContainSubstring("event=crash_arm_skip task="))
+				Expect(out).To(ContainSubstring("decision=max_triggers_already_present"))
+				Expect(out).To(ContainSubstring("task=test-task-log-early-return"))
+				Expect(out).To(ContainSubstring("job=pr-reviewer-agent-1234"))
+				Expect(out).To(ContainSubstring(`reason="pod_crash_no_stdout"`))
+				Expect(out).To(ContainSubstring(`parsed="pod_crash_no_stdout"`))
+				Expect(out).To(ContainSubstring("parsed_ok=true"))
+				Expect(out).To(ContainSubstring("cached_max_triggers=6"))
+			},
+		)
+
+		It("logs the tested values on the arming path too", func() {
+			task := lib.Task{
+				TaskIdentifier: lib.TaskIdentifier("test-task-log-arm"),
+				Frontmatter: lib.TaskFrontmatter{
+					"status": "in_progress",
+				},
+				Content: lib.TaskContent("do the work"),
+			}
+
+			out := captureGlogStderr(func() {
+				err := publisher.PublishFailure(
+					ctx, task, "pr-reviewer-agent-5678", "pod_crash_no_stdout",
+				)
+				Expect(err).NotTo(HaveOccurred())
+			})
+
+			Expect(out).To(ContainSubstring("event=crash_arm task="))
+			Expect(out).To(ContainSubstring("decision=arm cached_max_triggers=<absent>"))
+			Expect(out).To(ContainSubstring("task=test-task-log-arm"))
+			Expect(out).To(ContainSubstring("max_triggers=3"))
+		})
+
+		It("logs a rejected class with its parsed value so a miss is not silent", func() {
+			task := lib.Task{
+				TaskIdentifier: lib.TaskIdentifier("test-task-log-other-class"),
+				Frontmatter: lib.TaskFrontmatter{
+					"status": "in_progress",
+				},
+				Content: lib.TaskContent("do the work"),
+			}
+
+			out := captureGlogStderr(func() {
+				err := publisher.PublishFailure(
+					ctx, task, "pr-reviewer-agent-9999", "pod_oom_killed (OOMKilled/137)",
+				)
+				Expect(err).NotTo(HaveOccurred())
+			})
+
+			Expect(out).To(ContainSubstring("event=crash_arm_skip task="))
+			Expect(out).To(ContainSubstring("decision=not_crash_class"))
+			Expect(out).To(ContainSubstring(`parsed="pod_oom_killed"`))
+			Expect(out).To(ContainSubstring("parsed_ok=true"))
 		})
 	})
 
