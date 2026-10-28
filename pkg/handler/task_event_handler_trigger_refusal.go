@@ -81,6 +81,20 @@ func (h *taskEventHandler) checkTriggerBudget(
 	return false, nil
 }
 
+// triggerRefusalWriteError marks a refusal that could not be written onto the
+// record. It is deliberately a distinct type: a replay loop must treat it as
+// suppress-and-retry rather than fatal, because the reconcile floor re-drives
+// the task on the next pass. Without the distinction a transient publish failure
+// inside the deferred-respawn loop would exit the process and starve every other
+// due entry — the same reasoning that carves spawnJobError out of the fatal path.
+type triggerRefusalWriteError struct {
+	err error
+}
+
+func (e *triggerRefusalWriteError) Error() string { return e.err.Error() }
+
+func (e *triggerRefusalWriteError) Unwrap() error { return e.err }
+
 // triggerBudgetRefusesSpawn reports whether the scoped trigger budget gate
 // suppresses this spawn, counting a failed refusal write as an error. Both
 // outcomes suppress, but the caller must still see the error, and spelling them
@@ -93,7 +107,7 @@ func (h *taskEventHandler) triggerBudgetRefusesSpawn(
 	refused, err := h.checkTriggerBudget(ctx, task)
 	if err != nil {
 		metrics.TaskEventsTotal.WithLabelValues("error").Inc()
-		return true, err
+		return true, &triggerRefusalWriteError{err: err}
 	}
 	return refused, nil
 }

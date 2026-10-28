@@ -11,6 +11,7 @@ package handler
 
 import (
 	"context"
+	stderrors "errors"
 	"testing"
 
 	lib "github.com/bborbe/agent"
@@ -227,5 +228,48 @@ func TestCheckTriggerBudgetPublishFailureStillRefuses(t *testing.T) {
 	}
 	if len(pub.calls) != 1 {
 		t.Fatalf("expected exactly one attempted publish, got %d", len(pub.calls))
+	}
+}
+
+// TestTriggerBudgetRefusesSpawnWrapsWriteFailure pins the error type the
+// deferred-respawn loop keys on. That loop treats every error it cannot
+// classify as fatal, so a refusal-write failure that lost this type would exit
+// the process on a transient publish error instead of waiting for the next
+// reconcile pass.
+func TestCheckTriggerBudgetRefusesSpawnWrapsWriteFailure(t *testing.T) {
+	pub := &recordingRefusalPublisher{err: errors.New(context.Background(), "kafka unavailable")}
+	h := &taskEventHandler{resultPublisher: pub}
+
+	refused, err := h.triggerBudgetRefusesSpawn(
+		context.Background(),
+		triggerRefusalTestTask(refusalFixture()),
+	)
+	if !refused {
+		t.Fatal("expected the spawn to stay refused despite the failed write")
+	}
+	var writeErr *triggerRefusalWriteError
+	if !stderrors.As(err, &writeErr) {
+		t.Fatalf("expected *triggerRefusalWriteError, got %T: %v", err, err)
+	}
+}
+
+// TestTriggerBudgetRefusesSpawnNoErrorBelowCap proves the wrapper adds no error
+// on the pass-through path, so the classification above cannot mask a genuine
+// non-refusal.
+func TestCheckTriggerBudgetRefusesSpawnNoErrorBelowCap(t *testing.T) {
+	pub := &recordingRefusalPublisher{}
+	h := &taskEventHandler{resultPublisher: pub}
+
+	fm := refusalFixture()
+	fm["trigger_count"] = 2
+	refused, err := h.triggerBudgetRefusesSpawn(
+		context.Background(),
+		triggerRefusalTestTask(fm),
+	)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if refused {
+		t.Fatal("expected the spawn not to be refused below the cap")
 	}
 }
