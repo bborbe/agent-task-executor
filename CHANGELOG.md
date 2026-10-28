@@ -2,6 +2,10 @@
 
 All notable changes to this project will be documented in this file.
 
+## Unreleased
+
+- fix: **a refused quota read can no longer render as a genuine zero in the admission line.** Both used to reach `event=concurrency_admit` as `quota=0`, so a queue behind a broken read looked exactly like a queue behind a cap that admits nothing — the conflation that made a 2026-10-26 investigation misread a queue as a defect for two days. `podQuotaFor` now returns a `quotaBound` state (`none` / `ok` / `failed`) instead of a bare bool, and both the admit and the deferral line carry `quota_bound=`: a failed read reads `quota=0 cap=<max> quota_bound=failed`, a real `pods: 0` reads `quota=0 cap=0 quota_bound=ok`, and a Config naming no priority class or matching no scoping quota reads `quota_bound=none`. Admission behaviour is unchanged — a failed read still falls back to the declared cap and never blocks a spawn on its own; only its visibility changed.
+
 ## v0.47.2
 
 - fix: **a succeeded Job whose phase never moved is parked, not re-driven forever.** v0.46.3 made the re-drive streak count published failures instead of spawns, which correctly stopped charging a successful spawn — but it also removed the only thing that bounded a task whose agent exits 0 without moving the phase. Such a record is a deliberate human park, and the reconcile found it eligible on every pass: an unbounded spawn loop where there used to be a strand. The reconcile now publishes `phase: human_review` for it, which is already in the executor's terminal-phase set, so the record leaves the loop the way any terminal phase does.
