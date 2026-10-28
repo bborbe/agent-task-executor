@@ -252,11 +252,23 @@ var _ = Describe("TaskEventHandler reconcile loop", func() {
 			Expect(fakeSpawner.SpawnJobCallCount()).To(Equal(1))
 		})
 
-		It("is re-driven once the grace window has passed", func() {
+		It("is parked, not re-driven, once the grace window has passed", func() {
+			// The task is still at the phase its last Job succeeded for, so the
+			// agent exited 0 without moving it: a deliberate human park. This
+			// used to be re-driven — the redrive cap was what eventually stopped
+			// it — but v0.46.3 stopped charging a successful spawn against that
+			// cap, so the re-drive became unbounded and the park is now what
+			// ends the loop. A lost write-back is indistinguishable from a park
+			// at this distance, and parking leaves that to a human rather than
+			// silently re-running the work.
+			// The park reads the task from the view, not from the reconcile's
+			// own snapshot, so the view must hold it for this path to fire.
+			fakeView.GetReturns(eligibleTask(domain.TaskPhaseExecution), true)
 			taskStore.MarkSucceeded("tid-a", "execution", now.Add(-10*time.Minute))
 
 			Expect(h.ReconcileOnce(ctx)).To(BeNil())
-			Expect(fakeSpawner.SpawnJobCallCount()).To(Equal(1))
+			Expect(fakeSpawner.SpawnJobCallCount()).To(Equal(0))
+			Expect(fakeResultPublisher.PublishParkSucceededCallCount()).To(Equal(1))
 		})
 
 		It("still re-drives a task whose Job failed, up to the redrive cap", func() {
