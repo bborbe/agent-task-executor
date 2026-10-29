@@ -1260,6 +1260,7 @@ func (h *taskEventHandler) ReconcileOnce(ctx context.Context) error {
 	passCtx = withRedriveStreakCache(passCtx)
 	// One `list refs` of the success prefix for the pass; see success_cache.go.
 	passCtx = withSuccessCache(passCtx)
+	passCtx = withVaultIndexCache(passCtx)
 
 	if !h.view.Ready() {
 		metrics.ReconcilePassesTotal.WithLabelValues("view_not_ready").Inc()
@@ -1459,11 +1460,13 @@ func (h *taskEventHandler) gatherCandidates(
 	c *reconcileCounters,
 ) []reconcileCandidate {
 	candidates := make([]reconcileCandidate, 0, len(tasks))
+	suppressions := &indexTerminalSuppression{}
+	defer suppressions.report()
 	for _, task := range tasks {
 		if h.passDone(passCtx) {
 			return candidates
 		}
-		candidate, outcome := h.gatherCandidate(passCtx, task)
+		candidate, outcome := h.gatherCandidate(passCtx, task, suppressions)
 		if outcome == reconcileOutcomeCollected {
 			candidates = append(candidates, candidate)
 			continue
@@ -1526,6 +1529,7 @@ func sortCandidatesByAdmissionPriority(candidates []reconcileCandidate) {
 func (h *taskEventHandler) gatherCandidate(
 	ctx context.Context,
 	task lib.Task,
+	suppressions *indexTerminalSuppression,
 ) (reconcileCandidate, reconcileOutcome) {
 	task, config, ok, err := h.reconcileTask(ctx, task)
 	if err != nil {
@@ -1543,6 +1547,9 @@ func (h *taskEventHandler) gatherCandidate(
 		// to no Config). Nothing to clear here: the streak's phase key is what
 		// retires a task that genuinely moved on, and a task that left the filter
 		// is not spawned again either way.
+		return reconcileCandidate{}, reconcileOutcomeSkipped
+	}
+	if h.indexGateSuppresses(ctx, task, suppressions) {
 		return reconcileCandidate{}, reconcileOutcomeSkipped
 	}
 	// A parked task whose declared task_type resolved to a Config: restoring the

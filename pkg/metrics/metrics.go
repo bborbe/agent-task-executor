@@ -171,6 +171,11 @@ const (
 	// ReconcileRefusedGateNoRouting means the task carries neither an assignee
 	// nor a declared task_type.
 	ReconcileRefusedGateNoRouting = "no_routing"
+	// ReconcileRefusedGateIndexTerminal means the vault index reports the task's
+	// state as terminal. It is the gather-stage gate: it is applied on the
+	// reconcile gather and on the deferred-respawn path, and it is not one of the
+	// eight gates reconcileTask applies.
+	ReconcileRefusedGateIndexTerminal = "index_terminal"
 )
 
 // ReconcileRefusedTotal counts reconcile-floor refusals by the eligibility gate

@@ -107,7 +107,8 @@ func (h *taskEventHandler) checkViewDivergence(ctx context.Context, owned []lib.
 	if h.vaultIndexClient == nil {
 		return
 	}
-	index, err := h.vaultIndexClient.Read(ctx)
+	// The read is shared with the candidate gate through the pass cache.
+	index, _, err := h.vaultIndexFor(ctx)
 	if err != nil || index == nil {
 		// A nil index is a read failure, not an empty index: dereferencing it
 		// inside the pass is the one outcome the check must never produce.

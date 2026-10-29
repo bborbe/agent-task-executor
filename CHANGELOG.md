@@ -2,6 +2,10 @@
 
 All notable changes to this project will be documented in this file.
 
+## Unreleased
+
+- feat: **the reconcile gather no longer re-drives a task the vault index reports as finished.** The candidate gate now consults the vault-api task index after `reconcileTask` admits a task and suppresses it when the index reports a terminal status or phase, counted as `executor_reconcile_refused_total{gate="index_terminal"}` and logged as `event=index_terminal_suppressed` (capped at 20 ids per pass). The read is shared with the advisory divergence check through a per-pass context cache, so a pass still makes at most one index request; a missing client, a failed read or an absent id suppresses nothing.
+
 ## v0.49.1
 
 - fix: **stop writing `retry_count: 0` into the probe's spawn-time update.** The counter is retired: nothing increments it, `max_retries` is set on no record, and the controller no longer guards or resets it, so the probe's reset only re-created a dead field on every healthcheck re-trigger. `trigger_count: 0` stays — that counter is live and carries the cap.
