@@ -90,10 +90,16 @@ type schemeGuard struct {
 	refClient       ClaimRefClient
 	cluster         string
 	currentDateTime libtime.CurrentDateTimeGetter
-	// logOnce keeps the guard's first outcome in the log and nothing after it.
-	// Check runs on every spawn, so an unguarded log line here would be one per
-	// dispatch pass; the counter carries the rate and this carries the fact.
-	logOnce sync.Once
+	// One sync.Once per outcome, not one for the guard. Check runs on every
+	// spawn, so an unguarded log line would be one per dispatch pass and the
+	// counter carries the rate. A single shared Once would be worse than that:
+	// a process that booted while the fleet agreed consumes it on "confirmed",
+	// and the mismatch that arrives when the fleet moves is then never logged —
+	// exactly the event this guard exists to make visible.
+	confirmedOnce    sync.Once
+	bootstrappedOnce sync.Once
+	mismatchOnce     sync.Once
+	unreadableOnce   sync.Once
 }
 
 // Check implements SchemeGuard.
@@ -108,13 +114,7 @@ func (g *schemeGuard) Check(ctx context.Context) error {
 	if declared != ClaimKeySchemeVersion {
 		return g.refuse(ctx, declared)
 	}
-	metrics.ClaimSchemeTotal.WithLabelValues("confirmed").Inc()
-	g.logOnce.Do(func() {
-		glog.Infof(
-			"event=claim_scheme_confirmed scheme=%s key=%s",
-			ClaimKeySchemeVersion, ClaimSchemeRef,
-		)
-	})
+	g.confirm()
 	return nil
 }
 
@@ -138,7 +138,7 @@ func (g *schemeGuard) bootstrap(ctx context.Context) error {
 	)
 	if err == nil {
 		metrics.ClaimSchemeTotal.WithLabelValues("bootstrapped").Inc()
-		g.logOnce.Do(func() {
+		g.bootstrappedOnce.Do(func() {
 			glog.Infof(
 				"event=claim_scheme_bootstrapped scheme=%s key=%s cluster=%s",
 				ClaimKeySchemeVersion, ClaimSchemeRef, g.cluster,
@@ -156,19 +156,32 @@ func (g *schemeGuard) bootstrap(ctx context.Context) error {
 	if !found {
 		// The declaration vanished between the lost write and this read. Nothing
 		// to compare against, so admit; the next spawn bootstraps again.
-		return g.admitUnreadable(nil)
+		return g.admitUnreadable(
+			errors.Errorf(ctx, "declaration vanished after a lost create"),
+		)
 	}
 	if declared != ClaimKeySchemeVersion {
 		return g.refuse(ctx, declared)
 	}
-	metrics.ClaimSchemeTotal.WithLabelValues("confirmed").Inc()
+	g.confirm()
 	return nil
+}
+
+// confirm records a check whose declaration matches this binary's scheme.
+func (g *schemeGuard) confirm() {
+	metrics.ClaimSchemeTotal.WithLabelValues("confirmed").Inc()
+	g.confirmedOnce.Do(func() {
+		glog.Infof(
+			"event=claim_scheme_confirmed scheme=%s key=%s",
+			ClaimKeySchemeVersion, ClaimSchemeRef,
+		)
+	})
 }
 
 // refuse records and returns the one refusal the guard makes.
 func (g *schemeGuard) refuse(ctx context.Context, declared string) error {
 	metrics.ClaimSchemeTotal.WithLabelValues("mismatch").Inc()
-	g.logOnce.Do(func() {
+	g.mismatchOnce.Do(func() {
 		glog.Errorf(
 			"event=claim_scheme_mismatch declared=%s mine=%s key=%s refused=true",
 			declared, ClaimKeySchemeVersion, ClaimSchemeRef,
@@ -184,11 +197,10 @@ func (g *schemeGuard) refuse(ctx context.Context, declared string) error {
 }
 
 // admitUnreadable records a check that could not reach a verdict and admits the
-// claim. err may be nil, for the case where the declaration disappeared between
-// a lost write and the read-back.
+// claim.
 func (g *schemeGuard) admitUnreadable(err error) error {
 	metrics.ClaimSchemeTotal.WithLabelValues("unreadable").Inc()
-	g.logOnce.Do(func() {
+	g.unreadableOnce.Do(func() {
 		glog.Warningf(
 			"event=claim_scheme_unreadable scheme=%s err=%v admitted=true",
 			ClaimKeySchemeVersion, err,

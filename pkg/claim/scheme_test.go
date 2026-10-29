@@ -147,6 +147,36 @@ var _ = Describe("SchemeGuard", func() {
 		})
 	})
 
+	Context("when the fleet moves after this process already agreed", func() {
+		// The log line is once per outcome, never once per guard. A single shared
+		// Once would be consumed by the first confirmation and the mismatch that
+		// arrives when the fleet moves — the one event this guard exists to make
+		// visible — would never reach the log.
+		It("still logs the mismatch", func() {
+			fake.Seed(
+				"refs/"+claim.ClaimSchemeRef,
+				"eeee",
+				"nuke-dev",
+				claim.ClaimKeySchemeVersion,
+				"2099-01-01T00:00:00Z",
+			)
+			guard := newGuard()
+			Expect(guard.Check(ctx)).To(Succeed())
+
+			fake.Seed(
+				"refs/"+claim.ClaimSchemeRef,
+				"ffff",
+				"nuke-dev",
+				"v1",
+				"2099-01-01T00:00:00Z",
+			)
+			out := captureStderr(func() {
+				Expect(guard.Check(ctx)).ToNot(Succeed())
+			})
+			Expect(out).To(ContainSubstring("event=claim_scheme_mismatch"))
+		})
+	})
+
 	Context("when the declaration cannot be read", func() {
 		BeforeEach(func() {
 			fake.SetFault(func(req fakeRequest) *fakeFault {
