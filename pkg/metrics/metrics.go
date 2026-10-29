@@ -228,6 +228,20 @@ var ClaimKeyFallbackTotal = promauto.NewCounter(prometheus.CounterOpts{
 	Help: "Total number of pr-review claim keys that fell back to the task-id key.",
 })
 
+// ClaimSchemeTotal counts claim-key scheme guard outcomes by result. The result
+// set is closed: confirmed, bootstrapped, mismatch, unreadable. It is the
+// positive evidence that the guard ran at all — a fleet with no mismatch also
+// produces zero mismatches when the guard never executes, so the confirmed and
+// bootstrapped series are what distinguish "checked and agreed" from "not
+// checking".
+var ClaimSchemeTotal = promauto.NewCounterVec(
+	prometheus.CounterOpts{
+		Name: "executor_claim_scheme_total",
+		Help: "Total number of claim-key scheme guard outcomes by result.",
+	},
+	[]string{"result"},
+)
+
 // ParkedLostClaimTotal counts tasks parked at phase human_review after another
 // executor took over their claim, labelled by outcome. The unset default parks,
 // so an unexpected fleet-wide park must be alertable from a metric rather than
@@ -409,6 +423,7 @@ func init() {
 		RedriveAbortedTotal.WithLabelValues(reason).Add(0)
 	}
 	ClaimKeyFallbackTotal.Add(0)
+	initClaimSchemeSeries()
 	for _, result := range []string{"parked", "failed"} {
 		ParkedLostClaimTotal.WithLabelValues(result).Add(0)
 	}
@@ -431,5 +446,15 @@ func init() {
 		"jobless_released",
 	} {
 		ClaimTotal.WithLabelValues(result).Add(0)
+	}
+}
+
+// initClaimSchemeSeries seeds the closed claim-scheme result set, including the
+// two results that mean "the guard ran and agreed". A CounterVec with no series
+// registers no metric family at all, so without this a guard that had not yet
+// checked would look identical to one that was never wired up.
+func initClaimSchemeSeries() {
+	for _, result := range []string{"confirmed", "bootstrapped", "mismatch", "unreadable"} {
+		ClaimSchemeTotal.WithLabelValues(result).Add(0)
 	}
 }
