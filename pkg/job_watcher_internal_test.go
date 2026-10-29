@@ -205,7 +205,7 @@ var _ = Describe("jobWatcher backoff-limit pod detail", func() {
 			},
 		)
 
-		It("publishes the bare pod_crash_no_stdout when no pod is resolvable", func() {
+		It("publishes the condition plus the unresolved marker when no pod is resolvable", func() {
 			taskStore.Store(testTaskID, testTask)
 			job := makeJob("job-empty", string(testTaskID), backoffCondition())
 			setPodLister(watcher)
@@ -214,23 +214,26 @@ var _ = Describe("jobWatcher backoff-limit pod detail", func() {
 
 			Expect(fakePublisher.PublishFailureCallCount()).To(Equal(1))
 			_, _, _, calledReason := fakePublisher.PublishFailureArgsForCall(0)
-			Expect(calledReason).To(Equal("pod_crash_no_stdout"))
-		})
-
-		It("publishes the bare pod_crash_no_stdout when the pod lister lookup fails", func() {
-			taskStore.Store(testTaskID, testTask)
-			job := makeJob("job-listererr", string(testTaskID), backoffCondition())
-			setPodListerOverride(watcher, "test-ns", errorPodLister{})
-
-			watcher.HandleJob(ctx, job)
-
-			Expect(fakePublisher.PublishFailureCallCount()).To(Equal(1))
-			_, _, _, calledReason := fakePublisher.PublishFailureArgsForCall(0)
-			Expect(calledReason).To(Equal("pod_crash_no_stdout"))
+			Expect(calledReason).To(Equal("BackoffLimitExceeded (pod-unresolved)"))
 		})
 
 		It(
-			"publishes the bare pod_crash_no_stdout when the owned pod has no non-zero terminated container",
+			"publishes the condition plus the unresolved marker when the pod lister lookup fails",
+			func() {
+				taskStore.Store(testTaskID, testTask)
+				job := makeJob("job-listererr", string(testTaskID), backoffCondition())
+				setPodListerOverride(watcher, "test-ns", errorPodLister{})
+
+				watcher.HandleJob(ctx, job)
+
+				Expect(fakePublisher.PublishFailureCallCount()).To(Equal(1))
+				_, _, _, calledReason := fakePublisher.PublishFailureArgsForCall(0)
+				Expect(calledReason).To(Equal("BackoffLimitExceeded (pod-unresolved)"))
+			},
+		)
+
+		It(
+			"publishes the condition plus the unresolved marker when the owned pod has no non-zero terminated container",
 			func() {
 				taskStore.Store(testTaskID, testTask)
 				job := makeJob("job-running", string(testTaskID), backoffCondition())
@@ -258,7 +261,7 @@ var _ = Describe("jobWatcher backoff-limit pod detail", func() {
 
 				Expect(fakePublisher.PublishFailureCallCount()).To(Equal(1))
 				_, _, _, calledReason := fakePublisher.PublishFailureArgsForCall(0)
-				Expect(calledReason).To(Equal("pod_crash_no_stdout"))
+				Expect(calledReason).To(Equal("BackoffLimitExceeded (pod-unresolved)"))
 			},
 		)
 	})
@@ -527,3 +530,192 @@ func (f *fakeResultPublisher) PublishClearCurrentJobArgsForCall(
 	c := f.clearCurrentJobCalls[i]
 	return c.ctx, c.task, c.jobName
 }
+
+// SC2's fixture: one failed-Job case per value in the closed batch/v1 JobFailed
+// reason set, each pinning the published failure_reason. Every case is RED on
+// the pre-change build (62c5380), which published pod_crash_no_stdout for all of
+// them — that is what makes this fixture discriminating rather than a
+// restatement of current behaviour.
+var _ = Describe("failureReason closed-set fixture", func() {
+	var (
+		ctx           context.Context
+		fakePublisher *fakeResultPublisher
+		taskStore     *TaskStore
+		watcher       JobWatcher
+		testTask      lib.Task
+		testTaskID    lib.TaskIdentifier
+	)
+
+	BeforeEach(func() {
+		ctx = context.Background()
+		fakePublisher = &fakeResultPublisher{}
+		taskStore = NewTaskStore()
+		testTaskID = lib.TaskIdentifier("test-task-uuid-1234")
+		testTask = lib.Task{
+			TaskIdentifier: testTaskID,
+			Frontmatter: lib.TaskFrontmatter{
+				"status":   "in_progress",
+				"assignee": "claude",
+			},
+			Content: lib.TaskContent("do the work"),
+		}
+		watcher = NewJobWatcher(
+			fake.NewSimpleClientset(),
+			"test-ns",
+			NewEventHandlerConfig(),
+			taskStore,
+			fakePublisher,
+			nil,
+			libtime.NewCurrentDateTime(),
+		)
+	})
+
+	failedJob := func(name, reason string) *batchv1.Job {
+		return &batchv1.Job{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      name,
+				Namespace: "test-ns",
+				Labels:    map[string]string{"agent.benjamin-borbe.de/task-id": string(testTaskID)},
+			},
+			Status: batchv1.JobStatus{
+				Conditions: []batchv1.JobCondition{{
+					Type:    batchv1.JobFailed,
+					Status:  corev1.ConditionTrue,
+					Reason:  reason,
+					Message: "failed",
+				}},
+			},
+		}
+	}
+
+	terminatedPod := func(name, jobName, terminatedReason string, exitCode int32) *corev1.Pod {
+		return &corev1.Pod{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      name,
+				Namespace: "test-ns",
+				Labels:    map[string]string{"agent.benjamin-borbe.de/task-id": string(testTaskID)},
+				OwnerReferences: []metav1.OwnerReference{
+					{Kind: "Job", Name: jobName},
+				},
+			},
+			Status: corev1.PodStatus{
+				Phase: corev1.PodFailed,
+				ContainerStatuses: []corev1.ContainerStatus{{
+					State: corev1.ContainerState{
+						Terminated: &corev1.ContainerStateTerminated{
+							Reason:   terminatedReason,
+							ExitCode: exitCode,
+						},
+					},
+				}},
+			},
+		}
+	}
+
+	publishedReason := func(job *batchv1.Job, pods ...*corev1.Pod) string {
+		taskStore.Store(testTaskID, testTask)
+		if pods == nil {
+			setPodLister(watcher)
+		} else {
+			setPodLister(watcher, pods...)
+		}
+		before := fakePublisher.PublishFailureCallCount()
+		watcher.HandleJob(ctx, job)
+		Expect(fakePublisher.PublishFailureCallCount()).To(Equal(before + 1))
+		_, _, _, calledReason := fakePublisher.PublishFailureArgsForCall(before)
+		return calledReason
+	}
+
+	It("names the JobFailed condition on every member of the closed set", func() {
+		type fixtureCase struct {
+			name      string
+			condition string
+			pod       *corev1.Pod
+			expected  string
+		}
+		cases := []fixtureCase{
+			{
+				name:      "BackoffLimitExceeded with a resolvable pod",
+				condition: "BackoffLimitExceeded",
+				pod:       terminatedPod("pod-a", "job-a", "Error", 137),
+				expected:  "pod_crash_no_stdout (Error/137)",
+			},
+			{
+				name:      "BackoffLimitExceeded with an unresolvable pod",
+				condition: "BackoffLimitExceeded",
+				pod:       nil,
+				expected:  "BackoffLimitExceeded (pod-unresolved)",
+			},
+			{
+				name:      "BackoffLimitExceeded with an OOMKilled pod",
+				condition: "BackoffLimitExceeded",
+				pod:       terminatedPod("pod-b", "job-b", "OOMKilled", 137),
+				expected:  "pod_oom_killed (OOMKilled/137)",
+			},
+			{
+				name:      "DeadlineExceeded",
+				condition: "DeadlineExceeded",
+				pod:       nil,
+				expected:  "deadline_exceeded",
+			},
+			{
+				name:      "PodFailurePolicy with a resolvable pod",
+				condition: "PodFailurePolicy",
+				pod:       terminatedPod("pod-c", "job-c", "Error", 137),
+				expected:  "PodFailurePolicy (Error/137)",
+			},
+			{
+				name:      "PodFailurePolicy with an unresolvable pod",
+				condition: "PodFailurePolicy",
+				pod:       nil,
+				expected:  "PodFailurePolicy",
+			},
+			{
+				name:      "reasonless JobFailed with a resolvable pod",
+				condition: "",
+				pod:       terminatedPod("pod-d", "job-d", "Error", 137),
+				expected:  "JobFailed (Error/137)",
+			},
+			{
+				name:      "reasonless JobFailed with an unresolvable pod",
+				condition: "",
+				pod:       nil,
+				expected:  "JobFailed",
+			},
+		}
+		for i, c := range cases {
+			name := "job-" + c.name
+			job := failedJob(name, c.condition)
+			var pods []*corev1.Pod
+			if c.pod != nil {
+				pod := c.pod.DeepCopy()
+				pod.Name = name + "-pod"
+				pod.OwnerReferences = []metav1.OwnerReference{{Kind: "Job", Name: name}}
+				pods = append(pods, pod)
+			}
+			Expect(publishedReason(job, pods...)).To(
+				Equal(c.expected),
+				"case %d (%s): published reason must name the condition", i, c.name,
+			)
+		}
+	})
+
+	It("classifies every published value back into the crash or deadline class", func() {
+		for _, reason := range []string{
+			"pod_crash_no_stdout (Error/137)",
+			"BackoffLimitExceeded (pod-unresolved)",
+			"PodFailurePolicy (Error/137)",
+			"PodFailurePolicy",
+			"JobFailed (Error/137)",
+			"JobFailed",
+		} {
+			parsed, ok := ParseZombieReason(reason)
+			Expect(ok).To(BeTrue(), "ParseZombieReason must recognise %q", reason)
+			Expect(parsed).To(Equal(ZombieReasonPodCrashNoStdout),
+				"%q must classify as the crash class, not not_crash_class", reason)
+		}
+		parsed, ok := ParseZombieReason("deadline_exceeded")
+		Expect(ok).To(BeTrue())
+		Expect(parsed).To(Equal(ZombieReasonDeadlineExceeded))
+	})
+})

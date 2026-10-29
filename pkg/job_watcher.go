@@ -455,7 +455,16 @@ func (w *jobWatcher) HandleJob(ctx context.Context, job *batchv1.Job) {
 
 	if IsJobFailed(job) {
 		reason := w.failureReason(job)
-		glog.V(2).Infof("job %s/%s failed (task %s): %s", job.Namespace, job.Name, taskID, reason)
+		// The raw JobFailed condition is logged alongside the published reason:
+		// the published value is what operators read, but the condition is what
+		// tells them which Kubernetes failure they are looking at, and it is not
+		// otherwise recoverable — failed Jobs are not retained, and the record
+		// store carries only the collapsed reason.
+		condition, _ := jobFailedCondition(job)
+		glog.V(2).Infof(
+			"job %s/%s failed (task %s): reason=%s condition=%s",
+			job.Namespace, job.Name, taskID, reason, condition,
+		)
 		w.releaseClaim(ctx, taskID, job.Name)
 		w.handleTerminal(ctx, taskID, job, reason, true)
 		return
@@ -834,6 +843,18 @@ func isBackoffLimitExceeded(job *batchv1.Job) bool {
 	return false
 }
 
+const (
+	// jobFailedReasonless is published for a JobFailed condition whose Reason is
+	// empty, so the record names something instead of collapsing to a blank.
+	jobFailedReasonless = "JobFailed"
+	// backoffLimitExceededReason is the JobFailed condition that reaches
+	// backoffFailureReason.
+	backoffLimitExceededReason = "BackoffLimitExceeded"
+	// podUnresolvedMarker names the branch where the Job's pod is gone before
+	// the watcher can read its termination state.
+	podUnresolvedMarker = "pod-unresolved"
+)
+
 // JobFailureReason maps a failed Job's conditions to a ZombieReason. Returns
 // ZombieReasonDeadlineExceeded when a Failed condition has Reason
 // "DeadlineExceeded" (the kubelet killed the pod for running past
@@ -859,32 +880,74 @@ func JobFailureReason(job *batchv1.Job) ZombieReason {
 	return ZombieReasonPodCrashNoStdout
 }
 
-// failureReason returns the reason string to publish for a failed Job. A
-// BackoffLimitExceeded failure surfaces the pod's terminated reason + exit
-// code when the pod is still resolvable (see backoffFailureReason); every
-// other failure publishes the bare ZombieReason value.
+// failureReason returns the reason string to publish for a failed Job.
+//
+// A DeadlineExceeded failure publishes the vocabulary value unchanged. A
+// BackoffLimitExceeded failure surfaces the pod's terminated reason + exit code
+// when the pod is still resolvable, and names the condition plus an
+// unresolved-pod marker when it is not (see backoffFailureReason). Every other
+// failure publishes the Job's own JobFailed condition, with the pod's
+// terminated reason + exit code appended when the pod is still resolvable (see
+// fallthroughFailureReason) — the condition is what these records were
+// previously missing.
 func (w *jobWatcher) failureReason(job *batchv1.Job) string {
-	reason := JobFailureReason(job)
-	if reason == ZombieReasonDeadlineExceeded || !isBackoffLimitExceeded(job) {
-		return reason.String()
+	if JobFailureReason(job) == ZombieReasonDeadlineExceeded {
+		return ZombieReasonDeadlineExceeded.String()
 	}
-	return w.backoffFailureReason(job, reason)
+	if isBackoffLimitExceeded(job) {
+		return w.backoffFailureReason(job)
+	}
+	return w.fallthroughFailureReason(job)
 }
 
-// backoffFailureReason classifies a BackoffLimitExceeded Job using its
-// resolved pod's terminal state: the dedicated pod_oom_killed for an OOMKilled
-// pod, else the generic pod-failure reason, always appending the terminated
-// reason + exit code when a pod is resolvable so operators see the cause
-// without inspecting the pod.
-func (w *jobWatcher) backoffFailureReason(job *batchv1.Job, base ZombieReason) string {
+// backoffFailureReason classifies a BackoffLimitExceeded Job using its resolved
+// pod's terminal state: the dedicated pod_oom_killed for an OOMKilled pod, else
+// the generic pod-failure reason, always appending the terminated reason + exit
+// code when a pod is resolvable so operators see the cause without inspecting
+// the pod. When the pod is gone before the watcher reads it, the published
+// value names the condition and says so — a bare pod_crash_no_stdout diagnoses
+// nothing.
+func (w *jobWatcher) backoffFailureReason(job *batchv1.Job) string {
 	terminatedReason, exitCode, ok := w.terminalPodDetail(job)
 	if !ok {
-		return base.String()
+		return fmt.Sprintf("%s (%s)", backoffLimitExceededReason, podUnresolvedMarker)
 	}
 	if terminatedReason == "OOMKilled" {
 		return fmt.Sprintf("%s (%s/%d)", ZombieReasonPodOOMKilled, terminatedReason, exitCode)
 	}
-	return fmt.Sprintf("%s (%s/%d)", base.String(), terminatedReason, exitCode)
+	return fmt.Sprintf("%s (%s/%d)", ZombieReasonPodCrashNoStdout, terminatedReason, exitCode)
+}
+
+// fallthroughFailureReason names the Job's actual JobFailed condition,
+// appending the pod's terminated reason and exit code when the pod is still
+// resolvable. A condition whose Reason is empty publishes jobFailedReasonless
+// rather than a blank, so the record always names something.
+func (w *jobWatcher) fallthroughFailureReason(job *batchv1.Job) string {
+	condition, ok := jobFailedCondition(job)
+	if !ok {
+		return ZombieReasonPodCrashNoStdout.String()
+	}
+	terminatedReason, exitCode, podOK := w.terminalPodDetail(job)
+	if !podOK {
+		return condition
+	}
+	return fmt.Sprintf("%s (%s/%d)", condition, terminatedReason, exitCode)
+}
+
+// jobFailedCondition returns the reason of the Job's true JobFailed condition.
+// ok is false when the Job carries none. An empty Reason is reported as
+// jobFailedReasonless so the published value is never blank.
+func jobFailedCondition(job *batchv1.Job) (string, bool) {
+	for _, c := range job.Status.Conditions {
+		if c.Type != batchv1.JobFailed || c.Status != corev1.ConditionTrue {
+			continue
+		}
+		if c.Reason == "" {
+			return jobFailedReasonless, true
+		}
+		return c.Reason, true
+	}
+	return "", false
 }
 
 // HandlePod processes a Pod that has transitioned to a terminal failure state.

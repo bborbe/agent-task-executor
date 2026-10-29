@@ -296,6 +296,11 @@ type taskEventHandler struct {
 	claimManagerOnce sync.Once
 	claimManager     claim.LeaseManager
 	claimManagerErr  error
+	// claimSchemeGuard refuses a spawn whose claim-key scheme differs from the
+	// one the fleet has declared in git-rest. Built alongside the lease manager
+	// and nil until then; a nil guard admits, which is the same direction the
+	// guard takes when it cannot read the declaration.
+	claimSchemeGuard claim.SchemeGuard
 	// probeState is the read-only claim client the foreign-current_job probe
 	// uses, built lazily and separately from the lease manager.
 	probeState claimProbeState
