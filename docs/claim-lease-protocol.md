@@ -62,8 +62,15 @@ every key, and keys and task ids are never metric label values.
 | Key shape | Used by |
 |---|---|
 | `claims/task/<task id>` | task-id-keyed types, and `pr-review` with no usable PR link |
-| `claims/repo/<owner>-<repo>` | `update-go`, `release`, `build-fix` |
-| `claims/pr/<owner>-<repo>-<n>` | `pr-review` with a usable PR link |
+| `claims/repo/<owner>/<repo>` | `update-go`, `release`, `build-fix` |
+| `claims/pr/<owner>/<repo>/<n>` | `pr-review` with a usable PR link |
+
+Owner and repo are joined with `/`, never `-`. A hyphen is legal inside both
+components, so the earlier hyphen join was lossy: owner `a-b` with repo `c` and
+owner `a` with repo `b-c` both derived `claims/repo/a-b-c`, and two distinct
+repositories aliased one lock. `/` is rejected inside a component, so the slash
+join cannot collide. (Changed in `f3ac37a`, first released v0.41.0. This table
+carried the hyphen form for six releases after the code stopped producing it.)
 
 A `pr-review` key is per pull request when the task body carries a standalone
 pull-request URL: the first body line that, after trimming surrounding
@@ -135,6 +142,54 @@ writes. A pair still present in the store from an earlier release is recovered
 as a pair by `storeRecoveredPair`, which is the only path that handles one;
 `ClaimPair` and `TakeoverPair` keep their secondary parameter but every caller
 now passes it empty.
+
+### The fleet's declared scheme
+
+The two mixed-fleet windows above are what a *guard* exists to prevent, and the
+executor now carries one. `ClaimKeySchemeVersion` names the derivation this
+binary produces (`v2` today); the shared ref `claims/scheme` holds the
+derivation the fleet has declared. Before a spawn claims, the executor reads the
+declaration and does one of three things:
+
+| Declared | Action |
+|---|---|
+| equal to this binary's version | claim proceeds |
+| absent | this binary writes its own version, then claims — the bootstrap |
+| different | the spawn is **refused**; no claim ref is written |
+
+The declaration lives in git-rest, beside the claims, rather than in a per-cluster
+config. That placement is the whole design: a config would roll cluster by cluster
+and reproduce the very window it closes, while one shared ref flips atomically.
+Whichever cluster reaches an empty store first declares for everyone, and a lost
+compare-and-swap is not an error — the winner's value is read back and judged like
+any other, so two clusters bootstrapping at once converge instead of each believing
+it declared.
+
+**The failure direction is deliberate and asymmetric.** A read failure — git-rest
+unreachable, 5xx, a vanished declaration — **admits** the claim. An executor must
+not stop a fleet that claims fine without this guard, and failing closed there
+would trade one outage class for another. Only a positive mismatch refuses. In
+`shadow` mode the refusal skips the claim write and lets the spawn through, which
+is that mode's contract; in `on` it stops the spawn.
+
+**The guard binds only clusters that carry it.** An older image without a guard
+ignores `claims/scheme` entirely, so the release that introduces the guard cannot
+stop a guard-less peer. It protects every scheme change *after* the fleet is
+uniformly on a guard-aware build — that is its honest scope, and the reason it
+ships before the next derivation change rather than with it.
+
+**The cost during its own rollout.** The first upgraded cluster declares the new
+version and every not-yet-upgraded cluster refuses until it is upgraded. That is a
+short fleet-wide stall, chosen over the alternative because a stall is visible and
+recoverable while a silent duplicate run is neither.
+
+Observability is positive, not an absence: `executor_claim_scheme_total{result}`
+counts `confirmed`, `bootstrapped`, `mismatch` and `unreadable`, and the guard
+logs `event=claim_scheme_confirmed`, `event=claim_scheme_bootstrapped`,
+`event=claim_scheme_mismatch` (error level) or `event=claim_scheme_unreadable`
+(warning) — once each, then the counter carries the rate. A fleet with no
+mismatch and a guard that never runs look identical from a mismatch count alone,
+which is why the `confirmed` and `bootstrapped` series exist.
 
 Every key passes `validateClaimComponent`, so a hostile body cannot inject a
 path segment into a ref.

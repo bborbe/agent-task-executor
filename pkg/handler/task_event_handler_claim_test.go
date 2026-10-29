@@ -8,6 +8,7 @@ import (
 	"context"
 	"encoding/json"
 	stderrors "errors"
+	"fmt"
 	"strings"
 	"time"
 
@@ -289,6 +290,67 @@ func dispatchPutCount(harness *claimHarness) int {
 	return count
 }
 
+// isDispatchClaimKey reports whether key addresses a claim rather than the
+// claim-scheme declaration the guard bootstraps on its first check.
+func isDispatchClaimKey(key string) bool {
+	return strings.HasPrefix(key, "claims/task/") ||
+		strings.HasPrefix(key, "claims/repo/") ||
+		strings.HasPrefix(key, "claims/pr/")
+}
+
+// claimPutCallCount counts PUT calls that address a claim, ignoring both the
+// scheme declaration and the redrive streak refs the handler also writes.
+//
+// Specs assert on this rather than on PutCallCount: the claim path's first check
+// also declares the fleet's claim-key scheme, so a bare count conflates a
+// declaration with a claim.
+func claimPutCallCount(client *mocks.FakeClaimRefClient) int {
+	count := 0
+	for i := 0; i < client.PutCallCount(); i++ {
+		_, key, _, _, _, _ := client.PutArgsForCall(i)
+		if isDispatchClaimKey(key) {
+			count++
+		}
+	}
+	return count
+}
+
+// claimPutArgsForCall returns the arguments of the nth claim PUT, skipping every
+// write that is not a claim.
+func claimPutArgsForCall(
+	client *mocks.FakeClaimRefClient,
+	n int,
+) (key, expectedSha, cluster, taskID string, leaseUntil libtime.DateTime) {
+	seen := 0
+	for i := 0; i < client.PutCallCount(); i++ {
+		_, candidate, sha, candidateCluster, candidateTaskID, candidateLease := client.PutArgsForCall(
+			i,
+		)
+		if !isDispatchClaimKey(candidate) {
+			continue
+		}
+		if seen == n {
+			return candidate, sha, candidateCluster, candidateTaskID, candidateLease
+		}
+		seen++
+	}
+	Fail(fmt.Sprintf("no claim PUT at index %d", n))
+	return "", "", "", "", libtime.DateTime{}
+}
+
+// claimListCallCount counts List calls whose prefix is not the claim-scheme
+// declaration, which the guard reads on every claim attempt.
+func claimListCallCount(client *mocks.FakeClaimRefClient) int {
+	count := 0
+	for i := 0; i < client.ListCallCount(); i++ {
+		_, prefix := client.ListArgsForCall(i)
+		if prefix != claim.ClaimSchemeRef {
+			count++
+		}
+	}
+	return count
+}
+
 var _ = Describe("claim mode off", func() {
 	It("spawns one Job and constructs no claim client", func() {
 		harness := newClaimHarness(pkg.ClaimModeOff)
@@ -356,7 +418,7 @@ var _ = Describe("claim gate", func() {
 		Expect(harness.consume(task)).To(Succeed())
 
 		Expect(harness.spawner.SpawnJobCallCount()).To(Equal(1))
-		_, key, expectedSha, _, taskID, _ := harness.client.PutArgsForCall(0)
+		key, expectedSha, _, taskID, _ := claimPutArgsForCall(harness.client, 0)
 		Expect(key).To(Equal("claims/repo/bborbe/agent"))
 		Expect(expectedSha).To(Equal(""))
 		Expect(taskID).To(Equal(string(task.TaskIdentifier)))
@@ -425,7 +487,7 @@ var _ = Describe("claim gate", func() {
 		// One write: the create reads first and never attempts a doomed write, so
 		// only the takeover's write is recorded.
 		Expect(dispatchPutCount(harness)).To(Equal(1))
-		_, putKey, expectedSha, cluster, _, _ := harness.client.PutArgsForCall(0)
+		putKey, expectedSha, cluster, _, _ := claimPutArgsForCall(harness.client, 0)
 		Expect(putKey).To(Equal(key))
 		Expect(expectedSha).To(Equal("expired-sha"))
 		Expect(cluster).To(Equal("self"))

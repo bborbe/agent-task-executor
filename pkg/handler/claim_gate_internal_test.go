@@ -10,6 +10,7 @@ package handler
 import (
 	"context"
 	stderrors "errors"
+	"strings"
 	"testing"
 	stdtime "time"
 
@@ -63,6 +64,29 @@ func (c *recordingClaimRefClient) Put(
 		return c.put(ctx, key, expectedSha, cluster, taskID, leaseUntil)
 	}
 	return "sha-1", nil
+}
+
+// isClaimKey reports whether key addresses a claim rather than the claim-scheme
+// declaration the guard bootstraps on its first check.
+func isClaimKey(key string) bool {
+	return strings.HasPrefix(key, "claims/task/") ||
+		strings.HasPrefix(key, "claims/repo/") ||
+		strings.HasPrefix(key, "claims/pr/")
+}
+
+// claimPuts returns the recorded writes that address a claim, in call order.
+//
+// Specs assert on this rather than on putCalls: the first check of the claim
+// path also declares the fleet's claim-key scheme, which is a ref write but not
+// a claim, so a bare count conflates the two.
+func (c *recordingClaimRefClient) claimPuts() []claimPutCall {
+	out := make([]claimPutCall, 0, len(c.putCalls))
+	for _, call := range c.putCalls {
+		if isClaimKey(call.key) {
+			out = append(out, call)
+		}
+	}
+	return out
 }
 
 // List records the call and delegates to the optional func.
@@ -174,11 +198,11 @@ func TestAcquireSpawnClaimShadowRecordsCreate(t *testing.T) {
 	if !h.acquireSpawnClaim(ctx, gateTask("", ""), redispatchConfig()) {
 		t.Fatal("expected the spawn to proceed in claim mode shadow")
 	}
-	if len(client.putCalls) != 1 {
-		t.Fatalf("expected one Put, got %d", len(client.putCalls))
+	if len(client.claimPuts()) != 1 {
+		t.Fatalf("expected one Put, got %d", len(client.claimPuts()))
 	}
-	if client.putCalls[0].expectedSha != "" {
-		t.Fatalf("expected an empty expected_sha, got %q", client.putCalls[0].expectedSha)
+	if client.claimPuts()[0].expectedSha != "" {
+		t.Fatalf("expected an empty expected_sha, got %q", client.claimPuts()[0].expectedSha)
 	}
 }
 
@@ -190,8 +214,56 @@ func TestAcquireSpawnClaimOnRecordsCreate(t *testing.T) {
 	if !h.acquireSpawnClaim(ctx, gateTask("", ""), redispatchConfig()) {
 		t.Fatal("expected the spawn to proceed after a successful claim")
 	}
-	if len(client.putCalls) != 1 {
-		t.Fatalf("expected one Put, got %d", len(client.putCalls))
+	if len(client.claimPuts()) != 1 {
+		t.Fatalf("expected one Put, got %d", len(client.claimPuts()))
+	}
+}
+
+// schemeMismatchClient answers the scheme read with a declaration this binary
+// does not derive, so the guard refuses every claim.
+func schemeMismatchClient() *recordingClaimRefClient {
+	return &recordingClaimRefClient{
+		list: func(context.Context, string) ([]claim.ClaimRef, error) {
+			return []claim.ClaimRef{{
+				Ref:    "refs/" + claim.ClaimSchemeRef,
+				Sha:    "scheme-sha",
+				TaskID: "v1",
+			}}, nil
+		},
+	}
+}
+
+func TestAcquireSpawnClaimRefusesOnSchemeMismatch(t *testing.T) {
+	ctx := context.Background()
+	client := schemeMismatchClient()
+	h := newGateHandler(pkg.ClaimModeOn, client)
+
+	if h.acquireSpawnClaim(ctx, gateTask("", ""), redispatchConfig()) {
+		t.Fatal("expected a claim-key scheme mismatch to block the spawn in claim mode on")
+	}
+	// Refusing must not leave a ref behind: a guard that holds the work it
+	// refused to run is worse than no guard, because the matching cluster then
+	// finds the task claimed and never runs it either.
+	if len(client.claimPuts()) != 0 {
+		t.Fatalf("expected no claim write while refusing, got %d", len(client.claimPuts()))
+	}
+}
+
+func TestAcquireSpawnClaimSchemeMismatchProceedsInShadow(t *testing.T) {
+	ctx := context.Background()
+	client := schemeMismatchClient()
+	h := newGateHandler(pkg.ClaimModeShadow, client)
+
+	// Shadow's contract is to take claims without ever blocking a dispatch, so a
+	// refusal there skips the write and lets the spawn through.
+	if !h.acquireSpawnClaim(ctx, gateTask("", ""), redispatchConfig()) {
+		t.Fatal("expected claim mode shadow to proceed on a scheme mismatch")
+	}
+	if len(client.claimPuts()) != 0 {
+		t.Fatalf(
+			"expected no claim write on a refused shadow claim, got %d",
+			len(client.claimPuts()),
+		)
 	}
 }
 
@@ -297,18 +369,18 @@ func TestAcquireSpawnClaimTakeoverExpired(t *testing.T) {
 		"conflict":   1,
 		"taken_over": 1,
 	})
-	if len(client.putCalls) != 1 {
-		t.Fatalf("expected one Put call, got %d", len(client.putCalls))
+	if len(client.claimPuts()) != 1 {
+		t.Fatalf("expected one Put call, got %d", len(client.claimPuts()))
 	}
-	if client.putCalls[0].expectedSha != "expired-sha" {
+	if client.claimPuts()[0].expectedSha != "expired-sha" {
 		t.Errorf(
 			"takeover expected_sha = %q, want %q",
-			client.putCalls[1].expectedSha,
+			client.claimPuts()[0].expectedSha,
 			"expired-sha",
 		)
 	}
-	if client.putCalls[0].cluster != "self" {
-		t.Errorf("takeover cluster = %q, want %q", client.putCalls[0].cluster, "self")
+	if client.claimPuts()[0].cluster != "self" {
+		t.Errorf("takeover cluster = %q, want %q", client.claimPuts()[0].cluster, "self")
 	}
 }
 
@@ -328,8 +400,11 @@ func TestAcquireSpawnClaimTakeoverStillValid(t *testing.T) {
 		"conflict":           1,
 		"takeover_too_early": 1,
 	})
-	if len(client.putCalls) != 0 {
-		t.Fatalf("expected the takeover to write nothing, got %d Put calls", len(client.putCalls))
+	if len(client.claimPuts()) != 0 {
+		t.Fatalf(
+			"expected the takeover to write nothing, got %d Put calls",
+			len(client.claimPuts()),
+		)
 	}
 }
 
@@ -349,8 +424,11 @@ func TestAcquireSpawnClaimTakeoverInsideGrace(t *testing.T) {
 		"conflict":           1,
 		"takeover_too_early": 1,
 	})
-	if len(client.putCalls) != 0 {
-		t.Fatalf("expected the takeover to write nothing, got %d Put calls", len(client.putCalls))
+	if len(client.claimPuts()) != 0 {
+		t.Fatalf(
+			"expected the takeover to write nothing, got %d Put calls",
+			len(client.claimPuts()),
+		)
 	}
 }
 
@@ -451,8 +529,8 @@ func TestAcquireSpawnClaimDeriveKeyFailure(t *testing.T) {
 	if onHandler.acquireSpawnClaim(ctx, task, redispatchConfig()) {
 		t.Fatal("expected claim mode on to block a task with an underivable key")
 	}
-	if len(client.putCalls) != 0 {
-		t.Fatalf("expected no Put, got %d", len(client.putCalls))
+	if len(client.claimPuts()) != 0 {
+		t.Fatalf("expected no Put, got %d", len(client.claimPuts()))
 	}
 	expectGateClaimDelta(t, before, snapshotGateClaims(), map[string]float64{})
 
@@ -461,7 +539,7 @@ func TestAcquireSpawnClaimDeriveKeyFailure(t *testing.T) {
 	if !shadowHandler.acquireSpawnClaim(ctx, task, redispatchConfig()) {
 		t.Fatal("expected claim mode shadow to proceed on a key derivation failure")
 	}
-	if len(shadowClient.putCalls) != 0 {
-		t.Fatalf("expected no Put, got %d", len(shadowClient.putCalls))
+	if len(shadowClient.claimPuts()) != 0 {
+		t.Fatalf("expected no Put, got %d", len(shadowClient.claimPuts()))
 	}
 }
