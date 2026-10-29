@@ -2,7 +2,7 @@
 
 All notable changes to this project will be documented in this file.
 
-## Unreleased
+## v0.49.1
 
 - fix: **stop writing `retry_count: 0` into the probe's spawn-time update.** The counter is retired: nothing increments it, `max_retries` is set on no record, and the controller no longer guards or resets it, so the probe's reset only re-created a dead field on every healthcheck re-trigger. `trigger_count: 0` stays — that counter is live and carries the cap.
 
