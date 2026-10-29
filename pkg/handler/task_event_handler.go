@@ -805,6 +805,44 @@ func taskTypeMismatchReason(task lib.Task, cfg *pkg.AgentConfiguration) string {
 	)
 }
 
+// spawnPreconditionRefused reports whether the spawn must be refused before any
+// claim or Job is created. It is a single branch so spawnIfNeededClaimed stays
+// under the gocognit ceiling; the two refusals it covers are:
+//
+//   - an unusable target namespace, left untouched for a human (no claim, no
+//     frontmatter write, no Job), and
+//   - a task_type that is absent or outside the Config's effective set, which
+//     parseAndFilter already refuses on the Kafka consume path only — the
+//     reconcile floor and the deferred-respawn loop reach the spawn funnel
+//     without it.
+func (h *taskEventHandler) spawnPreconditionRefused(
+	ctx context.Context,
+	task lib.Task,
+	config *pkg.AgentConfiguration,
+) bool {
+	if h.rejectInvalidJobNamespace(ctx, task, config) {
+		return true
+	}
+	return h.refusesTypeMismatchSpawn(task, config)
+}
+
+// refusesTypeMismatchSpawn reports whether the spawn must be refused because the
+// task's task_type is absent or outside the Config's effective type set, logging
+// the reason and counting it. A Config that declares no types gates nothing,
+// which is taskTypeMismatchReason's own contract.
+func (h *taskEventHandler) refusesTypeMismatchSpawn(
+	task lib.Task,
+	config *pkg.AgentConfiguration,
+) bool {
+	mismatch := taskTypeMismatchReason(task, config)
+	if mismatch == "" {
+		return false
+	}
+	glog.V(2).Infof("skip task %s: %s", task.TaskIdentifier, mismatch)
+	metrics.TaskEventsTotal.WithLabelValues("type_mismatch").Inc()
+	return true
+}
+
 // effectiveTriggerPhases returns the phase allow-list from the Config trigger,
 // falling back to defaultTriggerPhases when Trigger is absent or the list is empty.
 func effectiveTriggerPhases(cfg *pkg.AgentConfiguration) domain.TaskPhases {
@@ -887,9 +925,16 @@ func (h *taskEventHandler) spawnIfNeededClaimed(
 		return spawnOutcomeSuppressed, nil
 	}
 
-	// A Config whose target namespace is unusable is left untouched for a human:
-	// no claim, no frontmatter write, no Job.
-	if h.rejectInvalidJobNamespace(ctx, task, config) {
+	// Preconditions that refuse the spawn before any claim or Job is created: a
+	// Config whose target namespace is unusable is left untouched for a human, and
+	// a task whose task_type is absent or outside the Config's effective set is
+	// refused rather than spawned into a Job that starts with an empty TASK_TYPE,
+	// exits 1 in one second, and then holds the assignee's concurrency slot for the
+	// full ttlSecondsAfterFinished (1800 s by default). The type half must live
+	// here and not only in parseAndFilter: the reconcile floor and the
+	// deferred-respawn loop reach this function without it, which is how such a
+	// record was spawned while the Kafka path was refusing it.
+	if h.spawnPreconditionRefused(ctx, task, config) {
 		return spawnOutcomeSuppressed, nil
 	}
 

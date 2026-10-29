@@ -2,6 +2,10 @@
 
 All notable changes to this project will be documented in this file.
 
+## Unreleased
+
+- fix: **a record whose `task_type` is absent can no longer be spawned by the reconcile floor.** `taskTypeMismatchReason` was applied only inside `parseAndFilter` — the Kafka consume path — while `reconcileTask` and the deferred-respawn loop reach `spawnIfNeededClaimed` without it, so the same record was refused on one path and spawned on another. The spawned Job started with an empty `TASK_TYPE`, the agent rejected it at startup, the pod exited 1 in one second, and because `maxConcurrentJobs: 1` and `ttlSecondsAfterFinished: 1800` the dead Job then held the assignee's only concurrency slot for the full thirty minutes. Observed 2026-10-28 on prod: `github-update-go-agent-79039b50-20261028215320`, spawned for an aborted witness record that carries no `task_type` key at all. The gate now runs in the shared spawn funnel, before the cap checks, so a malformed record never burns a redrive streak or a slot; a Config that declares no types still gates nothing, which is `taskTypeMismatchReason`'s own contract.
+
 ## v0.49.1
 
 - fix: **stop writing `retry_count: 0` into the probe's spawn-time update.** The counter is retired: nothing increments it, `max_retries` is set on no record, and the controller no longer guards or resets it, so the probe's reset only re-created a dead field on every healthcheck re-trigger. `trigger_count: 0` stays — that counter is live and carries the cap.

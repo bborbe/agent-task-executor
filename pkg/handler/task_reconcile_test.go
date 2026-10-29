@@ -157,6 +157,47 @@ var _ = Describe("TaskEventHandler reconcile loop", func() {
 		Expect(testutil.ToFloat64(metrics.ReconcileRedrivenTotal)).To(Equal(before + 1))
 	})
 
+	// The type gate must hold on the reconcile floor, not only in parseAndFilter.
+	// The floor re-derives candidates from the in-memory view and reaches
+	// spawnIfNeededClaimed without ever calling parseAndFilter, so before this
+	// gate a record with no task_type was refused by the Kafka path and spawned
+	// here: the Job started with an empty TASK_TYPE, the agent rejected it at
+	// startup, the pod exited 1 in one second, and the dead Job then held the
+	// assignee's single concurrency slot for the full 1800 s TTL.
+	It("does not spawn a task whose task_type is absent when the Config declares types", func() {
+		fakeResolver.ResolveReturns(
+			pkg.AgentConfiguration{
+				Assignee:  "claude",
+				Image:     "my-image:latest",
+				TaskTypes: []string{"github-update-go", "healthcheck"},
+			},
+			nil,
+		)
+		fakeView.SnapshotReturns([]lib.Task{eligibleTask(domain.TaskPhasePlanning)})
+		fakeSpawner.IsJobActiveReturns(false, nil)
+
+		Expect(h.ReconcileOnce(ctx)).To(BeNil())
+		Expect(fakeSpawner.SpawnJobCallCount()).To(Equal(0))
+	})
+
+	It("still spawns a task whose declared task_type the Config accepts", func() {
+		fakeResolver.ResolveReturns(
+			pkg.AgentConfiguration{
+				Assignee:  "claude",
+				Image:     "my-image:latest",
+				TaskTypes: []string{"github-update-go", "healthcheck"},
+			},
+			nil,
+		)
+		task := eligibleTask(domain.TaskPhasePlanning)
+		task.Frontmatter["task_type"] = "github-update-go"
+		fakeView.SnapshotReturns([]lib.Task{task})
+		fakeSpawner.IsJobActiveReturns(false, nil)
+
+		Expect(h.ReconcileOnce(ctx)).To(BeNil())
+		Expect(fakeSpawner.SpawnJobCallCount()).To(Equal(1))
+	})
+
 	// The reconcile floor has its own eligibility path (`reconcileTask`),
 	// separate from the Kafka event path: it re-derives from the in-memory view
 	// on every pass, so it never sees the event that the event path filters. It
