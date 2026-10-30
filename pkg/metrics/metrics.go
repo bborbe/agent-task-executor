@@ -144,11 +144,13 @@ var ViewDivergenceTotal = promauto.NewCounterVec(
 	[]string{"result"},
 )
 
-// The eight gates of the reconcile eligibility filter, in the order
-// reconcileTask applies them. The vocabulary is closed at compile time, which is
-// what lets ReconcileRefusedTotal be pre-initialised: every series exists before
-// the first refusal, so a gate that never fires is distinguishable from a
-// counter that was never wired up.
+// The eligibility gates that can refuse a spawn. The first eight are applied in
+// order by reconcileTask; index_terminal runs later, at the gather stage after
+// the filter has returned the task eligible, and again in the deferred-respawn
+// evaluation. The vocabulary is closed at compile time, which is what lets
+// ReconcileRefusedTotal be pre-initialised: every series exists before the first
+// refusal, so a gate that never fires is distinguishable from a counter that was
+// never wired up.
 const (
 	// ReconcileRefusedGateForeignCluster means the task names another cluster.
 	ReconcileRefusedGateForeignCluster = "foreign_cluster"
@@ -171,20 +173,31 @@ const (
 	// ReconcileRefusedGateNoRouting means the task carries neither an assignee
 	// nor a declared task_type.
 	ReconcileRefusedGateNoRouting = "no_routing"
+	// ReconcileRefusedGateIndexTerminal means the vault index reports the task's
+	// state as terminal. It is the gather-stage gate: applied once the filter has
+	// returned the task eligible, and again in the deferred-respawn evaluation. It
+	// is not one of the gates reconcileTask applies.
+	ReconcileRefusedGateIndexTerminal = "index_terminal"
+	// ReconcileRefusedGateTypeMismatch means the task's task_type is absent or
+	// outside the resolved Config's effective type set. It mirrors
+	// parseAndFilter's type gate on the Kafka path, which the reconcile floor
+	// did not apply — so a record with no task_type was refused there and
+	// spawned here.
+	ReconcileRefusedGateTypeMismatch = "type_mismatch"
 )
 
-// ReconcileRefusedTotal counts reconcile-floor refusals by the eligibility gate
-// that refused them.
+// ReconcileRefusedTotal counts spawn refusals by the eligibility gate that
+// refused them, covering both the reconcile floor and the deferred-respawn path.
 //
-// Before this counter six of the eight gates returned silently, so a refused
-// record was indistinguishable from one that was never in the candidate set at
-// all. The gate label is a closed compile-time domain — never a task id, cluster,
-// stage or assignee — so all eight series are pre-initialised at zero and a
-// `rate(...) == 0` read on any one gate is honest rather than empty.
+// Before this counter six of the then-existing eight returned silently, so a
+// refused record was indistinguishable from one that was never in the candidate
+// set at all. The gate label is a closed compile-time domain — never a task id,
+// cluster, stage or assignee — so all ten series are pre-initialised at zero and
+// a `rate(...) == 0` read on any one gate is honest rather than empty.
 var ReconcileRefusedTotal = promauto.NewCounterVec(
 	prometheus.CounterOpts{
 		Name: "executor_reconcile_refused_total",
-		Help: "Total number of reconcile-floor refusals by the eligibility gate that refused them.",
+		Help: "Total number of spawn refusals by the eligibility gate that refused them, on every spawn path that applies the gate.",
 	},
 	[]string{"gate"},
 )
@@ -227,6 +240,20 @@ var ClaimKeyFallbackTotal = promauto.NewCounter(prometheus.CounterOpts{
 	Name: "executor_claim_key_fallback_total",
 	Help: "Total number of pr-review claim keys that fell back to the task-id key.",
 })
+
+// ClaimSchemeTotal counts claim-key scheme guard outcomes by result. The result
+// set is closed: confirmed, bootstrapped, mismatch, unreadable. It is the
+// positive evidence that the guard ran at all — a fleet with no mismatch also
+// produces zero mismatches when the guard never executes, so the confirmed and
+// bootstrapped series are what distinguish "checked and agreed" from "not
+// checking".
+var ClaimSchemeTotal = promauto.NewCounterVec(
+	prometheus.CounterOpts{
+		Name: "executor_claim_scheme_total",
+		Help: "Total number of claim-key scheme guard outcomes by result.",
+	},
+	[]string{"result"},
+)
 
 // ParkedLostClaimTotal counts tasks parked at phase human_review after another
 // executor took over their claim, labelled by outcome. The unset default parks,
@@ -331,6 +358,27 @@ func seedDeferredAndRefusalOutcomes() {
 	TaskEventsTotal.WithLabelValues("event_refusal_write_failed").Add(0)
 }
 
+// initReconcileRefusedGateSeries pre-initialises the closed reconcile-refusal
+// gate set: the gate vocabulary is fixed at compile time, so every gate can be
+// registered before the first refusal and an absent series never masquerades as
+// a healthy zero.
+func initReconcileRefusedGateSeries() {
+	for _, gate := range []string{
+		ReconcileRefusedGateForeignCluster,
+		ReconcileRefusedGateUnresolvedConfig,
+		ReconcileRefusedGateTerminalStatus,
+		ReconcileRefusedGateStatusNotTriggered,
+		ReconcileRefusedGatePhaseNotTriggered,
+		ReconcileRefusedGateTerminalPhase,
+		ReconcileRefusedGateStageMismatch,
+		ReconcileRefusedGateNoRouting,
+		ReconcileRefusedGateIndexTerminal,
+		ReconcileRefusedGateTypeMismatch,
+	} {
+		ReconcileRefusedTotal.WithLabelValues(gate).Add(0)
+	}
+}
+
 func init() {
 	// Only the fixed sentinel is seeded. The namespace vocabulary is unbounded, so
 	// seeding it is not possible — but a CounterVec with no series registers no
@@ -386,21 +434,7 @@ func init() {
 	for _, result := range []string{"ok", "mismatch", "absent", "read_error"} {
 		ViewDivergenceTotal.WithLabelValues(result).Add(0)
 	}
-	// Pre-initialise the closed reconcile-refusal gate set: the gate vocabulary
-	// is fixed at compile time, so every gate can be registered before the first
-	// refusal and an absent series never masquerades as a healthy zero.
-	for _, gate := range []string{
-		ReconcileRefusedGateForeignCluster,
-		ReconcileRefusedGateUnresolvedConfig,
-		ReconcileRefusedGateTerminalStatus,
-		ReconcileRefusedGateStatusNotTriggered,
-		ReconcileRefusedGatePhaseNotTriggered,
-		ReconcileRefusedGateTerminalPhase,
-		ReconcileRefusedGateStageMismatch,
-		ReconcileRefusedGateNoRouting,
-	} {
-		ReconcileRefusedTotal.WithLabelValues(gate).Add(0)
-	}
+	initReconcileRefusedGateSeries()
 	// Pre-initialise the closed abort vocabulary so both series are visible
 	// before any abort. Unlike RedriveCappedTotal, whose labels are unbounded.
 	for _, reason := range []string{
@@ -410,6 +444,7 @@ func init() {
 		RedriveAbortedTotal.WithLabelValues(reason).Add(0)
 	}
 	ClaimKeyFallbackTotal.Add(0)
+	initClaimSchemeSeries()
 	for _, result := range []string{"parked", "failed"} {
 		ParkedLostClaimTotal.WithLabelValues(result).Add(0)
 	}
@@ -432,5 +467,15 @@ func init() {
 		"jobless_released",
 	} {
 		ClaimTotal.WithLabelValues(result).Add(0)
+	}
+}
+
+// initClaimSchemeSeries seeds the closed claim-scheme result set, including the
+// two results that mean "the guard ran and agreed". A CounterVec with no series
+// registers no metric family at all, so without this a guard that had not yet
+// checked would look identical to one that was never wired up.
+func initClaimSchemeSeries() {
+	for _, result := range []string{"confirmed", "bootstrapped", "mismatch", "unreadable"} {
+		ClaimSchemeTotal.WithLabelValues(result).Add(0)
 	}
 }

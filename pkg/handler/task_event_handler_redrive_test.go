@@ -404,8 +404,8 @@ var _ = Describe("redrive streak persistence", func() {
 		}
 
 		Expect(a.spawner.SpawnJobCallCount()).To(Equal(3))
-		Expect(client.PutCallCount()).To(Equal(0))
-		Expect(client.ListCallCount()).To(Equal(0))
+		Expect(claimPutCallCount(client)).To(Equal(0))
+		Expect(claimListCallCount(client)).To(Equal(0))
 		Expect(client.DeleteCallCount()).To(Equal(0))
 	})
 

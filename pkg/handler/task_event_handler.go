@@ -296,6 +296,11 @@ type taskEventHandler struct {
 	claimManagerOnce sync.Once
 	claimManager     claim.LeaseManager
 	claimManagerErr  error
+	// claimSchemeGuard refuses a spawn whose claim-key scheme differs from the
+	// one the fleet has declared in git-rest. Built alongside the lease manager
+	// and nil until then; a nil guard admits, which is the same direction the
+	// guard takes when it cannot read the declaration.
+	claimSchemeGuard claim.SchemeGuard
 	// probeState is the read-only claim client the foreign-current_job probe
 	// uses, built lazily and separately from the lease manager.
 	probeState claimProbeState
@@ -958,12 +963,9 @@ func (h *taskEventHandler) spawnIfNeededClaimed(
 		return spawnOutcomeSuppressed, err
 	}
 
-	// Claimed replays decide under deferredMu, released before SpawnJob; the
-	// lock order is assignee spawn lock → deferredMu. An eviction landing after
-	// this check and during SpawnJob does not stop the spawn — see
-	// spawnIfNeededClaimed. See claimStillValid.
-	if !h.claimStillValid(claim) {
-		h.recordClaimInvalidated(task)
+	// The last two refusals before the Job is created, together: the claim epoch
+	// and the vault index. See finalSpawnRefusals.
+	if h.finalSpawnRefusals(ctx, task, claim) {
 		return spawnOutcomeSuppressed, nil
 	}
 
@@ -1255,6 +1257,7 @@ func (h *taskEventHandler) ReconcileOnce(ctx context.Context) error {
 	passCtx = withRedriveStreakCache(passCtx)
 	// One `list refs` of the success prefix for the pass; see success_cache.go.
 	passCtx = withSuccessCache(passCtx)
+	passCtx = withVaultIndexCache(passCtx)
 
 	if !h.view.Ready() {
 		metrics.ReconcilePassesTotal.WithLabelValues("view_not_ready").Inc()
@@ -1454,11 +1457,13 @@ func (h *taskEventHandler) gatherCandidates(
 	c *reconcileCounters,
 ) []reconcileCandidate {
 	candidates := make([]reconcileCandidate, 0, len(tasks))
+	suppressions := &indexTerminalSuppression{}
+	defer suppressions.report()
 	for _, task := range tasks {
 		if h.passDone(passCtx) {
 			return candidates
 		}
-		candidate, outcome := h.gatherCandidate(passCtx, task)
+		candidate, outcome := h.gatherCandidate(passCtx, task, suppressions)
 		if outcome == reconcileOutcomeCollected {
 			candidates = append(candidates, candidate)
 			continue
@@ -1521,6 +1526,7 @@ func sortCandidatesByAdmissionPriority(candidates []reconcileCandidate) {
 func (h *taskEventHandler) gatherCandidate(
 	ctx context.Context,
 	task lib.Task,
+	suppressions *indexTerminalSuppression,
 ) (reconcileCandidate, reconcileOutcome) {
 	task, config, ok, err := h.reconcileTask(ctx, task)
 	if err != nil {
@@ -1538,6 +1544,9 @@ func (h *taskEventHandler) gatherCandidate(
 		// to no Config). Nothing to clear here: the streak's phase key is what
 		// retires a task that genuinely moved on, and a task that left the filter
 		// is not spawned again either way.
+		return reconcileCandidate{}, reconcileOutcomeSkipped
+	}
+	if h.indexGateSuppresses(ctx, task, suppressions) {
 		return reconcileCandidate{}, reconcileOutcomeSkipped
 	}
 	// A parked task whose declared task_type resolved to a Config: restoring the
@@ -1668,6 +1677,30 @@ func (h *taskEventHandler) reconcileTask(
 	}
 	if skip {
 		return h.refuseReconcile(task, metrics.ReconcileRefusedGateUnresolvedConfig)
+	}
+	// Type gate — the floor's twin of parseAndFilter's check. The Kafka path has
+	// always refused a record whose task_type is absent or outside the Config's
+	// effective set, and published the failure onto the record; this floor did
+	// not, so the same record was refused there and spawned here. The Job started
+	// with an empty TASK_TYPE, the agent rejected it at startup, the pod exited 1
+	// in one second, and the dead Job then held the assignee's only concurrency
+	// slot for the full ttlSecondsAfterFinished (1800 s by default).
+	//
+	// The failure is published here for the same reason the Kafka path publishes
+	// it: that write clears the assignee and sets previous_assignee, which is what
+	// stops the record being re-candidated on every pass. Refusing without it
+	// would suppress the record forever with no record-level trace.
+	if mismatch := taskTypeMismatchReason(task, config); mismatch != "" {
+		if err := h.resultPublisher.PublishTypeMismatchFailure(ctx, task, mismatch); err != nil {
+			metrics.TaskEventsTotal.WithLabelValues("error").Inc()
+			return task, nil, false, errors.Wrapf(
+				ctx, err, "publish type mismatch failure for task %s", task.TaskIdentifier,
+			)
+		}
+		glog.V(2).Infof(
+			"event=reconcile_type_mismatch task=%s reason=%q", task.TaskIdentifier, mismatch,
+		)
+		return h.refuseReconcile(task, metrics.ReconcileRefusedGateTypeMismatch)
 	}
 	// A task whose status is terminal is never a candidate, even when a Config
 	// lists that status in trigger.statuses — the status-side twin of the

@@ -119,6 +119,7 @@ func (h *taskEventHandler) createLeaseManager(
 	// share refClient but keep separate ref namespaces.
 	h.redriveStore = claim.NewRedriveStreakStore(refClient, h.currentDateTime)
 	h.redriveReasons = claim.NewRedriveReasonStore(refClient, h.currentDateTime)
+	h.claimSchemeGuard = claim.NewSchemeGuard(refClient, h.cluster, h.currentDateTime)
 	return manager, nil
 }
 
@@ -137,6 +138,20 @@ func (h *taskEventHandler) acquireSpawnClaim(
 	manager, err := h.leaseManager(ctx)
 	if err != nil {
 		return h.claimFailureDecision(task, "lease_manager", err)
+	}
+	// The scheme guard runs before any ref is derived or written. A mismatch
+	// means this cluster derives different key strings from its peers, so a claim
+	// it takes would exclude nobody: the peer claims its own ref for the same
+	// task and both run. Refusing is the whole point — no claim is written, so a
+	// matching cluster is free to take the work.
+	//
+	// claimFailureDecision, not a bare false, is what keeps shadow honest: shadow
+	// takes claims without ever blocking a dispatch, so there the refusal skips
+	// the write and lets the spawn through, which is exactly its contract.
+	if guard := h.claimSchemeGuard; guard != nil {
+		if guardErr := guard.Check(ctx); guardErr != nil {
+			return h.claimFailureDecision(task, "claim_scheme", guardErr)
+		}
 	}
 	owner, repo := claimOwnerRepo(task)
 	primary, secondary, fallback, err := claim.DeriveClaimKeysWithBody(
