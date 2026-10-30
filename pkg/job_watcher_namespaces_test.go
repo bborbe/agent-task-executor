@@ -808,3 +808,152 @@ func assertSweeperUsesPerTaskLister(
 		)
 	}
 }
+
+// recordingClaimReleaser records the shared success writes the watcher delegates
+// to the ClaimReleaser. The deployed implementation records the success and holds
+// the claim; this test only reads the record.
+type recordingClaimReleaser struct {
+	mu       sync.Mutex
+	records  []recordedSuccess
+	releases int
+}
+
+type recordedSuccess struct {
+	taskID      lib.TaskIdentifier
+	phase       string
+	completedAt time.Time
+}
+
+func (r *recordingClaimReleaser) ReleaseTaskClaim(context.Context, lib.TaskIdentifier) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.releases++
+}
+
+func (r *recordingClaimReleaser) ReleaseTaskClaimAfterSuccess(
+	_ context.Context,
+	taskID lib.TaskIdentifier,
+	phase string,
+	completedAt time.Time,
+) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.records = append(r.records, recordedSuccess{
+		taskID:      taskID,
+		phase:       phase,
+		completedAt: completedAt,
+	})
+}
+
+func (r *recordingClaimReleaser) successRecords() []recordedSuccess {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	out := make([]recordedSuccess, len(r.records))
+	copy(out, r.records)
+	return out
+}
+
+// succeededJob builds a terminal succeeded Job as the Job informer delivers it.
+func succeededJob(name, taskID, namespace string, completedAt time.Time) *batchv1.Job {
+	return &batchv1.Job{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      name,
+			Namespace: namespace,
+			Labels: map[string]string{
+				jobWatcherTaskIDLabel: taskID,
+			},
+			Annotations: map[string]string{
+				TaskPhaseAnnotationKey: "execution",
+			},
+		},
+		Status: batchv1.JobStatus{
+			CompletionTime: &metav1.Time{Time: completedAt},
+			Conditions: []batchv1.JobCondition{
+				{
+					Type:   batchv1.JobComplete,
+					Status: corev1.ConditionTrue,
+				},
+			},
+		},
+	}
+}
+
+// TestJobWatcherSucceededBeforeCacheSyncIsRecorded is the SC1 reproduction: a Job
+// that completed before this pod started arrives in its namespace informer's
+// initial LIST, whose handler calls run while HasSynced() is still false.
+//
+// On the pre-fix build the per-namespace sync barrier dropped that delivery, so
+// neither sink held a record and the spawn funnel saw "no success" and re-spawned
+// (measured on nuke dev 2026-10-28: informer start 19:50:47.510, first handling
+// 19:56:15.335, re-spawn 19:52:51). This test asserts both sinks hold the record
+// for the unsynced delivery, which is what the fix makes true and what the
+// pre-fix build fails.
+func TestJobWatcherSucceededBeforeCacheSyncIsRecorded(t *testing.T) {
+	ctx := context.Background()
+	provider := &namespaceTestProvider{}
+	provider.setItems(
+		configNamed("a", "ns-a"),
+		configNamed("b", "ns-b"),
+	)
+	releaser := &recordingClaimReleaser{}
+	w, ok := NewJobWatcher(
+		fake.NewClientset(),
+		"dev",
+		provider,
+		NewTaskStore(),
+		&fakeResultPublisher{},
+		releaser,
+		libtime.NewCurrentDateTime(),
+	).(*jobWatcher)
+	if !ok {
+		t.Fatalf("watcher is not a *jobWatcher")
+	}
+	w.newNamespaceInformer = func(
+		_ kubernetes.Interface,
+		ns libk8s.Namespace,
+	) (jobWatcherNamespaceInformer, error) {
+		return &fakeNamespaceInformer{synced: ns == "ns-b"}, nil
+	}
+	if err := w.reconcileNamespaceSet(ctx); err != nil {
+		t.Fatalf("reconcile namespace set: %v", err)
+	}
+
+	completedAt := time.Date(2026, 10, 28, 19, 50, 5, 0, time.UTC)
+
+	// The hole: delivered during the initial LIST, before the caches synced.
+	unsynced := lib.TaskIdentifier("unsynced-task")
+	w.HandleJob(ctx, succeededJob("job-unsynced", string(unsynced), "ns-a", completedAt))
+	if _, found := w.taskStore.LastSucceeded(unsynced); !found {
+		t.Fatalf("in-memory success record missing for a Job delivered before cache sync")
+	}
+
+	// Negative control on the same probe: the identical Job, caches synced.
+	synced := lib.TaskIdentifier("synced-task")
+	w.HandleJob(ctx, succeededJob("job-synced", string(synced), "ns-b", completedAt))
+	if _, found := w.taskStore.LastSucceeded(synced); !found {
+		t.Fatalf("in-memory success record missing for a Job delivered after cache sync")
+	}
+
+	records := releaser.successRecords()
+	if len(records) != 2 {
+		t.Fatalf("shared success records = %d, want 2 (one per delivery): %+v",
+			len(records), records)
+	}
+	seen := map[lib.TaskIdentifier]recordedSuccess{}
+	for _, record := range records {
+		seen[record.taskID] = record
+	}
+	for _, taskID := range []lib.TaskIdentifier{unsynced, synced} {
+		record, found := seen[taskID]
+		if !found {
+			t.Fatalf("shared success record missing for task %s", taskID)
+		}
+		if record.phase != "execution" {
+			t.Fatalf("task %s recorded phase %q, want execution", taskID, record.phase)
+		}
+		if !record.completedAt.Equal(completedAt) {
+			t.Fatalf("task %s recorded completedAt %s, want %s",
+				taskID, record.completedAt, completedAt)
+		}
+	}
+}
