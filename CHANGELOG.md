@@ -2,7 +2,7 @@
 
 All notable changes to this project will be documented in this file.
 
-## Unreleased
+## v0.50.2
 
 - fix: **the Kafka task-event path no longer spawns a task the vault index reports terminal, closing the fourth spawn path.** v0.50.1 gated the deferred seed, the deferred evaluation and the reconcile gather, and left the event path ungated so a task that genuinely re-opens still starts — but the same gap let a completion recorded on another cluster re-spawn the task once that cluster released its claim. Measured 2026-10-30: nuke prod recorded success for `406feb87` at 11:51:26Z (`completed=2026-10-30T11:51:24Z`) and released the claim at 11:51:42Z; sun's foreign-Job guard suppressed the spawn twice, at 11:50:40Z and 11:51:23Z, then allowed it at 11:52:15Z — 49 s after the success record — with zero `index_terminal_suppressed` lines on either cluster. The gate now sits in `spawnIfNeededClaimed` immediately before the lease claim: last, because it is the only gate that costs a network read, so a task a cheaper gate suppresses — parked, an active Job, a capped assignee, an invalid namespace — pays nothing. Inside a pass the read comes from the existing pass cache, so the read budget is unchanged — one per reconcile pass, one per deferred evaluation, and one per task event that actually reaches the spawn point. A genuinely re-opened task is non-terminal in the index and still spawns, so the reason the path was left ungated in v0.50.1 is preserved. Test: a task event whose index status is `completed` spawns no Job and advances `executor_reconcile_refused_total{gate="index_terminal"}` by exactly one, while the same event with a workable index entry spawns — the control fails if the fixture ever stops reaching the spawn point.
 
