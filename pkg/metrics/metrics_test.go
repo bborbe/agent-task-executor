@@ -182,7 +182,7 @@ var _ = Describe("Metrics", func() {
 		}
 	})
 
-	It("pre-initialises exactly the eight reconcile-refusal gates at zero", func() {
+	It("pre-initialises exactly the nine reconcile-refusal gates at zero", func() {
 		mfs, err := prometheus.DefaultGatherer.Gather()
 		Expect(err).NotTo(HaveOccurred())
 
@@ -197,6 +197,7 @@ var _ = Describe("Metrics", func() {
 			"terminal_phase",
 			"stage_mismatch",
 			"no_routing",
+			"type_mismatch",
 		))
 
 		// The series are pre-initialised, so ToFloat64 on the bare collector
@@ -210,6 +211,7 @@ var _ = Describe("Metrics", func() {
 			metrics.ReconcileRefusedGateTerminalPhase,
 			metrics.ReconcileRefusedGateStageMismatch,
 			metrics.ReconcileRefusedGateNoRouting,
+			metrics.ReconcileRefusedGateTypeMismatch,
 		} {
 			Expect(testutil.ToFloat64(
 				metrics.ReconcileRefusedTotal.WithLabelValues(gate),

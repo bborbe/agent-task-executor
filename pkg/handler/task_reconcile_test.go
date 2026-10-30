@@ -146,6 +146,17 @@ var _ = Describe("TaskEventHandler reconcile loop", func() {
 		Expect(untaggedResolver.ResolveCallCount()).To(Equal(0))
 	})
 
+	// typedConfig declares task types, so the type gate is live for it. The
+	// default resolver Config in BeforeEach declares none, which is why every
+	// pre-existing reconcile test still spawns.
+	typedConfig := func() pkg.AgentConfiguration {
+		return pkg.AgentConfiguration{
+			Assignee:  "claude",
+			Image:     "my-image:latest",
+			TaskTypes: []string{"github-update-go", "healthcheck"},
+		}
+	}
+
 	It("re-drives an eligible task from the view (AC 1)", func() {
 		fakeView.SnapshotReturns([]lib.Task{eligibleTask(domain.TaskPhasePlanning)})
 		fakeSpawner.IsJobActiveReturns(false, nil)
@@ -155,6 +166,41 @@ var _ = Describe("TaskEventHandler reconcile loop", func() {
 		Expect(err).To(BeNil())
 		Expect(fakeSpawner.SpawnJobCallCount()).To(Equal(1))
 		Expect(testutil.ToFloat64(metrics.ReconcileRedrivenTotal)).To(Equal(before + 1))
+	})
+
+	// The type gate must hold on the reconcile floor, not only in parseAndFilter.
+	// The floor re-derives candidates from the in-memory view and reaches
+	// spawnIfNeededClaimed without ever calling parseAndFilter, so before this
+	// gate a record with no task_type was refused by the Kafka path and spawned
+	// here: the Job started with an empty TASK_TYPE, the agent rejected it at
+	// startup, the pod exited 1 in one second, and the dead Job then held the
+	// assignee's single concurrency slot for the full 1800 s TTL.
+	It("does not spawn a task whose task_type is absent when the Config declares types", func() {
+		fakeResolver.ResolveReturns(typedConfig(), nil)
+		fakeView.SnapshotReturns([]lib.Task{eligibleTask(domain.TaskPhasePlanning)})
+		fakeSpawner.IsJobActiveReturns(false, nil)
+
+		Expect(h.ReconcileOnce(ctx)).To(BeNil())
+		Expect(fakeSpawner.SpawnJobCallCount()).To(Equal(0))
+		// Refused before the Job lookup, not merely after it, and the failure is
+		// published onto the record — that write clears the assignee and is what
+		// stops the record being re-candidated on every pass.
+		Expect(fakeSpawner.IsJobActiveCallCount()).To(Equal(0))
+		Expect(fakeResultPublisher.PublishTypeMismatchFailureCallCount()).To(Equal(1))
+		_, _, reason := fakeResultPublisher.PublishTypeMismatchFailureArgsForCall(0)
+		Expect(reason).To(ContainSubstring("no task_type"))
+	})
+
+	It("still spawns a task whose declared task_type the Config accepts", func() {
+		fakeResolver.ResolveReturns(typedConfig(), nil)
+		task := eligibleTask(domain.TaskPhasePlanning)
+		task.Frontmatter["task_type"] = "github-update-go"
+		fakeView.SnapshotReturns([]lib.Task{task})
+		fakeSpawner.IsJobActiveReturns(false, nil)
+
+		Expect(h.ReconcileOnce(ctx)).To(BeNil())
+		Expect(fakeSpawner.SpawnJobCallCount()).To(Equal(1))
+		Expect(fakeResultPublisher.PublishTypeMismatchFailureCallCount()).To(Equal(0))
 	})
 
 	// The reconcile floor has its own eligibility path (`reconcileTask`),
