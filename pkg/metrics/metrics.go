@@ -144,11 +144,13 @@ var ViewDivergenceTotal = promauto.NewCounterVec(
 	[]string{"result"},
 )
 
-// The eight gates of the reconcile eligibility filter, in the order
-// reconcileTask applies them. The vocabulary is closed at compile time, which is
-// what lets ReconcileRefusedTotal be pre-initialised: every series exists before
-// the first refusal, so a gate that never fires is distinguishable from a
-// counter that was never wired up.
+// The eligibility gates that can refuse a spawn. The first eight are applied in
+// order by reconcileTask; index_terminal runs later, at the gather stage after
+// the filter has returned the task eligible, and again in the deferred-respawn
+// evaluation. The vocabulary is closed at compile time, which is what lets
+// ReconcileRefusedTotal be pre-initialised: every series exists before the first
+// refusal, so a gate that never fires is distinguishable from a counter that was
+// never wired up.
 const (
 	// ReconcileRefusedGateForeignCluster means the task names another cluster.
 	ReconcileRefusedGateForeignCluster = "foreign_cluster"
@@ -172,24 +174,24 @@ const (
 	// nor a declared task_type.
 	ReconcileRefusedGateNoRouting = "no_routing"
 	// ReconcileRefusedGateIndexTerminal means the vault index reports the task's
-	// state as terminal. It is the gather-stage gate: it is applied on the
-	// reconcile gather and on the deferred-respawn path, and it is not one of the
-	// eight gates reconcileTask applies.
+	// state as terminal. It is the gather-stage gate: applied once the filter has
+	// returned the task eligible, and again in the deferred-respawn evaluation. It
+	// is not one of those eight reconcileTask applies.
 	ReconcileRefusedGateIndexTerminal = "index_terminal"
 )
 
-// ReconcileRefusedTotal counts reconcile-floor refusals by the eligibility gate
-// that refused them.
+// ReconcileRefusedTotal counts spawn refusals by the eligibility gate that
+// refused them, covering both the reconcile floor and the deferred-respawn path.
 //
-// Before this counter six of the eight gates returned silently, so a refused
-// record was indistinguishable from one that was never in the candidate set at
-// all. The gate label is a closed compile-time domain — never a task id, cluster,
-// stage or assignee — so all eight series are pre-initialised at zero and a
-// `rate(...) == 0` read on any one gate is honest rather than empty.
+// Before this counter six of the then-existing eight returned silently, so a
+// refused record was indistinguishable from one that was never in the candidate
+// set at all. The gate label is a closed compile-time domain — never a task id,
+// cluster, stage or assignee — so all nine series are pre-initialised at zero and
+// a `rate(...) == 0` read on any one gate is honest rather than empty.
 var ReconcileRefusedTotal = promauto.NewCounterVec(
 	prometheus.CounterOpts{
 		Name: "executor_reconcile_refused_total",
-		Help: "Total number of reconcile-floor refusals by the eligibility gate that refused them.",
+		Help: "Total number of spawn refusals by the eligibility gate that refused them, on every spawn path that applies the gate.",
 	},
 	[]string{"gate"},
 )
@@ -416,6 +418,7 @@ func init() {
 		ReconcileRefusedGateTerminalPhase,
 		ReconcileRefusedGateStageMismatch,
 		ReconcileRefusedGateNoRouting,
+		ReconcileRefusedGateIndexTerminal,
 	} {
 		ReconcileRefusedTotal.WithLabelValues(gate).Add(0)
 	}
