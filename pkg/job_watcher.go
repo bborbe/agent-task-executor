@@ -26,6 +26,7 @@ import (
 	"k8s.io/client-go/tools/cache"
 
 	agentv1 "github.com/bborbe/agent-task-executor/k8s/apis/agent.benjamin-borbe.de/v1"
+	"github.com/bborbe/agent-task-executor/pkg/metrics"
 )
 
 //counterfeiter:generate -o ../mocks/job_watcher.go --fake-name FakeJobWatcher . JobWatcher
@@ -314,6 +315,16 @@ func (w *jobWatcher) startNamespaceInformer(
 	return nil
 }
 
+// namespaceWatched reports whether namespace is in the watched set, regardless
+// of whether its caches have synced. The succeeded-Job path uses it instead of
+// namespaceReady: it needs the namespace to be one the watcher is responsible
+// for, but not its pod cache (see handleSucceededJob).
+func (w *jobWatcher) namespaceWatched(namespace libk8s.Namespace) bool {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	return w.watched[namespace]
+}
+
 // namespaceReady reports whether the watcher may handle events for namespace.
 // A namespace no Config names is never ready. Before an informer is started
 // for a watched namespace, the pre-Run seed decides; once it is started, the
@@ -444,7 +455,11 @@ func (w *jobWatcher) claimReleaseAllowed(
 }
 
 func (w *jobWatcher) HandleJob(ctx context.Context, job *batchv1.Job) {
-	if !w.namespaceReady(libk8s.Namespace(job.Namespace)) {
+	namespace := libk8s.Namespace(job.Namespace)
+	// Watched, not synced: a SUCCEEDED Job is handled ahead of the per-namespace
+	// cache barrier (see handleSucceededJob), while the failed path below stays
+	// behind it.
+	if !w.namespaceWatched(namespace) {
 		return
 	}
 	taskIDStr, ok := job.Labels["agent.benjamin-borbe.de/task-id"]
@@ -454,6 +469,12 @@ func (w *jobWatcher) HandleJob(ctx context.Context, job *batchv1.Job) {
 	taskID := lib.TaskIdentifier(taskIDStr)
 
 	if IsJobFailed(job) {
+		// A failed Job is classified against the pod cache — terminalPodDetail
+		// reads the namespace's PodLister — so it must not run before that
+		// namespace's caches have synced.
+		if !w.namespaceReady(namespace) {
+			return
+		}
 		reason := w.failureReason(job)
 		// The raw JobFailed condition is logged alongside the published reason:
 		// the published value is what operators read, but the condition is what
@@ -470,35 +491,73 @@ func (w *jobWatcher) HandleJob(ctx context.Context, job *batchv1.Job) {
 		return
 	}
 	if IsJobSucceeded(job) {
-		// Succeeded job (exit 0) means the agent's main.Run returned nil, which
-		// implies its result was published to Kafka successfully. Do NOT publish
-		// a synthetic failure — doing so races the real result and triggers an
-		// infinite respawn loop via the vault poll on the controller side.
-		// But the vault task still carries current_job/job_started_at from the
-		// spawn notification, and nobody clears them on the success path (the
-		// controller's result_writer writes phase/status/notes only). Without a
-		// clear here the task would sit terminal with a stale current_job that
-		// the zombie sweeper can never classify — evicting the task from the
-		// store on success makes it invisible to Snapshot(). Publish the clear
-		// (deduped per job) before eviction.
-		glog.V(2).
-			Infof("job %s/%s succeeded (task %s): trusting agent publish, no synthetic result",
-				job.Namespace, job.Name, taskID)
-		// Remembered before the store check: the task entry may already be
-		// evicted (or, after an executor restart, never stored), but the spawn
-		// path still needs to know a result is on its way to the vault.
-		// CompletionTime, not now, so a re-delivered old Job keeps its age.
-		if job.Status.CompletionTime != nil {
-			w.taskStore.MarkSucceeded(
-				taskID,
-				job.Annotations[TaskPhaseAnnotationKey],
-				job.Status.CompletionTime.Time,
-			)
-		}
-		w.releaseSucceededJobClaim(ctx, taskID, job)
-		if task, ok := w.taskStore.Load(taskID); ok {
-			w.handleSucceeded(ctx, taskID, task, job)
-		}
+		w.handleSucceededJob(ctx, namespace, taskID, job)
+	}
+}
+
+// handleSucceededJob records a succeeded Job and clears its task's current_job.
+//
+// It runs AHEAD of the per-namespace sync barrier on purpose. The barrier exists
+// so a terminal FAILED Job is not classified against a pod cache that has not
+// filled yet; a succeeded Job needs no pod cache at all — MarkSucceeded writes
+// memory, the claim hold writes the shared success store, and the current_job
+// clear reads the task store and the publisher. Waiting for the barrier
+// therefore buys nothing and costs the record: client-go invokes a handler for
+// every object of an initial LIST while that list is still draining, so
+// HasSynced() is false for all but the last of them, and a Job that completed
+// before this pod started — exactly what a restart creates — was dropped and not
+// seen again until the 5-minute resync.
+//
+// Measured 2026-10-28 on nuke dev: the trading-sandbox informer started
+// 19:50:47.510, a pre-existing terminal Job was first handled 19:56:15.335 (328 s
+// later, one resync), and the task re-spawned at 19:52:51 with no record in
+// either sink. Spec 014 recorded the drop as an accepted consequence of the
+// barrier (its Failure-Modes row "The Config provider returns an empty set at
+// boot"), which is why it was never read as a defect.
+//
+// The line below is the fix's own observable: a pre-fix binary cannot emit it,
+// because there this path never runs before the barrier.
+func (w *jobWatcher) handleSucceededJob(
+	ctx context.Context,
+	namespace libk8s.Namespace,
+	taskID lib.TaskIdentifier,
+	job *batchv1.Job,
+) {
+	if !w.namespaceReady(namespace) {
+		glog.V(2).Infof(
+			"event=success_before_cache_sync task=%s namespace=%s job=%s",
+			taskID, namespace, job.Name,
+		)
+		metrics.TaskEventsTotal.WithLabelValues("success_before_cache_sync").Inc()
+	}
+	// Succeeded job (exit 0) means the agent's main.Run returned nil, which
+	// implies its result was published to Kafka successfully. Do NOT publish
+	// a synthetic failure — doing so races the real result and triggers an
+	// infinite respawn loop via the vault poll on the controller side.
+	// But the vault task still carries current_job/job_started_at from the
+	// spawn notification, and nobody clears them on the success path (the
+	// controller's result_writer writes phase/status/notes only). Without a
+	// clear here the task would sit terminal with a stale current_job that
+	// the zombie sweeper can never classify — evicting the task from the
+	// store on success makes it invisible to Snapshot(). Publish the clear
+	// (deduped per job) before eviction.
+	glog.V(2).
+		Infof("job %s/%s succeeded (task %s): trusting agent publish, no synthetic result",
+			job.Namespace, job.Name, taskID)
+	// Remembered before the store check: the task entry may already be
+	// evicted (or, after an executor restart, never stored), but the spawn
+	// path still needs to know a result is on its way to the vault.
+	// CompletionTime, not now, so a re-delivered old Job keeps its age.
+	if job.Status.CompletionTime != nil {
+		w.taskStore.MarkSucceeded(
+			taskID,
+			job.Annotations[TaskPhaseAnnotationKey],
+			job.Status.CompletionTime.Time,
+		)
+	}
+	w.releaseSucceededJobClaim(ctx, taskID, job)
+	if task, ok := w.taskStore.Load(taskID); ok {
+		w.handleSucceeded(ctx, taskID, task, job)
 	}
 }
 

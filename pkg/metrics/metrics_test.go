@@ -83,6 +83,7 @@ var _ = Describe("Metrics", func() {
 			"skipped_unknown_assignee",
 			"skipped_active_job",
 			"skipped_recent_success",
+			"success_before_cache_sync",
 			"error",
 			"type_mismatch",
 			"deferred_claim_invalidated",

@@ -394,6 +394,7 @@ func init() {
 	TaskEventsTotal.WithLabelValues("skipped_active_job").Add(0)
 	TaskEventsTotal.WithLabelValues("skipped_recent_success").Add(0)
 	TaskEventsTotal.WithLabelValues("parked_succeeded").Add(0)
+	TaskEventsTotal.WithLabelValues("success_before_cache_sync").Add(0)
 	TaskEventsTotal.WithLabelValues("skipped_stage").Add(0)
 	TaskEventsTotal.WithLabelValues("pin_outside_pool").Add(0)
 	TaskEventsTotal.WithLabelValues("skipped_foreign_cluster").Add(0)
