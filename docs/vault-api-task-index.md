@@ -125,13 +125,22 @@ index once and joins it to the tasks the pass owns.
   `warnings` is the global index warning count, not a per-id attribution.
 - **`compared` counts ids actually joined**, not owned ids. A failed or empty
   index therefore reads as `compared=0`, never as agreement.
-- **One read per pass.** No read happens before the vault-classification early
-  returns (`view_not_ready`, `task_vault_unstamped`, `task_vault_mismatch`) and
-  none after the pass budget is spent. A pass that is already done makes no
-  call.
-- **A read failure is logged** (`event=view_divergence_read_error`) and the pass
-  continues unchanged. The check is advisory: it changes no eligibility,
-  admission, capping or spawning, and it never writes to the vault.
+- **The same read now gates spawn eligibility.** The reconcile candidate gather
+  refuses an id whose index entry is terminal, and the deferred evaluation
+  refuses a due entry whose index entry is terminal. The comparison still only
+  reports; it never writes to the vault.
+- **One read per reconcile pass, shared.** The reconcile pass performs exactly
+  one read and shares it between the candidate gate and the divergence check.
+  No read happens before the vault-classification early returns
+  (`view_not_ready`, `task_vault_unstamped`, `task_vault_mismatch`). The
+  deferred evaluation runs on its own ticker, performs its own single read when
+  at least one entry is due and none when nothing is due.
+- **A failed read fails open.** Nothing is suppressed, the reconcile pass
+  reports the failure once as `event=view_divergence_read_error`, and the
+  deferred path is silent because it runs no divergence check.
+- **Terminal on the index side** means `status` `completed` or `aborted`, or a
+  terminal `phase` (`human_review`, `done`). A non-terminal entry that merely
+  differs from the view suppresses nothing.
 - **A deployment without a vault-api URL** builds no client, makes no call and
   emits nothing.
 - **Canonical values on both sides.** The view normalizes legacy aliases
@@ -168,6 +177,24 @@ with a closed set: `ok`, `mismatch`, `absent`, `read_error`.
   in-memory snapshot, not a per-id file comparison. Reusing it as a label value
   would let a dashboard read one failure as the other, so the two stay separate
   counters.
+
+### Refusal gate: `index_terminal`
+
+The read also drives a refusal gate, counted separately from the divergence
+outcomes above.
+
+- **Counter:** `executor_reconcile_refused_total{gate="index_terminal"}`.
+- **Unit:** one per suppressed id, **uncapped**, on both the reconcile
+  candidate gather and the deferred-respawn evaluation. The counter is the
+  exact signal and is never trimmed.
+- **Log contract:** one `event=index_terminal_suppressed task=<id>` line per
+  suppressed id per pass at V(2), sorted ascending by id and capped at 20 names
+  per pass. The cap bounds the log line and never the counter.
+- **Fail-open rule:** a missing client, a failed read or a spent pass budget
+  suppresses nothing and increments nothing.
+- **Label hygiene:** `gate` is the only label, its value comes from the fixed
+  gate vocabulary, and no task id, cluster, vault or assignee is ever a label
+  value.
 
 ## Source
 

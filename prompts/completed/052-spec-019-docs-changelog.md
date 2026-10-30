@@ -1,8 +1,13 @@
 ---
-status: approved
+status: completed
 spec: [019-bug-deferred-respawn-ignores-vault-terminal-status]
+summary: 'Documented the index read as a spawn-eligibility gate, added the index_terminal refusal-gate metric contract, and recorded the deferred-respawn duplicate fix in ## Unreleased'
+execution_id: agent-task-executor-divergent-view-exec-052-spec-019-docs-changelog
+dark-factory-version: v0.198.7
 created: "2026-10-30T00:25:18Z"
 queued: "2026-10-29T23:48:40Z"
+started: "2026-10-30T00:11:51Z"
+completed: "2026-10-30T00:18:43Z"
 branch: dark-factory/bug-deferred-respawn-ignores-vault-terminal-status
 ---
 
