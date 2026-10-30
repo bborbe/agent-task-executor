@@ -963,12 +963,9 @@ func (h *taskEventHandler) spawnIfNeededClaimed(
 		return spawnOutcomeSuppressed, err
 	}
 
-	// Claimed replays decide under deferredMu, released before SpawnJob; the
-	// lock order is assignee spawn lock → deferredMu. An eviction landing after
-	// this check and during SpawnJob does not stop the spawn — see
-	// spawnIfNeededClaimed. See claimStillValid.
-	if !h.claimStillValid(claim) {
-		h.recordClaimInvalidated(task)
+	// The last two refusals before the Job is created, together: the claim epoch
+	// and the vault index. See finalSpawnRefusals.
+	if h.finalSpawnRefusals(ctx, task, claim) {
 		return spawnOutcomeSuppressed, nil
 	}
 

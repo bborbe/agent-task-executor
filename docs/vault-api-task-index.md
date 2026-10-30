@@ -125,16 +125,25 @@ index once and joins it to the tasks the pass owns.
   `warnings` is the global index warning count, not a per-id attribution.
 - **`compared` counts ids actually joined**, not owned ids. A failed or empty
   index therefore reads as `compared=0`, never as agreement.
-- **The same read now gates spawn eligibility.** The reconcile candidate gather
-  refuses an id whose index entry is terminal, and the deferred evaluation
-  refuses a due entry whose index entry is terminal. The comparison still only
-  reports; it never writes to the vault.
+- **The same read now gates spawn eligibility on every path.** The reconcile
+  candidate gather refuses an id whose index entry is terminal, the deferred
+  evaluation refuses a due entry whose index entry is terminal, and the spawn
+  funnel itself — `spawnIfNeededClaimed`, which the Kafka task-event path
+  reaches directly — refuses a task whose index entry is terminal immediately
+  before it takes the lease claim. That last position is deliberate: it is the
+  only gate that costs a network read, so every cheaper refusal (parked, active
+  Job, capped assignee, invalid namespace) returns above it and pays nothing.
+  A task that genuinely re-opens is non-terminal in the index and still spawns.
+  The comparison still only reports; it never writes to the vault.
 - **One read per reconcile pass, shared.** The reconcile pass performs exactly
   one read and shares it between the candidate gate and the divergence check.
   No read happens before the vault-classification early returns
   (`view_not_ready`, `task_vault_unstamped`, `task_vault_mismatch`). The
   deferred evaluation runs on its own ticker, performs its own single read when
-  at least one entry is due and none when nothing is due.
+  at least one entry is due and none when nothing is due; its spawn calls reuse
+  that pass cache, so three due entries still cost one read. A Kafka task event
+  is not a pass and carries no cache: it pays one read, and only when it
+  reaches the spawn point.
 - **A failed read fails open.** Nothing is suppressed, the reconcile pass
   reports the failure once as `event=view_divergence_read_error`, and the
   deferred path is silent because it runs no divergence check.
@@ -184,9 +193,10 @@ The read also drives a refusal gate, counted separately from the divergence
 outcomes above.
 
 - **Counter:** `executor_reconcile_refused_total{gate="index_terminal"}`.
-- **Unit:** one per suppressed id, **uncapped**, on both the reconcile
-  candidate gather and the deferred-respawn evaluation. The counter is the
-  exact signal and is never trimmed.
+- **Unit:** one per suppressed id, **uncapped**, on the reconcile candidate
+  gather, the deferred-respawn evaluation and the spawn funnel the Kafka
+  task-event path reaches. The counter is the exact signal and is never
+  trimmed.
 - **Log contract:** one `event=index_terminal_suppressed task=<id>` line per
   suppressed id per pass at V(2), sorted ascending by id and capped at 20 names
   per pass. The cap bounds the log line and never the counter.
