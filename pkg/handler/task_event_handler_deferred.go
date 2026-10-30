@@ -65,6 +65,12 @@ func sortDeferredByAdmissionPriority(replays []deferredReplay) {
 // rejected Job must not exit the process and starve every other due entry. The
 // skipped entry is not re-parked; the reconcile floor re-drives the task.
 func (h *taskEventHandler) evalDeferredRespawns(ctx context.Context) error {
+	// One evaluation pass pays for at most one vault-index read, however many due
+	// entries it examines. Each tick gets a fresh cache.
+	ctx = withVaultIndexCache(ctx)
+	suppressions := &indexTerminalSuppression{}
+	defer suppressions.report()
+
 	now := h.currentDateTime.Now().Time()
 
 	h.deferredMu.Lock()
@@ -97,6 +103,12 @@ func (h *taskEventHandler) evalDeferredRespawns(ctx context.Context) error {
 		}
 		replay := replay // capture for closure
 		entry := replay.entry
+		// The vault has finished this task. Discard the entry rather than spawning
+		// or re-parking it; a missing client or failed read fails open.
+		if h.indexGateSuppresses(ctx, entry.task, suppressions) {
+			h.clearQueuedAtStampIfNotDeferred(entry.task.TaskIdentifier)
+			continue
+		}
 		outcome, err := h.spawnIfNeededClaimed(ctx, entry.task, &entry.config, &replay.claim)
 		spawned := outcome.spawned()
 		if err != nil {
@@ -295,6 +307,9 @@ func (h *taskEventHandler) seedDeferredRespawnsFromStore(ctx context.Context) {
 		}
 		phase := task.Frontmatter.Phase()
 		if phase != nil && IsTerminal(*phase) {
+			continue
+		}
+		if IsTerminalStatus(task.Frontmatter.Status()) {
 			continue
 		}
 		jobStartedAt, jobStartedErr := task.Frontmatter.JobStartedAt()

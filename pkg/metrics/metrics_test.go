@@ -182,7 +182,7 @@ var _ = Describe("Metrics", func() {
 		}
 	})
 
-	It("pre-initialises exactly the nine reconcile-refusal gates at zero", func() {
+	It("pre-initialises exactly the ten reconcile-refusal gates at zero", func() {
 		mfs, err := prometheus.DefaultGatherer.Gather()
 		Expect(err).NotTo(HaveOccurred())
 
@@ -197,6 +197,7 @@ var _ = Describe("Metrics", func() {
 			"terminal_phase",
 			"stage_mismatch",
 			"no_routing",
+			"index_terminal",
 			"type_mismatch",
 		))
 
@@ -211,6 +212,7 @@ var _ = Describe("Metrics", func() {
 			metrics.ReconcileRefusedGateTerminalPhase,
 			metrics.ReconcileRefusedGateStageMismatch,
 			metrics.ReconcileRefusedGateNoRouting,
+			metrics.ReconcileRefusedGateIndexTerminal,
 			metrics.ReconcileRefusedGateTypeMismatch,
 		} {
 			Expect(testutil.ToFloat64(
