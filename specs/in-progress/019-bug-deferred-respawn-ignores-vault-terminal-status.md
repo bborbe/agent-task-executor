@@ -1,8 +1,9 @@
 ---
-status: prompted
+status: verifying
 approved: "2026-10-29T23:20:13Z"
 generating: "2026-10-29T23:20:14Z"
 prompted: "2026-10-29T23:41:47Z"
+verifying: "2026-10-30T00:18:44Z"
 branch: dark-factory/bug-deferred-respawn-ignores-vault-terminal-status
 ---
 
