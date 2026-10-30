@@ -1,8 +1,13 @@
 ---
-status: approved
+status: completed
 spec: [019-bug-deferred-respawn-ignores-vault-terminal-status]
+summary: Gated the startup seed and deferred evaluation on terminal vault status so a finished task is never re-spawned, with fail-open reads and a per-pass index cache; added self-contained external and internal regression tests.
+execution_id: agent-task-executor-divergent-view-exec-050-spec-019-deferred-index-gate
+dark-factory-version: v0.198.7
 created: "2026-10-30T00:25:18Z"
 queued: "2026-10-29T23:48:40Z"
+started: "2026-10-29T23:56:55Z"
+completed: "2026-10-30T00:05:52Z"
 branch: dark-factory/bug-deferred-respawn-ignores-vault-terminal-status
 ---
 
