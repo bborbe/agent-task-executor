@@ -7,6 +7,7 @@ package spawner
 import (
 	"context"
 	"sort"
+	"sync"
 
 	"github.com/bborbe/errors"
 	k8s "github.com/bborbe/k8s"
@@ -16,6 +17,7 @@ import (
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/util/intstr"
+	kubernetes "k8s.io/client-go/kubernetes"
 
 	agentv1 "github.com/bborbe/agent-task-executor/k8s/apis/agent.benjamin-borbe.de/v1"
 	pkg "github.com/bborbe/agent-task-executor/pkg"
@@ -42,6 +44,37 @@ const serviceStorageSize = "1Gi"
 // the executor from spec.type rather than hand-written into the CR, so the type
 // stays the single source of truth.
 const agentTypeEnvKey = "AGENT_TYPE"
+
+// serviceConfigLabelKey marks a StatefulSet as this executor's for the named
+// Config, for the case a cross-namespace ownerRef cannot cover: a namespaced
+// owner that does not exist in the dependent's namespace is treated as absent,
+// and Kubernetes then garbage-collects the dependent.
+const serviceConfigLabelKey = "agent.benjamin-borbe.de/config-name"
+
+// serviceConfigUIDLabelKey carries the Config's UID beside its name, and the two
+// are checked together before anything is deleted.
+//
+// ⚠️ The name alone is not an identity. Two executors in one cluster may each run a
+// Config called `claude-interactive` — that dev/prod pairing is the reason this
+// feature exists — and a sweep that matched on name alone would have executor A
+// delete executor B's StatefulSet (and its PVC, via the Delete retention policy)
+// on every tick. A UID is unique per object per cluster, and two executors in
+// different clusters cannot see each other's StatefulSets, so the UID alone is
+// sufficient scope. No legacy fallback is needed: this label is introduced with
+// the feature itself and no deployed object carries it yet.
+const serviceConfigUIDLabelKey = "agent.benjamin-borbe.de/config-uid"
+
+// serviceExecutorLabelKey records which executor created a copy, as its control
+// namespace.
+//
+// ⚠️ The UID alone is not enough to make the reaper safe. A copy belonging to a
+// DIFFERENT executor carries that executor's Config UID, which is absent from this
+// executor's live list by definition — so a reaper matching on "labelled and not
+// live" would delete exactly the cross-tenant workload the ownership fix above
+// exists to protect. The reaper therefore only considers copies this executor
+// stamped, and the UID comparison is then meaningful: it distinguishes "my Config
+// still exists" from "my Config was deleted".
+const serviceExecutorLabelKey = "agent.benjamin-borbe.de/executor-namespace"
 
 // serviceReadinessPortName, serviceReadinessPort and serviceReadinessPath are the
 // contract between this reconciler and the service agent's own readiness endpoint:
@@ -75,8 +108,10 @@ type ServiceReconciler interface {
 		config agentv1.Config,
 		resolved pkg.AgentConfiguration,
 	) error
-	// UndeployService removes the StatefulSet a Config owns, in the reconciler's
-	// own namespace — but only if the executor actually owns it.
+	// UndeployService removes the StatefulSet a Config owns, in the Config's
+	// resolved namespace — but only if the executor actually owns it. It also
+	// sweeps every remaining namespace for copies this Config left behind when
+	// its serviceNamespace changed.
 	//
 	// The ownership check is not defensive decoration. The loop calls this for
 	// every Config that is not a service, and a StatefulSet's name here is just
@@ -87,20 +122,24 @@ type ServiceReconciler interface {
 	// Idempotent and honest: a missing StatefulSet is not an error (the ownerRef
 	// may already have collected it), and a StatefulSet this executor does not
 	// own is left untouched and reported as such, never as a removal.
-	UndeployService(ctx context.Context, name string) error
+	UndeployService(ctx context.Context, config agentv1.Config) error
+	// ReapOrphanedCopies deletes cross-namespace StatefulSets whose Config no longer
+	// exists, so deleting a CR does not leave a workload running forever with the
+	// Config's Secret and PVC. Called once per reconcile pass, not per Config.
+	ReapOrphanedCopies(ctx context.Context, configs []agentv1.Config)
 }
 
 // NewServiceReconciler returns a ServiceReconciler that deploys StatefulSets
 // through the given deployer.
 func NewServiceReconciler(
 	deployer k8s.StatefulSetDeployer,
-	statefulSets k8s.StatefulSetInterface,
+	kubeClient kubernetes.Interface,
 	namespace k8s.Namespace,
 	storageClass string,
 ) ServiceReconciler {
 	return &serviceReconciler{
 		deployer:     deployer,
-		statefulSets: statefulSets,
+		kubeClient:   kubeClient,
 		namespace:    namespace,
 		storageClass: storageClass,
 	}
@@ -108,9 +147,30 @@ func NewServiceReconciler(
 
 type serviceReconciler struct {
 	deployer     k8s.StatefulSetDeployer
-	statefulSets k8s.StatefulSetInterface
+	kubeClient   kubernetes.Interface
 	namespace    k8s.Namespace
 	storageClass string
+
+	// reapMu guards reapCandidates.
+	reapMu sync.Mutex
+	// reapCandidates holds the copies that looked orphaned on the PREVIOUS pass.
+	// A copy must look orphaned on two consecutive passes before it is deleted —
+	// see ReapOrphanedCopies for why one pass is not enough.
+	reapCandidates map[string]struct{}
+}
+
+// resolveServiceNamespace returns the namespace one Config's workload belongs in.
+// It reads the value from the Config rather than from the resolved settings, so
+// create and delete can never disagree about the namespace.
+func (r *serviceReconciler) resolveServiceNamespace(
+	ctx context.Context,
+	config agentv1.Config,
+) (k8s.Namespace, error) {
+	namespace, err := pkg.ResolveServiceNamespace(ctx, r.namespace, config.Spec.ServiceNamespace)
+	if err != nil {
+		return "", errors.Wrapf(ctx, err, "resolve service namespace for config %s", config.Name)
+	}
+	return namespace, nil
 }
 
 func (r *serviceReconciler) ReconcileService(
@@ -125,7 +185,12 @@ func (r *serviceReconciler) ReconcileService(
 		return nil
 	}
 
-	statefulSet, err := r.buildStatefulSet(ctx, config, resolved)
+	namespace, err := r.resolveServiceNamespace(ctx, config)
+	if err != nil {
+		return err
+	}
+
+	statefulSet, err := r.buildStatefulSet(ctx, config, resolved, namespace)
 	if err != nil {
 		return err
 	}
@@ -133,15 +198,54 @@ func (r *serviceReconciler) ReconcileService(
 		return errors.Wrapf(ctx, err, "deploy statefulset %s", statefulSet.Name)
 	}
 	glog.V(2).
-		Infof("reconciled service statefulset %s for assignee %s with image %s", statefulSet.Name, resolved.Assignee, resolved.Image)
+		Infof("reconciled service statefulset %s in namespace %s for assignee %s with image %s", statefulSet.Name, namespace, resolved.Assignee, resolved.Image)
+
+	// A namespace change creates the new workload above and leaves the old one
+	// running with the Config's Secret. Removing the previous copy is best-effort:
+	// the reconcile has already succeeded, and a refused cluster-wide list must not
+	// take a healthy service agent down.
+	r.removePreviousNamespaceCopies(ctx, config, namespace)
 	return nil
 }
 
 func (r *serviceReconciler) UndeployService(
 	ctx context.Context,
-	name string,
+	config agentv1.Config,
 ) error {
-	existing, err := r.statefulSets.Get(ctx, name, metav1.GetOptions{})
+	namespace, err := r.resolveServiceNamespace(ctx, config)
+	if err != nil {
+		// The loop calls this for EVERY non-service Config, and serviceNamespace is
+		// meaningless on a job Config. A job Config that happens to set it to the
+		// executor's own namespace would otherwise be reported as failed on every
+		// tick forever, and its sweep skipped with it. Nothing to undeploy is the
+		// honest reading: log it and clean up in the executor namespace, which is
+		// where a StatefulSet left over from a service→job edit would sit.
+		glog.V(2).Infof(
+			"event=service_undeploy_namespace_unresolved config=%s error=%v; using executor namespace",
+			config.Name,
+			err,
+		)
+		namespace = r.namespace
+	}
+	if err := r.undeployInNamespace(ctx, config, namespace); err != nil {
+		return err
+	}
+	// A Config that changed from service to job while clearing serviceNamespace
+	// resolves to the executor's own namespace, so a copy left in a sandbox
+	// namespace is unreachable by the lookup above. Sweep remaining namespaces too.
+	r.removePreviousNamespaceCopies(ctx, config, namespace)
+	return nil
+}
+
+// undeployInNamespace removes the StatefulSet this Config owns in one namespace.
+func (r *serviceReconciler) undeployInNamespace(
+	ctx context.Context,
+	config agentv1.Config,
+	namespace k8s.Namespace,
+) error {
+	existing, err := r.kubeClient.AppsV1().
+		StatefulSets(namespace.String()).
+		Get(ctx, config.Name, metav1.GetOptions{})
 	if err != nil {
 		if apierrors.IsNotFound(err) {
 			// Nothing to remove — the ownerRef may already have collected it, and
@@ -149,29 +253,238 @@ func (r *serviceReconciler) UndeployService(
 			// had a StatefulSet at all. Silent, and *not* reported as a removal.
 			return nil
 		}
-		return errors.Wrapf(ctx, err, "get statefulset %s", name)
+		return errors.Wrapf(ctx, err, "get statefulset %s", config.Name)
 	}
-	if !ownedByConfig(existing) {
+	if !ownedByConfig(existing, config) {
 		// Someone else's workload, sharing this Config's name. Leave it alone and
 		// say so — reporting it as a removal is how a no-op becomes a false alarm.
 		glog.V(2).
-			Infof("kept statefulset %s: not owned by a Config, refusing to undeploy", name)
+			Infof("kept statefulset %s: not owned by a Config, refusing to undeploy", config.Name)
 		return nil
 	}
-	if err := r.deployer.Undeploy(ctx, r.namespace, k8s.Name(name)); err != nil {
-		return errors.Wrapf(ctx, err, "undeploy statefulset %s", name)
+	if err := r.deployer.Undeploy(ctx, namespace, k8s.Name(config.Name)); err != nil {
+		return errors.Wrapf(ctx, err, "undeploy statefulset %s", config.Name)
 	}
-	glog.V(2).Infof("removed service statefulset %s", name)
+	glog.V(2).Infof("removed service statefulset %s in namespace %s", config.Name, namespace)
 	return nil
 }
 
-// ownedByConfig reports whether a StatefulSet was created by this executor for a
-// Config. buildStatefulSet sets the Config as the controller owner, so that
-// ownerRef is the executor's own mark: a StatefulSet without it belongs to
-// another chart in the namespace that happens to use the same name.
-func ownedByConfig(statefulSet *appsv1.StatefulSet) bool {
+// ReapOrphanedCopies deletes cross-namespace StatefulSets this executor created for
+// a Config that no longer exists.
+//
+// ⚠️ Without this, deleting a Config CR orphans its cross-namespace workload
+// permanently: such a copy carries no ownerRef (a namespaced owner that does not
+// exist in the dependent's namespace is treated as absent, and the garbage
+// collector then deletes the dependent), and the per-Config sweep is only reachable
+// through Configs still present in the provider list — so neither path runs once the
+// CR is gone. The workload keeps running with the Config's Secret env and its PVC.
+//
+// Two deliberate narrowings:
+//
+//   - Only objects with NO ownerRef are considered. Same-namespace copies have one,
+//     and the garbage collector is authoritative for those; reaping them here would
+//     let a momentarily stale Config list delete every live service agent.
+//   - The selector is the executor-namespace label, so only copies this executor
+//     stamped are listed at all; the per-item UID check is what decides liveness.
+//
+// Best-effort, like the sweep: a refused list or a failed delete is logged and never
+// fails the pass. A missing cluster-scoped grant must not take every service agent down.
+func (r *serviceReconciler) ReapOrphanedCopies(
+	ctx context.Context,
+	configs []agentv1.Config,
+) {
+	// ⚠️ A copy must look orphaned on TWO consecutive passes before it is deleted,
+	// and that is the whole of this function's safety.
+	//
+	// The list passed in comes from the plain Config store, which has no sync gate:
+	// `serviceReconcileLoop.Run` calls ReconcileOnce immediately and concurrently
+	// with the connector, so the first pass after every restart runs against a store
+	// that is empty or — worse — a strict subset, because client-go's `processDeltas`
+	// calls `OnAdd` once per object rather than handing the initial LIST over
+	// atomically. Inferring sync from a non-empty list is therefore wrong, and an
+	// earlier revision of this comment claimed exactly that.
+	//
+	// Requiring two passes is what makes a partial store harmless: a Config the
+	// informer has not delivered yet is missing for at most one pass, and one pass is
+	// a full reconcile interval (a minute by default) against a LIST of a handful of
+	// Configs that completes in milliseconds. A genuinely deleted Config is missing
+	// on every pass, so it is still reaped — one interval later.
+	//
+	// The cost of being wrong here is not downtime: buildStatefulSet sets
+	// `WhenDeleted: Delete`, so reaping a live copy destroys its session PVC.
+	if len(configs) == 0 {
+		glog.V(2).Infof("event=service_orphan_reap_skipped reason=empty_config_list")
+		r.setReapCandidates(nil)
+		return
+	}
+
+	live := make(map[string]struct{}, len(configs))
+	for _, config := range configs {
+		if uid := string(config.UID); uid != "" {
+			live[uid] = struct{}{}
+		}
+	}
+
+	list, err := r.kubeClient.AppsV1().StatefulSets("").List(ctx, metav1.ListOptions{
+		LabelSelector: serviceExecutorLabelKey + "=" + r.namespace.String(),
+	})
+	if err != nil {
+		glog.Errorf("event=service_orphan_reap_failed error=%v", err)
+		return
+	}
+	previous := r.reapCandidatesSnapshot()
+	current := make(map[string]struct{}, len(list.Items))
+	for i := range list.Items {
+		existing := &list.Items[i]
+		// Checked in code as well as in the selector: the selector is the server's
+		// job, and a client that ignores it (or an apiserver that answers more
+		// broadly) must not widen this delete to another executor's workload.
+		if existing.Labels[serviceExecutorLabelKey] != r.namespace.String() {
+			continue
+		}
+		if len(existing.OwnerReferences) > 0 {
+			continue
+		}
+		uid := existing.Labels[serviceConfigUIDLabelKey]
+		if uid == "" {
+			continue
+		}
+		if _, ok := live[uid]; ok {
+			continue
+		}
+		key := existing.Namespace + "/" + existing.Name
+		current[key] = struct{}{}
+		if _, seen := previous[key]; !seen {
+			// First sighting. Recorded, not acted on.
+			glog.V(2).Infof(
+				"event=service_orphan_reap_pending config=%s namespace=%s uid=%s",
+				existing.Labels[serviceConfigLabelKey],
+				existing.Namespace,
+				uid,
+			)
+			continue
+		}
+		previousNamespace := k8s.Namespace(existing.Namespace)
+		if err := r.deployer.Undeploy(ctx, previousNamespace, k8s.Name(existing.Name)); err != nil {
+			glog.Errorf(
+				"event=service_orphan_reap_delete_failed config=%s namespace=%s error=%v",
+				existing.Labels[serviceConfigLabelKey],
+				previousNamespace,
+				err,
+			)
+			continue
+		}
+		glog.V(2).Infof(
+			"event=service_orphan_reaped config=%s namespace=%s uid=%s",
+			existing.Labels[serviceConfigLabelKey],
+			previousNamespace,
+			uid,
+		)
+	}
+	r.setReapCandidates(current)
+}
+
+// setReapCandidates replaces the remembered candidate set for the next pass.
+func (r *serviceReconciler) setReapCandidates(candidates map[string]struct{}) {
+	r.reapMu.Lock()
+	defer r.reapMu.Unlock()
+	r.reapCandidates = candidates
+}
+
+// reapCandidatesSnapshot copies the remembered candidate set, so a caller can
+// compare against it without holding the lock across the delete calls.
+func (r *serviceReconciler) reapCandidatesSnapshot() map[string]struct{} {
+	r.reapMu.Lock()
+	defer r.reapMu.Unlock()
+	out := make(map[string]struct{}, len(r.reapCandidates))
+	for k := range r.reapCandidates {
+		out[k] = struct{}{}
+	}
+	return out
+}
+
+// removePreviousNamespaceCopies deletes StatefulSets this Config owns in any
+// namespace other than the resolved one. A namespace change creates the new copy
+// and, without this, leaves the previous one running with the Config's Secret.
+//
+// Best-effort by design: the workload has already been reconciled, so a refused
+// cluster-wide list (403) or a failed delete is logged and never fails the
+// reconcile. A missing cluster-scoped grant must not take every service agent down.
+func (r *serviceReconciler) removePreviousNamespaceCopies(
+	ctx context.Context,
+	config agentv1.Config,
+	resolvedNamespace k8s.Namespace,
+) {
+	// A field selector, not a label selector: the name is a field on every
+	// StatefulSet, so this stays correct for a copy written before the label pair
+	// existed, which a label selector would silently skip. Without it this is a
+	// full-cluster list per service Config per tick, deserialising every StatefulSet
+	// in the cluster for a sweep that is almost always a no-op.
+	list, err := r.kubeClient.AppsV1().StatefulSets("").List(ctx, metav1.ListOptions{
+		FieldSelector: "metadata.name=" + config.Name,
+	})
+	if err != nil {
+		glog.Errorf(
+			"event=service_namespace_sweep_failed config=%s error=%v",
+			config.Name,
+			err,
+		)
+		return
+	}
+	for i := range list.Items {
+		existing := &list.Items[i]
+		if existing.Name != config.Name {
+			continue
+		}
+		if existing.Namespace == resolvedNamespace.String() {
+			continue
+		}
+		if !ownedByConfig(existing, config) {
+			continue
+		}
+		previousNamespace := k8s.Namespace(existing.Namespace)
+		if err := r.deployer.Undeploy(ctx, previousNamespace, k8s.Name(existing.Name)); err != nil {
+			glog.Errorf(
+				"event=service_namespace_sweep_delete_failed config=%s namespace=%s error=%v",
+				config.Name,
+				previousNamespace,
+				err,
+			)
+			continue
+		}
+		glog.V(2).Infof(
+			"event=service_namespace_removed config=%s namespace=%s",
+			config.Name,
+			previousNamespace,
+		)
+	}
+}
+
+// ownedByConfig reports whether a StatefulSet was created by this executor for
+// this Config. Two marks are accepted because only one of them can exist in every
+// case: the controller ownerRef where the Config and the workload share a
+// namespace, and the label pair everywhere else. A StatefulSet with neither
+// belongs to another chart in the namespace that happens to use the same name.
+//
+// ⚠️ The label path requires BOTH the name and the UID. Matching the name alone
+// lets a same-named Config owned by a different executor read as this one's, which
+// is a cross-tenant delete rather than a tidiness bug — see serviceConfigUIDLabelKey.
+func ownedByConfig(statefulSet *appsv1.StatefulSet, config agentv1.Config) bool {
+	if statefulSet.Labels[serviceConfigLabelKey] == config.Name &&
+		string(config.UID) != "" &&
+		statefulSet.Labels[serviceConfigUIDLabelKey] == string(config.UID) {
+		return true
+	}
 	for _, owner := range statefulSet.OwnerReferences {
-		if owner.Kind == "Config" && owner.APIVersion == agentv1.SchemeGroupVersion.String() {
+		if owner.Kind == "Config" &&
+			owner.APIVersion == agentv1.SchemeGroupVersion.String() &&
+			owner.Name == config.Name &&
+			// No empty-UID arm: `metav1.NewControllerRef` copies the UID, and the API
+			// server requires `OwnerReference.uid`, so no StatefulSet this executor
+			// ever wrote carries a Config ownerRef without one. Accepting an empty
+			// UID would widen the check to any Config-kind reference with a matching
+			// name — the one half of the identity that cannot be forged.
+			string(owner.UID) == string(config.UID) {
 			return true
 		}
 	}
@@ -183,6 +496,7 @@ func (r *serviceReconciler) buildStatefulSet(
 	ctx context.Context,
 	config agentv1.Config,
 	resolved pkg.AgentConfiguration,
+	namespace k8s.Namespace,
 ) (*appsv1.StatefulSet, error) {
 	mountPath := resolved.VolumeMountPath
 	if mountPath == "" {
@@ -210,7 +524,7 @@ func (r *serviceReconciler) buildStatefulSet(
 
 	objectMetaBuilder := k8s.NewObjectMetaBuilder()
 	objectMetaBuilder.SetName(k8s.Name(config.Name))
-	objectMetaBuilder.SetNamespace(r.namespace)
+	objectMetaBuilder.SetNamespace(namespace)
 
 	statefulSetBuilder := k8s.NewStatefulSetBuilder()
 	statefulSetBuilder.SetObjectMetaBuilder(objectMetaBuilder)
@@ -226,6 +540,16 @@ func (r *serviceReconciler) buildStatefulSet(
 	if err != nil {
 		return nil, errors.Wrapf(ctx, err, "build statefulset for config %s", config.Name)
 	}
+
+	// The builder's AddLabel targets the pod template, so the markers the sweep
+	// reads must be set on the StatefulSet's own metadata. Both are needed: the name
+	// is what a human reads, the UID is what the ownership check trusts.
+	if statefulSet.Labels == nil {
+		statefulSet.Labels = map[string]string{}
+	}
+	statefulSet.Labels[serviceConfigLabelKey] = config.Name
+	statefulSet.Labels[serviceConfigUIDLabelKey] = string(config.UID)
+	statefulSet.Labels[serviceExecutorLabelKey] = r.namespace.String()
 
 	// An empty StorageClassName must become nil, not "".
 	//
@@ -252,8 +576,16 @@ func (r *serviceReconciler) buildStatefulSet(
 
 	// The Config owns the workload: deleting the CR garbage-collects the
 	// StatefulSet, which is SC4's "CR delete → cleanup" half.
-	statefulSet.OwnerReferences = []metav1.OwnerReference{
-		*metav1.NewControllerRef(&config, agentv1.SchemeGroupVersion.WithKind("Config")),
+	//
+	// Only when the two share a namespace. A namespaced owner that does not exist
+	// in the dependent's namespace is treated as absent, and the garbage collector
+	// then deletes the dependent — so stamping this reference onto a StatefulSet in
+	// another namespace would make the moved workload delete itself. Cross-namespace
+	// copies carry serviceConfigLabelKey instead and are collected by the sweep.
+	if statefulSet.Namespace == r.namespace.String() {
+		statefulSet.OwnerReferences = []metav1.OwnerReference{
+			*metav1.NewControllerRef(&config, agentv1.SchemeGroupVersion.WithKind("Config")),
+		}
 	}
 
 	// A StatefulSet's volumeClaimTemplates are RETAINED by default, so without
