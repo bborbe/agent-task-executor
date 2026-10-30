@@ -1681,6 +1681,30 @@ func (h *taskEventHandler) reconcileTask(
 	if skip {
 		return h.refuseReconcile(task, metrics.ReconcileRefusedGateUnresolvedConfig)
 	}
+	// Type gate — the floor's twin of parseAndFilter's check. The Kafka path has
+	// always refused a record whose task_type is absent or outside the Config's
+	// effective set, and published the failure onto the record; this floor did
+	// not, so the same record was refused there and spawned here. The Job started
+	// with an empty TASK_TYPE, the agent rejected it at startup, the pod exited 1
+	// in one second, and the dead Job then held the assignee's only concurrency
+	// slot for the full ttlSecondsAfterFinished (1800 s by default).
+	//
+	// The failure is published here for the same reason the Kafka path publishes
+	// it: that write clears the assignee and sets previous_assignee, which is what
+	// stops the record being re-candidated on every pass. Refusing without it
+	// would suppress the record forever with no record-level trace.
+	if mismatch := taskTypeMismatchReason(task, config); mismatch != "" {
+		if err := h.resultPublisher.PublishTypeMismatchFailure(ctx, task, mismatch); err != nil {
+			metrics.TaskEventsTotal.WithLabelValues("error").Inc()
+			return task, nil, false, errors.Wrapf(
+				ctx, err, "publish type mismatch failure for task %s", task.TaskIdentifier,
+			)
+		}
+		glog.V(2).Infof(
+			"event=reconcile_type_mismatch task=%s reason=%q", task.TaskIdentifier, mismatch,
+		)
+		return h.refuseReconcile(task, metrics.ReconcileRefusedGateTypeMismatch)
+	}
 	// A task whose status is terminal is never a candidate, even when a Config
 	// lists that status in trigger.statuses — the status-side twin of the
 	// terminal-phase gate below, and unconditional for the same reason.

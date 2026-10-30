@@ -176,8 +176,14 @@ const (
 	// ReconcileRefusedGateIndexTerminal means the vault index reports the task's
 	// state as terminal. It is the gather-stage gate: applied once the filter has
 	// returned the task eligible, and again in the deferred-respawn evaluation. It
-	// is not one of those eight reconcileTask applies.
+	// is not one of the gates reconcileTask applies.
 	ReconcileRefusedGateIndexTerminal = "index_terminal"
+	// ReconcileRefusedGateTypeMismatch means the task's task_type is absent or
+	// outside the resolved Config's effective type set. It mirrors
+	// parseAndFilter's type gate on the Kafka path, which the reconcile floor
+	// did not apply — so a record with no task_type was refused there and
+	// spawned here.
+	ReconcileRefusedGateTypeMismatch = "type_mismatch"
 )
 
 // ReconcileRefusedTotal counts spawn refusals by the eligibility gate that
@@ -186,7 +192,7 @@ const (
 // Before this counter six of the then-existing eight returned silently, so a
 // refused record was indistinguishable from one that was never in the candidate
 // set at all. The gate label is a closed compile-time domain — never a task id,
-// cluster, stage or assignee — so all nine series are pre-initialised at zero and
+// cluster, stage or assignee — so all ten series are pre-initialised at zero and
 // a `rate(...) == 0` read on any one gate is honest rather than empty.
 var ReconcileRefusedTotal = promauto.NewCounterVec(
 	prometheus.CounterOpts{
@@ -352,6 +358,27 @@ func seedDeferredAndRefusalOutcomes() {
 	TaskEventsTotal.WithLabelValues("event_refusal_write_failed").Add(0)
 }
 
+// initReconcileRefusedGateSeries pre-initialises the closed reconcile-refusal
+// gate set: the gate vocabulary is fixed at compile time, so every gate can be
+// registered before the first refusal and an absent series never masquerades as
+// a healthy zero.
+func initReconcileRefusedGateSeries() {
+	for _, gate := range []string{
+		ReconcileRefusedGateForeignCluster,
+		ReconcileRefusedGateUnresolvedConfig,
+		ReconcileRefusedGateTerminalStatus,
+		ReconcileRefusedGateStatusNotTriggered,
+		ReconcileRefusedGatePhaseNotTriggered,
+		ReconcileRefusedGateTerminalPhase,
+		ReconcileRefusedGateStageMismatch,
+		ReconcileRefusedGateNoRouting,
+		ReconcileRefusedGateIndexTerminal,
+		ReconcileRefusedGateTypeMismatch,
+	} {
+		ReconcileRefusedTotal.WithLabelValues(gate).Add(0)
+	}
+}
+
 func init() {
 	// Only the fixed sentinel is seeded. The namespace vocabulary is unbounded, so
 	// seeding it is not possible — but a CounterVec with no series registers no
@@ -406,22 +433,7 @@ func init() {
 	for _, result := range []string{"ok", "mismatch", "absent", "read_error"} {
 		ViewDivergenceTotal.WithLabelValues(result).Add(0)
 	}
-	// Pre-initialise the closed reconcile-refusal gate set: the gate vocabulary
-	// is fixed at compile time, so every gate can be registered before the first
-	// refusal and an absent series never masquerades as a healthy zero.
-	for _, gate := range []string{
-		ReconcileRefusedGateForeignCluster,
-		ReconcileRefusedGateUnresolvedConfig,
-		ReconcileRefusedGateTerminalStatus,
-		ReconcileRefusedGateStatusNotTriggered,
-		ReconcileRefusedGatePhaseNotTriggered,
-		ReconcileRefusedGateTerminalPhase,
-		ReconcileRefusedGateStageMismatch,
-		ReconcileRefusedGateNoRouting,
-		ReconcileRefusedGateIndexTerminal,
-	} {
-		ReconcileRefusedTotal.WithLabelValues(gate).Add(0)
-	}
+	initReconcileRefusedGateSeries()
 	// Pre-initialise the closed abort vocabulary so both series are visible
 	// before any abort. Unlike RedriveCappedTotal, whose labels are unbounded.
 	for _, reason := range []string{
