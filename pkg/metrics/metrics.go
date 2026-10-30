@@ -171,6 +171,12 @@ const (
 	// ReconcileRefusedGateNoRouting means the task carries neither an assignee
 	// nor a declared task_type.
 	ReconcileRefusedGateNoRouting = "no_routing"
+	// ReconcileRefusedGateTypeMismatch means the task's task_type is absent or
+	// outside the resolved Config's effective type set. It mirrors
+	// parseAndFilter's type gate on the Kafka path, which the reconcile floor
+	// did not apply — so a record with no task_type was refused there and
+	// spawned here.
+	ReconcileRefusedGateTypeMismatch = "type_mismatch"
 )
 
 // ReconcileRefusedTotal counts reconcile-floor refusals by the eligibility gate
@@ -411,6 +417,7 @@ func init() {
 		ReconcileRefusedGateTerminalPhase,
 		ReconcileRefusedGateStageMismatch,
 		ReconcileRefusedGateNoRouting,
+		ReconcileRefusedGateTypeMismatch,
 	} {
 		ReconcileRefusedTotal.WithLabelValues(gate).Add(0)
 	}
