@@ -1,10 +1,14 @@
 # Parameterized BuildKit build Job.
 #
-# Rendered by hack/build-cluster.sh, which is called from
-# `make build BUILD_TARGET=<kubectl-context>`; never applied by hand.
+# Rendered and applied by the release-to-image dispatcher when this repo is
+# released. Unlike the sibling repos this file was copied from, this repo has
+# no `hack/build-cluster.sh` and no `BUILD_TARGET` arm in `Makefile.docker`:
+# `make build` here still builds locally with plain `docker build`. Never
+# applied by hand.
 #
-# This file lives outside k8s/ on purpose: k8s/Makefile applies every *.yaml
-# under k8s/, so a template kept there would be adopted as deploy state.
+# This file lives outside k8s/ on purpose: everything under k8s/ is deploy
+# state reached through `make apply`, so a template kept there would be adopted
+# as such.
 #
 # Template tokens:
 #   __JOB_NAME__           Job name, derived from __TAG__ and sanitized for DNS
