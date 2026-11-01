@@ -2,6 +2,10 @@
 
 All notable changes to this project will be documented in this file.
 
+## Unreleased
+
+- fix: **the executor now applies its container memory limit to the Go runtime, so a 256Mi limit stops OOM-killing a ~108MiB live heap.** `GOGC` defaults to 100, so the heap may grow to twice the live set before a collection is forced — and the runtime was never told the cgroup limit. `agent-task-executor-openclaw` on nuke prod therefore targeted ~216MiB against a 256Mi container limit and died `OOMKilled` (`exit=137`) on every cold start, 10 times in 48h. `pkg/memlimit` reads `/sys/fs/cgroup/memory.max` (v2) or `memory.limit_in_bytes` (v1) at startup and calls `debug.SetMemoryLimit` at 85% of it, leaving headroom for non-heap; an explicit `GOMEMLIMIT` wins, and a missing or unlimited file leaves the runtime default untouched. It runs as `Run`'s first statement, not in `main()`, because glog is not initialised until `service.Main` has parsed its flags — logging from `main()` makes glog fatal on a log file it has no directory for (caught on the nuke dev canary: `exitCode 2`, `CrashLoopBackOff`). Also serves `/debug/pprof` on the existing cluster-internal listener: `/gc` proves whether memory is *reclaimable*, never which types *retain* it. Measured on nuke dev at `tasks=28319 retained_bodies=4860` — `(*taskView).ConsumeMessage` holds 83.6% of the 74.56MB live heap (`reflect.mapassign_faststr0` 26.5MB, `encoding/json/v2.makeString` 25.5MB), so the retention rule is bounded and inside its ≤30% gate. **`limits.memory` is unchanged:** the live heap fits, the ceiling was never the defect.
+
 ## v0.50.4
 
 - chore: **`.maintainer.yaml` opts the repo into release-triggered image builds.** Adds `dockerBuild: {autoBuild: true, destinations: [dockerhub]}` — the per-repo consent flag the `maintainerconfig` schema (`bborbe/maintainer#96`, merged 2026-10-30) gates a release-triggered builder on. Consent only: nothing consumes `autoBuild` yet, so this change publishes no image by itself. No repo secret and no CI build — the intended push credential is the in-cluster `buildkit-push` secret.

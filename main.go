@@ -6,6 +6,8 @@ package main
 
 import (
 	"context"
+	"net/http"
+	"net/http/pprof"
 	"net/url"
 	"os"
 	"regexp"
@@ -34,6 +36,7 @@ import (
 	"github.com/bborbe/agent-task-executor/pkg/claim"
 	"github.com/bborbe/agent-task-executor/pkg/factory"
 	"github.com/bborbe/agent-task-executor/pkg/handler"
+	"github.com/bborbe/agent-task-executor/pkg/memlimit"
 	"github.com/bborbe/agent-task-executor/pkg/probe"
 )
 
@@ -243,6 +246,12 @@ func (a *application) validateClaimTransport(
 
 //nolint:funlen // Initialization sequence; wiring is linear with no branching.
 func (a *application) Run(ctx context.Context, sentryClient libsentry.Client) error {
+	// Apply the container's memory ceiling before anything meaningful allocates,
+	// so the runtime's GC target is set against the limit the pod actually has
+	// rather than GOGC's 2x-live default. It must run here, not in main(): glog
+	// is not initialised until service.Main has parsed its flags, and logging
+	// before that makes glog fatal on a log file it has no directory for.
+	memlimit.ApplyFromCgroup()
 	if err := a.validate(ctx); err != nil {
 		return err
 	}
@@ -476,6 +485,36 @@ func (a *application) Run(ctx context.Context, sentryClient libsentry.Client) er
 	return service.Run(ctx, runFuncs...)
 }
 
+// pprofHandler returns the /debug/pprof surface, or nil when no auth secret is
+// configured.
+//
+// The listener it would share with /metrics and /gc is unauthenticated, and the
+// agent namespace carries no NetworkPolicy, so any pod in the cluster can reach
+// it. A heap profile discloses far more than a metric: the sampled objects carry
+// the task bodies the view retains. Refusing to mount the routes without a
+// secret is the safe default — an operator who wants to profile a deployment
+// sets AGENTS_AUTH_SECRET, the same credential /agents already uses.
+func pprofHandler(authSecret string) http.Handler {
+	if authSecret == "" {
+		return nil
+	}
+	// A private mux rather than http.DefaultServeMux: the profiles then exist
+	// only on this listener, and only behind the check below.
+	mux := http.NewServeMux()
+	mux.HandleFunc("/debug/pprof/", pprof.Index)
+	mux.HandleFunc("/debug/pprof/cmdline", pprof.Cmdline)
+	mux.HandleFunc("/debug/pprof/profile", pprof.Profile)
+	mux.HandleFunc("/debug/pprof/symbol", pprof.Symbol)
+	mux.HandleFunc("/debug/pprof/trace", pprof.Trace)
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Header.Get("X-Agent-Auth") != authSecret {
+			w.WriteHeader(http.StatusUnauthorized)
+			return
+		}
+		mux.ServeHTTP(w, r)
+	})
+}
+
 func (a *application) createHTTPServer(
 	configProvider pkg.EventHandlerConfig,
 	runner probe.HealthcheckRunner,
@@ -488,6 +527,15 @@ func (a *application) createHTTPServer(
 		router.Path("/setloglevel/{level}").
 			Handler(log.NewSetLoglevelHandler(ctx, log.NewLogLevelSetter(2, 5*time.Minute)))
 		router.Path("/gc").Handler(libhttp.NewGarbageCollectorHandler())
+		// /debug/pprof shares the cluster-internal listener with /metrics and /gc.
+		// It is the only way to ask the running process which types hold its live
+		// heap: /gc proves whether memory is reclaimable, never what is retained.
+		// pprof.Index is mounted explicitly rather than serving DefaultServeMux, so
+		// the profiles exist only on this listener and nowhere a blank import would
+		// have registered them (gosec G108).
+		if pprofHandler := pprofHandler(os.Getenv("AGENTS_AUTH_SECRET")); pprofHandler != nil {
+			router.PathPrefix("/debug/pprof/").Handler(pprofHandler)
+		}
 
 		router.Path("/agents").
 			Handler(handler.NewAgentsHandler(configProvider, os.Getenv("AGENTS_AUTH_SECRET")))
