@@ -1,14 +1,13 @@
 ---
-status: failed
+status: completed
 spec: [020-executor-config-accepted]
 execution_id: agent-task-executor-config-accepted-exec-054-spec-020-refresh-counter
 dark-factory-version: v0.198.7
 created: "2026-11-01T18:24:00Z"
 queued: "2026-11-01T20:36:38Z"
 started: "2026-11-01T20:52:38Z"
-completed: "2026-11-01T20:55:44Z"
+completed: "2026-11-01T21:00:30Z"
 branch: dark-factory/executor-config-accepted
-lastFailReason: 'execute prompt: docker run failed: wait command: exit status 137'
 ---
 
 # Count the accepted-set refresh by result, seeded at zero
