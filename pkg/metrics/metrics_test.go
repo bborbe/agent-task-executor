@@ -222,6 +222,67 @@ var _ = Describe("Metrics", func() {
 		}
 	})
 
+	It("registers executor_config_accepted with exactly the three join labels and value 1", func() {
+		// The family does not exist until a series is set, so seed one and
+		// remove it again — this spec owns the family shape, not the published
+		// tuples (the handler fixtures own those).
+		metrics.ConfigAccepted.WithLabelValues("execution", "github-update-go", "cfgtest").Set(1)
+		defer metrics.ConfigAccepted.DeleteLabelValues(
+			"execution", "github-update-go", "cfgtest",
+		)
+
+		mfs, err := prometheus.DefaultGatherer.Gather()
+		Expect(err).NotTo(HaveOccurred())
+
+		for _, mf := range mfs {
+			if mf.GetName() != "executor_config_accepted" {
+				continue
+			}
+			Expect(mf.GetHelp()).NotTo(BeEmpty())
+			Expect(mf.GetMetric()).To(HaveLen(1))
+
+			labelNames := make([]string, 0, len(mf.GetMetric()[0].GetLabel()))
+			for _, lp := range mf.GetMetric()[0].GetLabel() {
+				labelNames = append(labelNames, lp.GetName())
+			}
+			Expect(labelNames).To(ConsistOf("phase", "task_type", "vault"))
+			Expect(mf.GetMetric()[0].GetGauge().GetValue()).To(Equal(float64(1)))
+			return
+		}
+		Fail("executor_config_accepted not registered")
+	})
+
+	It("registers no total-suffixed variant of the accepted gauge", func() {
+		metrics.ConfigAccepted.WithLabelValues("execution", "github-update-go", "cfgtest").Set(1)
+		metrics.ConfigAccepted.DeleteLabelValues("execution", "github-update-go", "cfgtest")
+
+		mfs, err := prometheus.DefaultGatherer.Gather()
+		Expect(err).NotTo(HaveOccurred())
+
+		names := make(map[string]bool, len(mfs))
+		for _, mf := range mfs {
+			names[mf.GetName()] = true
+		}
+		// Built by concatenation: the absence assertion must not itself
+		// introduce the forbidden name into a grep of the tree.
+		Expect(names).NotTo(HaveKey("executor_config_accepted" + "_total"))
+	})
+
+	It("pre-initialises both accepted-refresh results at zero", func() {
+		mfs, err := prometheus.DefaultGatherer.Gather()
+		Expect(err).NotTo(HaveOccurred())
+
+		Expect(
+			gatherLabels(mfs, "executor_config_accepted_refresh_total", "result"),
+		).To(ConsistOf("ok", "read_error"))
+
+		for _, result := range []string{"ok", "read_error"} {
+			Expect(testutil.ToFloat64(
+				metrics.ConfigAcceptedRefreshTotal.WithLabelValues(result),
+			)).To(Equal(float64(0)), "result=%s", result)
+		}
+	})
+
 	It("labels the redrive-cap counter with task_type then phase", func() {
 		// The touch is required: this vec is deliberately not pre-initialised,
 		// so it emits no metric family until a label pair is observed. The two

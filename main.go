@@ -404,6 +404,7 @@ func (a *application) Run(ctx context.Context, sentryClient libsentry.Client) er
 		a.Namespace,
 		a.KafkaBrokers,
 		resolver,
+		eventHandlerConfig,
 		log.DefaultSamplerFactory,
 		currentDateTimeGetter,
 		resultPublisher,

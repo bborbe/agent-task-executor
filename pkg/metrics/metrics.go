@@ -124,6 +124,42 @@ var ReconcilePassesTotal = promauto.NewCounterVec(
 	[]string{"result"},
 )
 
+// ConfigAccepted is the set of (phase, task_type) pairs this executor's agent
+// Config CRs currently accept, one series per pair with value 1, tagged with
+// the publishing executor's task vault.
+//
+// It is a gauge, not a counter: it describes current state. It is the
+// right-hand side of the cross-repo `unreachable-phase` join — the controller
+// publishes agent_controller_open_tasks on the same three labels and subtracts
+// this side with `unless on (phase, task_type)`. The label names are frozen by
+// that merged rule, and the metric name carries no `_total`.
+//
+// Never call Reset() on it. A reset-then-set refresh leaves a window in which
+// the family is empty, and under `unless` an empty right side returns every
+// open record — the exact false all-records alert this metric exists to
+// prevent. Removed pairs are deleted by label values instead.
+var ConfigAccepted = promauto.NewGaugeVec(
+	prometheus.GaugeOpts{
+		Name: "executor_config_accepted",
+		Help: "Accepted (phase, task_type) pairs per vault, value 1 per pair; the right-hand side of the unreachable-phase join.",
+	},
+	[]string{"phase", "task_type", "vault"},
+)
+
+// ConfigAcceptedRefreshTotal counts accepted-set refreshes by result. The
+// result set is closed at compile time — `ok` and `read_error` — so both
+// series are seeded in init(): without the seed a refresh that never ran is
+// indistinguishable from one that ran and found nothing changed, and only the
+// first of those is a fault. Deliberately carries no pair labels: this
+// counter answers "did the refresh run", not "what did it publish".
+var ConfigAcceptedRefreshTotal = promauto.NewCounterVec(
+	prometheus.CounterOpts{
+		Name: "executor_config_accepted_refresh_total",
+		Help: "Total number of accepted-set refreshes by result (ok, read_error).",
+	},
+	[]string{"result"},
+)
+
 // ViewDivergenceTotal counts reconcile-pass view/vault divergence checks by
 // result. The result set is closed at compile time: `ok` and `read_error`
 // increment once per pass that reaches the check, `mismatch` and `absent`
@@ -435,6 +471,11 @@ func init() {
 		ViewDivergenceTotal.WithLabelValues(result).Add(0)
 	}
 	initReconcileRefusedGateSeries()
+	// Pre-initialise the closed refresh result set so `rate(...) == 0` can fire on
+	// a refresh that never ran, rather than skipping silently on an absent series.
+	for _, result := range []string{"ok", "read_error"} {
+		ConfigAcceptedRefreshTotal.WithLabelValues(result).Add(0)
+	}
 	// Pre-initialise the closed abort vocabulary so both series are visible
 	// before any abort. Unlike RedriveCappedTotal, whose labels are unbounded.
 	for _, reason := range []string{
