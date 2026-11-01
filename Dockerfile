@@ -5,6 +5,11 @@ ARG BUILD_GIT_COMMIT=none
 ARG BUILD_DATE=unknown
 COPY . /workspace
 WORKDIR /workspace
+# vendor/ is gitignored and never committed, so a clean checkout has none. The
+# local path vendors on the host first (Makefile.docker: check-go-mod), but an
+# in-cluster build clones the bare repo and runs this Dockerfile directly, so
+# the vendoring has to happen here or `-mod=vendor` fails on a clean tree.
+RUN go mod vendor
 RUN CGO_ENABLED=0 GOOS=linux go build -trimpath -mod=vendor -ldflags "-s" -a -installsuffix cgo -o /main
 CMD ["/bin/bash"]
 
