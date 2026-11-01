@@ -6,6 +6,8 @@ package main
 
 import (
 	"context"
+	"net/http"
+	_ "net/http/pprof"
 	"net/url"
 	"os"
 	"regexp"
@@ -34,10 +36,15 @@ import (
 	"github.com/bborbe/agent-task-executor/pkg/claim"
 	"github.com/bborbe/agent-task-executor/pkg/factory"
 	"github.com/bborbe/agent-task-executor/pkg/handler"
+	"github.com/bborbe/agent-task-executor/pkg/memlimit"
 	"github.com/bborbe/agent-task-executor/pkg/probe"
 )
 
 func main() {
+	// Apply the container's memory ceiling before anything allocates, so the
+	// runtime's GC target is set against the limit the pod actually has rather
+	// than GOGC's 2x-live default.
+	memlimit.ApplyFromCgroup()
 	app := &application{}
 	os.Exit(service.Main(context.Background(), app, &app.SentryDSN, &app.SentryProxy))
 }
@@ -488,6 +495,10 @@ func (a *application) createHTTPServer(
 		router.Path("/setloglevel/{level}").
 			Handler(log.NewSetLoglevelHandler(ctx, log.NewLogLevelSetter(2, 5*time.Minute)))
 		router.Path("/gc").Handler(libhttp.NewGarbageCollectorHandler())
+		// /debug/pprof shares the cluster-internal listener with /metrics and /gc.
+		// It is the only way to ask the running process which types hold its live
+		// heap: /gc proves whether memory is reclaimable, never what is retained.
+		router.PathPrefix("/debug/pprof/").Handler(http.DefaultServeMux)
 
 		router.Path("/agents").
 			Handler(handler.NewAgentsHandler(configProvider, os.Getenv("AGENTS_AUTH_SECRET")))
