@@ -192,6 +192,34 @@ func CreateClaimClientFactory(
 	}
 }
 
+// CreateJobSpawner returns the K8s Job spawner every consumer and reconcile
+// loop dispatches through. It carries no logic beyond construction.
+func CreateJobSpawner(
+	kubeClient kubernetes.Interface,
+	namespace libk8s.Namespace,
+	kafkaBrokers string,
+	branch base.Branch,
+	topicPrefix base.TopicPrefix,
+	currentDateTimeGetter libtime.CurrentDateTimeGetter,
+	jobTTLSecondsAfterFinished int32,
+	jobKafkaClientCertSecret string,
+	jobKafkaCaCertSecret string,
+	jobFsGroup int64,
+) spawner.JobSpawner {
+	return spawner.NewJobSpawner(
+		kubeClient,
+		namespace,
+		kafkaBrokers,
+		string(branch),
+		string(topicPrefix),
+		currentDateTimeGetter,
+		jobTTLSecondsAfterFinished,
+		jobKafkaClientCertSecret,
+		jobKafkaCaCertSecret,
+		jobFsGroup,
+	)
+}
+
 // CreateConsumer wires together all components and returns a Kafka Consumer that
 // reads task events and spawns K8s Jobs for qualifying tasks, along with the
 // TaskEventHandler so callers can wire RunDeferredRespawnLoop.
@@ -199,14 +227,14 @@ func CreateConsumer(
 	saramaClient sarama.Client,
 	branch base.Branch,
 	cluster string,
-	stageFilter bool,
-	runUntagged bool,
+	stageFilter, runUntagged bool,
 	consumerGroup string,
 	topicPrefix base.TopicPrefix,
 	kubeClient kubernetes.Interface,
 	namespace libk8s.Namespace,
 	kafkaBrokers string,
 	resolver pkg.ConfigResolver,
+	configProvider libk8s.Provider[agentv1.Config],
 	logSamplerFactory log.SamplerFactory,
 	currentDateTimeGetter libtime.CurrentDateTimeGetter,
 	resultPublisher pkg.ResultPublisher,
@@ -220,16 +248,15 @@ func CreateConsumer(
 	vaultAliases []string,
 	reconcilePassTimeout time.Duration,
 	reconcileInterval time.Duration,
-	claimMode pkg.ClaimMode,
-	claimRefClientFactory pkg.ClaimRefClientFactory,
+	claimMode pkg.ClaimMode, claimRefClientFactory pkg.ClaimRefClientFactory,
 	claimClientFactory pkg.ClaimClientFactory, vaultIndexClient claim.VaultAPIIndexClient,
 ) (libkafka.Consumer, handler.ClaimLifecycleEventHandler) {
-	jobSpawner := spawner.NewJobSpawner(
+	jobSpawner := CreateJobSpawner(
 		kubeClient,
 		namespace,
 		kafkaBrokers,
-		string(branch),
-		string(topicPrefix),
+		branch,
+		topicPrefix,
 		currentDateTimeGetter,
 		jobTTLSecondsAfterFinished,
 		jobKafkaClientCertSecret,
@@ -254,6 +281,7 @@ func CreateConsumer(
 		claimMode,
 		claimRefClientFactory,
 		handler.WithClaimClientFactory(claimClientFactory),
+		handler.WithConfigProvider(configProvider),
 		handler.WithVaultAPIIndexClient(vaultIndexClient),
 		handler.WithVaultAliases(vaultAliases),
 		handler.WithPodQuotaLimiter(spawner.NewPodQuotaLimiter(kubeClient, currentDateTimeGetter)),

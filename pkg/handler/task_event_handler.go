@@ -22,6 +22,7 @@ import (
 	"github.com/bborbe/vault-cli/pkg/domain"
 	"github.com/golang/glog"
 
+	agentv1 "github.com/bborbe/agent-task-executor/k8s/apis/agent.benjamin-borbe.de/v1"
 	pkg "github.com/bborbe/agent-task-executor/pkg"
 	"github.com/bborbe/agent-task-executor/pkg/claim"
 	"github.com/bborbe/agent-task-executor/pkg/metrics"
@@ -235,6 +236,7 @@ func NewTaskEventHandler(
 		spawnLocks:              make(map[string]*sync.Mutex),
 		view:                    view,
 		vaultMatcher:            NewVaultMatcher(taskVault, nil),
+		configAcceptedPairs:     make(map[configAcceptedPair]struct{}),
 		reconcilePassTimeout:    reconcilePassTimeout,
 		reconcileInterval:       reconcileInterval,
 		claimMode:               claimMode,
@@ -274,11 +276,20 @@ type taskEventHandler struct {
 	// SUCCESSFUL vault write can update; a task whose file is gone never updates
 	// either, so without this map it re-stamps on every deferral, forever.
 	// Guarded by deferredMu.
-	queuedAtStamps        map[lib.TaskIdentifier]string
-	spawnLocksMu          sync.Mutex
-	spawnLocks            map[string]*sync.Mutex
-	view                  TaskView
-	vaultMatcher          VaultMatcher
+	queuedAtStamps map[lib.TaskIdentifier]string
+	spawnLocksMu   sync.Mutex
+	spawnLocks     map[string]*sync.Mutex
+	view           TaskView
+	vaultMatcher   VaultMatcher
+	// configProvider is the Config store the accepted-set refresh reads. It is the
+	// same provider the resolver reads; nil skips the refresh, which is the shape
+	// of every test that does not assert the metric.
+	configProvider libk8s.Provider[agentv1.Config]
+	// configAcceptedMu guards configAcceptedPairs: the pairs published by the last
+	// successful refresh, so a pair no Config accepts any more is deleted by label
+	// values rather than by resetting the family.
+	configAcceptedMu      sync.Mutex
+	configAcceptedPairs   map[configAcceptedPair]struct{}
 	reconcilePassTimeout  time.Duration
 	reconcileInterval     time.Duration
 	claimMode             pkg.ClaimMode
@@ -1245,6 +1256,14 @@ func (h *taskEventHandler) ReconcileOnce(ctx context.Context) error {
 	// deadline bounds the per-task Job lookups and spawns that follow.
 	passCtx, cancel := context.WithTimeout(ctx, h.reconcilePassTimeout)
 	defer cancel()
+
+	// The accepted-pair set is published before every early return below. A view
+	// that is not ready, an unstamped snapshot or a mismatched vault are
+	// independent of which pairs the Configs accept, and the consumer needs the
+	// second fact regardless of the first.
+	if err := h.refreshConfigAccepted(passCtx); err != nil {
+		glog.Warningf("event=config_accepted_refresh_failed err=%v", err)
+	}
 
 	// One `list jobs` per assignee for the whole pass, instead of two per task.
 	// Scoped to passCtx so the event path never reads a frozen snapshot.

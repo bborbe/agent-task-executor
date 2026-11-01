@@ -124,6 +124,28 @@ var ReconcilePassesTotal = promauto.NewCounterVec(
 	[]string{"result"},
 )
 
+// ConfigAccepted is the set of (phase, task_type) pairs this executor's agent
+// Config CRs currently accept, one series per pair with value 1, tagged with
+// the publishing executor's task vault.
+//
+// It is a gauge, not a counter: it describes current state. It is the
+// right-hand side of the cross-repo `unreachable-phase` join — the controller
+// publishes agent_controller_open_tasks on the same three labels and subtracts
+// this side with `unless on (phase, task_type)`. The label names are frozen by
+// that merged rule, and the metric name carries no `_total`.
+//
+// Never call Reset() on it. A reset-then-set refresh leaves a window in which
+// the family is empty, and under `unless` an empty right side returns every
+// open record — the exact false all-records alert this metric exists to
+// prevent. Removed pairs are deleted by label values instead.
+var ConfigAccepted = promauto.NewGaugeVec(
+	prometheus.GaugeOpts{
+		Name: "executor_config_accepted",
+		Help: "Accepted (phase, task_type) pairs per vault, value 1 per pair; the right-hand side of the unreachable-phase join.",
+	},
+	[]string{"phase", "task_type", "vault"},
+)
+
 // ViewDivergenceTotal counts reconcile-pass view/vault divergence checks by
 // result. The result set is closed at compile time: `ok` and `read_error`
 // increment once per pass that reaches the check, `mismatch` and `absent`

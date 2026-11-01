@@ -5,6 +5,9 @@
 package handler
 
 import (
+	libk8s "github.com/bborbe/k8s"
+
+	agentv1 "github.com/bborbe/agent-task-executor/k8s/apis/agent.benjamin-borbe.de/v1"
 	pkg "github.com/bborbe/agent-task-executor/pkg"
 	"github.com/bborbe/agent-task-executor/pkg/claim"
 	"github.com/bborbe/agent-task-executor/pkg/spawner"
@@ -59,6 +62,14 @@ func WithVaultAliases(aliases []string) HandlerOption {
 func WithVaultAPIIndexClient(client claim.VaultAPIIndexClient) HandlerOption {
 	return func(h *taskEventHandler) {
 		h.vaultIndexClient = client
+	}
+}
+
+// WithConfigProvider supplies the Config store the accepted-set metric reads.
+// Nil (the default) skips the refresh.
+func WithConfigProvider(provider libk8s.Provider[agentv1.Config]) HandlerOption {
+	return func(h *taskEventHandler) {
+		h.configProvider = provider
 	}
 }
 

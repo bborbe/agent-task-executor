@@ -41,7 +41,14 @@ func runApply(
 }
 
 // assertApply checks the limit handed to the runtime and the paths read.
-func assertApply(t *testing.T, fs *fakeFS, got []int64, wantSet bool, wantLimit int64, wantRead []string) {
+func assertApply(
+	t *testing.T,
+	fs *fakeFS,
+	got []int64,
+	wantSet bool,
+	wantLimit int64,
+	wantRead []string,
+) {
 	t.Helper()
 	if wantSet {
 		if len(got) != 1 || got[0] != wantLimit {
