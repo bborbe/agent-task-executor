@@ -2,7 +2,7 @@
 
 All notable changes to this project will be documented in this file.
 
-## Unreleased
+## v0.52.0
 
 - feat: **`hack/build-job.yaml` plus a module-mode Dockerfile make this repo buildable by the release-triggered dispatcher.** The release-to-image dispatcher renders the manifest and applies it at the release tag; a target repo without `hack/build-job.yaml` is skipped with `reason=no_build_manifest`, so the `dockerBuild: {autoBuild: true, destinations: [dockerhub]}` consent added in v0.50.4 could never have fired. The manifest is the same one `bborbe/go-skeleton` and `bborbe/agent-claude` publish through — repo-agnostic, with only `__TOKEN__` placeholders filled at render time; the header comment is reworded to describe this repo's path, and that is the only divergence.
   - **The image now builds in module mode and downloads its own dependencies.** `vendor/` is gitignored and never committed, so a bare clone has none, and the previous `-mod=vendor` build could only work when something vendored first — `make build` did it on the host via `check-go-mod`, which an in-cluster build never runs. The Dockerfile now does `COPY go.mod go.sum` → `go mod download` → `COPY . .` → `go build`, with the module and build caches as BuildKit cache mounts, and `Makefile.docker` no longer vendors on the host: leaving that in place would put a `vendor/` in the build context that Go then selects automatically, recreating the local/cluster divergence. Proven by building the branch from a **fresh clone** with no `vendor/` — the exact clean-clone condition the dispatcher creates. No secret and no CI build: the push credential is the in-cluster `buildkit-push` secret mounted by the rendered Job.
