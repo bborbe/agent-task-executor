@@ -7,6 +7,11 @@ package main
 import (
 	"context"
 	"net/http"
+	// #nosec G108 -- /debug/pprof is served on the cluster-internal listener
+	// beside /metrics and /gc, which is the same exposure class and never
+	// published through an ingress. It is the only way to ask the running
+	// process which types retain its live heap; /gc proves only whether memory
+	// is reclaimable.
 	_ "net/http/pprof"
 	"net/url"
 	"os"
