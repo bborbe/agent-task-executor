@@ -2,7 +2,7 @@
 
 All notable changes to this project will be documented in this file.
 
-## Unreleased
+## v0.52.0
 
 - feat: **`hack/build-job.yaml` plus in-Dockerfile vendoring make this repo buildable by the release-triggered dispatcher.** The release-to-image dispatcher renders the manifest and applies it at the release tag; a target repo without `hack/build-job.yaml` is skipped with `reason=no_build_manifest`, so the `dockerBuild: {autoBuild: true, destinations: [dockerhub]}` consent added in v0.50.4 could never have fired. The manifest is the same one `bborbe/go-skeleton` and `bborbe/agent-claude` publish through — repo-agnostic, with only `__TOKEN__` placeholders filled at render time; the two header comments that described those repos' `build-cluster.sh` path are reworded to describe this repo's, and that is the only divergence.
   - **The manifest alone was not enough, and the omission would have failed the build rather than the review.** `vendor/` is gitignored and never committed, and the Dockerfile builds `-mod=vendor`; `make build` only works because `Makefile.docker:check-go-mod` vendors on the host first. An in-cluster build clones the bare repo and runs the Dockerfile directly, so the vendoring now happens inside the build stage (`RUN go mod vendor` before the `go build`). Verified by building from this worktree with no `vendor/` present — the exact clean-tree condition — which now succeeds and produces the image; before the change that same tree fails at `go build -mod=vendor`. No secret and no CI build: the push credential is the in-cluster `buildkit-push` secret mounted by the rendered Job.
