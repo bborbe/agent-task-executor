@@ -2,7 +2,7 @@
 
 All notable changes to this project will be documented in this file.
 
-## Unreleased
+## v0.50.4
 
 - chore: **`.maintainer.yaml` opts the repo into release-triggered image builds.** Adds `dockerBuild: {autoBuild: true, destinations: [dockerhub]}` — the per-repo consent flag the `maintainerconfig` schema (`bborbe/maintainer#96`, merged 2026-10-30) gates a release-triggered builder on. Consent only: nothing consumes `autoBuild` yet, so this change publishes no image by itself. No repo secret and no CI build — the intended push credential is the in-cluster `buildkit-push` secret.
 
