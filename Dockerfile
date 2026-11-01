@@ -3,14 +3,18 @@ FROM ${DOCKER_REGISTRY}/golang:1.27.3 AS build
 ARG BUILD_GIT_VERSION=dev
 ARG BUILD_GIT_COMMIT=none
 ARG BUILD_DATE=unknown
-COPY . /workspace
 WORKDIR /workspace
-# vendor/ is gitignored and never committed, so a clean checkout has none. The
-# local path vendors on the host first (Makefile.docker: check-go-mod), but an
-# in-cluster build clones the bare repo and runs this Dockerfile directly, so
-# the vendoring has to happen here or `-mod=vendor` fails on a clean tree.
-RUN go mod vendor
-RUN CGO_ENABLED=0 GOOS=linux go build -trimpath -mod=vendor -ldflags "-s" -a -installsuffix cgo -o /main
+# Module mode, no vendoring. vendor/ is gitignored, so a bare clone has none and
+# any vendor-based build fails there; downloading into a cache layer removes that
+# failure class instead of working around it. The dependency fetch is its own
+# layer so a source-only change does not re-download, and the build stage mounts
+# the same module cache.
+COPY go.mod go.sum ./
+RUN --mount=type=cache,target=/go/pkg/mod go mod download
+COPY . .
+RUN --mount=type=cache,target=/go/pkg/mod \
+    --mount=type=cache,target=/root/.cache/go-build \
+    CGO_ENABLED=0 GOOS=linux go build -trimpath -ldflags "-s" -a -installsuffix cgo -o /main
 CMD ["/bin/bash"]
 
 FROM ${DOCKER_REGISTRY}/alpine:3.24 AS alpine
