@@ -43,12 +43,29 @@ var cgroupLimitPaths = []string{
 // or unlimited cgroup file leaves the runtime's own default in place, so the
 // function never lowers a limit it could not read.
 func ApplyFromCgroup() {
-	if env := strings.TrimSpace(os.Getenv("GOMEMLIMIT")); env != "" {
+	apply(
+		os.Getenv("GOMEMLIMIT"),
+		cgroupLimitPaths,
+		os.ReadFile,
+		func(soft int64) { debug.SetMemoryLimit(soft) },
+	)
+}
+
+// apply is ApplyFromCgroup with its three inputs injected, so every branch is
+// reachable from a test without touching the real cgroup filesystem or the
+// process's own memory limit.
+func apply(
+	goMemLimitEnv string,
+	paths []string,
+	readFile func(string) ([]byte, error),
+	setLimit func(int64),
+) {
+	if env := strings.TrimSpace(goMemLimitEnv); env != "" {
 		glog.Infof("event=memory_limit source=env GOMEMLIMIT=%s", env)
 		return
 	}
-	for _, path := range cgroupLimitPaths {
-		raw, err := os.ReadFile(path)
+	for _, path := range paths {
+		raw, err := readFile(path)
 		if err != nil {
 			continue
 		}
@@ -57,7 +74,7 @@ func ApplyFromCgroup() {
 			continue
 		}
 		soft := int64(float64(limit) * softLimitRatio)
-		debug.SetMemoryLimit(soft)
+		setLimit(soft)
 		glog.Infof(
 			"event=memory_limit source=%s cgroup_bytes=%d soft_limit_bytes=%d",
 			path,
