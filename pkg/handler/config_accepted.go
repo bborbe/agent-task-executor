@@ -51,9 +51,11 @@ func (h *taskEventHandler) refreshConfigAccepted(ctx context.Context) error {
 	}
 	items, err := h.configProvider.Get(ctx)
 	if err != nil {
+		metrics.ConfigAcceptedRefreshTotal.WithLabelValues("read_error").Inc()
 		return errors.Wrapf(ctx, err, "list agent configs for accepted set")
 	}
 	if err := ctx.Err(); err != nil {
+		metrics.ConfigAcceptedRefreshTotal.WithLabelValues("read_error").Inc()
 		return errors.Wrapf(ctx, err, "refresh accepted config set cancelled")
 	}
 	pairs := configAcceptedPairs(items)
@@ -73,6 +75,8 @@ func (h *taskEventHandler) refreshConfigAccepted(ctx context.Context) error {
 		deleted++
 	}
 	h.configAcceptedPairs = pairs
+
+	metrics.ConfigAcceptedRefreshTotal.WithLabelValues("ok").Inc()
 
 	glog.Infof(
 		"event=config_accepted_refreshed configs=%d pairs=%d deleted=%d",

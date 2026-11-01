@@ -146,6 +146,20 @@ var ConfigAccepted = promauto.NewGaugeVec(
 	[]string{"phase", "task_type", "vault"},
 )
 
+// ConfigAcceptedRefreshTotal counts accepted-set refreshes by result. The
+// result set is closed at compile time — `ok` and `read_error` — so both
+// series are seeded in init(): without the seed a refresh that never ran is
+// indistinguishable from one that ran and found nothing changed, and only the
+// first of those is a fault. Deliberately carries no pair labels: this
+// counter answers "did the refresh run", not "what did it publish".
+var ConfigAcceptedRefreshTotal = promauto.NewCounterVec(
+	prometheus.CounterOpts{
+		Name: "executor_config_accepted_refresh_total",
+		Help: "Total number of accepted-set refreshes by result (ok, read_error).",
+	},
+	[]string{"result"},
+)
+
 // ViewDivergenceTotal counts reconcile-pass view/vault divergence checks by
 // result. The result set is closed at compile time: `ok` and `read_error`
 // increment once per pass that reaches the check, `mismatch` and `absent`
@@ -457,6 +471,11 @@ func init() {
 		ViewDivergenceTotal.WithLabelValues(result).Add(0)
 	}
 	initReconcileRefusedGateSeries()
+	// Pre-initialise the closed refresh result set so `rate(...) == 0` can fire on
+	// a refresh that never ran, rather than skipping silently on an absent series.
+	for _, result := range []string{"ok", "read_error"} {
+		ConfigAcceptedRefreshTotal.WithLabelValues(result).Add(0)
+	}
 	// Pre-initialise the closed abort vocabulary so both series are visible
 	// before any abort. Unlike RedriveCappedTotal, whose labels are unbounded.
 	for _, reason := range []string{
