@@ -369,7 +369,10 @@ func configSpecProperties() map[string]apiextensionsv1.JSONSchemaProps {
 		"configMapItems":     configMapItemsSchema(),
 		"priorityClassName":  {Type: "string", Pattern: crdDNS1123Label},
 		"jobNamespace":       {Type: "string", Pattern: crdDNS1123Label, MaxLength: &crdMaxNameLen},
-		"imagePullSecret":    {Type: "string"},
+		// Empty means the executor's own namespace; a value equal to the executor's
+		// own namespace is rejected at reconcile time.
+		"serviceNamespace": {Type: "string", Pattern: crdDNS1123Label, MaxLength: &crdMaxNameLen},
+		"imagePullSecret":  {Type: "string"},
 		// 0 = unlimited (see AgentConfiguration.MaxConcurrentJobs).
 		"maxConcurrentJobs": {Type: "integer", Minimum: &crdMinZero},
 		// Optional; unset means false. true re-dispatches a taken-over task;

@@ -5,12 +5,40 @@
 package pkg_test
 
 import (
+	"testing"
+
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 
 	agentv1 "github.com/bborbe/agent-task-executor/k8s/apis/agent.benjamin-borbe.de/v1"
 	"github.com/bborbe/agent-task-executor/pkg"
 )
+
+// TestTaggedConfigurationsCarriesServiceNamespace pins the field's survival
+// through TaggedConfigurations, which copies every field explicitly: an omitted
+// field is silently dropped on that path.
+func TestTaggedConfigurationsCarriesServiceNamespace(t *testing.T) {
+	configs := pkg.AgentConfigurations{
+		{
+			Assignee:         "claude",
+			Image:            "foo/bar",
+			ServiceNamespace: "agent-sandbox",
+		},
+		{
+			Assignee: "unset",
+			Image:    "foo/bar",
+		},
+	}
+
+	tagged := configs.TaggedConfigurations("dev")
+
+	if got := tagged[0].ServiceNamespace; got != "agent-sandbox" {
+		t.Fatalf("expected ServiceNamespace %q, got %q", "agent-sandbox", got)
+	}
+	if got := tagged[1].ServiceNamespace; got != "" {
+		t.Fatalf("expected empty ServiceNamespace, got %q", got)
+	}
+}
 
 // The Ginkgo suite entry-point (TestPkg) lives in suite_test.go — the
 // package-conventional *_suite_test.go location.

@@ -7,7 +7,6 @@ package pkg
 import (
 	"context"
 
-	"github.com/bborbe/errors"
 	libk8s "github.com/bborbe/k8s"
 )
 
@@ -21,15 +20,5 @@ func ResolveJobNamespace(
 	executorNamespace libk8s.Namespace,
 	jobNamespace string,
 ) (libk8s.Namespace, error) {
-	if jobNamespace == "" {
-		return executorNamespace, nil
-	}
-	if jobNamespace == executorNamespace.String() {
-		return "", errors.Errorf(
-			ctx,
-			"jobNamespace %q may not equal the executor namespace",
-			jobNamespace,
-		)
-	}
-	return libk8s.Namespace(jobNamespace), nil
+	return resolveNamespaceOutsideExecutor(ctx, executorNamespace, jobNamespace, "jobNamespace")
 }
