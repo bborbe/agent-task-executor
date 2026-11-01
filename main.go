@@ -6,13 +6,7 @@ package main
 
 import (
 	"context"
-	"net/http"
-	// #nosec G108 -- /debug/pprof is served on the cluster-internal listener
-	// beside /metrics and /gc, which is the same exposure class and never
-	// published through an ingress. It is the only way to ask the running
-	// process which types retain its live heap; /gc proves only whether memory
-	// is reclaimable.
-	_ "net/http/pprof"
+	"net/http/pprof"
 	"net/url"
 	"os"
 	"regexp"
@@ -505,7 +499,10 @@ func (a *application) createHTTPServer(
 		// /debug/pprof shares the cluster-internal listener with /metrics and /gc.
 		// It is the only way to ask the running process which types hold its live
 		// heap: /gc proves whether memory is reclaimable, never what is retained.
-		router.PathPrefix("/debug/pprof/").Handler(http.DefaultServeMux)
+		// pprof.Index is mounted explicitly rather than serving DefaultServeMux, so
+		// the profiles exist only on this listener and nowhere a blank import would
+		// have registered them (gosec G108).
+		router.PathPrefix("/debug/pprof/").HandlerFunc(pprof.Index)
 
 		router.Path("/agents").
 			Handler(handler.NewAgentsHandler(configProvider, os.Getenv("AGENTS_AUTH_SECRET")))
