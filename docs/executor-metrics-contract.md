@@ -90,7 +90,24 @@ narrows the set to one instance's Configs.
   accepted.
 - **A genuinely empty set is truthful.** When every Config is gone the family
   may empty. That is a real "no Config accepts anything" reading, not a
-  refresh failure, and it is the one legitimate empty.
+  refresh failure.
+- ⚠️ **The second empty is not truthful, and it is bounded by one reconcile
+  interval.** `k8s.NewEventHandler` backs the provider with an in-memory map
+  that starts empty, and `Get` returns that map with a **nil error** rather
+  than blocking on `HasSynced`. A pod's first pass can therefore run before
+  the Config informer has populated the store, read an empty list as a
+  successful read, and publish nothing. The family is empty for up to one
+  reconcile interval (60 s default) after a pod starts, and the refresh counts
+  it as `result="ok"` — correctly, because nothing failed. Two things keep
+  this from firing the alert: a restarting pod's registry is fresh, so there
+  are no prior series for the window to blank, and the rule's `for: 1h`
+  exceeds one reconcile interval by an order of magnitude. ⚠️ **That makes
+  `for:` load-bearing, not cosmetic:** shortening it below the reconcile
+  interval would turn every rollout into a false all-records page. The
+  alternative repair — waiting for informer sync before the first refresh, or
+  driving the refresh from the informer's own events — is deliberately not
+  taken here; it would put the metric's liveness behind a second readiness
+  condition for a window the alert already absorbs.
 
 ## Refresh counter
 
