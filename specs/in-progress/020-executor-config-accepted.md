@@ -1,8 +1,9 @@
 ---
-status: prompted
+status: verifying
 approved: "2026-11-01T16:13:03Z"
 generating: "2026-11-01T18:18:29Z"
 prompted: "2026-11-01T18:30:35Z"
+verifying: "2026-11-01T21:11:26Z"
 branch: dark-factory/executor-config-accepted
 ---
 
