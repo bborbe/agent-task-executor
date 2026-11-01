@@ -1,8 +1,13 @@
 ---
-status: approved
+status: completed
 spec: [020-executor-config-accepted]
+summary: Proved the accepted-set metric contract with metrics/handler fixtures, documented the cross-repo join, and merged the two changelog bullets into one.
+execution_id: agent-task-executor-config-accepted-exec-055-spec-020-tests-and-contract
+dark-factory-version: v0.198.7
 created: "2026-11-01T18:24:00Z"
 queued: "2026-11-01T20:36:40Z"
+started: "2026-11-01T21:00:31Z"
+completed: "2026-11-01T21:11:26Z"
 branch: dark-factory/executor-config-accepted
 ---
 
