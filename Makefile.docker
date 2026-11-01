@@ -1,7 +1,7 @@
 DIRS += $(shell find */* -maxdepth 0 -name Makefile -exec dirname "{}" \;)
 
 .PHONY: build
-build: check-version-tag check-go-mod
+build: check-version-tag
 	@if [ -z "$(VERSION)" ]; then echo "ERROR: no VERSION set and no git tag found — set VERSION=vX.Y.Z or create a tag" >&2; exit 1; fi
 	DOCKER_BUILDKIT=1 \
 	docker build \
@@ -32,14 +32,10 @@ check-version-tag:
 		fi; \
 	fi
 
-.PHONY: check-go-mod
-check-go-mod:
-	@if [ -f "go.mod" ]; then \
-		echo "go.mod found, running go mod vendor..."; \
-		go mod vendor; \
-	else \
-		echo "go.mod not found, skipping go mod vendor."; \
-	fi
+# No host-side `go mod vendor`: the image builds in module mode and downloads its
+# own dependencies (see Dockerfile). Vendoring on the host would leave a vendor/
+# that `COPY . .` picks up, and Go then selects vendor mode automatically — which
+# is exactly the local/cluster divergence this repo no longer has.
 
 .PHONY: upload
 upload:
