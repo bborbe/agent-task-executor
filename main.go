@@ -503,6 +503,14 @@ func (a *application) createHTTPServer(
 		// the profiles exist only on this listener and nowhere a blank import would
 		// have registered them (gosec G108).
 		router.PathPrefix("/debug/pprof/").HandlerFunc(pprof.Index)
+		// Index serves /debug/pprof/ and the named profiles (heap, goroutine,
+		// allocs, …), but the blank import also registered these four separately.
+		// Mount them too, so the surface matches what /debug/pprof/ documents
+		// rather than silently 404-ing the CPU profile and the symbol lookup.
+		router.Path("/debug/pprof/cmdline").HandlerFunc(pprof.Cmdline)
+		router.Path("/debug/pprof/profile").HandlerFunc(pprof.Profile)
+		router.Path("/debug/pprof/symbol").HandlerFunc(pprof.Symbol)
+		router.Path("/debug/pprof/trace").HandlerFunc(pprof.Trace)
 
 		router.Path("/agents").
 			Handler(handler.NewAgentsHandler(configProvider, os.Getenv("AGENTS_AUTH_SECRET")))
