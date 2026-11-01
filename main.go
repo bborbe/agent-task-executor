@@ -41,10 +41,6 @@ import (
 )
 
 func main() {
-	// Apply the container's memory ceiling before anything allocates, so the
-	// runtime's GC target is set against the limit the pod actually has rather
-	// than GOGC's 2x-live default.
-	memlimit.ApplyFromCgroup()
 	app := &application{}
 	os.Exit(service.Main(context.Background(), app, &app.SentryDSN, &app.SentryProxy))
 }
@@ -250,6 +246,12 @@ func (a *application) validateClaimTransport(
 
 //nolint:funlen // Initialization sequence; wiring is linear with no branching.
 func (a *application) Run(ctx context.Context, sentryClient libsentry.Client) error {
+	// Apply the container's memory ceiling before anything meaningful allocates,
+	// so the runtime's GC target is set against the limit the pod actually has
+	// rather than GOGC's 2x-live default. It must run here, not in main(): glog
+	// is not initialised until service.Main has parsed its flags, and logging
+	// before that makes glog fatal on a log file it has no directory for.
+	memlimit.ApplyFromCgroup()
 	if err := a.validate(ctx); err != nil {
 		return err
 	}
