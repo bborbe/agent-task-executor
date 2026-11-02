@@ -2,7 +2,7 @@
 
 All notable changes to this project will be documented in this file.
 
-## Unreleased
+## v0.55.0
 
 - feat: build on a cluster with `BUILD_TARGET=<cluster>` (nukedev/sun/nukeprod) via `hack/build-cluster.sh`; the default local arm is unchanged. The existing dispatcher-consumed `hack/build-job.yaml` is kept and now also passes `DOCKER_REGISTRY`, `BUILD_GIT_COMMIT` and `BUILD_DATE` as build args.
 
