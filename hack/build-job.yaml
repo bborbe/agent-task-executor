@@ -1,10 +1,9 @@
 # Parameterized BuildKit build Job.
 #
 # Rendered and applied by the release-to-image dispatcher when this repo is
-# released. Unlike the sibling repos this file was copied from, this repo has
-# no `hack/build-cluster.sh` and no `BUILD_TARGET` arm in `Makefile.docker`:
-# `make build` here still builds locally with plain `docker build`. Never
-# applied by hand.
+# released, and by `hack/build-cluster.sh` when `make build` runs with a
+# BUILD_TARGET other than `local`. The default local arm does not use it:
+# `make build` with no BUILD_TARGET still builds with plain `docker build`.
 #
 # This file lives outside k8s/ on purpose: everything under k8s/ is deploy
 # state reached through `make apply`, so a template kept there would be adopted
@@ -46,6 +45,7 @@ spec:
         app.kubernetes.io/version: "__TAG__"
     spec:
       restartPolicy: Never
+      automountServiceAccountToken: false
       initContainers:
         - name: clone
           image: alpine/git:v2.54.0@sha256:e8ceedc73bd80992ae8d58a7d24c58b8322146c354f1d2e81a97db4452068ec0
@@ -58,6 +58,8 @@ spec:
               git -C /src fetch -q --depth=1 --tags origin "$2"
               git -C /src checkout -q --detach FETCH_HEAD
               git -C /src log -1 --format=%ct > /meta/source-date-epoch
+              git -C /src log -1 --format=%cI > /meta/source-date-iso
+              git -C /src rev-parse --short HEAD > /meta/git-commit
               git -C /src describe --tags --always --dirty > /meta/git-version
               echo "cloned $1 at $2: $(git -C /src rev-parse HEAD) epoch=$(cat /meta/source-date-epoch) version=$(cat /meta/git-version)"
             - clone
@@ -70,10 +72,14 @@ spec:
               value: safe.directory
             - name: GIT_CONFIG_VALUE_0
               value: /src
+          # Memory requests are deliberately small: the build node runs at ~98%
+          # of its request capacity, and a pod asking for a GiB of scheduling
+          # headroom to do a few hundred MiB of work never schedules there.
+          # The limits are the real constraint; a request is only a hint.
           resources:
             requests:
               cpu: 100m
-              memory: 256Mi
+              memory: 64Mi
             limits:
               cpu: "1"
               memory: 1Gi
@@ -102,6 +108,9 @@ spec:
                 --opt platform=linux/amd64 \
                 --opt build-arg:SOURCE_DATE_EPOCH=__SOURCE_DATE_EPOCH__ \
                 --opt build-arg:BUILD_GIT_VERSION="$(cat /meta/git-version)" \
+                --opt build-arg:BUILD_GIT_COMMIT="$(cat /meta/git-commit)" \
+                --opt build-arg:BUILD_DATE="$(cat /meta/source-date-iso)" \
+                --opt build-arg:DOCKER_REGISTRY=docker.io \
                 --metadata-file /meta/metadata.json \
                 --output type=image,name=__IMAGE__:__TAG__,push=__PUSH__,rewrite-timestamp=true
               cat /meta/metadata.json
@@ -120,7 +129,7 @@ spec:
           resources:
             requests:
               cpu: 500m
-              memory: 1Gi
+              memory: 256Mi
             limits:
               cpu: "2"
               memory: 4Gi
