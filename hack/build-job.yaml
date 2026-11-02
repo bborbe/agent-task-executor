@@ -73,10 +73,14 @@ spec:
               value: safe.directory
             - name: GIT_CONFIG_VALUE_0
               value: /src
+          # Memory requests are deliberately small: the build node runs at ~98%
+          # of its request capacity, and a pod asking for a GiB of scheduling
+          # headroom to do a few hundred MiB of work never schedules there.
+          # The limits are the real constraint; a request is only a hint.
           resources:
             requests:
               cpu: 100m
-              memory: 256Mi
+              memory: 64Mi
             limits:
               cpu: "1"
               memory: 1Gi
@@ -126,7 +130,7 @@ spec:
           resources:
             requests:
               cpu: 500m
-              memory: 1Gi
+              memory: 256Mi
             limits:
               cpu: "2"
               memory: 4Gi
