@@ -1,10 +1,9 @@
 # Parameterized BuildKit build Job.
 #
 # Rendered and applied by the release-to-image dispatcher when this repo is
-# released. Unlike the sibling repos this file was copied from, this repo has
-# no `hack/build-cluster.sh` and no `BUILD_TARGET` arm in `Makefile.docker`:
-# `make build` here still builds locally with plain `docker build`. Never
-# applied by hand.
+# released, and by `hack/build-cluster.sh` when `make build` runs with a
+# BUILD_TARGET other than `local`. The default local arm does not use it:
+# `make build` with no BUILD_TARGET still builds with plain `docker build`.
 #
 # This file lives outside k8s/ on purpose: everything under k8s/ is deploy
 # state reached through `make apply`, so a template kept there would be adopted
