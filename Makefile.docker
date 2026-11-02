@@ -72,6 +72,8 @@ endif
 upload:
 ifeq ($(BUILD_TARGET),local)
 	docker push $(DOCKER_REGISTRY)/$(IMAGE):$(VERSION)
+else
+	@echo "upload: nothing to do — the cluster arm already pushed $(DOCKER_REGISTRY)/$(IMAGE):$(VERSION)"
 endif
 
 .PHONY: clean
@@ -81,6 +83,8 @@ ifeq ($(BUILD_TARGET),local)
 	docker image prune -f || true
 	docker builder prune --all -f || true
 	rm -rf vendor
+else
+	@echo "clean: nothing to do — the cluster arm leaves nothing on this host"
 endif
 
 .PHONY: apply

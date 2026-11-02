@@ -1,9 +1,8 @@
 #!/usr/bin/env bash
 # Resolves BUILD_TARGET into the kubeconfig file and kubectl context that
 # `kubectl` actually needs, and provides the kc() helper every call goes
-# through. Sourced by hack/build-cluster.sh (per-build Job runner) and
-# hack/build-cluster-bootstrap.sh (cluster prerequisites) so the mapping
-# cannot drift between the two.
+# through. Sourced by hack/build-cluster.sh; keeping the mapping here rather
+# than inline means any future caller shares it instead of restating it.
 #
 # Defines variables and a function only: no `set -euo pipefail`, no `exit`,
 # no output. The sourcing script owns all of that.
