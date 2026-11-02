@@ -130,18 +130,39 @@ sed \
 # may hardcode `namespace:` instead of carrying the token, and polling the
 # requested NAMESPACE would then watch a namespace the Job was never created in
 # until the deadline expired.
-rendered_namespace="$(sed -n 's/^[[:space:]]*namespace:[[:space:]]*//p' "${rendered}" | head -1)"
-[ -n "${rendered_namespace}" ] || die "rendered manifest has no metadata.namespace"
+#
+# Anchored to the metadata block and stopped at the first match: an unanchored
+# pattern would take a nested `namespace:` (a RoleBinding, a second document) as
+# metadata, and `sed | head -1` can die on SIGPIPE once a second match exists.
+rendered_namespace="$(awk '
+	/^metadata:/ { in_meta = 1; next }
+	in_meta && /^[^[:space:]]/ { exit }
+	in_meta && /^[[:space:]]*namespace:/ {
+		sub(/^[[:space:]]*namespace:[[:space:]]*/, "")
+		print
+		exit
+	}
+' "${rendered}")"
+printf '%s' "${rendered_namespace}" | grep -qE '^[a-z0-9]([-a-z0-9]*[a-z0-9])?$' ||
+	die "rendered manifest has no valid metadata.namespace (got '${rendered_namespace}')"
 NAMESPACE="${rendered_namespace}"
 
-# A kubectl failure must not read as "no such Job": under `set -o pipefail` the
-# pipeline below reports an RBAC denial, a missing namespace and a bad context
-# identically to an absent object, and the script would go on to apply.
-if existing="$(kc -n "${NAMESPACE}" get job "${JOB_NAME}" --ignore-not-found -o name 2>&1)"; then
+# A kubectl failure must not read as "no such Job": an RBAC denial, a missing
+# namespace and a bad context otherwise look exactly like an absent object, and
+# the script would go on to apply.
+#
+# stdout is the existence signal and stderr is the diagnostic, kept apart: a
+# warning on a *successful* `get` — kubectl prints a client/server version-skew
+# warning on every server-contacting command — must not be read as an existing
+# Job, or a healthy cluster refuses every build with a false message.
+kubectl_err="$(mktemp)"
+trap 'rm -f "${rendered}" "${kubectl_err}"' EXIT
+if existing="$(kc -n "${NAMESPACE}" get job "${JOB_NAME}" --ignore-not-found -o name 2>"${kubectl_err}")"; then
 	[ -z "${existing}" ] || die "job ${NAMESPACE}/${JOB_NAME} already exists; delete it with: ${KUBE_HINT} -n ${NAMESPACE} delete job ${JOB_NAME}"
 else
-	die "cannot read job ${NAMESPACE}/${JOB_NAME}: ${existing}"
+	die "cannot read job ${NAMESPACE}/${JOB_NAME}: $(cat "${kubectl_err}")"
 fi
+rm -f "${kubectl_err}"
 
 if ! kc apply -f "${rendered}"; then
 	echo "build-cluster: job ${NAMESPACE}/${JOB_NAME} was not accepted; events:" >&2
