@@ -127,6 +127,11 @@ spec:
               value: "--oci-worker-no-process-sandbox"
             - name: DOCKER_CONFIG
               value: "/docker-config"
+          # Unconfined here is deliberate and is NOT an oversight left over from
+          # the init containers above: rootless buildkitd with
+          # --oci-worker-no-process-sandbox needs both profiles relaxed to run
+          # nested containers. Tightening them breaks every build; the
+          # unprivileged uid and the dropped capabilities are the boundary.
           securityContext:
             runAsUser: 1000
             runAsGroup: 1000
