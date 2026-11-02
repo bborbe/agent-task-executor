@@ -29,9 +29,20 @@ ifeq ($(BUILD_TARGET),local)
 	-t $(DOCKER_REGISTRY)/$(IMAGE):$(VERSION) \
 	-f Dockerfile .
 else
-# The cluster arm publishes at VERSION. VERSION has no default here beyond the
-# latest tag; pass a scratch tag explicitly:
+# The cluster arm publishes at VERSION and cannot use check-version-tag: that
+# guard compares the local HEAD's tag, which is meaningless when the Job clones
+# an arbitrary REF. It would also silently pass a VERSION that is merely the
+# Makefile's default — `git describe --tags $(git rev-list --tags --max-count=1)`
+# resolves to the newest release tag, so a bare `make build BUILD_TARGET=sun`
+# would push over that released image. Require the caller to name the tag:
 #   make build BUILD_TARGET=<cluster> REF=<sha> VERSION=<tag>
+	@if [ "$(origin VERSION)" = "file" ] && [ -z "$(ALLOW_DEFAULT_VERSION)" ]; then \
+		echo "ERROR: the cluster arm needs an explicit VERSION." >&2; \
+		echo "  VERSION was defaulted to $(VERSION), which is the newest release tag." >&2; \
+		echo "  Building over it would replace a released image." >&2; \
+		echo "  Pass VERSION=<scratch-tag>, or set ALLOW_DEFAULT_VERSION=1 to build the default deliberately." >&2; \
+		exit 1; \
+	fi
 	BUILD_TARGET='$(BUILD_TARGET)' \
 	REPO_URL='$(BUILD_REPO_URL)' \
 	REF='$(REF)' \
