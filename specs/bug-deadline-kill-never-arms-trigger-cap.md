@@ -20,6 +20,19 @@ The operator-visible cost is two-fold: cluster slots are consumed by Jobs that c
 
 A Job that dies on its deadline without ever scheduling counts toward the trigger cap. After the third such failure the record carries `max_triggers: 3`, the controller clears the `assignee`, and the task stops re-queuing on its own. A Job that ran and then hit its deadline, and any recurring task, behave exactly as they do today.
 
+## Non-goals
+
+- **Arming on the store-miss path.** `taskFromFailedJob` marks `max_triggers` present-but-nil precisely so that path never overwrites an operator budget; changing that sentinel is a separate spec with its own regression risk.
+- **The zombie sweeper's `pod_not_scheduled` classification.** It is unreachable for a Job that reaches its deadline (see Reproduction), so this spec neither relies on it nor removes it.
+- **A new `ZombieReason` value.** The class is discriminated at the arm gate; the published reason stays `deadline_exceeded`.
+- **Raising `activeDeadlineSeconds` or resizing the cluster.** The fix is about escalation, not about making the stuck Job run.
+
+## Assumptions
+
+- The pod lister is synced when the deadline failure is handled. When it is not, the arm gate declines (Desired Behavior 4) and the next cycle retries.
+- `specs/in-progress/004-bug-job-failure-reason.md` (`status: verifying`) lands first, and this spec consumes its `DeadlineExceeded` / `BackoffLimitExceeded` split without changing it.
+- `TriggerCapEngaged`'s "explicit `max_triggers` or present `ref`" semantics, as implemented in `bborbe/agent-task-controller`, are as described here.
+
 ## Acceptance Criteria
 
 - [ ] A `deadline_exceeded` failure whose pod never scheduled arms the cap — evidence: a spec at the `PublishFailure` seam whose task carries no `max_triggers`, whose Job condition is `Failed/DeadlineExceeded` and whose pod carries `PodScheduled=False`, asserts the published `UpdateFrontmatterCommand` contains `max_triggers: 3`; `go test ./pkg/...` exits 0
@@ -27,12 +40,12 @@ A Job that dies on its deadline without ever scheduling counts toward the trigge
 - [ ] An unresolvable pod does **not** arm — evidence: a `deadline_exceeded` failure whose pod lookup returns nothing (pod GC'd, or the lister not synced) asserts the published `UpdateFrontmatterCommand` carries `current_job: ""` and no `max_triggers` key; `go test ./pkg/...` exits 0
 - [ ] The existing crash arming still holds — evidence: the current `pod_crash_no_stdout` arming spec still asserts `max_triggers: 3` and passes (call sites updated mechanically where the publisher's signature changed); `go test ./pkg/...` exits 0
 - [ ] An already-present `max_triggers` is left alone on the deadline path — evidence: a spec with `max_triggers: 5` on the task and a never-scheduled `deadline_exceeded` failure asserts the published update carries no `max_triggers` key (the operator's budget is not lowered); `go test ./pkg/...` exits 0
-- [ ] The deadline arm is distinguishable from the crash arm in the log — evidence: the deadline arm emits the existing `event=crash_arm_decision` line carrying `parsed=deadline_exceeded` and `decision=arm`, and the new spec asserts that line for the arming case; `grep -n 'parsed=deadline_exceeded' pkg/result_publisher.go` returns ≥1 line
+- [ ] The deadline arm is distinguishable from the crash arm in the log — evidence: a spec capturing glog output (via the existing `captureGlogStderr` helper) for a never-scheduled deadline failure asserts the emitted line contains `parsed="deadline_exceeded"` and `decision=arm`; `go test ./pkg/...` exits 0
 - [ ] `make precommit` exits 0
 - [ ] CHANGELOG carries the fix — evidence: `grep -n '## Unreleased' CHANGELOG.md` returns line ≥1 and the bullet under it names the deadline arm; `git diff --stat` shows `CHANGELOG.md` modified
 - [ ] **Post-Deploy (Rung-2):** a task with no `max_triggers` whose Job cannot schedule arms the cap on dev — evidence: `kubectlnukedev -n agent logs deploy/agent-task-executor-personal --since=3h | grep 'event=crash_arm_decision' | grep 'decision=arm'` returns ≥1 line naming the replay task, and `vault-cli --vault private-personal task get "<replay task>" max_triggers --output json` reports `3`
   - `deploy_check:` `kubectlnukedev -n agent get deploy agent-task-executor-personal -o jsonpath='{.spec.template.spec.containers[0].image}' | awk -F: '{print $NF}'`
-  - `deploy_target:` `v0.55.2` — the predicted next patch tag (`## Unreleased` carries only `fix:` bullets); the operator updates it to the tag actually deployed if that differs.
+  - `deploy_target:` `$(git describe --tags --abbrev=0 origin/master)` — resolved at verification time to the tag the release cut produced, so a patch-vs-minor prediction cannot make Phase 0.5 refuse a correct deploy.
 
 ## Verification
 
@@ -41,7 +54,6 @@ A Job that dies on its deadline without ever scheduling counts toward the trigge
 - `make precommit` — exits 0
 - `go test ./pkg/...` — exits 0; the new deadline-arm specs and the unchanged crash-arm spec are green
 - `grep -n 'ZombieReasonDeadlineExceeded' pkg/result_publisher.go` — returns ≥1 line (the deadline path is reachable from the arm gate)
-- `grep -n 'parsed=deadline_exceeded' pkg/result_publisher.go` — returns ≥1 line
 - `grep -n '## Unreleased' CHANGELOG.md` — returns line ≥1
 
 ### Operator-executable (runs on the host after PR merge, spec verification ladder)
@@ -59,12 +71,13 @@ A Job that dies on its deadline without ever scheduling counts toward the trigge
 5. An already-present `max_triggers` is never overwritten on this path, preserving an operator-set budget.
 6. The `pod_crash_no_stdout` arming behavior is unchanged in every respect.
 7. The arm decision is logged on the existing `event=crash_arm_decision` line, carrying the parsed reason and the decision, so an operator can tell a deadline arm from a crash arm without reading the record.
-8. The store-miss path (`PublishStoreMissFailure`) reaches the same arm gate and behaves identically — a never-scheduled deadline failure arms there too. This is intentional, not an asymmetry.
+8. The store-miss path (`PublishStoreMissFailure`) reaches the same arm gate but does **not** arm: `taskFromFailedJob` builds the task with `max_triggers` present-but-nil, and the gate treats a present key as already-armed. That sentinel is deliberate — an absent key there would overwrite an operator-set cap of 5 or 6 with the default 3 — so this path stays exactly as it is today.
 
 ## Constraints
 
-- **Pod-state plumbing.** The arm gate (`crashFailureUpdates`, `pkg/result_publisher.go`) is a package-level function that receives only a reason string; the pod lister lives on `jobWatcher` (`pkg/job_watcher.go:352`) and is already used to resolve pods for `BackoffLimitExceeded`. The pod-state signal must therefore be carried from the watcher into the gate — either as an added `PublishFailure` parameter or as a publisher dependency. Either shape is acceptable; what is frozen is that the **reason string continues to flow through unchanged**, and that the gate still branches on the parsed reason so the deadline path stays greppable in `pkg/result_publisher.go`.
-- **Spec 006's recurring-task guard holds for every class except the never-scheduled one.** A task with no `ref` and no `max_triggers` stays uncapped when its pod ran and hit the deadline, or when its pod cannot be resolved. Only a pod that demonstrably never scheduled arms the cap. This is a deliberate, narrow amendment to `specs/completed/006-bug-trigger-cap-never-engages-for-repo-backed-tasks.md` § Constraints; that spec is not edited — the new spec supersedes its constraint for this one class and carries the pointer.
+- **Pod-state plumbing.** The arm gate (`crashFailureUpdates`, `pkg/result_publisher.go`) is a package-level function that receives only a reason string; the pod lister lives on `jobWatcher` (`pkg/job_watcher.go:352`) and is already used to resolve pods for `BackoffLimitExceeded`. The pod-state signal must therefore be carried from the watcher into the gate — either as an added `PublishFailure` parameter or as a publisher dependency (which shape — agent decides at impl time). What is frozen is that the **reason string continues to flow through unchanged**, and that the gate still branches on the parsed reason so the deadline path stays greppable in `pkg/result_publisher.go`.
+- **One definition of "never scheduled".** `hasPodScheduledFalse(pod)` already exists at `pkg/zombie_sweeper.go:276` in the same package. Reuse it (or otherwise guarantee the two cannot drift) — a second, independent `PodScheduled` check would let the sweeper's classification and the arm gate's classification diverge silently.
+- **Spec 006's recurring-task guard holds for every class except the never-scheduled one.** A task with no `ref` and no `max_triggers` stays uncapped when its pod ran and hit the deadline, or when its pod cannot be resolved. Only a pod that demonstrably never scheduled arms the cap. This is a deliberate, narrow amendment to `specs/completed/006-bug-trigger-cap-never-engages-for-repo-backed-tasks.md` § Constraints; that spec is not edited — the new spec supersedes its constraint for this one class and carries the pointer. Spec 006's own acceptance criterion ("the recurring-task regression guard is unchanged … `SpawnJobCallCount() == 1`") still holds at the controller test level, because that fixture task carries no `max_triggers`; the two specs do not disagree.
 - **`specs/in-progress/004-bug-job-failure-reason.md` is at `status: verifying`** and owns the `DeadlineExceeded` / `BackoffLimitExceeded` classification split in `job_watcher.go`. This spec consumes that classification and must not re-open it.
 - Repo conventions are frozen: Ginkgo/Gomega v2 tests, `github.com/bborbe/errors` wrapping (never `fmt.Errorf`), counterfeiter mocks for new dependencies (`//counterfeiter:generate`), glog `V(n)` gating.
 - The published reason string for a never-scheduled deadline kill stays `deadline_exceeded`. The class is discriminated at the arm gate, not by introducing a new reason value — changing the reason would alter the `## Failure` body every operator greps and would collide with spec 004.
@@ -79,7 +92,7 @@ A Job that dies on its deadline without ever scheduling counts toward the trigge
 | Pod is `Pending` but `PodScheduled` is `True` (scheduled, containers not started) | No arm — the pod was placed | Investigate image pull / container start separately; this spec covers only unschedulable pods |
 | A legitimately long task is killed at its deadline after running | No arm | Operator raises `activeDeadlineSeconds` on the config |
 | Recurring task (no `ref`, no `max_triggers`) whose pod never schedules | Arms at 3, assignee cleared | Correct per this spec: a recurring task that can never schedule is stuck, not merely re-dispatching. Re-dispatch resumes when an operator re-assigns |
-| A legitimate task is armed in error | `max_triggers: 3` written, assignee cleared on the third failure | Reversible: remove `max_triggers`, re-assign. The next failure cycle re-arms only if the pod is still never scheduled |
+| A legitimate task is armed in error | `max_triggers: 3` written, assignee cleared on the third failure | Reversible: `vault-cli --vault <v> task remove "<task>" max_triggers` then `vault-cli --vault <v> task set "<task>" assignee "<agent>"`. The next failure cycle re-arms only if the pod is still never scheduled |
 | The controller's increment lands before the arm write | The increment sees no cap and clears nothing; the cap takes effect from the next failure cycle | Expected; costs one extra cycle (documented at `pkg/result_publisher.go`) |
 
 ## Reproduction
@@ -118,7 +131,7 @@ crashFailureUpdates(task, jobName, "deadline_exceeded")  -> { current_job: "" } 
 Why the sweeper does not cover this class:
 
 ```
-pkg/zombie_sweeper.go:142-143   if elapsed < deadline { continue }        # only classifies at/after the deadline
+pkg/zombie_sweeper.go:143       if elapsed < deadline { continue }        # only classifies at/after the deadline
 k8s/apis/.../v1/types.go:26     DefaultZombieSweeperIntervalSeconds = 60   # polls every 60 s
 pkg/job_watcher.go:838          w.taskStore.Delete(taskID)                # event-driven watcher removes the task after publishing
 pkg/job_watcher.go:952-955      failureReason returns the deadline reason with no pod read
