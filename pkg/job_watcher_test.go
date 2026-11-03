@@ -131,7 +131,9 @@ var _ = Describe("JobWatcher", func() {
 			watcher.HandleJob(ctx, job)
 
 			Expect(fakePublisher.PublishFailureCallCount()).To(Equal(1))
-			_, calledTask, calledJobName, calledReason := fakePublisher.PublishFailureArgsForCall(0)
+			_, calledTask, calledJobName, calledReason, _ := fakePublisher.PublishFailureArgsForCall(
+				0,
+			)
 			Expect(string(calledTask.TaskIdentifier)).To(Equal(string(testTaskID)))
 			Expect(calledJobName).To(Equal("job-1"))
 			Expect(calledReason).To(Equal("JobFailed"))
@@ -345,7 +347,7 @@ var _ = Describe("JobWatcher", func() {
 			watcher.HandleJob(ctx, job)
 
 			Expect(fakePublisher.PublishFailureCallCount()).To(Equal(1))
-			_, _, _, calledReason := fakePublisher.PublishFailureArgsForCall(0)
+			_, _, _, calledReason, _ := fakePublisher.PublishFailureArgsForCall(0)
 			Expect(calledReason).To(Equal("JobFailed"))
 		})
 	})
@@ -440,7 +442,9 @@ var _ = Describe("JobWatcher", func() {
 			watcher.HandleJob(ctx, job)
 
 			Expect(fakePublisher.PublishFailureCallCount()).To(Equal(1))
-			_, calledTask, calledJobName, calledReason := fakePublisher.PublishFailureArgsForCall(0)
+			_, calledTask, calledJobName, calledReason, _ := fakePublisher.PublishFailureArgsForCall(
+				0,
+			)
 			Expect(calledTask).To(Equal(testTask))
 			Expect(calledJobName).To(Equal("job-hit"))
 			Expect(calledReason).To(Equal("JobFailed"))
@@ -478,7 +482,7 @@ var _ = Describe("JobWatcher", func() {
 			watcher.HandleJob(ctx, job)
 
 			Expect(fakePublisher.PublishFailureCallCount()).To(Equal(1))
-			_, _, _, calledReason := fakePublisher.PublishFailureArgsForCall(0)
+			_, _, _, calledReason, _ := fakePublisher.PublishFailureArgsForCall(0)
 			Expect(calledReason).To(Equal("deadline_exceeded"))
 		})
 
@@ -500,7 +504,7 @@ var _ = Describe("JobWatcher", func() {
 				watcher.HandleJob(ctx, job)
 
 				Expect(fakePublisher.PublishFailureCallCount()).To(Equal(1))
-				_, _, _, calledReason := fakePublisher.PublishFailureArgsForCall(0)
+				_, _, _, calledReason, _ := fakePublisher.PublishFailureArgsForCall(0)
 				Expect(calledReason).To(Equal("BackoffLimitExceeded (pod-unresolved)"))
 			},
 		)
@@ -592,7 +596,7 @@ var _ = Describe("JobWatcher", func() {
 			watcher.HandlePod(ctx, pod)
 
 			Expect(fakePublisher.PublishFailureCallCount()).To(Equal(1))
-			_, _, calledJobName, calledReason := fakePublisher.PublishFailureArgsForCall(0)
+			_, _, calledJobName, calledReason, _ := fakePublisher.PublishFailureArgsForCall(0)
 			Expect(calledJobName).To(Equal("my-job"))
 			Expect(calledReason).To(Equal("image_pull_backoff"))
 		})
@@ -619,7 +623,7 @@ var _ = Describe("JobWatcher", func() {
 			watcher.HandlePod(ctx, pod)
 
 			Expect(fakePublisher.PublishFailureCallCount()).To(Equal(1))
-			_, _, _, calledReason := fakePublisher.PublishFailureArgsForCall(0)
+			_, _, _, calledReason, _ := fakePublisher.PublishFailureArgsForCall(0)
 			Expect(calledReason).To(Equal("image_pull_backoff"))
 		})
 
@@ -645,7 +649,7 @@ var _ = Describe("JobWatcher", func() {
 			watcher.HandlePod(ctx, pod)
 
 			Expect(fakePublisher.PublishFailureCallCount()).To(Equal(1))
-			_, _, calledJobName, calledReason := fakePublisher.PublishFailureArgsForCall(0)
+			_, _, calledJobName, calledReason, _ := fakePublisher.PublishFailureArgsForCall(0)
 			Expect(calledJobName).To(Equal("my-job"))
 			Expect(calledReason).To(Equal("pod_crash_no_stdout"))
 		})
@@ -664,7 +668,7 @@ var _ = Describe("JobWatcher", func() {
 			watcher.HandlePod(ctx, pod)
 
 			Expect(fakePublisher.PublishFailureCallCount()).To(Equal(1))
-			_, _, _, calledReason := fakePublisher.PublishFailureArgsForCall(0)
+			_, _, _, calledReason, _ := fakePublisher.PublishFailureArgsForCall(0)
 			Expect(calledReason).To(Equal("pod_evicted"))
 		})
 
@@ -690,7 +694,7 @@ var _ = Describe("JobWatcher", func() {
 			watcher.HandlePod(ctx, pod)
 
 			Expect(fakePublisher.PublishFailureCallCount()).To(Equal(1))
-			_, _, _, calledReason := fakePublisher.PublishFailureArgsForCall(0)
+			_, _, _, calledReason, _ := fakePublisher.PublishFailureArgsForCall(0)
 			Expect(calledReason).To(Equal("pod_crash_no_stdout"))
 		})
 

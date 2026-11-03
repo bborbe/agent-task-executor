@@ -812,7 +812,7 @@ func (w *jobWatcher) publishSyntheticFailure(
 	job *batchv1.Job,
 	reason string,
 ) {
-	if err := w.publisher.PublishFailure(ctx, task, job.Name, reason); err != nil {
+	if err := w.publisher.PublishFailure(ctx, task, job.Name, reason, w.jobPod(job)); err != nil {
 		glog.Errorf("publish synthetic failure for task %s (job %s): %v", taskID, job.Name, err)
 	} else {
 		glog.V(2).Infof("published synthetic failure for task %s (job %s)", taskID, job.Name)
@@ -1046,7 +1046,7 @@ func (w *jobWatcher) HandlePod(ctx context.Context, pod *corev1.Pod) {
 		return
 	}
 
-	if err := w.publisher.PublishFailure(ctx, task, jobName, reason.String()); err != nil {
+	if err := w.publisher.PublishFailure(ctx, task, jobName, reason.String(), pod); err != nil {
 		glog.Errorf(
 			"publish pod-state failure for task %s (pod %s reason %s): %v",
 			taskID, pod.Name, reason, err,
@@ -1117,6 +1117,33 @@ func hasNonZeroTerminatedContainer(pod *corev1.Pod) bool {
 		}
 	}
 	return false
+}
+
+// jobPod returns the most recently created Pod owned by job, or nil when the
+// namespace's PodLister is not synced, the lookup fails, or the Job owns no
+// pod. Unlike terminalPodDetail it does not require a terminated container:
+// a never-scheduled pod has none, and that pod is exactly the one the deadline
+// arm gate needs.
+func (w *jobWatcher) jobPod(job *batchv1.Job) *corev1.Pod {
+	lister := w.PodLister(libk8s.Namespace(job.Namespace))
+	if lister == nil {
+		return nil
+	}
+	pods, err := lister.Pods(job.Namespace).List(labels.Everything())
+	if err != nil {
+		glog.Errorf("job watcher: list pods for job %s/%s: %v", job.Namespace, job.Name, err)
+		return nil
+	}
+	var best *corev1.Pod
+	for _, pod := range pods {
+		if ownerJobName(pod) != job.Name {
+			continue
+		}
+		if best == nil || pod.CreationTimestamp.After(best.CreationTimestamp.Time) {
+			best = pod
+		}
+	}
+	return best
 }
 
 // terminalPodDetail returns the terminated reason and exit code of the Job's

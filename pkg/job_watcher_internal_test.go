@@ -361,6 +361,7 @@ type resultPublisherCall struct {
 	task    lib.Task
 	jobName string
 	reason  string
+	pod     *corev1.Pod
 }
 
 func (f *fakeResultPublisher) PublishSpawnNotification(
@@ -376,12 +377,14 @@ func (f *fakeResultPublisher) PublishFailure(
 	task lib.Task,
 	jobName string,
 	reason string,
+	pod *corev1.Pod,
 ) error {
 	f.publishFailureCalls = append(f.publishFailureCalls, resultPublisherCall{
 		ctx:     ctx,
 		task:    task,
 		jobName: jobName,
 		reason:  reason,
+		pod:     pod,
 	})
 	return nil
 }
@@ -518,6 +521,10 @@ func (f *fakeResultPublisher) PublishFailureArgsForCall(
 ) (context.Context, lib.Task, string, string) {
 	c := f.publishFailureCalls[i]
 	return c.ctx, c.task, c.jobName, c.reason
+}
+
+func (f *fakeResultPublisher) PublishFailurePodArgsForCall(i int) *corev1.Pod {
+	return f.publishFailureCalls[i].pod
 }
 
 func (f *fakeResultPublisher) PublishClearCurrentJobCallCount() int {

@@ -1,6 +1,7 @@
 ---
 status: approved
 approved: "2026-11-03T19:54:03Z"
+generating: "2026-11-03T19:58:19Z"
 branch: dark-factory/bug-deadline-kill-never-arms-trigger-cap
 ---
 

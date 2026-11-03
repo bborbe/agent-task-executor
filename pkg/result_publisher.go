@@ -21,6 +21,7 @@ import (
 	libtime "github.com/bborbe/time"
 	"github.com/bborbe/vault-cli/pkg/domain"
 	"github.com/golang/glog"
+	corev1 "k8s.io/api/core/v1"
 
 	"github.com/bborbe/agent-task-executor/pkg/claim"
 	"github.com/bborbe/agent-task-executor/pkg/metrics"
@@ -81,9 +82,20 @@ type ResultPublisher interface {
 	// runs on the result-merge path only, while these writes take the atomic
 	// frontmatter-command path (buildUpdateModifyFn), which never reaches it.
 	//
+	// pod is the failed Job's pod as observed by the caller, or nil when the
+	// caller has no pod (the zombie sweeper, or an unresolvable pod). It is used
+	// only to discriminate the never-scheduled deadline class at the arm gate: a
+	// nil pod never arms, and the pod is never written to the record.
+	//
 	// Idempotent per current_job via a TTL'd LRU; concurrent classifications for
 	// the same job emit one event.
-	PublishFailure(ctx context.Context, task lib.Task, jobName string, reason string) error
+	PublishFailure(
+		ctx context.Context,
+		task lib.Task,
+		jobName string,
+		reason string,
+		pod *corev1.Pod,
+	) error
 	// PublishStoreMissFailure is PublishFailure for a Job whose task has already
 	// left the executor's in-memory store, so the record carries no failure of
 	// its own and no other path can report one. It writes the same frontmatter
@@ -482,6 +494,15 @@ func (p *resultPublisher) PublishSpawnNotification(
 // outcome is ever published for it, and without a cap the controller's
 // assignee-clear — the only operator-inbox signal this path has — never fires.
 //
+// The same cap is armed for a deadline_exceeded failure whose pod carries
+// PodScheduled=False: the Job was killed at its deadline before it was ever
+// placed on a node, so it can never run and would otherwise re-queue forever.
+// The never-scheduled predicate is hasPodScheduledFalse, the single definition
+// the zombie sweeper also uses. A pod that reached a terminal phase before the
+// deadline carries no PodScheduled=False condition, so the same predicate covers
+// the "ran and then hit its deadline" case without a phase check. A nil pod is
+// not evidence of never having scheduled, so it never arms.
+//
 // The gate is ParseZombieReason, not string equality. PublishFailure takes reason
 // as a raw string and is shared by all eight ZombieReason values, several of
 // which already carry their own escalation semantics; matching on the parsed
@@ -489,10 +510,11 @@ func (p *resultPublisher) PublishSpawnNotification(
 // correctly classified as its own class rather than falling through to a literal
 // comparison that cannot match it.
 //
-// An already-present max_triggers is left alone. The controller's write path is a
-// blind Updates apply, so writing here would clobber an operator's deliberate
-// budget — the store holds records at 5 and 6, and halving one of those is a
-// regression, not a repair.
+// An already-present max_triggers is left alone, for both arming classes. The
+// controller's write path is a blind Updates apply, so writing here would
+// clobber an operator's deliberate budget — the store holds records at 5 and 6,
+// and halving one of those is a regression, not a repair. The presence check
+// sits after the class gate so it protects both classes.
 //
 // Every return is logged with the values the decision tested, not just its
 // verdict. This function is the only place the crash class arms a record, and a
@@ -512,10 +534,24 @@ func (p *resultPublisher) PublishSpawnNotification(
 // outcome no code here has reached, and an operator grepping for it would be
 // told the cap was armed on a write that failed — the same false green this
 // instrumentation exists to remove. Publish failure is reported by the caller.
-func crashFailureUpdates(task lib.Task, jobName, reason string) lib.TaskFrontmatter {
+func crashFailureUpdates(
+	task lib.Task,
+	jobName, reason string,
+	pod *corev1.Pod,
+) lib.TaskFrontmatter {
 	updates := lib.TaskFrontmatter{"current_job": ""}
 	parsed, parsedOK := ParseZombieReason(reason)
-	if !parsedOK || parsed != ZombieReasonPodCrashNoStdout {
+	armClass := parsedOK && (parsed == ZombieReasonPodCrashNoStdout ||
+		(parsed == ZombieReasonDeadlineExceeded && pod != nil && hasPodScheduledFalse(pod)))
+	if !armClass {
+		if parsedOK && parsed == ZombieReasonDeadlineExceeded {
+			glog.V(2).Infof(
+				"event=crash_arm_decision task=%s job=%s reason=%q parsed=%q parsed_ok=%t "+
+					"decision=not_never_scheduled pod_resolved=%t",
+				task.TaskIdentifier, jobName, reason, parsed.String(), parsedOK, pod != nil,
+			)
+			return updates
+		}
 		glog.V(2).Infof(
 			"event=crash_arm_decision task=%s job=%s reason=%q parsed=%q parsed_ok=%t "+
 				"decision=not_crash_class",
@@ -546,8 +582,9 @@ func (p *resultPublisher) PublishFailure(
 	task lib.Task,
 	jobName string,
 	reason string,
+	pod *corev1.Pod,
 ) error {
-	return p.publishFailure(ctx, task, jobName, reason, "")
+	return p.publishFailure(ctx, task, jobName, reason, "", pod)
 }
 
 // PublishStoreMissFailure publishes the same failure as PublishFailure, with a
@@ -565,7 +602,11 @@ func (p *resultPublisher) PublishStoreMissFailure(
 	jobName string,
 	reason string,
 ) error {
-	return p.publishFailure(ctx, task, jobName, reason, storeMissFailureNoteFor(reason))
+	// The store-miss path carries no pod. Its taskFromFailedJob sentinel
+	// (max_triggers: nil) already suppresses arming, and passing a pod here would
+	// be the only way to break that guarantee: the never-scheduled deadline gate
+	// would then see a present max_triggers key and stay unarmed only by accident.
+	return p.publishFailure(ctx, task, jobName, reason, storeMissFailureNoteFor(reason), nil)
 }
 
 // storeMissFailureNoteFor returns the note written into the `## Failure` body when
@@ -617,6 +658,7 @@ func (p *resultPublisher) publishFailure(
 	jobName string,
 	reason string,
 	note string,
+	pod *corev1.Pod,
 ) error {
 	if p.dedupe.checkDedupe(jobName) {
 		glog.V(2).Infof("event=zombie_dedupe job=%s task=%s", jobName, task.TaskIdentifier)
@@ -634,7 +676,7 @@ func (p *resultPublisher) publishFailure(
 	updateCmd := taskcmd.UpdateFrontmatterCommand{
 		TaskIdentifier: task.TaskIdentifier,
 		TargetVault:    targetVaultFromTask(task),
-		Updates:        crashFailureUpdates(task, jobName, reason),
+		Updates:        crashFailureUpdates(task, jobName, reason, pod),
 		Body: &taskcmd.BodySection{
 			Heading: "## Failure",
 			Section: section,
