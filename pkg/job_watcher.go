@@ -812,7 +812,15 @@ func (w *jobWatcher) publishSyntheticFailure(
 	job *batchv1.Job,
 	reason string,
 ) {
-	if err := w.publisher.PublishFailure(ctx, task, job.Name, reason, w.jobPod(job)); err != nil {
+	// Only the deadline class consults the pod: every other reason either never
+	// arms the cap or already resolved its pod via terminalPodDetail, so an
+	// unconditional lookup would add a namespace-wide Pods().List to failures
+	// that can never use it.
+	var pod *corev1.Pod
+	if JobFailureReason(job) == ZombieReasonDeadlineExceeded {
+		pod = w.jobPod(job)
+	}
+	if err := w.publisher.PublishFailure(ctx, task, job.Name, reason, pod); err != nil {
 		glog.Errorf("publish synthetic failure for task %s (job %s): %v", taskID, job.Name, err)
 	} else {
 		glog.V(2).Infof("published synthetic failure for task %s (job %s)", taskID, job.Name)

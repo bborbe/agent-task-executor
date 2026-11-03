@@ -82,6 +82,36 @@ var _ = Describe("jobWatcher backoff-limit pod detail", func() {
 		}
 	}
 
+	deadlineCondition := func() batchv1.JobCondition {
+		return batchv1.JobCondition{
+			Type:    batchv1.JobFailed,
+			Status:  corev1.ConditionTrue,
+			Reason:  "DeadlineExceeded",
+			Message: "Job was active longer than specified deadline",
+		}
+	}
+
+	// makeUnscheduledPod builds a pod the Job owns that was never placed on a
+	// node — the shape the deadline arm gate classifies as never-scheduled.
+	makeUnscheduledPod := func(name, jobName, taskID string) *corev1.Pod {
+		return &corev1.Pod{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      name,
+				Namespace: "test-ns",
+				Labels:    map[string]string{"agent.benjamin-borbe.de/task-id": taskID},
+				OwnerReferences: []metav1.OwnerReference{
+					{Kind: "Job", Name: jobName},
+				},
+			},
+			Status: corev1.PodStatus{
+				Phase: corev1.PodPending,
+				Conditions: []corev1.PodCondition{
+					{Type: corev1.PodScheduled, Status: corev1.ConditionFalse},
+				},
+			},
+		}
+	}
+
 	makeOwnedTerminatedPod := func(name, jobName, taskID, terminatedReason string, exitCode int32, createdAt string) *corev1.Pod {
 		pod := &corev1.Pod{
 			ObjectMeta: metav1.ObjectMeta{
@@ -231,6 +261,34 @@ var _ = Describe("jobWatcher backoff-limit pod detail", func() {
 				Expect(calledReason).To(Equal("BackoffLimitExceeded (pod-unresolved)"))
 			},
 		)
+
+		It("passes the never-scheduled pod to PublishFailure on a deadline kill", func() {
+			// Pins the Job-informer plumbing: without this the arm gate could be
+			// fed nil from every production call site and the whole suite would
+			// stay green while the never-scheduled fix silently no-ops.
+			taskStore.Store(testTaskID, testTask)
+			job := makeJob("job-deadline-unscheduled", string(testTaskID), deadlineCondition())
+			pod := makeUnscheduledPod("pod-deadline-unscheduled", job.Name, string(testTaskID))
+			setPodLister(watcher, pod)
+
+			watcher.HandleJob(ctx, job)
+
+			Expect(fakePublisher.PublishFailureCallCount()).To(Equal(1))
+			_, _, _, calledReason := fakePublisher.PublishFailureArgsForCall(0)
+			Expect(calledReason).To(Equal("deadline_exceeded"))
+			Expect(fakePublisher.PublishFailurePodArgsForCall(0)).To(Equal(pod))
+		})
+
+		It("passes a nil pod to PublishFailure when the Job owns no pod", func() {
+			taskStore.Store(testTaskID, testTask)
+			job := makeJob("job-deadline-nopod", string(testTaskID), deadlineCondition())
+			setPodLister(watcher)
+
+			watcher.HandleJob(ctx, job)
+
+			Expect(fakePublisher.PublishFailureCallCount()).To(Equal(1))
+			Expect(fakePublisher.PublishFailurePodArgsForCall(0)).To(BeNil())
+		})
 
 		It(
 			"publishes the condition plus the unresolved marker when the owned pod has no non-zero terminated container",
