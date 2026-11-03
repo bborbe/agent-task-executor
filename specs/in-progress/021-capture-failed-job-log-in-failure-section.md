@@ -1,6 +1,7 @@
 ---
-status: draft
-created: 2026-11-03
+status: approved
+approved: "2026-11-03T20:30:23Z"
+branch: dark-factory/capture-failed-job-log-in-failure-section
 ---
 
 ## Summary
