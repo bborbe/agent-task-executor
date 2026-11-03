@@ -2,7 +2,7 @@
 
 All notable changes to this project will be documented in this file.
 
-## Unreleased
+## v0.55.2
 
 - fix: arm the trigger cap for a Job killed at its deadline before it was ever scheduled — the cap was armed only for the pod-crash class, so a never-scheduled deadline kill left `max_triggers` absent and the task re-queued until a human cleared the assignee. The arm gate now also admits `deadline_exceeded` when the failed pod carries `PodScheduled=False`; a pod that ran to a terminal phase, an unresolvable pod, and the store-miss path stay unarmed, and the recurring-task guard is unchanged
 
