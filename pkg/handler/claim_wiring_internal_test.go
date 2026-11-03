@@ -17,6 +17,7 @@ import (
 	lib "github.com/bborbe/agent"
 	base "github.com/bborbe/cqrs/base"
 	libtime "github.com/bborbe/time"
+	corev1 "k8s.io/api/core/v1"
 
 	pkg "github.com/bborbe/agent-task-executor/pkg"
 	"github.com/bborbe/agent-task-executor/pkg/claim"
@@ -347,7 +348,7 @@ func (s *parkRecordingPublisher) PublishSpawnNotification(
 }
 
 func (s *parkRecordingPublisher) PublishFailure(
-	context.Context, lib.Task, string, string,
+	context.Context, lib.Task, string, string, *corev1.Pod,
 ) error {
 	return nil
 }

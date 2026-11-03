@@ -138,7 +138,7 @@ var _ = Describe("ZombieSweeper", func() {
 				Expect(err).To(BeNil())
 
 				Expect(fakePublisher.PublishFailureCallCount()).To(Equal(1))
-				_, calledTask, calledJobName, calledReason := fakePublisher.PublishFailureArgsForCall(
+				_, calledTask, calledJobName, calledReason, _ := fakePublisher.PublishFailureArgsForCall(
 					0,
 				)
 				Expect(string(calledTask.TaskIdentifier)).To(Equal(string(taskID)))
@@ -278,7 +278,7 @@ var _ = Describe("ZombieSweeper", func() {
 				err := sweeper.SweepOnce(ctx)
 				Expect(err).To(BeNil())
 				Expect(fakePublisher.PublishFailureCallCount()).To(Equal(1))
-				_, calledTask, calledJobName, calledReason := fakePublisher.PublishFailureArgsForCall(
+				_, calledTask, calledJobName, calledReason, _ := fakePublisher.PublishFailureArgsForCall(
 					0,
 				)
 				Expect(string(calledTask.TaskIdentifier)).To(Equal(string(taskID)))
@@ -330,7 +330,7 @@ var _ = Describe("ZombieSweeper", func() {
 				err := sweeper.SweepOnce(ctx)
 				Expect(err).To(BeNil())
 				Expect(fakePublisher.PublishFailureCallCount()).To(Equal(1))
-				_, _, _, calledReason := fakePublisher.PublishFailureArgsForCall(0)
+				_, _, _, calledReason, _ := fakePublisher.PublishFailureArgsForCall(0)
 				Expect(calledReason).To(Equal("pod_not_scheduled"))
 			})
 		})
@@ -517,6 +517,7 @@ var _ = Describe("ZombieSweeper", func() {
 						_ lib.Task,
 						_ string,
 						_ string,
+						_ *corev1.Pod,
 					) error {
 						if fakePublisher.PublishFailureCallCount() == 2 {
 							return context.Canceled

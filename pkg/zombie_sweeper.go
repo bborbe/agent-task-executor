@@ -156,7 +156,11 @@ func (s *zombieSweeper) SweepOnce(ctx context.Context) error {
 		if reason == "" {
 			continue
 		}
-		if err := s.publisher.PublishFailure(ctx, task, jobName, reason.String()); err != nil {
+		// The sweeper supplies no pod: its classify can fall through to
+		// ZombieReasonDeadlineExceeded for a never-scheduled retry pod, so letting
+		// the gate resolve the pod here would silently change sweeper behaviour. A
+		// sweeper-published failure never arms.
+		if err := s.publisher.PublishFailure(ctx, task, jobName, reason.String(), nil); err != nil {
 			glog.Errorf(
 				"zombie sweeper: publish failure for task %s (job %s reason %s): %v",
 				taskID, jobName, reason, err,
