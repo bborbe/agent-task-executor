@@ -2,9 +2,13 @@
 
 All notable changes to this project will be documented in this file.
 
-## Unreleased
+## v0.56.0
 
-- fix: arm the trigger cap for a Job whose pod can never be scheduled — the cap was armed only for the pod-crash class, so a never-scheduled kill left `max_triggers` absent and the task re-queued until a human cleared the assignee. The arm gate now also admits `pod_not_scheduled`, and the zombie sweeper publishes that classification at its 2-minute grace window instead of waiting for the 30-minute deadline: the Job controller deletes the pod one second BEFORE it stamps `DeadlineExceeded`, so a failure-time pod lookup returns nothing for exactly the class that matters. A Job that ran to its deadline, an unresolvable pod, and the store-miss path stay unarmed, and the recurring-task guard is unchanged
+- feat: **a failed Job's `## Failure` section now carries a redacted, bounded tail of the pod's own log, captured at publish time.** Pods survive only `ttlSecondsAfterFinished: 1800`, so a diagnosis that lands later found the pod already gone and the record naming *that* the Job failed but never *why*. The tail is read through the Kubernetes log API with `TailLines` and `LimitBytes` applied at the request, redacted before the section string is composed (GitHub tokens, PEM private-key blocks, bearer tokens, URL userinfo, and any assignment of `redactionMinSecretLength` = 13 or more characters; shorter lookup keys survive), and fenced so the existing body-section writer still parses the section. A read failure — the pod collected, the `pods/log` grant missing, throttling — is logged on one V(1) line and swallowed: the failure still publishes and `PublishFailure` keeps its signature. A successful Job reads no log. The `pods/log` RBAC grant is a companion change in `bborbe/agent`.
+
+## v0.55.2
+
+- fix: arm the trigger cap for a Job whose pod can never be scheduled — the cap was armed only for the pod-crash class, so a never-scheduled kill left `max_triggers` absent and the task re-queued until a human cleared the assignee. The arm gate now also admits `pod_not_scheduled`, and the zombie sweeper publishes that classification at its 2-minute grace window instead of waiting for the 30-minute deadline: the Job controller deletes the pod one second BEFORE it stamps `DeadlineExceeded`, so a failure-time pod lookup returns nothing for exactly the class that matters. The arm gate no longer reads the pod at all. A Job that ran to its deadline, an unresolvable pod, and the store-miss path stay unarmed, and the recurring-task guard is unchanged
 
 ## v0.55.1
 

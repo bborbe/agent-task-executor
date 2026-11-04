@@ -138,7 +138,7 @@ var _ = Describe("ZombieSweeper", func() {
 				Expect(err).To(BeNil())
 
 				Expect(fakePublisher.PublishFailureCallCount()).To(Equal(1))
-				_, calledTask, calledJobName, calledReason := fakePublisher.PublishFailureArgsForCall(
+				_, calledTask, calledJobName, calledReason, _ := fakePublisher.PublishFailureArgsForCall(
 					0,
 				)
 				Expect(string(calledTask.TaskIdentifier)).To(Equal(string(taskID)))
@@ -278,7 +278,7 @@ var _ = Describe("ZombieSweeper", func() {
 				err := sweeper.SweepOnce(ctx)
 				Expect(err).To(BeNil())
 				Expect(fakePublisher.PublishFailureCallCount()).To(Equal(1))
-				_, calledTask, calledJobName, calledReason := fakePublisher.PublishFailureArgsForCall(
+				_, calledTask, calledJobName, calledReason, _ := fakePublisher.PublishFailureArgsForCall(
 					0,
 				)
 				Expect(string(calledTask.TaskIdentifier)).To(Equal(string(taskID)))
@@ -330,7 +330,7 @@ var _ = Describe("ZombieSweeper", func() {
 				err := sweeper.SweepOnce(ctx)
 				Expect(err).To(BeNil())
 				Expect(fakePublisher.PublishFailureCallCount()).To(Equal(1))
-				_, _, _, calledReason := fakePublisher.PublishFailureArgsForCall(0)
+				_, _, _, calledReason, _ := fakePublisher.PublishFailureArgsForCall(0)
 				Expect(calledReason).To(Equal("pod_not_scheduled"))
 			})
 		})
@@ -338,14 +338,12 @@ var _ = Describe("ZombieSweeper", func() {
 		// 6e-early: the never-scheduled class does NOT wait for the deadline.
 		// The Job controller deletes the pod one second before it stamps the Job's
 		// DeadlineExceeded condition (measured on nuke dev 2026-11-04), so a
-		// deadline-gated sweeper can never see the pod. This spec pins the early
-		// publish: a Job well inside its deadline budget whose pod has been
-		// unschedulable past the grace window is classified immediately.
+		// deadline-gated sweeper can never see the pod. This pins the early publish.
 		Context("pod is unschedulable past the grace window but inside the deadline", func() {
 			It("publishes pod_not_scheduled before the deadline", func() {
 				taskID := lib.TaskIdentifier("task-6e-early-pod-not-scheduled")
-				// 5 minutes ago; the default zombie timeout is 1800 s, so this task
-				// is nowhere near its deadline.
+				// 5 minutes ago; the default zombie timeout is 1800 s, so this task is
+				// nowhere near its deadline.
 				ts := libtimetest.ParseDateTime("2026-06-01T11:55:00Z")
 				task := makeTask(string(taskID), "agent-a", "job-1", ts.Format(time.RFC3339))
 				taskStore.Store(taskID, task)
@@ -381,7 +379,7 @@ var _ = Describe("ZombieSweeper", func() {
 				err := sweeper.SweepOnce(ctx)
 				Expect(err).To(BeNil())
 				Expect(fakePublisher.PublishFailureCallCount()).To(Equal(1))
-				_, _, _, calledReason := fakePublisher.PublishFailureArgsForCall(0)
+				_, _, _, calledReason, _ := fakePublisher.PublishFailureArgsForCall(0)
 				Expect(calledReason).To(Equal("pod_not_scheduled"))
 			})
 		})
@@ -568,6 +566,7 @@ var _ = Describe("ZombieSweeper", func() {
 						_ lib.Task,
 						_ string,
 						_ string,
+						_ *corev1.Pod,
 					) error {
 						if fakePublisher.PublishFailureCallCount() == 2 {
 							return context.Canceled

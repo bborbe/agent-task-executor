@@ -170,7 +170,8 @@ func (s *zombieSweeper) SweepOnce(ctx context.Context) error {
 		if reason == "" {
 			continue
 		}
-		if err := s.publisher.PublishFailure(ctx, task, jobName, reason.String()); err != nil {
+		// No pod: the sweeper writes no log tail, and the arm no longer needs one.
+		if err := s.publisher.PublishFailure(ctx, task, jobName, reason.String(), nil); err != nil {
 			glog.Errorf(
 				"zombie sweeper: publish failure for task %s (job %s reason %s): %v",
 				taskID, jobName, reason, err,

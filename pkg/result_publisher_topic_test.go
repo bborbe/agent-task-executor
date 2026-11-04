@@ -39,7 +39,13 @@ var _ = Describe("ResultPublisher topic naming", func() {
 	})
 
 	publish := func(topicPrefix base.TopicPrefix) string {
-		publisher := pkg.NewResultPublisher(fakeSyncProducer, topicPrefix, currentDateTime, nil)
+		publisher := pkg.NewResultPublisher(
+			fakeSyncProducer,
+			topicPrefix,
+			currentDateTime,
+			nil,
+			nil,
+		)
 		task := lib.Task{
 			TaskIdentifier: lib.TaskIdentifier("topic-test-task"),
 			Frontmatter: lib.TaskFrontmatter{
