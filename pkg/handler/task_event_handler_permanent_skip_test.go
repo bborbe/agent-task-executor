@@ -183,11 +183,19 @@ var _ = Describe("Permanent message skip", func() {
 		before := testutil.ToFloat64(
 			metrics.TaskEventsTotal.WithLabelValues("skipped_permanent"),
 		)
+		dlqBefore := testutil.ToFloat64(
+			metrics.DeadLetterTotal.WithLabelValues("develop-agent-task-v1-event"),
+		)
 		Expect(h.ConsumeMessage(ctx, message(task("tid-metric")))).To(Succeed())
 		Expect(
 			testutil.ToFloat64(
 				metrics.TaskEventsTotal.WithLabelValues("skipped_permanent"),
 			) - before,
+		).To(Equal(float64(1)))
+		Expect(
+			testutil.ToFloat64(
+				metrics.DeadLetterTotal.WithLabelValues("develop-agent-task-v1-event"),
+			) - dlqBefore,
 		).To(Equal(float64(1)))
 	})
 })
