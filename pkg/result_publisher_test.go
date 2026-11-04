@@ -496,25 +496,19 @@ var _ = Describe("ResultPublisher", func() {
 			Entry("deadline_exceeded with no pod", "deadline_exceeded"),
 		)
 
-		It("arms the cap for a deadline kill whose pod never scheduled", func() {
+		It("arms the cap when the sweeper classified the pod as never scheduled", func() {
+			// pod_not_scheduled is the only signal that survives: the Job controller
+			// deletes the pod one second BEFORE it stamps DeadlineExceeded, so the
+			// deadline path can never read the pod state it would need.
 			task := lib.Task{
-				TaskIdentifier: lib.TaskIdentifier("test-task-deadline-never-scheduled"),
+				TaskIdentifier: lib.TaskIdentifier("test-task-pod-not-scheduled"),
 				Frontmatter: lib.TaskFrontmatter{
 					"status": "in_progress",
 				},
 				Content: lib.TaskContent("do the work"),
 			}
-			pod := &corev1.Pod{
-				Status: corev1.PodStatus{
-					Phase: corev1.PodPending,
-					Conditions: []corev1.PodCondition{
-						{Type: corev1.PodScheduled, Status: corev1.ConditionFalse},
-					},
-				},
-			}
 			err := publisher.PublishFailure(
-				ctx, task, "claude-20260418120000", "deadline_exceeded", pod,
-			)
+				ctx, task, "claude-20260418120000", "pod_not_scheduled", nil)
 			Expect(err).NotTo(HaveOccurred())
 
 			_, updateCmd := decodeUpdateFrontmatterCommand(producer.messages[0])
@@ -523,60 +517,14 @@ var _ = Describe("ResultPublisher", func() {
 			Expect(updateCmd.Updates["max_triggers"]).To(BeNumerically("==", 3))
 		})
 
-		It("does not arm a deadline kill whose pod reached a terminal phase", func() {
+		It("does not arm a deadline kill, whose pod is already gone", func() {
+			// Arming on the bare reason would cap every task that legitimately ran
+			// to its deadline, and the pod it would discriminate on is deleted before
+			// the condition is stamped.
 			task := lib.Task{
 				TaskIdentifier: lib.TaskIdentifier("test-task-deadline-ran"),
 				Frontmatter: lib.TaskFrontmatter{
 					"status": "in_progress",
-				},
-				Content: lib.TaskContent("do the work"),
-			}
-			pod := &corev1.Pod{Status: corev1.PodStatus{Phase: corev1.PodFailed}}
-			err := publisher.PublishFailure(
-				ctx, task, "claude-20260418120000", "deadline_exceeded", pod,
-			)
-			Expect(err).NotTo(HaveOccurred())
-
-			_, updateCmd := decodeUpdateFrontmatterCommand(producer.messages[0])
-			Expect(updateCmd.Updates).To(HaveLen(1))
-			Expect(updateCmd.Updates["current_job"]).To(Equal(""))
-			_, hasMax := updateCmd.Updates["max_triggers"]
-			Expect(hasMax).To(BeFalse(), "a pod that ran to a terminal phase must not arm the cap")
-		})
-
-		It("does not arm a deadline kill whose pod was scheduled but never started", func() {
-			task := lib.Task{
-				TaskIdentifier: lib.TaskIdentifier("test-task-deadline-scheduled"),
-				Frontmatter: lib.TaskFrontmatter{
-					"status": "in_progress",
-				},
-				Content: lib.TaskContent("do the work"),
-			}
-			pod := &corev1.Pod{
-				Status: corev1.PodStatus{
-					Phase: corev1.PodPending,
-					Conditions: []corev1.PodCondition{
-						{Type: corev1.PodScheduled, Status: corev1.ConditionTrue},
-					},
-				},
-			}
-			err := publisher.PublishFailure(
-				ctx, task, "claude-20260418120000", "deadline_exceeded", pod,
-			)
-			Expect(err).NotTo(HaveOccurred())
-
-			_, updateCmd := decodeUpdateFrontmatterCommand(producer.messages[0])
-			Expect(updateCmd.Updates).To(HaveLen(1))
-			_, hasMax := updateCmd.Updates["max_triggers"]
-			Expect(hasMax).To(BeFalse(), "a scheduled pod must not arm the cap")
-		})
-
-		It("preserves an operator-set max_triggers on the never-scheduled deadline path", func() {
-			task := lib.Task{
-				TaskIdentifier: lib.TaskIdentifier("test-task-deadline-operator-cap"),
-				Frontmatter: lib.TaskFrontmatter{
-					"status":       "in_progress",
-					"max_triggers": 5,
 				},
 				Content: lib.TaskContent("do the work"),
 			}
@@ -589,8 +537,27 @@ var _ = Describe("ResultPublisher", func() {
 				},
 			}
 			err := publisher.PublishFailure(
-				ctx, task, "claude-20260418120000", "deadline_exceeded", pod,
-			)
+				ctx, task, "claude-20260418120000", "deadline_exceeded", pod)
+			Expect(err).NotTo(HaveOccurred())
+
+			_, updateCmd := decodeUpdateFrontmatterCommand(producer.messages[0])
+			Expect(updateCmd.Updates).To(HaveLen(1))
+			Expect(updateCmd.Updates["current_job"]).To(Equal(""))
+			_, hasMax := updateCmd.Updates["max_triggers"]
+			Expect(hasMax).To(BeFalse(), "a deadline kill must not arm the cap")
+		})
+
+		It("preserves an operator-set max_triggers on the never-scheduled path", func() {
+			task := lib.Task{
+				TaskIdentifier: lib.TaskIdentifier("test-task-pod-not-scheduled-operator-cap"),
+				Frontmatter: lib.TaskFrontmatter{
+					"status":       "in_progress",
+					"max_triggers": 5,
+				},
+				Content: lib.TaskContent("do the work"),
+			}
+			err := publisher.PublishFailure(
+				ctx, task, "claude-20260418120000", "pod_not_scheduled", nil)
 			Expect(err).NotTo(HaveOccurred())
 
 			_, updateCmd := decodeUpdateFrontmatterCommand(producer.messages[0])
@@ -599,33 +566,24 @@ var _ = Describe("ResultPublisher", func() {
 			Expect(hasMax).To(BeFalse(), "an operator budget of 5 must not be lowered to 3")
 		})
 
-		It("logs the deadline arm distinctly from the crash arm", func() {
+		It("logs the never-scheduled arm distinctly", func() {
 			task := lib.Task{
-				TaskIdentifier: lib.TaskIdentifier("test-task-deadline-log-arm"),
+				TaskIdentifier: lib.TaskIdentifier("test-task-pod-not-scheduled-log-arm"),
 				Frontmatter: lib.TaskFrontmatter{
 					"status": "in_progress",
 				},
 				Content: lib.TaskContent("do the work"),
 			}
-			pod := &corev1.Pod{
-				Status: corev1.PodStatus{
-					Phase: corev1.PodPending,
-					Conditions: []corev1.PodCondition{
-						{Type: corev1.PodScheduled, Status: corev1.ConditionFalse},
-					},
-				},
-			}
 			out := captureGlogStderr(func() {
 				err := publisher.PublishFailure(
-					ctx, task, "claude-20260418120000", "deadline_exceeded", pod,
-				)
+					ctx, task, "claude-20260418120000", "pod_not_scheduled", nil)
 				Expect(err).NotTo(HaveOccurred())
 			})
 
 			Expect(out).To(ContainSubstring("event=crash_arm_decision "))
-			Expect(out).To(ContainSubstring(`parsed="deadline_exceeded"`))
+			Expect(out).To(ContainSubstring(`parsed="pod_not_scheduled"`))
 			Expect(out).To(ContainSubstring("decision=arm"))
-			Expect(out).To(ContainSubstring("task=test-task-deadline-log-arm"))
+			Expect(out).To(ContainSubstring("task=test-task-pod-not-scheduled-log-arm"))
 		})
 
 		It("preserves an operator-set max_triggers instead of clobbering it", func() {

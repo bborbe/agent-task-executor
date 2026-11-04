@@ -504,14 +504,19 @@ func (p *resultPublisher) PublishSpawnNotification(
 // outcome is ever published for it, and without a cap the controller's
 // assignee-clear — the only operator-inbox signal this path has — never fires.
 //
-// The same cap is armed for a deadline_exceeded failure whose pod carries
-// PodScheduled=False: the Job was killed at its deadline before it was ever
-// placed on a node, so it can never run and would otherwise re-queue forever.
-// The never-scheduled predicate is hasPodScheduledFalse, the single definition
-// the zombie sweeper also uses. A pod that reached a terminal phase before the
-// deadline carries no PodScheduled=False condition, so the same predicate covers
-// the "ran and then hit its deadline" case without a phase check. A nil pod is
-// not evidence of never having scheduled, so it never arms.
+// The same cap is armed for the pod_not_scheduled class: the Job's pod could not
+// be placed on any node, so it can never run and would otherwise re-queue
+// forever. That classification is produced by the zombie sweeper, which is the
+// only component that can still observe the pod — see the note below.
+//
+// A deadline_exceeded failure does NOT arm, and the pod argument is not
+// consulted. The Job controller deletes the pod one second BEFORE it stamps the
+// Job's DeadlineExceeded condition (measured on nuke dev 2026-11-04), so a
+// failure-time pod lookup returns nothing for exactly the class that matters;
+// gating on it would leave every spec green while the runtime never armed. That
+// is what the first attempt at this fix did, and a live replay ran trigger_count
+// from 1 to 11 with no max_triggers ever written. The pod argument survives for
+// the log-tail capture, which has its own reason to want it.
 //
 // The gate is ParseZombieReason, not string equality. PublishFailure takes reason
 // as a raw string and is shared by all eight ZombieReason values, several of
@@ -547,21 +552,17 @@ func (p *resultPublisher) PublishSpawnNotification(
 func crashFailureUpdates(
 	task lib.Task,
 	jobName, reason string,
-	pod *corev1.Pod,
 ) lib.TaskFrontmatter {
 	updates := lib.TaskFrontmatter{"current_job": ""}
 	parsed, parsedOK := ParseZombieReason(reason)
+	// The never-scheduled class is armed on the sweeper's classification, not on
+	// a pod read here: the Job controller deletes the pod one second BEFORE it
+	// stamps the Job's DeadlineExceeded condition, so a failure-time lookup
+	// returns nothing for exactly the class that matters (measured on nuke dev
+	// 2026-11-04). pod still feeds the log tail; it no longer gates the arm.
 	armClass := parsedOK && (parsed == ZombieReasonPodCrashNoStdout ||
-		(parsed == ZombieReasonDeadlineExceeded && pod != nil && hasPodScheduledFalse(pod)))
+		parsed == ZombieReasonPodNotScheduled)
 	if !armClass {
-		if parsedOK && parsed == ZombieReasonDeadlineExceeded {
-			glog.V(2).Infof(
-				"event=crash_arm_decision task=%s job=%s reason=%q parsed=%q parsed_ok=%t "+
-					"decision=not_never_scheduled pod_resolved=%t",
-				task.TaskIdentifier, jobName, reason, parsed.String(), parsedOK, pod != nil,
-			)
-			return updates
-		}
 		glog.V(2).Infof(
 			"event=crash_arm_decision task=%s job=%s reason=%q parsed=%q parsed_ok=%t "+
 				"decision=not_crash_class",
@@ -751,7 +752,7 @@ func (p *resultPublisher) publishFailure(
 	updateCmd := taskcmd.UpdateFrontmatterCommand{
 		TaskIdentifier: task.TaskIdentifier,
 		TargetVault:    targetVaultFromTask(task),
-		Updates:        crashFailureUpdates(task, jobName, reason, pod),
+		Updates:        crashFailureUpdates(task, jobName, reason),
 		Body: &taskcmd.BodySection{
 			Heading: "## Failure",
 			Section: section,
