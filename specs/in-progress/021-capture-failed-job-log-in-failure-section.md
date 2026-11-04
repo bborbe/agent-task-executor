@@ -1,6 +1,8 @@
 ---
-status: approved
+status: prompted
 approved: "2026-11-03T20:30:23Z"
+generating: "2026-11-04T01:44:29Z"
+prompted: "2026-11-04T01:44:29Z"
 branch: dark-factory/capture-failed-job-log-in-failure-section
 ---
 
@@ -36,7 +38,7 @@ Every failed Job's `## Failure` section carries the tail of its own pod log — 
 
 ## Acceptance Criteria
 
-- [ ] A failure publish whose fake log contains a literal GitHub token, a PEM private-key block, a bearer token, a URL carrying userinfo, and a secret-shaped assignment of 13 or more characters produces a composed `## Failure` body containing **none** of those literal values — evidence: `go test ./pkg/ -run TestPkg -v -- -ginkgo.focus='redact|lookup key'` passes and the focused specs assert each value's absence against the **composed body**, not against the redactor's return value. The 13-character fixture is a value used in no other case, so a redactor hardcoded to the other fixtures fails here.
+- [ ] A failure publish whose fake log contains a literal GitHub token, a PEM private-key block, a bearer token, a URL carrying userinfo, and a value of 13 or more characters assigned to a secret-named key produces a composed `## Failure` body containing **none** of those literal values — evidence: `go test ./pkg/ -run TestPkg -v -args -ginkgo.focus='redact|lookup key' | grep -qE 'Ran [1-9][0-9]+ of'` passes and the focused specs assert each value's absence against the **composed body**, not against the redactor's return value. The 13-character fixture is a value used in no other case, so a redactor hardcoded to the other fixtures fails here.
 - [ ] The same composed body still contains a short lookup key verbatim, so the tail remains useful for triage — evidence: the same focused run asserts the literal is present in the composed body, from a spec under a `Describe` whose name contains `redact`.
 - [ ] The log request carries both a line limit and a byte limit, and an over-limit input yields a tail within the byte limit — evidence: a focused spec asserts both fields on the request and that a 10× over-limit input yields at most the byte limit.
 - [ ] A failed log read still publishes the failure, returns nil, adds no log block, and names the job on one V(1) line — evidence: a focused spec named `log read fails` asserts no error, the failure section present, `Log tail` absent, and the log line naming the job.
@@ -52,11 +54,15 @@ Every failed Job's `## Failure` section carries the tail of its own pod log — 
 ### Container-executable (runs inside the YOLO container at prompt time)
 
 - `make precommit` — format, lint, vet, unit and integration tests
-- `go test ./pkg/ -run TestPkg -v -- -ginkgo.focus='redact'` — redaction and composed-body assertions
-- `go test ./pkg/ -run TestPkg -v -- -ginkgo.focus='failure'` — failure-publish path
-- `git diff origin/master -U0 -- pkg/result_publisher.go | grep -cE '^[-+].*PublishFailure'` — signature frozen
+- `go test ./pkg/ -run TestPkg -v -args -ginkgo.focus='redact' 2>&1 | tee /tmp/spec-redact.out | grep -qE 'Ran [1-9][0-9]+ of' && grep -q 'SUCCESS!' /tmp/spec-redact.out` — redaction and composed-body assertions; the count assertion is what makes the command fail when the focus selects nothing, and the `SUCCESS!` assertion is what makes it fail when the selected specs fail (Ginkgo prints `Ran N of M` before the verdict)
+- `go test ./pkg/ -run TestPkg -v -args -ginkgo.focus='failure' 2>&1 | tee /tmp/spec-failure.out | grep -qE 'Ran [1-9][0-9]* of' && grep -q 'SUCCESS!' /tmp/spec-failure.out` — failure-publish path
+- `sed -n '/^\tPublishFailure($/,/^\t) error$/p' pkg/result_publisher.go | grep -cE '^\t\t[a-z]'` — prints `5`, one line per parameter, so an added or removed parameter changes the number
 
 The suite entry point is `TestPkg` (`pkg/suite_test.go:18`), so a `-run 'Redact'` filter selects nothing and exits 0 — every Ginkgo selection in this spec uses `-run TestPkg` plus `-ginkgo.focus`.
+
+Two ways to lose the focus silently, both measured on this repo with go1.27.3, and both why every selection above carries its `Ran` count:
+- `-run 'Redact'` selects no suite, so nothing runs at all.
+- `-- -ginkgo.focus='x'` does **not** forward the flag: `go test` runs the whole 247-spec suite, prints `Ran 247 of 247`, and exits 0. Use `-args -ginkgo.focus='x'` (or the bare `-ginkgo.focus='x'`), never `--`.
 
 ### Operator-executable (runs on the host after release and deploy)
 
@@ -71,7 +77,7 @@ No scenario is added: the dev rung above exercises the real pod, real RBAC and r
 1. When a Job fails and the executor publishes `## Failure`, the section carries Timestamp, Job and Reason exactly as today, plus one `- **Log tail:**` block.
 2. The tail is the failed pod's own log, read at publish time, bounded by both a line count and a byte count so a runaway log cannot bloat the task file.
 3. Every credential-shaped string in the tail is replaced before the section string is composed — redaction happens on the composing side, never downstream.
-4. A secret-shaped assignment shorter than 13 characters is left readable, because a lookup key is a reference and the tail is worthless without it.
+4. An assignment is redacted only when its key is secret-shaped and its value is 13 or more characters. A shorter value, and a value under an ordinary logfmt key such as `event=` or `job=`, stay readable — a lookup key is a reference, and a tail whose every field reads `<redacted>` is worthless for triage.
 5. If the pod or its log cannot be read — already garbage-collected, lister not synced, API error, throttled — the failure publishes exactly as it does today: no log block, no error, one V(1) line naming the job.
 6. A successful Job reads no log and gains no block.
 7. The captured tail is plain text in a fenced block, so the markdown section stays parseable by the existing body-section writer.
@@ -81,7 +87,7 @@ No scenario is added: the dev rung above exercises the real pod, real RBAC and r
 - `PublishFailure(ctx, task, jobName, reason) error` keeps its signature — spec 004 freezes it, and the reason string still flows through unchanged.
 - The redaction step must run before the section string is built; redacting the already-composed string is not acceptable.
 - The log read must not depend on the job watcher's informer cache. The publisher and the watcher are constructed independently, so an informer-backed reader would couple them; the reader takes a client and a namespace instead.
-- The redaction floor is a named constant, `redactionMinSecretLength = 13`: an assignment of 13 or more characters is redacted, a shorter one survives as a lookup key. The implementation and the test that pins the boundary both reference the constant, never a literal.
+- The redaction floor is a named constant, `redactionMinSecretLength = 13`, applied to the value of an assignment whose key is secret-shaped (`token`, `secret`, `passw`, `pem`, `dsn`, `credential`, `api_key`, `auth`, case-insensitive). A value of 13 or more characters under such a key is redacted; a shorter one survives as a lookup key, and a value under an ordinary logfmt key (`event`, `task`, `job`, `reason`) is never redacted. The key-shape requirement is load-bearing: the executor's own logs are logfmt (`pkg/result_publisher.go:549` — `event=… task=… job=… reason=…`), so a pure length floor replaces every field with `<redacted>` and ships a tail that cannot be triaged. The implementation and the test that pins the boundary both reference the constant, never a literal.
 - No new cluster permission beyond reading pod logs in the namespaces the executor already watches.
 
 ## Failure Modes
