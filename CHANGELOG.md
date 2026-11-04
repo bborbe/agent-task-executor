@@ -2,6 +2,10 @@
 
 All notable changes to this project will be documented in this file.
 
+## v0.55.2
+
+- fix: arm the trigger cap for a Job killed at its deadline before it was ever scheduled — the cap was armed only for the pod-crash class, so a never-scheduled deadline kill left `max_triggers` absent and the task re-queued until a human cleared the assignee. The arm gate now also admits `deadline_exceeded` when the failed pod carries `PodScheduled=False`; a pod that ran to a terminal phase, an unresolvable pod, and the store-miss path stay unarmed, and the recurring-task guard is unchanged
+
 ## v0.55.1
 
 - fix: harden the cluster build runner — the namespace is read back from the rendered manifest instead of the environment, a kubectl error fails loudly instead of reading as an absent Job, `TIMEOUT` is parsed as base 10, `SOURCE_DATE_EPOCH` is covered by the newline rejection, the clone init container drops all capabilities and cannot escalate, and `upload` / `clean` say they did nothing when `BUILD_TARGET` is not `local`

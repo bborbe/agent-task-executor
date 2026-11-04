@@ -172,7 +172,7 @@ var _ = Describe("JobWatcher (envtest)", func() {
 		Consistently(publisher.PublishFailureCallCount, 2*time.Second, 200*time.Millisecond).
 			Should(Equal(1), "expected exactly one PublishFailure call (no duplicates)")
 
-		_, _, gotJobName, gotReason := publisher.PublishFailureArgsForCall(0)
+		_, _, gotJobName, gotReason, _ := publisher.PublishFailureArgsForCall(0)
 		Expect(gotJobName).To(Equal(jobName))
 		Expect(gotReason).To(Equal(string(pkg.ZombieReasonImagePullBackOff)))
 	})
