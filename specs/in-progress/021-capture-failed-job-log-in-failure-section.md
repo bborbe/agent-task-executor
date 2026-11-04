@@ -1,8 +1,9 @@
 ---
-status: prompted
+status: verifying
 approved: "2026-11-03T20:30:23Z"
 generating: "2026-11-04T01:44:29Z"
 prompted: "2026-11-04T01:44:29Z"
+verifying: "2026-11-04T04:06:50Z"
 branch: dark-factory/capture-failed-job-log-in-failure-section
 ---
 
