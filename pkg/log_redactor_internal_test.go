@@ -49,6 +49,11 @@ var _ = Describe("redactLog", func() {
 			[]string{"0123456789abc"},
 			[]string{"ANTHROPIC_AUTH_TOKEN="},
 		),
+		Entry("quoted secret-named assignment with spaces",
+			`DATABASE_PASSWORD="correct horse battery staple"`,
+			[]string{"correct horse battery staple"},
+			[]string{"DATABASE_PASSWORD="},
+		),
 	)
 
 	It("leaves an ordinary log line unchanged", func() {
@@ -72,6 +77,9 @@ var _ = Describe("redactLog", func() {
 		value := strings.Repeat("a", redactionMinSecretLength-1)
 		assignment := "AUTH_TOKEN=" + value
 		Expect(redactLog(assignment)).To(ContainSubstring(assignment))
+
+		quoted := `AUTH_TOKEN="` + value + `"`
+		Expect(redactLog(quoted)).To(ContainSubstring(quoted))
 	})
 
 	It("redacts a value at exactly the floor", func() {

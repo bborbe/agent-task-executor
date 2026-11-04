@@ -20,6 +20,17 @@ const redactionMinSecretLength = 13
 // see that something was taken out.
 const redactionPlaceholder = "<redacted>"
 
+// redactionFloor is redactionMinSecretLength as the decimal string the
+// assignment pattern interpolates. Both the implementation and the boundary
+// test reference the constant, never a literal, so they cannot drift apart.
+var redactionFloor = strconv.Itoa(redactionMinSecretLength)
+
+// redactionFloorMinusOne is redactionFloor-1. The bare (unquoted) branch of the
+// assignment pattern matches its first character separately — that character
+// must not be a quote, so a short quoted value cannot slip through the bare
+// branch just because the quotes push its total length past the floor.
+var redactionFloorMinusOne = strconv.Itoa(redactionMinSecretLength - 1)
+
 // The patterns are compiled once at package level: redactLog runs on every
 // failure publish, and compiling five regexps per call would be wasted work on
 // a path that already does a network read.
@@ -40,14 +51,14 @@ var (
 	logRedactBearer = regexp.MustCompile(`(?i)(Bearer\s+)\S{8,}`)
 	// logRedactAssign matches an assignment whose KEY is secret-shaped and
 	// whose VALUE is at least redactionMinSecretLength characters. Group 1 is
-	// the key plus the separator, so the key survives in the output. The value
-	// run is non-whitespace, which covers a quoted logfmt field only up to its
-	// first space — a deliberate limit, see redactLog's false-positive note.
+	// the key plus the separator, so the key survives in the output. A quoted
+	// value is matched whole: a bare non-whitespace run would stop at the first
+	// space and leave `AUTH_TOKEN="correct horse battery"` untouched, which is
+	// the shape a value with spaces takes in a shell echo or a compose dump.
 	logRedactAssign = regexp.MustCompile(
-		`(?i)([A-Za-z0-9_.-]*(?:token|secret|passw|pem|dsn|credential|api[_-]?key|auth)[A-Za-z0-9_.-]*\s*[=:]\s*)\S{` +
-			strconv.Itoa(
-				redactionMinSecretLength,
-			) + `,}`,
+		`(?i)([A-Za-z0-9_.-]*(?:token|secret|passw|pem|dsn|credential|api[_-]?key|auth)[A-Za-z0-9_.-]*\s*[=:]\s*)` +
+			`(?:"[^"]{` + redactionFloor + `,}"|'[^']{` + redactionFloor + `,}'|[^"'\s]\S{` +
+			redactionFloorMinusOne + `,})`,
 	)
 )
 
