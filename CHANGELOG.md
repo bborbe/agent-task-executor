@@ -2,7 +2,7 @@
 
 All notable changes to this project will be documented in this file.
 
-## Unreleased
+## v0.56.1
 
 - fix: **a provably unprocessable task event no longer crash-loops the consumer and wedges every agent in the namespace.** A deterministic validation failure — Kubernetes rejecting the spawned Job name as a non-RFC-1123 label, or any `Invalid`/`BadRequest` status — can never succeed on redelivery, so the consumer recorded it in a sampled log line, exited, and re-read the same offset forever. `ConsumeMessage` now classifies such an error, publishes the original message to `{TOPIC_PREFIX}-agent-task-v1-dead-letter` (key preserved, source topic/partition/offset and the error carried as headers), and returns nil so the offset advances. A transient failure — API timeout, vault write, kube blip — is returned unchanged, so the offset stays unmarked and the failure still surfaces. If the dead-letter record cannot be written, the error is surfaced rather than swallowed, because skipping without a durable record is silent loss. The skip is counted by `agent_executor_task_events_total{result="skipped_permanent"}` and `agent_executor_dead_letter_total{topic=...}`.
 
