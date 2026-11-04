@@ -251,18 +251,19 @@ func NewTaskEventHandler(
 }
 
 type taskEventHandler struct {
-	jobSpawner       spawner.JobSpawner
-	namespace        libk8s.Namespace
-	branch           base.Branch
-	cluster          string
-	stageFilter      bool
-	runUntagged      bool
-	resolver         pkg.ConfigResolver
-	resultPublisher  pkg.ResultPublisher
-	taskStore        *pkg.TaskStore
-	currentDateTime  libtime.CurrentDateTimeGetter
-	deferredMu       sync.Mutex
-	deferredRespawns map[lib.TaskIdentifier]deferredEntry
+	jobSpawner          spawner.JobSpawner
+	namespace           libk8s.Namespace
+	branch              base.Branch
+	cluster             string
+	stageFilter         bool
+	runUntagged         bool
+	resolver            pkg.ConfigResolver
+	resultPublisher     pkg.ResultPublisher
+	deadLetterPublisher pkg.DeadLetterPublisher
+	taskStore           *pkg.TaskStore
+	currentDateTime     libtime.CurrentDateTimeGetter
+	deferredMu          sync.Mutex
+	deferredRespawns    map[lib.TaskIdentifier]deferredEntry
 	// refusedMu guards refusedGates: the last reconcile gate that refused each task.
 	refusedMu    sync.Mutex
 	refusedGates map[lib.TaskIdentifier]string
@@ -575,7 +576,7 @@ func (h *taskEventHandler) ConsumeMessage(ctx context.Context, msg *sarama.Consu
 		metrics.TaskEventsTotal.WithLabelValues("event_refusal_write_failed").Inc()
 		return nil
 	}
-	return err
+	return h.classifySpawnError(ctx, task, msg, err)
 }
 
 // parseAndFilter unmarshals the message and applies all pre-spawn filter checks.

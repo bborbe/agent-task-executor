@@ -80,3 +80,12 @@ func WithPodQuotaLimiter(limiter spawner.PodQuotaLimiter) HandlerOption {
 		h.podQuotaLimiter = limiter
 	}
 }
+
+// WithDeadLetterPublisher attaches the durable sink for a message the consumer
+// can never process. Without it a permanent failure is surfaced rather than
+// skipped, because skipping with nowhere to record the message would lose it.
+func WithDeadLetterPublisher(publisher pkg.DeadLetterPublisher) HandlerOption {
+	return func(h *taskEventHandler) {
+		h.deadLetterPublisher = publisher
+	}
+}

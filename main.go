@@ -395,6 +395,7 @@ func (a *application) Run(ctx context.Context, sentryClient libsentry.Client) er
 
 	consumer, taskEventHandler := factory.CreateConsumer(
 		saramaClient,
+		syncProducer,
 		a.Branch,
 		a.Cluster,
 		a.StageFilter,

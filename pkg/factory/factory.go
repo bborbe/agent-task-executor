@@ -6,6 +6,7 @@ package factory
 
 import (
 	"context"
+	"fmt"
 	"time"
 
 	"github.com/IBM/sarama"
@@ -225,6 +226,7 @@ func CreateJobSpawner(
 // TaskEventHandler so callers can wire RunDeferredRespawnLoop.
 func CreateConsumer(
 	saramaClient sarama.Client,
+	syncProducer libkafka.SyncProducer,
 	branch base.Branch,
 	cluster string,
 	stageFilter, runUntagged bool,
@@ -288,14 +290,10 @@ func CreateConsumer(
 		handler.WithClaimJobControl(
 			handler.NewKubeJobControl(kubeClient, namespace, resolver, view),
 		),
+		handler.WithDeadLetterPublisher(newDeadLetterPublisher(syncProducer, topicPrefix)),
 	)
 	topic := lib.TaskV1SchemaID.EventTopic(topicPrefix)
-	offsetManager := libkafka.NewSaramaOffsetManager(
-		saramaClient,
-		libkafka.Group(consumerGroup),
-		libkafka.OffsetOldest,
-		libkafka.OffsetOldest,
-	)
+	offsetManager := newTaskOffsetManager(saramaClient, consumerGroup)
 	return libkafka.NewOffsetConsumerHighwaterMarks(
 		saramaClient,
 		topic,
@@ -304,6 +302,34 @@ func CreateConsumer(
 		run.NewTrigger(),
 		logSamplerFactory,
 	), taskEventHandler
+}
+
+// newDeadLetterPublisher returns the durable sink a provably unprocessable task
+// event is recorded in, so skipping it does not also erase the evidence. It
+// lives here rather than inline in CreateConsumer to keep that constructor under
+// the function-length limit.
+func newDeadLetterPublisher(
+	syncProducer libkafka.SyncProducer,
+	topicPrefix base.TopicPrefix,
+) pkg.DeadLetterPublisher {
+	return pkg.NewKafkaDeadLetterPublisher(
+		syncProducer,
+		libkafka.Topic(fmt.Sprintf("%s-agent-task-v1-dead-letter", topicPrefix)),
+	)
+}
+
+// newTaskOffsetManager returns the offset manager the task event consumer marks
+// its progress through.
+func newTaskOffsetManager(
+	saramaClient sarama.Client,
+	consumerGroup string,
+) libkafka.OffsetManager {
+	return libkafka.NewSaramaOffsetManager(
+		saramaClient,
+		libkafka.Group(consumerGroup),
+		libkafka.OffsetOldest,
+		libkafka.OffsetOldest,
+	)
 }
 
 // CreateTaskView returns the in-memory task view and the run.Func that captures
