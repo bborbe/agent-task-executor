@@ -1,8 +1,9 @@
 ---
-status: approved
+status: completed
 spec: [021-capture-failed-job-log-in-failure-section]
 created: "2026-11-04T01:20:02Z"
 queued: "2026-11-04T01:44:19Z"
+completed: "2026-11-04T04:06:50Z"
 ---
 
 # Redact credential shapes from captured pod log text
