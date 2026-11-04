@@ -128,6 +128,22 @@ var _ = Describe("PublishFailure redaction in the composed body", func() {
 		))
 		Expect(strings.Count(updateCmd.Body.Section, "```")).To(Equal(2))
 	})
+
+	It("widens the fence when the log itself carries one", func() {
+		f.reader.TailReturns("before\n```\nafter\n", nil)
+
+		Expect(
+			f.pub.PublishFailure(
+				context.Background(), f.task, "job-1", "pod_crash_no_stdout", f.pod,
+			),
+		).To(Succeed())
+
+		_, updateCmd := decodeUpdateFrontmatterCommand(f.producer.messages[0])
+		section := updateCmd.Body.Section
+		// A fixed three-backtick fence would close on the log's own ``` and let
+		// the rest of the tail be read as markdown. Four backticks contain it.
+		Expect(section).To(ContainSubstring("- **Log tail:**\n\n````\nbefore\n```\nafter\n````\n"))
+	})
 })
 
 var _ = Describe("PublishFailure log tail read failures", func() {

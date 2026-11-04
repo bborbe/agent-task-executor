@@ -693,7 +693,37 @@ func (p *resultPublisher) logTailBlock(
 	if tail == "" {
 		return ""
 	}
-	return "\n- **Log tail:**\n\n```\n" + tail + "\n```\n"
+	fence := logFence(tail)
+	return "\n- **Log tail:**\n\n" + fence + "\n" + tail + "\n" + fence + "\n"
+}
+
+// logFence returns a backtick fence long enough to contain tail.
+//
+// A fixed three-backtick fence is not safe here: the tail is container output
+// written into a task body that an agent later reads, so a log line carrying
+// its own ``` would close the block early and let the rest of the log be read
+// as markdown — an injection into a record nobody reviews before it is pushed.
+// Markdown closes a fence only with a run at least as long as the opener, so
+// one backtick more than the longest run in the tail always contains it. An
+// ordinary tail still gets the usual three, which is what the composed-body
+// spec asserts.
+func logFence(tail string) string {
+	longest := 0
+	run := 0
+	for _, r := range tail {
+		if r == '`' {
+			run++
+			if run > longest {
+				longest = run
+			}
+			continue
+		}
+		run = 0
+	}
+	if longest < 2 {
+		longest = 2
+	}
+	return strings.Repeat("`", longest+1)
 }
 
 func (p *resultPublisher) publishFailure(

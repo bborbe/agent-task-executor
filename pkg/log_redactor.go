@@ -55,8 +55,11 @@ var (
 	// value is matched whole: a bare non-whitespace run would stop at the first
 	// space and leave `AUTH_TOKEN="correct horse battery"` untouched, which is
 	// the shape a value with spaces takes in a shell echo or a compose dump.
+	// The key's trailing `["']?` is what admits a JSON-encoded pair —
+	// `"api_key": "value"` — where the closing quote sits between the name and
+	// the separator and would otherwise stop the key match one character short.
 	logRedactAssign = regexp.MustCompile(
-		`(?i)([A-Za-z0-9_.-]*(?:token|secret|passw|pem|dsn|credential|api[_-]?key|auth)[A-Za-z0-9_.-]*\s*[=:]\s*)` +
+		`(?i)([A-Za-z0-9_.-]*(?:token|secret|passw|pem|dsn|credential|api[_-]?key|auth)[A-Za-z0-9_.-]*["']?\s*[=:]\s*)` +
 			`(?:"[^"]{` + redactionFloor + `,}"|'[^']{` + redactionFloor + `,}'|[^"'\s]\S{` +
 			redactionFloorMinusOne + `,})`,
 	)

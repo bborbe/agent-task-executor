@@ -54,6 +54,11 @@ var _ = Describe("redactLog", func() {
 			[]string{"correct horse battery staple"},
 			[]string{"DATABASE_PASSWORD="},
 		),
+		Entry("JSON-encoded secret-named pair",
+			`{"api_key": "sk-live-0123456789abcdef"}`,
+			[]string{"sk-live-0123456789abcdef"},
+			[]string{"api_key"},
+		),
 	)
 
 	It("leaves an ordinary log line unchanged", func() {
