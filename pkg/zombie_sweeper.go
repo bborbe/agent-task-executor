@@ -77,6 +77,21 @@ const (
 	// with PodScheduled=False is classified pod_not_scheduled. Must exceed
 	// typical scheduler latency comfortably; 2 minutes is empirically generous.
 	podNotScheduledGraceWindow = 2 * time.Minute
+
+	// podNotScheduledArmWindow is how long a Pod must stay unschedulable before
+	// the sweeper publishes pod_not_scheduled AHEAD of the task's deadline, so
+	// the trigger cap can arm.
+	//
+	// It is deliberately much longer than podNotScheduledGraceWindow. The grace
+	// window is only a scheduler-latency floor; the arm window must also clear
+	// cluster-autoscaler scale-up, which routinely takes several minutes. Arming
+	// at the grace window would classify a pod that is merely waiting for a node
+	// as one that can never run: the record would take a spurious failure, lose
+	// `current_job` while its Job is still active, and accrue `max_triggers: 3` —
+	// three slow spawns would clear the assignee for a task that would have run.
+	// Ten minutes still caps a genuinely stuck task well inside the default
+	// 1800 s deadline, which is the whole point of the early path.
+	podNotScheduledArmWindow = 10 * time.Minute
 )
 
 // NOTE on "no recent heartbeat" from spec DB #9 / AC #6:
@@ -125,65 +140,92 @@ func (s *zombieSweeper) SweepOnce(ctx context.Context) error {
 		return errors.Wrapf(ctx, err, "list configs")
 	}
 	for taskID, task := range snapshot {
-		jobName := task.Frontmatter.CurrentJob()
-		if jobName == "" {
-			// No active job recorded; nothing to sweep.
-			continue
-		}
-		jobStartedAt, err := task.Frontmatter.JobStartedAt()
-		if err != nil || jobStartedAt.IsZero() {
-			glog.V(3).Infof(
-				"zombie sweeper: task %s job_started_at unparseable or zero; skipping",
-				taskID,
-			)
-			continue
-		}
-		elapsed := now.Sub(jobStartedAt)
-		// A pod younger than the grace window cannot be classified unschedulable,
-		// so skip the namespace resolution and the pod read for it.
-		if elapsed < podNotScheduledGraceWindow {
-			continue
-		}
-		namespace := resolveTaskNamespace(ctx, s.namespace, task, cfgs)
-		lister := s.jobWatcher.PodLister(namespace)
-		if lister == nil {
-			glog.V(2).Infof(
-				"zombie sweeper: task %s namespace %s pod lister not synced; skipping",
-				taskID, namespace,
-			)
-			continue
-		}
-		reason := s.classify(lister, namespace, taskID, now)
-		// The never-scheduled class does not wait for the deadline. The Job
-		// controller deletes the pod one second BEFORE it stamps the Job's
-		// DeadlineExceeded condition (measured on nuke dev 2026-11-04), so by the
-		// deadline the pod this classification needs is already gone. classify
-		// applies the 2-minute grace window itself, so reaching here with
-		// pod_not_scheduled means the pod has been unschedulable that long and will
-		// never run — publishing now caps a Job that can never succeed instead of
-		// letting it burn a full deadline first.
-		if reason != ZombieReasonPodNotScheduled {
-			if elapsed < s.taskDeadline(task, cfgs) {
-				continue
-			}
-		}
-		if reason == "" {
-			continue
-		}
-		// No pod: the sweeper writes no log tail, and the arm no longer needs one.
-		if err := s.publisher.PublishFailure(ctx, task, jobName, reason.String(), nil); err != nil {
-			glog.Errorf(
-				"zombie sweeper: publish failure for task %s (job %s reason %s): %v",
-				taskID, jobName, reason, err,
-			)
-			continue
-		}
-		glog.V(2).Infof(
-			"zombie sweeper: published failure for task %s (job %s reason %s elapsed=%s)",
-			taskID, jobName, reason, elapsed,
-		)
+		s.sweepTask(ctx, taskID, task, cfgs, now)
 	}
 	return nil
+}
+
+// sweepTask decides whether one task is a zombie and publishes its failure.
+// Extracted from SweepOnce so the per-tick loop stays legible: the decision has
+// three independent gates (grace floor, classification, deadline-or-arm-window)
+// and inlining them pushed the loop past the complexity limit.
+func (s *zombieSweeper) sweepTask(
+	ctx context.Context,
+	taskID lib.TaskIdentifier,
+	task lib.Task,
+	cfgs []agentv1.Config,
+	now time.Time,
+) {
+	jobName := task.Frontmatter.CurrentJob()
+	if jobName == "" {
+		// No active job recorded; nothing to sweep.
+		return
+	}
+	jobStartedAt, err := task.Frontmatter.JobStartedAt()
+	if err != nil || jobStartedAt.IsZero() {
+		glog.V(3).Infof(
+			"zombie sweeper: task %s job_started_at unparseable or zero; skipping",
+			taskID,
+		)
+		return
+	}
+	deadline := s.taskDeadline(task, cfgs)
+	elapsed := now.Sub(jobStartedAt)
+	// A pod younger than the grace window cannot be classified unschedulable,
+	// so skip the namespace resolution and the pod read for it. The floor is
+	// clamped to the task's own deadline so a Config with a deadline shorter
+	// than the grace window keeps its configured detection latency.
+	floor := podNotScheduledGraceWindow
+	if deadline < floor {
+		floor = deadline
+	}
+	if elapsed < floor {
+		return
+	}
+	namespace := resolveTaskNamespace(ctx, s.namespace, task, cfgs)
+	lister := s.jobWatcher.PodLister(namespace)
+	if lister == nil {
+		glog.V(2).Infof(
+			"zombie sweeper: task %s namespace %s pod lister not synced; skipping",
+			taskID, namespace,
+		)
+		return
+	}
+	reason := s.classify(lister, namespace, taskID, now)
+	if reason == "" {
+		return
+	}
+	// The never-scheduled class may be published ahead of the deadline. The Job
+	// controller deletes the pod one second BEFORE it stamps the Job's
+	// DeadlineExceeded condition (measured on nuke dev 2026-11-04), so by the
+	// deadline the pod this classification needs is already gone.
+	//
+	// It waits podNotScheduledArmWindow, not the classification's 2-minute grace
+	// window: unschedulable is not the same as will-never-schedule, and a pod
+	// waiting on cluster-autoscaler scale-up can sit Pending for several minutes
+	// and then run. Arming that early would take a spurious failure, clear
+	// current_job under a still-active Job, and accrue max_triggers — three slow
+	// spawns would clear the assignee for a task that would have run.
+	armWindow := podNotScheduledArmWindow
+	if deadline < armWindow {
+		armWindow = deadline
+	}
+	early := reason == ZombieReasonPodNotScheduled && elapsed >= armWindow
+	if !early && elapsed < deadline {
+		return
+	}
+	// No pod: the sweeper writes no log tail, and the arm no longer needs one.
+	if err := s.publisher.PublishFailure(ctx, task, jobName, reason.String(), nil); err != nil {
+		glog.Errorf(
+			"zombie sweeper: publish failure for task %s (job %s reason %s): %v",
+			taskID, jobName, reason, err,
+		)
+		return
+	}
+	glog.V(2).Infof(
+		"zombie sweeper: published failure for task %s (job %s reason %s elapsed=%s)",
+		taskID, jobName, reason, elapsed,
+	)
 }
 
 // resolveTaskNamespace returns the namespace the task's Job lives in. It uses

@@ -342,9 +342,9 @@ var _ = Describe("ZombieSweeper", func() {
 		Context("pod is unschedulable past the grace window but inside the deadline", func() {
 			It("publishes pod_not_scheduled before the deadline", func() {
 				taskID := lib.TaskIdentifier("task-6e-early-pod-not-scheduled")
-				// 5 minutes ago; the default zombie timeout is 1800 s, so this task is
-				// nowhere near its deadline.
-				ts := libtimetest.ParseDateTime("2026-06-01T11:55:00Z")
+				// 12 minutes ago: past the 10-minute arm window but still well inside
+				// the default 1800 s deadline.
+				ts := libtimetest.ParseDateTime("2026-06-01T11:48:00Z")
 				task := makeTask(string(taskID), "agent-a", "job-1", ts.Format(time.RFC3339))
 				taskStore.Store(taskID, task)
 
@@ -381,6 +381,51 @@ var _ = Describe("ZombieSweeper", func() {
 				Expect(fakePublisher.PublishFailureCallCount()).To(Equal(1))
 				_, _, _, calledReason, _ := fakePublisher.PublishFailureArgsForCall(0)
 				Expect(calledReason).To(Equal("pod_not_scheduled"))
+			})
+		})
+
+		Context("pod is unschedulable past the grace window but inside the arm window", func() {
+			It("does not publish early, so a scale-up is not mistaken for never-scheduled", func() {
+				// 5 minutes: past the 2-minute classification grace, but inside the
+				// 10-minute arm window. A cluster-autoscaler scale-up routinely takes
+				// this long and then schedules, so arming here would take a spurious
+				// failure and clear current_job under a still-active Job.
+				taskID := lib.TaskIdentifier("task-6e-arm-window-pod-not-scheduled")
+				ts := libtimetest.ParseDateTime("2026-06-01T11:55:00Z")
+				task := makeTask(string(taskID), "agent-a", "job-1", ts.Format(time.RFC3339))
+				taskStore.Store(taskID, task)
+
+				cfg := agentv1.Config{
+					ObjectMeta: metav1.ObjectMeta{Name: "cfg-a"},
+					Spec:       agentv1.ConfigSpec{Assignee: "agent-a"},
+				}
+				_ = eventHandlerConfig.OnAdd(ctx, cfg)
+
+				fakeClient := fake.NewSimpleClientset()
+				informerFactory := k8sinformers.NewSharedInformerFactoryWithOptions(
+					fakeClient,
+					0,
+					k8sinformers.WithNamespace("test-ns"),
+				)
+				podInformer := informerFactory.Core().V1().Pods().Informer()
+				_ = podInformer.GetIndexer().
+					Add(makePod("pod-arm-window-unschedulable", "test-ns", string(taskID), corev1.PodPending, 5*time.Minute, podScheduledFalseCondition()))
+				podLister := informerFactory.Core().V1().Pods().Lister()
+				fakeJobWatcher := &mocks.FakeJobWatcher{}
+				fakeJobWatcher.PodListerReturns(podLister)
+
+				sweeper := pkg.NewZombieSweeper(
+					fakeJobWatcher,
+					"test-ns",
+					taskStore,
+					fakePublisher,
+					eventHandlerConfig,
+					currentDateTime,
+				)
+
+				err := sweeper.SweepOnce(ctx)
+				Expect(err).To(BeNil())
+				Expect(fakePublisher.PublishFailureCallCount()).To(Equal(0))
 			})
 		})
 
