@@ -8,7 +8,6 @@ import (
 	lib "github.com/bborbe/agent"
 	"github.com/bborbe/agent-task-executor/pkg"
 	"github.com/bborbe/cqrs/base"
-	v1 "k8s.io/api/core/v1"
 )
 
 type FakeResultPublisher struct {
@@ -39,14 +38,13 @@ type FakeResultPublisher struct {
 	publishClearCurrentJobReturnsOnCall map[int]struct {
 		result1 error
 	}
-	PublishFailureStub        func(context.Context, lib.Task, string, string, *v1.Pod) error
+	PublishFailureStub        func(context.Context, lib.Task, string, string) error
 	publishFailureMutex       sync.RWMutex
 	publishFailureArgsForCall []struct {
 		arg1 context.Context
 		arg2 lib.Task
 		arg3 string
 		arg4 string
-		arg5 *v1.Pod
 	}
 	publishFailureReturns struct {
 		result1 error
@@ -329,7 +327,7 @@ func (fake *FakeResultPublisher) PublishClearCurrentJobReturnsOnCall(i int, resu
 	}{result1}
 }
 
-func (fake *FakeResultPublisher) PublishFailure(arg1 context.Context, arg2 lib.Task, arg3 string, arg4 string, arg5 *v1.Pod) error {
+func (fake *FakeResultPublisher) PublishFailure(arg1 context.Context, arg2 lib.Task, arg3 string, arg4 string) error {
 	fake.publishFailureMutex.Lock()
 	ret, specificReturn := fake.publishFailureReturnsOnCall[len(fake.publishFailureArgsForCall)]
 	fake.publishFailureArgsForCall = append(fake.publishFailureArgsForCall, struct {
@@ -337,14 +335,13 @@ func (fake *FakeResultPublisher) PublishFailure(arg1 context.Context, arg2 lib.T
 		arg2 lib.Task
 		arg3 string
 		arg4 string
-		arg5 *v1.Pod
-	}{arg1, arg2, arg3, arg4, arg5})
+	}{arg1, arg2, arg3, arg4})
 	stub := fake.PublishFailureStub
 	fakeReturns := fake.publishFailureReturns
-	fake.recordInvocation("PublishFailure", []interface{}{arg1, arg2, arg3, arg4, arg5})
+	fake.recordInvocation("PublishFailure", []interface{}{arg1, arg2, arg3, arg4})
 	fake.publishFailureMutex.Unlock()
 	if stub != nil {
-		return stub(arg1, arg2, arg3, arg4, arg5)
+		return stub(arg1, arg2, arg3, arg4)
 	}
 	if specificReturn {
 		return ret.result1
@@ -358,17 +355,17 @@ func (fake *FakeResultPublisher) PublishFailureCallCount() int {
 	return len(fake.publishFailureArgsForCall)
 }
 
-func (fake *FakeResultPublisher) PublishFailureCalls(stub func(context.Context, lib.Task, string, string, *v1.Pod) error) {
+func (fake *FakeResultPublisher) PublishFailureCalls(stub func(context.Context, lib.Task, string, string) error) {
 	fake.publishFailureMutex.Lock()
 	defer fake.publishFailureMutex.Unlock()
 	fake.PublishFailureStub = stub
 }
 
-func (fake *FakeResultPublisher) PublishFailureArgsForCall(i int) (context.Context, lib.Task, string, string, *v1.Pod) {
+func (fake *FakeResultPublisher) PublishFailureArgsForCall(i int) (context.Context, lib.Task, string, string) {
 	fake.publishFailureMutex.RLock()
 	defer fake.publishFailureMutex.RUnlock()
 	argsForCall := fake.publishFailureArgsForCall[i]
-	return argsForCall.arg1, argsForCall.arg2, argsForCall.arg3, argsForCall.arg4, argsForCall.arg5
+	return argsForCall.arg1, argsForCall.arg2, argsForCall.arg3, argsForCall.arg4
 }
 
 func (fake *FakeResultPublisher) PublishFailureReturns(result1 error) {

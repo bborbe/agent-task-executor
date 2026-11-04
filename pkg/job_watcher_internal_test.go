@@ -262,10 +262,12 @@ var _ = Describe("jobWatcher backoff-limit pod detail", func() {
 			},
 		)
 
-		It("passes the never-scheduled pod to PublishFailure on a deadline kill", func() {
-			// Pins the Job-informer plumbing: without this the arm gate could be
-			// fed nil from every production call site and the whole suite would
-			// stay green while the never-scheduled fix silently no-ops.
+		It("publishes the deadline kill without resolving a pod", func() {
+			// The Job controller deletes the pod one second BEFORE it stamps the
+			// Job's DeadlineExceeded condition, so a failure-time lookup returns
+			// nothing for exactly the class that matters. The watcher therefore
+			// publishes the reason alone; the never-scheduled class is armed by the
+			// sweeper's pod_not_scheduled classification instead.
 			taskStore.Store(testTaskID, testTask)
 			job := makeJob("job-deadline-unscheduled", string(testTaskID), deadlineCondition())
 			pod := makeUnscheduledPod("pod-deadline-unscheduled", job.Name, string(testTaskID))
@@ -276,18 +278,6 @@ var _ = Describe("jobWatcher backoff-limit pod detail", func() {
 			Expect(fakePublisher.PublishFailureCallCount()).To(Equal(1))
 			_, _, _, calledReason := fakePublisher.PublishFailureArgsForCall(0)
 			Expect(calledReason).To(Equal("deadline_exceeded"))
-			Expect(fakePublisher.PublishFailurePodArgsForCall(0)).To(Equal(pod))
-		})
-
-		It("passes a nil pod to PublishFailure when the Job owns no pod", func() {
-			taskStore.Store(testTaskID, testTask)
-			job := makeJob("job-deadline-nopod", string(testTaskID), deadlineCondition())
-			setPodLister(watcher)
-
-			watcher.HandleJob(ctx, job)
-
-			Expect(fakePublisher.PublishFailureCallCount()).To(Equal(1))
-			Expect(fakePublisher.PublishFailurePodArgsForCall(0)).To(BeNil())
 		})
 
 		It(
@@ -419,7 +409,6 @@ type resultPublisherCall struct {
 	task    lib.Task
 	jobName string
 	reason  string
-	pod     *corev1.Pod
 }
 
 func (f *fakeResultPublisher) PublishSpawnNotification(
@@ -435,14 +424,12 @@ func (f *fakeResultPublisher) PublishFailure(
 	task lib.Task,
 	jobName string,
 	reason string,
-	pod *corev1.Pod,
 ) error {
 	f.publishFailureCalls = append(f.publishFailureCalls, resultPublisherCall{
 		ctx:     ctx,
 		task:    task,
 		jobName: jobName,
 		reason:  reason,
-		pod:     pod,
 	})
 	return nil
 }
@@ -579,10 +566,6 @@ func (f *fakeResultPublisher) PublishFailureArgsForCall(
 ) (context.Context, lib.Task, string, string) {
 	c := f.publishFailureCalls[i]
 	return c.ctx, c.task, c.jobName, c.reason
-}
-
-func (f *fakeResultPublisher) PublishFailurePodArgsForCall(i int) *corev1.Pod {
-	return f.publishFailureCalls[i].pod
 }
 
 func (f *fakeResultPublisher) PublishClearCurrentJobCallCount() int {

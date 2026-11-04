@@ -16,7 +16,6 @@ import (
 	"github.com/bborbe/cqrs/base"
 	libk8s "github.com/bborbe/k8s"
 	libtime "github.com/bborbe/time"
-	corev1 "k8s.io/api/core/v1"
 
 	pkg "github.com/bborbe/agent-task-executor/pkg"
 	"github.com/bborbe/agent-task-executor/pkg/claim"
@@ -71,7 +70,7 @@ func (stubResultPublisher) PublishSpawnNotification(
 }
 
 func (stubResultPublisher) PublishFailure(
-	context.Context, lib.Task, string, string, *corev1.Pod,
+	context.Context, lib.Task, string, string,
 ) error {
 	return nil
 }

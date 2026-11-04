@@ -26,7 +26,6 @@ import (
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 	"github.com/prometheus/client_golang/prometheus/testutil"
-	corev1 "k8s.io/api/core/v1"
 
 	"github.com/bborbe/agent-task-executor/mocks"
 	"github.com/bborbe/agent-task-executor/pkg"
@@ -293,9 +292,7 @@ var _ = Describe("ResultPublisher", func() {
 					ctx,
 					task,
 					"claude-20260418120000",
-					"pod OOM killed",
-					nil,
-				)
+					"pod OOM killed")
 				Expect(err).NotTo(HaveOccurred())
 
 				Expect(producer.messages).To(HaveLen(2))
@@ -390,9 +387,7 @@ var _ = Describe("ResultPublisher", func() {
 				ctx,
 				task,
 				"github-update-go-agent-00000000000000",
-				"pod_crash_no_stdout",
-				nil,
-			)
+				"pod_crash_no_stdout")
 			Expect(err).NotTo(HaveOccurred())
 			_, hitCmd := decodeUpdateFrontmatterCommand(producer.messages[2])
 			Expect(hitCmd.Body.Section).NotTo(ContainSubstring("The status above is unchanged"))
@@ -464,9 +459,7 @@ var _ = Describe("ResultPublisher", func() {
 				ctx,
 				task,
 				"claude-20260418120000",
-				"pod_crash_no_stdout",
-				nil,
-			)
+				"pod_crash_no_stdout")
 			Expect(err).NotTo(HaveOccurred())
 			Expect(producer.messages).To(HaveLen(2))
 
@@ -494,9 +487,7 @@ var _ = Describe("ResultPublisher", func() {
 					ctx,
 					task,
 					"claude-20260418120000",
-					"pod_crash_no_stdout (Error/1)",
-					nil,
-				)
+					"pod_crash_no_stdout (Error/1)")
 				Expect(err).NotTo(HaveOccurred())
 
 				_, updateCmd := decodeUpdateFrontmatterCommand(producer.messages[0])
@@ -514,9 +505,7 @@ var _ = Describe("ResultPublisher", func() {
 					},
 					Content: lib.TaskContent("do the work"),
 				}
-				err := publisher.PublishFailure(ctx, task, "claude-20260418120000", reason,
-					nil,
-				)
+				err := publisher.PublishFailure(ctx, task, "claude-20260418120000", reason)
 				Expect(err).NotTo(HaveOccurred())
 
 				_, updateCmd := decodeUpdateFrontmatterCommand(producer.messages[0])
@@ -536,25 +525,19 @@ var _ = Describe("ResultPublisher", func() {
 			Entry("deadline_exceeded with no pod", "deadline_exceeded"),
 		)
 
-		It("arms the cap for a deadline kill whose pod never scheduled", func() {
+		It("arms the cap when the sweeper classified the pod as never scheduled", func() {
+			// pod_not_scheduled is the only signal that survives: the Job controller
+			// deletes the pod one second BEFORE it stamps DeadlineExceeded, so the
+			// deadline path can never read the pod state it would need.
 			task := lib.Task{
-				TaskIdentifier: lib.TaskIdentifier("test-task-deadline-never-scheduled"),
+				TaskIdentifier: lib.TaskIdentifier("test-task-pod-not-scheduled"),
 				Frontmatter: lib.TaskFrontmatter{
 					"status": "in_progress",
 				},
 				Content: lib.TaskContent("do the work"),
 			}
-			pod := &corev1.Pod{
-				Status: corev1.PodStatus{
-					Phase: corev1.PodPending,
-					Conditions: []corev1.PodCondition{
-						{Type: corev1.PodScheduled, Status: corev1.ConditionFalse},
-					},
-				},
-			}
 			err := publisher.PublishFailure(
-				ctx, task, "claude-20260418120000", "deadline_exceeded", pod,
-			)
+				ctx, task, "claude-20260418120000", "pod_not_scheduled")
 			Expect(err).NotTo(HaveOccurred())
 
 			_, updateCmd := decodeUpdateFrontmatterCommand(producer.messages[0])
@@ -563,7 +546,10 @@ var _ = Describe("ResultPublisher", func() {
 			Expect(updateCmd.Updates["max_triggers"]).To(BeNumerically("==", 3))
 		})
 
-		It("does not arm a deadline kill whose pod reached a terminal phase", func() {
+		It("does not arm a deadline kill", func() {
+			// The pod is already deleted when this failure is published, so the
+			// never-scheduled class cannot be discriminated here. Arming on the bare
+			// reason would cap every task that legitimately ran to its deadline.
 			task := lib.Task{
 				TaskIdentifier: lib.TaskIdentifier("test-task-deadline-ran"),
 				Frontmatter: lib.TaskFrontmatter{
@@ -571,66 +557,28 @@ var _ = Describe("ResultPublisher", func() {
 				},
 				Content: lib.TaskContent("do the work"),
 			}
-			pod := &corev1.Pod{Status: corev1.PodStatus{Phase: corev1.PodFailed}}
 			err := publisher.PublishFailure(
-				ctx, task, "claude-20260418120000", "deadline_exceeded", pod,
-			)
+				ctx, task, "claude-20260418120000", "deadline_exceeded")
 			Expect(err).NotTo(HaveOccurred())
 
 			_, updateCmd := decodeUpdateFrontmatterCommand(producer.messages[0])
 			Expect(updateCmd.Updates).To(HaveLen(1))
 			Expect(updateCmd.Updates["current_job"]).To(Equal(""))
 			_, hasMax := updateCmd.Updates["max_triggers"]
-			Expect(hasMax).To(BeFalse(), "a pod that ran to a terminal phase must not arm the cap")
+			Expect(hasMax).To(BeFalse(), "a deadline kill must not arm the cap")
 		})
 
-		It("does not arm a deadline kill whose pod was scheduled but never started", func() {
+		It("preserves an operator-set max_triggers on the never-scheduled path", func() {
 			task := lib.Task{
-				TaskIdentifier: lib.TaskIdentifier("test-task-deadline-scheduled"),
-				Frontmatter: lib.TaskFrontmatter{
-					"status": "in_progress",
-				},
-				Content: lib.TaskContent("do the work"),
-			}
-			pod := &corev1.Pod{
-				Status: corev1.PodStatus{
-					Phase: corev1.PodPending,
-					Conditions: []corev1.PodCondition{
-						{Type: corev1.PodScheduled, Status: corev1.ConditionTrue},
-					},
-				},
-			}
-			err := publisher.PublishFailure(
-				ctx, task, "claude-20260418120000", "deadline_exceeded", pod,
-			)
-			Expect(err).NotTo(HaveOccurred())
-
-			_, updateCmd := decodeUpdateFrontmatterCommand(producer.messages[0])
-			Expect(updateCmd.Updates).To(HaveLen(1))
-			_, hasMax := updateCmd.Updates["max_triggers"]
-			Expect(hasMax).To(BeFalse(), "a scheduled pod must not arm the cap")
-		})
-
-		It("preserves an operator-set max_triggers on the never-scheduled deadline path", func() {
-			task := lib.Task{
-				TaskIdentifier: lib.TaskIdentifier("test-task-deadline-operator-cap"),
+				TaskIdentifier: lib.TaskIdentifier("test-task-pod-not-scheduled-operator-cap"),
 				Frontmatter: lib.TaskFrontmatter{
 					"status":       "in_progress",
 					"max_triggers": 5,
 				},
 				Content: lib.TaskContent("do the work"),
 			}
-			pod := &corev1.Pod{
-				Status: corev1.PodStatus{
-					Phase: corev1.PodPending,
-					Conditions: []corev1.PodCondition{
-						{Type: corev1.PodScheduled, Status: corev1.ConditionFalse},
-					},
-				},
-			}
 			err := publisher.PublishFailure(
-				ctx, task, "claude-20260418120000", "deadline_exceeded", pod,
-			)
+				ctx, task, "claude-20260418120000", "pod_not_scheduled")
 			Expect(err).NotTo(HaveOccurred())
 
 			_, updateCmd := decodeUpdateFrontmatterCommand(producer.messages[0])
@@ -639,33 +587,24 @@ var _ = Describe("ResultPublisher", func() {
 			Expect(hasMax).To(BeFalse(), "an operator budget of 5 must not be lowered to 3")
 		})
 
-		It("logs the deadline arm distinctly from the crash arm", func() {
+		It("logs the never-scheduled arm distinctly", func() {
 			task := lib.Task{
-				TaskIdentifier: lib.TaskIdentifier("test-task-deadline-log-arm"),
+				TaskIdentifier: lib.TaskIdentifier("test-task-pod-not-scheduled-log-arm"),
 				Frontmatter: lib.TaskFrontmatter{
 					"status": "in_progress",
 				},
 				Content: lib.TaskContent("do the work"),
 			}
-			pod := &corev1.Pod{
-				Status: corev1.PodStatus{
-					Phase: corev1.PodPending,
-					Conditions: []corev1.PodCondition{
-						{Type: corev1.PodScheduled, Status: corev1.ConditionFalse},
-					},
-				},
-			}
 			out := captureGlogStderr(func() {
 				err := publisher.PublishFailure(
-					ctx, task, "claude-20260418120000", "deadline_exceeded", pod,
-				)
+					ctx, task, "claude-20260418120000", "pod_not_scheduled")
 				Expect(err).NotTo(HaveOccurred())
 			})
 
 			Expect(out).To(ContainSubstring("event=crash_arm_decision "))
-			Expect(out).To(ContainSubstring(`parsed="deadline_exceeded"`))
+			Expect(out).To(ContainSubstring(`parsed="pod_not_scheduled"`))
 			Expect(out).To(ContainSubstring("decision=arm"))
-			Expect(out).To(ContainSubstring("task=test-task-deadline-log-arm"))
+			Expect(out).To(ContainSubstring("task=test-task-pod-not-scheduled-log-arm"))
 		})
 
 		It("preserves an operator-set max_triggers instead of clobbering it", func() {
@@ -682,9 +621,7 @@ var _ = Describe("ResultPublisher", func() {
 				ctx,
 				task,
 				"claude-20260418120000",
-				"pod_crash_no_stdout",
-				nil,
-			)
+				"pod_crash_no_stdout")
 			Expect(err).NotTo(HaveOccurred())
 
 			_, updateCmd := decodeUpdateFrontmatterCommand(producer.messages[0])
@@ -705,9 +642,7 @@ var _ = Describe("ResultPublisher", func() {
 				ctx,
 				task,
 				"claude-20260418120000",
-				"pod_crash_no_stdout (ContainerStatusUnknown/137)",
-				nil,
-			)
+				"pod_crash_no_stdout (ContainerStatusUnknown/137)")
 			Expect(err).NotTo(HaveOccurred())
 
 			_, updateCmd := decodeUpdateFrontmatterCommand(producer.messages[0])
@@ -733,9 +668,7 @@ var _ = Describe("ResultPublisher", func() {
 
 				out := captureGlogStderr(func() {
 					err := publisher.PublishFailure(
-						ctx, task, "pr-reviewer-agent-1234", "pod_crash_no_stdout",
-						nil,
-					)
+						ctx, task, "pr-reviewer-agent-1234", "pod_crash_no_stdout")
 					Expect(err).NotTo(HaveOccurred())
 				})
 
@@ -764,9 +697,7 @@ var _ = Describe("ResultPublisher", func() {
 
 			out := captureGlogStderr(func() {
 				err := publisher.PublishFailure(
-					ctx, task, "pr-reviewer-agent-5678", "pod_crash_no_stdout",
-					nil,
-				)
+					ctx, task, "pr-reviewer-agent-5678", "pod_crash_no_stdout")
 				Expect(err).NotTo(HaveOccurred())
 			})
 
@@ -791,9 +722,7 @@ var _ = Describe("ResultPublisher", func() {
 
 			out := captureGlogStderr(func() {
 				err := publisher.PublishFailure(
-					ctx, task, "pr-reviewer-agent-9999", "pod_oom_killed (OOMKilled/137)",
-					nil,
-				)
+					ctx, task, "pr-reviewer-agent-9999", "pod_oom_killed (OOMKilled/137)")
 				Expect(err).NotTo(HaveOccurred())
 			})
 
@@ -819,15 +748,11 @@ var _ = Describe("ResultPublisher", func() {
 				Content: lib.TaskContent("do the work"),
 			}
 
-			err := publisher.PublishFailure(ctx, task, "claude-20260418120000", "pod OOM killed",
-				nil,
-			)
+			err := publisher.PublishFailure(ctx, task, "claude-20260418120000", "pod OOM killed")
 			Expect(err).NotTo(HaveOccurred())
 			Expect(producer.messages).To(HaveLen(2))
 
-			err = publisher.PublishFailure(ctx, task, "claude-20260418120000", "pod OOM killed",
-				nil,
-			)
+			err = publisher.PublishFailure(ctx, task, "claude-20260418120000", "pod OOM killed")
 			Expect(err).NotTo(HaveOccurred())
 			Expect(producer.messages).To(HaveLen(2), "second call should be deduped")
 		})
@@ -859,9 +784,7 @@ var _ = Describe("ResultPublisher", func() {
 					ctx,
 					task,
 					"claude-20260418120000",
-					"pod OOM killed",
-					nil,
-				)
+					"pod OOM killed")
 				Expect(err).To(HaveOccurred())
 				Expect(err.Error()).To(ContainSubstring("trigger_count increment"))
 				Expect(
@@ -877,9 +800,7 @@ var _ = Describe("ResultPublisher", func() {
 					ctx,
 					task,
 					"claude-20260418120000",
-					"pod OOM killed",
-					nil,
-				)
+					"pod OOM killed")
 				Expect(err).To(HaveOccurred())
 				Expect(
 					len(partialProducer.messages),
@@ -902,9 +823,7 @@ var _ = Describe("ResultPublisher", func() {
 					ctx,
 					task,
 					"claude-20260418120000",
-					"pod OOM killed",
-					nil,
-				)
+					"pod OOM killed")
 				Expect(err).NotTo(HaveOccurred())
 				Expect(producer.messages).To(HaveLen(2))
 
@@ -915,9 +834,7 @@ var _ = Describe("ResultPublisher", func() {
 					ctx,
 					task,
 					"claude-20260418120000",
-					"pod OOM killed",
-					nil,
-				)
+					"pod OOM killed")
 				Expect(err).NotTo(HaveOccurred())
 				Expect(
 					producer.messages,
@@ -952,9 +869,7 @@ var _ = Describe("ResultPublisher", func() {
 					ctx,
 					task,
 					"claude-20260418120000",
-					"pod OOM killed",
-					nil,
-				)
+					"pod OOM killed")
 				Expect(err).To(HaveOccurred())
 				Expect(err.Error()).To(ContainSubstring("zombie failure update"))
 				Expect(
@@ -966,9 +881,7 @@ var _ = Describe("ResultPublisher", func() {
 					ctx,
 					task,
 					"claude-20260418120000",
-					"pod OOM killed",
-					nil,
-				)
+					"pod OOM killed")
 				Expect(err).To(HaveOccurred())
 				Expect(
 					partialProducer.messages,
@@ -1370,9 +1283,7 @@ var _ = Describe("ResultPublisher", func() {
 					ctx,
 					task,
 					"claude-20260418120000",
-					"pod OOM killed",
-					nil,
-				)
+					"pod OOM killed")
 				Expect(err).NotTo(HaveOccurred())
 
 				Expect(producer.messages).To(HaveLen(2))
@@ -1390,9 +1301,7 @@ var _ = Describe("ResultPublisher", func() {
 					"status": "in_progress",
 				},
 			}
-			err := publisher.PublishFailure(ctx, task, "claude-20260418120000", "pod OOM killed",
-				nil,
-			)
+			err := publisher.PublishFailure(ctx, task, "claude-20260418120000", "pod OOM killed")
 			Expect(err).NotTo(HaveOccurred())
 
 			Expect(producer.messages).To(HaveLen(2))
@@ -1778,9 +1687,7 @@ var _ = Describe("ResultPublisher", func() {
 				},
 			}
 
-			Expect(p.PublishFailure(ctx, task, "job-reason-1", "pod_oom_killed",
-				nil,
-			)).To(Succeed())
+			Expect(p.PublishFailure(ctx, task, "job-reason-1", "pod_oom_killed")).To(Succeed())
 
 			// Two writes: the streak ref (recordRedriveFailure) lands first, then
 			// the reason ref — the streak counts published failures, and the
@@ -1806,9 +1713,7 @@ var _ = Describe("ResultPublisher", func() {
 			}
 
 			Expect(
-				p.PublishFailure(ctx, task, "job-reason-2", "pod_oom_killed (OOMKilled/137)",
-					nil,
-				),
+				p.PublishFailure(ctx, task, "job-reason-2", "pod_oom_killed (OOMKilled/137)"),
 			).To(Succeed())
 
 			_, key, _, _, _, _ := client.PutArgsForCall(1)
@@ -1828,9 +1733,7 @@ var _ = Describe("ResultPublisher", func() {
 				},
 			}
 
-			Expect(p.PublishFailure(ctx, task, "job-reason-3", "pod OOM killed",
-				nil,
-			)).To(Succeed())
+			Expect(p.PublishFailure(ctx, task, "job-reason-3", "pod OOM killed")).To(Succeed())
 
 			_, key, _, _, _, _ := client.PutArgsForCall(1)
 			Expect(key).To(Equal(
@@ -1849,12 +1752,8 @@ var _ = Describe("ResultPublisher", func() {
 				},
 			}
 
-			Expect(p.PublishFailure(ctx, task, "job-reason-4", "pod_oom_killed",
-				nil,
-			)).To(Succeed())
-			Expect(p.PublishFailure(ctx, task, "job-reason-4", "pod_oom_killed",
-				nil,
-			)).To(Succeed())
+			Expect(p.PublishFailure(ctx, task, "job-reason-4", "pod_oom_killed")).To(Succeed())
+			Expect(p.PublishFailure(ctx, task, "job-reason-4", "pod_oom_killed")).To(Succeed())
 
 			// One streak ref + one reason ref; the deduped repeat writes neither.
 			Expect(client.PutCallCount()).To(Equal(2))
@@ -1906,9 +1805,7 @@ var _ = Describe("ResultPublisher", func() {
 					ctx,
 					failingTask("test-task-streak-read-fail"),
 					"job-srf-1",
-					"pod_oom_killed",
-					nil,
-				),
+					"pod_oom_killed"),
 			).To(Succeed())
 
 			// The count is unknown, so the new-streak clear is skipped: no Delete.
@@ -1938,9 +1835,7 @@ var _ = Describe("ResultPublisher", func() {
 					ctx,
 					failingTask("test-task-new-streak"),
 					"job-ns-1",
-					"pod_oom_killed",
-					nil,
-				),
+					"pod_oom_killed"),
 			).To(Succeed())
 
 			// A reason set left by an earlier streak would otherwise satisfy the
@@ -1977,9 +1872,7 @@ var _ = Describe("ResultPublisher", func() {
 					ctx,
 					failingTask("test-task-running-streak"),
 					"job-rs-1",
-					"pod_oom_killed",
-					nil,
-				),
+					"pod_oom_killed"),
 			).To(Succeed())
 
 			// Mid-streak the evidence must accumulate, so nothing is cleared.

@@ -138,9 +138,10 @@ func (s *zombieSweeper) SweepOnce(ctx context.Context) error {
 			)
 			continue
 		}
-		deadline := s.taskDeadline(task, cfgs)
 		elapsed := now.Sub(jobStartedAt)
-		if elapsed < deadline {
+		// A pod younger than the grace window cannot be classified unschedulable,
+		// so skip the namespace resolution and the pod read for it.
+		if elapsed < podNotScheduledGraceWindow {
 			continue
 		}
 		namespace := resolveTaskNamespace(ctx, s.namespace, task, cfgs)
@@ -153,14 +154,23 @@ func (s *zombieSweeper) SweepOnce(ctx context.Context) error {
 			continue
 		}
 		reason := s.classify(lister, namespace, taskID, now)
+		// The never-scheduled class does not wait for the deadline. The Job
+		// controller deletes the pod one second BEFORE it stamps the Job's
+		// DeadlineExceeded condition (measured on nuke dev 2026-11-04), so by the
+		// deadline the pod this classification needs is already gone. classify
+		// applies the 2-minute grace window itself, so reaching here with
+		// pod_not_scheduled means the pod has been unschedulable that long and will
+		// never run — publishing now caps a Job that can never succeed instead of
+		// letting it burn a full deadline first.
+		if reason != ZombieReasonPodNotScheduled {
+			if elapsed < s.taskDeadline(task, cfgs) {
+				continue
+			}
+		}
 		if reason == "" {
 			continue
 		}
-		// The sweeper supplies no pod: its classify can fall through to
-		// ZombieReasonDeadlineExceeded for a never-scheduled retry pod, so letting
-		// the gate resolve the pod here would silently change sweeper behaviour. A
-		// sweeper-published failure never arms.
-		if err := s.publisher.PublishFailure(ctx, task, jobName, reason.String(), nil); err != nil {
+		if err := s.publisher.PublishFailure(ctx, task, jobName, reason.String()); err != nil {
 			glog.Errorf(
 				"zombie sweeper: publish failure for task %s (job %s reason %s): %v",
 				taskID, jobName, reason, err,
