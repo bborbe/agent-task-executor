@@ -175,6 +175,29 @@ var _ = Describe("jobWatcher backoff-limit pod detail", func() {
 			Expect(calledReason).NotTo(ContainSubstring("deadline_exceeded"))
 		})
 
+		It("passes the owned pod to PublishFailure for a backoff-limit failure", func() {
+			taskStore.Store(testTaskID, testTask)
+			job := makeJob("job-backoff-pod", string(testTaskID), backoffCondition())
+			setPodLister(
+				watcher,
+				makeOwnedTerminatedPod(
+					"pod-backoff",
+					"job-backoff-pod",
+					string(testTaskID),
+					"Error",
+					1,
+					"2026-08-16T00:00:00Z",
+				),
+			)
+
+			watcher.HandleJob(ctx, job)
+
+			Expect(fakePublisher.PublishFailureCallCount()).To(Equal(1))
+			pod := fakePublisher.PublishFailurePodArgsForCall(0)
+			Expect(pod).NotTo(BeNil())
+			Expect(pod.Name).To(Equal("pod-backoff"))
+		})
+
 		It(
 			"publishes pod_crash_no_stdout with Error/1 detail for a non-OOM terminated pod",
 			func() {

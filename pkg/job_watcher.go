@@ -812,14 +812,12 @@ func (w *jobWatcher) publishSyntheticFailure(
 	job *batchv1.Job,
 	reason string,
 ) {
-	// Only the deadline class consults the pod: every other reason either never
-	// arms the cap or already resolved its pod via terminalPodDetail, so an
-	// unconditional lookup would add a namespace-wide Pods().List to failures
-	// that can never use it.
-	var pod *corev1.Pod
-	if JobFailureReason(job) == ZombieReasonDeadlineExceeded {
-		pod = w.jobPod(job)
-	}
+	// The pod now feeds two consumers: the never-scheduled deadline arm gate and
+	// the captured log tail. It is resolved unconditionally because the log
+	// matters MOST for the crash class — the class the old deadline-only
+	// condition excluded — and a crash is exactly the failure whose cause is
+	// invisible without the pod's own output.
+	pod := w.jobPod(job)
 	if err := w.publisher.PublishFailure(ctx, task, job.Name, reason, pod); err != nil {
 		glog.Errorf("publish synthetic failure for task %s (job %s): %v", taskID, job.Name, err)
 	} else {

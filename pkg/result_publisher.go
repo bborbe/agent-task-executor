@@ -7,6 +7,7 @@ package pkg
 import (
 	"context"
 	"fmt"
+	"strings"
 	"sync"
 	"time"
 
@@ -83,9 +84,10 @@ type ResultPublisher interface {
 	// frontmatter-command path (buildUpdateModifyFn), which never reaches it.
 	//
 	// pod is the failed Job's pod as observed by the caller, or nil when the
-	// caller has no pod (the zombie sweeper, or an unresolvable pod). It is used
-	// only to discriminate the never-scheduled deadline class at the arm gate: a
-	// nil pod never arms, and the pod is never written to the record.
+	// caller has no pod (the zombie sweeper, or an unresolvable pod). It feeds
+	// two consumers: the never-scheduled deadline class at the arm gate, and the
+	// log tail. A nil pod never arms and yields no tail, and the pod itself is
+	// never written to the record.
 	//
 	// Idempotent per current_job via a TTL'd LRU; concurrent classifications for
 	// the same job emit one event.
@@ -203,11 +205,15 @@ type ResultPublisher interface {
 // NewResultPublisher creates a ResultPublisher. claimRefClientFactory may be
 // nil — claim mode off, or a mode that never built a client — in which case no
 // failure reason is recorded and every publish behaves exactly as before.
+//
+// podLogReader may be nil, in which case no log tail is captured and every
+// failure section is composed exactly as it was before the tail feature.
 func NewResultPublisher(
 	syncProducer libkafka.SyncProducer,
 	topicPrefix base.TopicPrefix,
 	currentDateTime libtime.CurrentDateTimeGetter,
 	claimRefClientFactory ClaimRefClientFactory,
+	podLogReader PodLogReader,
 ) ResultPublisher {
 	return &resultPublisher{
 		commandObjectSender: cdb.NewCommandObjectSender(
@@ -217,6 +223,7 @@ func NewResultPublisher(
 		),
 		currentDateTime:       currentDateTime,
 		claimRefClientFactory: claimRefClientFactory,
+		podLogReader:          podLogReader,
 		dedupe:                newDedupe(dedupeCapacity, currentDateTime),
 	}
 }
@@ -282,6 +289,9 @@ type resultPublisher struct {
 	// claimRefClientFactory builds the client the reason store records through.
 	// Nil under claim mode off.
 	claimRefClientFactory ClaimRefClientFactory
+	// podLogReader reads the failed pod's log tail at publish time. Nil means
+	// log capture is off, and every publish then behaves exactly as before.
+	podLogReader PodLogReader
 	// reasonStoreOnce guards the lazy construction below. PublishFailure is
 	// called from more than one goroutine (the Job and Pod informers), and the
 	// precommit gate runs with -race=false, so an unguarded nil-check would ship
@@ -602,10 +612,11 @@ func (p *resultPublisher) PublishStoreMissFailure(
 	jobName string,
 	reason string,
 ) error {
-	// The store-miss path carries no pod. Its taskFromFailedJob sentinel
-	// (max_triggers: nil) already suppresses arming, and passing a pod here would
-	// be the only way to break that guarantee: the never-scheduled deadline gate
-	// would then see a present max_triggers key and stay unarmed only by accident.
+	// The store-miss path carries no pod, so it writes no log tail either. Its
+	// taskFromFailedJob sentinel (max_triggers: nil) already suppresses arming,
+	// and passing a pod here would be the only way to break that guarantee: the
+	// never-scheduled deadline gate would then see a present max_triggers key and
+	// stay unarmed only by accident.
 	return p.publishFailure(ctx, task, jobName, reason, storeMissFailureNoteFor(reason), nil)
 }
 
@@ -652,6 +663,69 @@ const storeMissFailureNoteOther = "- **Note:** this record was not in the execut
 	"above failed. The status above is unchanged: only `current_job` was cleared and " +
 	"`trigger_count` incremented.\n"
 
+// logTailBlock returns the fenced `- **Log tail:**` block for the failed pod's
+// log, or "" when there is no tail to write.
+//
+// The raw log is redacted HERE, before the section string is composed: an
+// unredacted value must never have a moment where it could be logged, returned
+// or written. A nil reader (log capture off) or a nil pod (a failure class that
+// carries none) yields no block. A read failure is logged at V(1) and
+// swallowed — the failure record is the point, and losing it to a logging
+// failure would be the worse outcome.
+func (p *resultPublisher) logTailBlock(
+	ctx context.Context,
+	task lib.Task,
+	jobName string,
+	pod *corev1.Pod,
+) string {
+	if p.podLogReader == nil || pod == nil {
+		return ""
+	}
+	tail, err := p.podLogReader.Tail(ctx, pod.Namespace, pod.Name)
+	if err != nil {
+		glog.V(1).Infof(
+			"event=log_tail_unavailable task=%s job=%s pod=%s/%s error=%v",
+			task.TaskIdentifier, jobName, pod.Namespace, pod.Name, err,
+		)
+		return ""
+	}
+	tail = strings.TrimRight(redactLog(tail), "\n")
+	if tail == "" {
+		return ""
+	}
+	fence := logFence(tail)
+	return "\n- **Log tail:**\n\n" + fence + "\n" + tail + "\n" + fence + "\n"
+}
+
+// logFence returns a backtick fence long enough to contain tail.
+//
+// A fixed three-backtick fence is not safe here: the tail is container output
+// written into a task body that an agent later reads, so a log line carrying
+// its own ``` would close the block early and let the rest of the log be read
+// as markdown — an injection into a record nobody reviews before it is pushed.
+// Markdown closes a fence only with a run at least as long as the opener, so
+// one backtick more than the longest run in the tail always contains it. An
+// ordinary tail still gets the usual three, which is what the composed-body
+// spec asserts.
+func logFence(tail string) string {
+	longest := 0
+	run := 0
+	for _, r := range tail {
+		if r == '`' {
+			run++
+			if run > longest {
+				longest = run
+			}
+			continue
+		}
+		run = 0
+	}
+	if longest < 2 {
+		longest = 2
+	}
+	return strings.Repeat("`", longest+1)
+}
+
 func (p *resultPublisher) publishFailure(
 	ctx context.Context,
 	task lib.Task,
@@ -667,11 +741,12 @@ func (p *resultPublisher) publishFailure(
 
 	now := p.currentDateTime.Now().UTC().Format(time.RFC3339)
 	section := fmt.Sprintf(
-		"## Failure\n\n- **Timestamp:** %s\n- **Job:** %s\n- **Reason:** %s\n%s",
+		"## Failure\n\n- **Timestamp:** %s\n- **Job:** %s\n- **Reason:** %s\n%s%s",
 		now,
 		jobName,
 		reason,
 		note,
+		p.logTailBlock(ctx, task, jobName, pod),
 	)
 	updateCmd := taskcmd.UpdateFrontmatterCommand{
 		TaskIdentifier: task.TaskIdentifier,

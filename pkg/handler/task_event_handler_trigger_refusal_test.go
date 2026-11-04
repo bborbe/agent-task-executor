@@ -111,6 +111,7 @@ var _ = Describe("Trigger budget refusal write", func() {
 				base.TopicPrefix("develop"),
 				currentDateTime,
 				nil,
+				nil,
 			)
 			h := handler.NewTaskEventHandler(
 				fakeSpawner,

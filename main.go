@@ -372,6 +372,7 @@ func (a *application) Run(ctx context.Context, sentryClient libsentry.Client) er
 		a.TopicPrefix,
 		currentDateTimeGetter,
 		claimRefClientFactory,
+		pkg.NewPodLogReader(kubeClient),
 	)
 	taskStore := pkg.NewTaskStore()
 
