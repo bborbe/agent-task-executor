@@ -14,6 +14,8 @@ import (
 	"github.com/golang/glog"
 )
 
+//counterfeiter:generate -o ../mocks/dead_letter_publisher.go --fake-name FakeDeadLetterPublisher . DeadLetterPublisher
+
 // DeadLetterPublisher records a task event the consumer can never process, so
 // skipping it does not also erase the evidence of what was skipped.
 //

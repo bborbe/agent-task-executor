@@ -29,26 +29,6 @@ import (
 	"github.com/bborbe/agent-task-executor/pkg/metrics"
 )
 
-// recordingDeadLetterPublisher captures the messages the handler records and
-// lets a spec force the publish itself to fail.
-type recordingDeadLetterPublisher struct {
-	messages []*sarama.ConsumerMessage
-	causes   []error
-	err      error
-}
-
-func (p *recordingDeadLetterPublisher) Publish(
-	_ context.Context,
-	msg *sarama.ConsumerMessage,
-	cause error,
-) error {
-	p.messages = append(p.messages, msg)
-	p.causes = append(p.causes, cause)
-	return p.err
-}
-
-var _ pkg.DeadLetterPublisher = &recordingDeadLetterPublisher{}
-
 // invalidJobNameError is the shape Kubernetes returns when it rejects a Job
 // name as a non-RFC-1123 label — the deterministic class this task skips.
 func invalidJobNameError() error {
@@ -72,7 +52,7 @@ var _ = Describe("Permanent message skip", func() {
 		ctx         context.Context
 		fakeSpawner *mocks.FakeJobSpawner
 		fakeView    *mocks.FakeTaskView
-		deadLetter  *recordingDeadLetterPublisher
+		deadLetter  *mocks.FakeDeadLetterPublisher
 	)
 
 	BeforeEach(func() {
@@ -83,7 +63,7 @@ var _ = Describe("Permanent message skip", func() {
 		fakeView.ReadyReturns(true)
 		fakeView.SnapshotReturns(nil)
 		fakeView.GetReturns(lib.Task{}, false)
-		deadLetter = &recordingDeadLetterPublisher{}
+		deadLetter = new(mocks.FakeDeadLetterPublisher)
 	})
 
 	build := func(opts ...handler.HandlerOption) handler.TaskEventHandler {
@@ -155,13 +135,14 @@ var _ = Describe("Permanent message skip", func() {
 		poison := message(task("tid-poison"))
 		Expect(h.ConsumeMessage(ctx, poison)).To(Succeed())
 
-		Expect(deadLetter.messages).To(HaveLen(1))
-		Expect(deadLetter.messages[0]).To(BeIdenticalTo(poison))
-		Expect(deadLetter.causes[0].Error()).To(ContainSubstring("RFC 1123"))
+		Expect(deadLetter.PublishCallCount()).To(Equal(1))
+		_, capturedMsg, capturedCause := deadLetter.PublishArgsForCall(0)
+		Expect(capturedMsg).To(BeIdenticalTo(poison))
+		Expect(capturedCause.Error()).To(ContainSubstring("RFC 1123"))
 
 		Expect(h.ConsumeMessage(ctx, message(task("tid-valid")))).To(Succeed())
 		Expect(fakeSpawner.SpawnJobCallCount()).To(Equal(2))
-		Expect(deadLetter.messages).To(HaveLen(1), "the valid message must not be dead-lettered")
+		Expect(deadLetter.PublishCallCount()).To(Equal(1), "the valid message must not be dead-lettered")
 	})
 
 	// SC3: a failure on a valid message is not swallowed. The error surfaces and
@@ -173,7 +154,7 @@ var _ = Describe("Permanent message skip", func() {
 		err := h.ConsumeMessage(ctx, message(task("tid-transient")))
 		Expect(err).To(HaveOccurred())
 		Expect(err.Error()).To(ContainSubstring("kube api unavailable"))
-		Expect(deadLetter.messages).To(BeEmpty())
+		Expect(deadLetter.PublishCallCount()).To(BeZero())
 	})
 
 	// A permanent failure with nowhere to record it must NOT be skipped: that
@@ -189,7 +170,7 @@ var _ = Describe("Permanent message skip", func() {
 	// the consumer keeps failing loudly rather than losing it silently.
 	It("surfaces the failure when the dead-letter publish itself fails", func() {
 		fakeSpawner.SpawnJobReturns("", invalidJobNameError())
-		deadLetter.err = stderrors.New("kafka unavailable")
+		deadLetter.PublishReturns(stderrors.New("kafka unavailable"))
 		h := build(handler.WithDeadLetterPublisher(deadLetter))
 
 		Expect(h.ConsumeMessage(ctx, message(task("tid-dlq-down")))).NotTo(Succeed())
