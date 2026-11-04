@@ -2,6 +2,10 @@
 
 All notable changes to this project will be documented in this file.
 
+## Unreleased
+
+- fix: arm the trigger cap for a Job whose pod can never be scheduled — the cap was armed only for the pod-crash class, so a never-scheduled kill left `max_triggers` absent and the task re-queued until a human cleared the assignee. The arm gate now also admits `pod_not_scheduled`, and the zombie sweeper publishes that classification at a 10-minute arm window instead of waiting for the 30-minute deadline: the Job controller deletes the pod one second BEFORE it stamps `DeadlineExceeded`, so a failure-time pod lookup returns nothing for exactly the class that matters. A Job that ran to its deadline, an unresolvable pod, and the store-miss path stay unarmed, and the recurring-task guard is unchanged
+
 ## v0.56.1
 
 - fix: **a provably unprocessable task event no longer crash-loops the consumer and wedges every agent in the namespace.** A deterministic validation failure — Kubernetes rejecting the spawned Job name as a non-RFC-1123 label, or any `Invalid`/`BadRequest` status — can never succeed on redelivery, so the consumer recorded it in a sampled log line, exited, and re-read the same offset forever. `ConsumeMessage` now classifies such an error, publishes the original message to `{TOPIC_PREFIX}-agent-task-v1-dead-letter` (key preserved, source topic/partition/offset and the error carried as headers), and returns nil so the offset advances. A transient failure — API timeout, vault write, kube blip — is returned unchanged, so the offset stays unmarked and the failure still surfaces. If the dead-letter record cannot be written, the error is surfaced rather than swallowed, because skipping without a durable record is silent loss. The skip is counted by `agent_executor_task_events_total{result="skipped_permanent"}` and `agent_executor_dead_letter_total{topic=...}`.
@@ -12,7 +16,7 @@ All notable changes to this project will be documented in this file.
 
 ## v0.55.2
 
-- fix: arm the trigger cap for a Job whose pod can never be scheduled — the cap was armed only for the pod-crash class, so a never-scheduled kill left `max_triggers` absent and the task re-queued until a human cleared the assignee. The arm gate now also admits `pod_not_scheduled`, and the zombie sweeper publishes that classification at its 2-minute grace window instead of waiting for the 30-minute deadline: the Job controller deletes the pod one second BEFORE it stamps `DeadlineExceeded`, so a failure-time pod lookup returns nothing for exactly the class that matters. The arm gate no longer reads the pod at all. A Job that ran to its deadline, an unresolvable pod, and the store-miss path stay unarmed, and the recurring-task guard is unchanged
+- fix: arm the trigger cap for a Job killed at its deadline before it was ever scheduled — the cap was armed only for the pod-crash class, so a never-scheduled deadline kill left `max_triggers` absent and the task re-queued until a human cleared the assignee. The arm gate now also admits `deadline_exceeded` when the failed pod carries `PodScheduled=False`; a pod that ran to a terminal phase, an unresolvable pod, and the store-miss path stay unarmed, and the recurring-task guard is unchanged
 
 ## v0.55.1
 
