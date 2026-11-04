@@ -252,6 +252,18 @@ var SkippedUnknownAssigneeTotal = promauto.NewCounterVec(
 	[]string{"assignee"},
 )
 
+// DeadLetterTotal counts task events a provably unprocessable message caused to
+// be recorded durably and skipped, by the source topic. It is the alertable
+// half of the permanent-skip path: TaskEventsTotal{result="skipped_permanent"}
+// says a skip happened, this says on which topic the poison is arriving.
+var DeadLetterTotal = promauto.NewCounterVec(
+	prometheus.CounterOpts{
+		Name: "agent_executor_dead_letter_total",
+		Help: "Total number of task events recorded durably and skipped as unprocessable, by source topic.",
+	},
+	[]string{"topic"},
+)
+
 // ClaimTotal counts claim lease outcomes by result. The result set is closed;
 // keys and task ids are never label values.
 var ClaimTotal = promauto.NewCounterVec(
@@ -451,6 +463,7 @@ func init() {
 	// `rate(...) == 0` alert on it skip silently.
 	TaskEventsTotal.WithLabelValues("claim_probe_failed").Add(0)
 	TaskEventsTotal.WithLabelValues("respawn_after_grace_window").Add(0)
+	TaskEventsTotal.WithLabelValues("skipped_permanent").Add(0)
 	seedDeferredAndRefusalOutcomes()
 	// Pre-initialise every reconcile outcome so rate() sees a 0 series rather
 	// than no data — an absent series makes `rate(...)==0` skip silently and the
