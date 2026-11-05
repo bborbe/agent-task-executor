@@ -271,3 +271,95 @@ func TestKubeJobControlNamespaceFallbacks(t *testing.T) {
 		})
 	}
 }
+
+// clearedAssigneeResolver mirrors the production resolver for the case this
+// test exists for: an empty assignee resolves to no Config at all, while the
+// task's own task_type still names exactly one.
+type clearedAssigneeResolver struct{ config pkg.AgentConfiguration }
+
+func (r clearedAssigneeResolver) Resolve(
+	_ context.Context,
+	assignee string,
+) (pkg.AgentConfiguration, error) {
+	if assignee == "" {
+		return pkg.AgentConfiguration{}, pkg.ErrConfigNotFound
+	}
+	return r.config, nil
+}
+
+func (r clearedAssigneeResolver) ResolveByTaskType(
+	context.Context,
+	string,
+	string,
+) (pkg.AgentConfiguration, error) {
+	return r.config, nil
+}
+
+// viewWithClearedAssignee returns a view holding one task whose assignee has
+// been cleared and whose task_type is intact — the shape a dark-factory agent
+// writes back between phases, and the shape the executor's own restore loop
+// keeps re-publishing.
+func viewWithClearedAssignee(id lib.TaskIdentifier, taskType string) *fakeTaskView {
+	return &fakeTaskView{tasks: map[lib.TaskIdentifier]lib.Task{
+		id: {
+			TaskIdentifier: id,
+			Frontmatter:    lib.TaskFrontmatter{"assignee": "", "task_type": taskType},
+		},
+	}}
+}
+
+// TestKubeJobControlResolvesNamespaceForTaskWithClearedAssignee is the
+// regression this test file exists for.
+//
+// A task whose assignee was cleared resolves to no Config by assignee, so
+// namespaceFor fell back to the executor's own namespace, IsJobRunning read
+// false for a Job that was running in the Config's sandbox, and after
+// JoblessGrace the lease manager released a claim whose Job was still running.
+// The peer cluster then claimed the free ref and started the same task id —
+// the cross-cluster duplicate. Measured 2026-11-04 on two task ids
+// (8e0eb923, bb0d817e), both `github-dark-factory-agent` with
+// jobNamespace: development-sandbox.
+//
+// The task_type is the routing key that survives a cleared assignee — the same
+// lookup startup recovery already uses for exactly this shape.
+func TestKubeJobControlResolvesNamespaceForTaskWithClearedAssignee(t *testing.T) {
+	ctx := context.Background()
+	const sandbox = "development-sandbox"
+
+	sandboxJob := testJob("job-1", "task-1")
+	sandboxJob.Namespace = sandbox
+
+	client := fake.NewClientset(sandboxJob)
+	control := NewKubeJobControl(
+		client,
+		"agent",
+		clearedAssigneeResolver{
+			config: pkg.AgentConfiguration{
+				Assignee:     "github-dark-factory-agent",
+				JobNamespace: sandbox,
+			},
+		},
+		viewWithClearedAssignee("task-1", "dark-factory-implement"),
+	)
+
+	running, err := control.IsJobRunning(ctx, "task-1")
+	if err != nil {
+		t.Fatalf("IsJobRunning: %v", err)
+	}
+	if !running {
+		t.Fatal(
+			"IsJobRunning = false for a Job in the sandbox namespace of a task with a cleared assignee",
+		)
+	}
+
+	if err := control.DeleteJob(ctx, "task-1"); err != nil {
+		t.Fatalf("DeleteJob: %v", err)
+	}
+	remaining, err := client.BatchV1().Jobs(sandbox).List(ctx, metav1.ListOptions{})
+	if err != nil {
+		t.Fatalf("list jobs: %v", err)
+	}
+	if len(remaining.Items) != 0 {
+		t.Fatalf("expected the sandbox Job to be deleted, got %v", remaining.Items)
+	}
+}
