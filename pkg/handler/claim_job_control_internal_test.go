@@ -271,3 +271,186 @@ func TestKubeJobControlNamespaceFallbacks(t *testing.T) {
 		})
 	}
 }
+
+// clearedAssigneeResolver mirrors the production resolver for the case this
+// test exists for: an empty assignee resolves to no Config at all, while the
+// task's own task_type still names exactly one.
+type clearedAssigneeResolver struct {
+	config pkg.AgentConfiguration
+	// taskTypeErr is what ResolveByTaskType answers, so the ambiguity and
+	// not-found arms are reachable. nil means "return config".
+	taskTypeErr error
+	// byTaskTypeArgs records every (taskType, preferAssignee) pair the resolver
+	// was asked for, so the test fails if namespaceFor passes the wrong key.
+	byTaskTypeArgs *[][2]string
+}
+
+func (r clearedAssigneeResolver) Resolve(
+	_ context.Context,
+	assignee string,
+) (pkg.AgentConfiguration, error) {
+	if assignee == "" {
+		return pkg.AgentConfiguration{}, pkg.ErrConfigNotFound
+	}
+	return r.config, nil
+}
+
+func (r clearedAssigneeResolver) ResolveByTaskType(
+	_ context.Context,
+	taskType string,
+	preferAssignee string,
+) (pkg.AgentConfiguration, error) {
+	if r.byTaskTypeArgs != nil {
+		*r.byTaskTypeArgs = append(*r.byTaskTypeArgs, [2]string{taskType, preferAssignee})
+	}
+	if r.taskTypeErr != nil {
+		return pkg.AgentConfiguration{}, r.taskTypeErr
+	}
+	return r.config, nil
+}
+
+// viewWithClearedAssignee returns a view holding one task whose assignee has
+// been cleared and whose task_type is intact — the shape a dark-factory agent
+// writes back between phases, and the shape the executor's own restore loop
+// keeps re-publishing.
+func viewWithClearedAssignee(id lib.TaskIdentifier, taskType string) *fakeTaskView {
+	return &fakeTaskView{tasks: map[lib.TaskIdentifier]lib.Task{
+		id: {
+			TaskIdentifier: id,
+			Frontmatter:    lib.TaskFrontmatter{"assignee": "", "task_type": taskType},
+		},
+	}}
+}
+
+// TestKubeJobControlResolvesNamespaceForTaskWithClearedAssignee is the
+// regression this test file exists for.
+//
+// A task whose assignee was cleared resolves to no Config by assignee, so
+// namespaceFor fell back to the executor's own namespace, IsJobRunning read
+// false for a Job that was running in the Config's sandbox, and after
+// JoblessGrace the lease manager released a claim whose Job was still running.
+// The peer cluster then claimed the free ref and started the same task id —
+// the cross-cluster duplicate. Measured 2026-11-04 on two task ids
+// (8e0eb923, bb0d817e), both `github-dark-factory-agent` with
+// jobNamespace: development-sandbox.
+//
+// The task_type is the routing key that survives a cleared assignee — the same
+// lookup startup recovery already uses for exactly this shape.
+func TestKubeJobControlResolvesNamespaceForTaskWithClearedAssignee(t *testing.T) {
+	ctx := context.Background()
+	const sandbox = "development-sandbox"
+
+	sandboxJob := testJob("job-1", "task-1")
+	sandboxJob.Namespace = sandbox
+
+	client := fake.NewClientset(sandboxJob)
+	var args [][2]string
+	control := NewKubeJobControl(
+		client,
+		"agent",
+		clearedAssigneeResolver{
+			config: pkg.AgentConfiguration{
+				Assignee:     "github-dark-factory-agent",
+				JobNamespace: sandbox,
+			},
+			byTaskTypeArgs: &args,
+		},
+		viewWithClearedAssignee("task-1", "dark-factory-implement"),
+	)
+
+	running, err := control.IsJobRunning(ctx, "task-1")
+	if err != nil {
+		t.Fatalf("IsJobRunning: %v", err)
+	}
+	if !running {
+		t.Fatal(
+			"IsJobRunning = false for a Job in the sandbox namespace of a task with a cleared assignee",
+		)
+	}
+
+	// The fallback must be keyed on the task's own task_type, and must not
+	// smuggle the cleared assignee back in as a tie-breaker.
+	if len(args) == 0 {
+		t.Fatal("ResolveByTaskType was never called")
+	}
+	for _, call := range args {
+		if call[0] != "dark-factory-implement" {
+			t.Fatalf("ResolveByTaskType taskType = %q, want dark-factory-implement", call[0])
+		}
+		if call[1] != "" {
+			t.Fatalf("ResolveByTaskType preferAssignee = %q, want empty", call[1])
+		}
+	}
+
+	if err := control.DeleteJob(ctx, "task-1"); err != nil {
+		t.Fatalf("DeleteJob: %v", err)
+	}
+	remaining, err := client.BatchV1().Jobs(sandbox).List(ctx, metav1.ListOptions{})
+	if err != nil {
+		t.Fatalf("list jobs: %v", err)
+	}
+	if len(remaining.Items) != 0 {
+		t.Fatalf("expected the sandbox Job to be deleted, got %v", remaining.Items)
+	}
+}
+
+// TestKubeJobControlFallsBackWhenTaskTypeCannotRoute pins the three ways the
+// task_type fallback can refuse to name a namespace: several Configs declare the
+// type, none does, or the resolver itself is unusable. All three must land on
+// the executor's namespace — the fence must never be the reason a claim cannot
+// be released, and a fail-closed branch here would hold claims forever.
+//
+// The Job is therefore invisible, which is the pre-existing fail-open behaviour
+// namespaceFor documents; this test pins the fallback, it does not endorse it.
+func TestKubeJobControlFallsBackWhenTaskTypeCannotRoute(t *testing.T) {
+	tests := []struct {
+		name        string
+		taskTypeErr error
+	}{
+		{name: "task_type matches several Configs", taskTypeErr: pkg.ErrConfigAmbiguous},
+		{name: "task_type matches no Config", taskTypeErr: pkg.ErrConfigNotFound},
+		{name: "resolver unavailable", taskTypeErr: stderrors.New("resolver unavailable")},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			control := &kubeJobControl{
+				kubeClient: fake.NewClientset(),
+				namespace:  "agent",
+				resolver: clearedAssigneeResolver{
+					config:      pkg.AgentConfiguration{JobNamespace: "development-sandbox"},
+					taskTypeErr: test.taskTypeErr,
+				},
+				view: viewWithClearedAssignee("task-1", "dark-factory-implement"),
+			}
+
+			got := control.namespaceFor(context.Background(), "task-1")
+			if got != "agent" {
+				t.Fatalf("namespaceFor = %q, want the executor namespace %q", got, "agent")
+			}
+		})
+	}
+}
+
+// TestNamespaceFallbackReason pins the operator-facing label: an ambiguous
+// task_type and an absent Config are different fleet problems and must not both
+// read as "no_config".
+func TestNamespaceFallbackReason(t *testing.T) {
+	tests := []struct {
+		name string
+		err  error
+		want string
+	}{
+		{name: "ambiguous", err: pkg.ErrConfigAmbiguous, want: "ambiguous_config"},
+		{name: "not found", err: pkg.ErrConfigNotFound, want: "no_config"},
+		{name: "other", err: stderrors.New("resolver unavailable"), want: "resolve_error"},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			if got := namespaceFallbackReason(test.err); got != test.want {
+				t.Fatalf("namespaceFallbackReason = %q, want %q", got, test.want)
+			}
+		})
+	}
+}
