@@ -688,7 +688,7 @@ func (s *jobSpawner) buildJobEnvBuilder(
 		return nil, err
 	}
 	envBuilder := k8s.NewEnvBuilder()
-	envBuilder.Add("TASK_CONTENT", taskContent)
+	envBuilder.Add("TASK_CONTENT", stripControlBytes(taskContent))
 	envBuilder.Add("TASK_ID", string(task.TaskIdentifier))
 	envBuilder.Add("KAFKA_BROKERS", s.kafkaBrokers)
 	envBuilder.Add("BRANCH", s.branch)
@@ -699,6 +699,21 @@ func (s *jobSpawner) buildJobEnvBuilder(
 		envBuilder.Add(key, value)
 	}
 	return envBuilder, nil
+}
+
+// stripControlBytes removes ASCII control bytes (except \t, \n, \r) and DEL
+// from s. Kubernetes rejects env values containing NUL, so a single corrupt
+// task file would otherwise fail every Job at container init.
+func stripControlBytes(s string) string {
+	return strings.Map(func(r rune) rune {
+		if r == '\t' || r == '\n' || r == '\r' {
+			return r
+		}
+		if r < 0x20 || r == 0x7f {
+			return -1
+		}
+		return r
+	}, s)
 }
 
 // renderTaskContent serializes task into the markdown form an agent expects:
