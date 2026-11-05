@@ -689,8 +689,22 @@ func (s *jobSpawner) buildJobEnvBuilder(
 		return nil, err
 	}
 	taskContentValue := stripControlBytes(taskContent)
-	if err := checkEnvEntrySize(ctx, task.TaskIdentifier, taskContentEnvKey, taskContentValue); err != nil {
-		return nil, err
+	// execve rejects any single argv/envp string over MAX_ARG_STRLEN, and the
+	// kernel counts the whole "KEY=value" entry including its NUL terminator —
+	// so the budget is not len(value) <= 131072. An oversized entry fails before
+	// the container's entrypoint runs, leaving a Job with no log line the agent
+	// ever wrote and a re-drive that fails identically, so refuse it here.
+	taskContentEntryBytes := len(taskContentEnvKey) + 1 + len(taskContentValue) + 1
+	if taskContentEntryBytes > maxEnvStringBytes {
+		metrics.TaskContentTooLargeTotal.Inc()
+		return nil, errors.Errorf(
+			ctx,
+			"task_content_too_large: task %s renders a %d-byte %s env entry, over the %d-byte MAX_ARG_STRLEN limit",
+			task.TaskIdentifier,
+			taskContentEntryBytes,
+			taskContentEnvKey,
+			maxEnvStringBytes,
+		)
 	}
 	envBuilder := k8s.NewEnvBuilder()
 	envBuilder.Add(taskContentEnvKey, taskContentValue)
@@ -729,31 +743,6 @@ const maxEnvStringBytes = 32 * 4096
 
 // taskContentEnvKey names the env var carrying the rendered task markdown.
 const taskContentEnvKey = "TASK_CONTENT"
-
-// checkEnvEntrySize refuses an env entry that would exceed maxEnvStringBytes.
-// The budget is the whole "KEY=value" string plus its NUL terminator, not the
-// value alone: the kernel counts one entry, so a value just under the limit
-// still fails once the key and terminator are added.
-func checkEnvEntrySize(
-	ctx context.Context,
-	taskID lib.TaskIdentifier,
-	key string,
-	value string,
-) error {
-	entryBytes := len(key) + 1 + len(value) + 1
-	if entryBytes <= maxEnvStringBytes {
-		return nil
-	}
-	metrics.TaskContentTooLargeTotal.Inc()
-	return errors.Errorf(
-		ctx,
-		"task_content_too_large: task %s renders a %d-byte %s env entry, over the %d-byte MAX_ARG_STRLEN limit",
-		taskID,
-		entryBytes,
-		key,
-		maxEnvStringBytes,
-	)
-}
 
 // renderTaskContent serializes task into the markdown form an agent expects:
 // "---\n<yaml-frontmatter>---\n<body>". When task.Frontmatter is empty, the
