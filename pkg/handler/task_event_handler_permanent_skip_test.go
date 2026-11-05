@@ -142,7 +142,9 @@ var _ = Describe("Permanent message skip", func() {
 
 		Expect(h.ConsumeMessage(ctx, message(task("tid-valid")))).To(Succeed())
 		Expect(fakeSpawner.SpawnJobCallCount()).To(Equal(2))
-		Expect(deadLetter.PublishCallCount()).To(Equal(1), "the valid message must not be dead-lettered")
+		Expect(
+			deadLetter.PublishCallCount(),
+		).To(Equal(1), "the valid message must not be dead-lettered")
 	})
 
 	// SC3: a failure on a valid message is not swallowed. The error surfaces and

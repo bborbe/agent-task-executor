@@ -22,6 +22,7 @@ import (
 	"k8s.io/client-go/kubernetes"
 
 	pkg "github.com/bborbe/agent-task-executor/pkg"
+	"github.com/bborbe/agent-task-executor/pkg/metrics"
 )
 
 // taskIDLabelKey labels a spawned Job with the task UUID so IsJobActive
@@ -687,8 +688,12 @@ func (s *jobSpawner) buildJobEnvBuilder(
 	if err != nil {
 		return nil, err
 	}
+	taskContentValue := stripControlBytes(taskContent)
+	if err := checkEnvEntrySize(ctx, task.TaskIdentifier, taskContentEnvKey, taskContentValue); err != nil {
+		return nil, err
+	}
 	envBuilder := k8s.NewEnvBuilder()
-	envBuilder.Add("TASK_CONTENT", stripControlBytes(taskContent))
+	envBuilder.Add(taskContentEnvKey, taskContentValue)
 	envBuilder.Add("TASK_ID", string(task.TaskIdentifier))
 	envBuilder.Add("KAFKA_BROKERS", s.kafkaBrokers)
 	envBuilder.Add("BRANCH", s.branch)
@@ -714,6 +719,40 @@ func stripControlBytes(s string) string {
 		}
 		return r
 	}, s)
+}
+
+// maxEnvStringBytes is the kernel's per-string limit for a single argv/envp
+// entry: MAX_ARG_STRLEN, 32 pages. execve fails with E2BIG — surfaced as
+// "argument list too long" — before the container's entrypoint runs, so an
+// oversized value kills the Job with no log line the agent ever wrote.
+const maxEnvStringBytes = 32 * 4096
+
+// taskContentEnvKey names the env var carrying the rendered task markdown.
+const taskContentEnvKey = "TASK_CONTENT"
+
+// checkEnvEntrySize refuses an env entry that would exceed maxEnvStringBytes.
+// The budget is the whole "KEY=value" string plus its NUL terminator, not the
+// value alone: the kernel counts one entry, so a value just under the limit
+// still fails once the key and terminator are added.
+func checkEnvEntrySize(
+	ctx context.Context,
+	taskID lib.TaskIdentifier,
+	key string,
+	value string,
+) error {
+	entryBytes := len(key) + 1 + len(value) + 1
+	if entryBytes <= maxEnvStringBytes {
+		return nil
+	}
+	metrics.TaskContentTooLargeTotal.Inc()
+	return errors.Errorf(
+		ctx,
+		"task_content_too_large: task %s renders a %d-byte %s env entry, over the %d-byte MAX_ARG_STRLEN limit",
+		taskID,
+		entryBytes,
+		key,
+		maxEnvStringBytes,
+	)
 }
 
 // renderTaskContent serializes task into the markdown form an agent expects:

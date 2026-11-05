@@ -7,6 +7,8 @@ package spawner_test
 import (
 	"context"
 	"fmt"
+	"strconv"
+	"strings"
 
 	lib "github.com/bborbe/agent"
 	libk8s "github.com/bborbe/k8s"
@@ -297,6 +299,66 @@ var _ = Describe("JobSpawner", func() {
 			Expect(envMap["TASK_CONTENT"]).To(Equal("just a body"))
 			Expect(envMap["TASK_CONTENT"]).NotTo(ContainSubstring("---"))
 			Expect(envMap["TASK_CONTENT"]).NotTo(ContainSubstring("{}"))
+		})
+
+		Context("TASK_CONTENT env size guard", func() {
+			// maxArgStrlen is the kernel's MAX_ARG_STRLEN (32 pages). Restated here
+			// rather than imported because this is an external test package, and a
+			// test that reads the same constant the code does cannot catch the
+			// constant itself being wrong.
+			const maxArgStrlen = 32 * 4096
+			// The budget covers the whole "KEY=value" entry plus its NUL, so the
+			// largest body that still spawns is shorter than the limit by the
+			// prefix and the terminator.
+			const envPrefixLen = len("TASK_CONTENT=")
+			passBodyLen := maxArgStrlen - envPrefixLen - 1
+			failBodyLen := passBodyLen + 1
+
+			It("refuses a task whose TASK_CONTENT env entry exceeds MAX_ARG_STRLEN", func() {
+				task := lib.Task{
+					TaskIdentifier: lib.TaskIdentifier("oversize-task"),
+					Frontmatter:    lib.TaskFrontmatter{},
+					Content:        lib.TaskContent(strings.Repeat("x", failBodyLen)),
+				}
+				config := pkg.AgentConfiguration{Assignee: "claude", Image: "x:y"}
+
+				_, err := jobSpawner.SpawnJob(ctx, task, config)
+
+				Expect(err).To(HaveOccurred())
+				Expect(err.Error()).To(ContainSubstring("task_content_too_large"))
+				Expect(err.Error()).To(ContainSubstring(strconv.Itoa(maxArgStrlen + 1)))
+				jobs, listErr := fakeClient.BatchV1().
+					Jobs("test-ns").
+					List(ctx, metav1.ListOptions{})
+				Expect(listErr).To(BeNil())
+				Expect(jobs.Items).To(BeEmpty())
+			})
+
+			It(
+				"still spawns a task whose TASK_CONTENT env entry is exactly at MAX_ARG_STRLEN",
+				func() {
+					task := lib.Task{
+						TaskIdentifier: lib.TaskIdentifier("boundary-task"),
+						Frontmatter:    lib.TaskFrontmatter{},
+						Content:        lib.TaskContent(strings.Repeat("x", passBodyLen)),
+					}
+					config := pkg.AgentConfiguration{Assignee: "claude", Image: "x:y"}
+
+					_, err := jobSpawner.SpawnJob(ctx, task, config)
+
+					Expect(err).To(BeNil())
+					jobs, listErr := fakeClient.BatchV1().
+						Jobs("test-ns").
+						List(ctx, metav1.ListOptions{})
+					Expect(listErr).To(BeNil())
+					Expect(jobs.Items).To(HaveLen(1))
+					envMap := make(map[string]string)
+					for _, e := range jobs.Items[0].Spec.Template.Spec.Containers[0].Env {
+						envMap[e.Name] = e.Value
+					}
+					Expect(envMap["TASK_CONTENT"]).To(HaveLen(passBodyLen))
+				},
+			)
 		})
 
 		It("strips NUL and other control bytes from TASK_CONTENT", func() {

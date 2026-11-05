@@ -36,6 +36,21 @@ var JobsSpawnedTotal = promauto.NewCounterVec(
 	[]string{"namespace"},
 )
 
+// TaskContentTooLargeTotal counts spawns the executor refused because the task's
+// TASK_CONTENT env entry would exceed the kernel's 128 KiB per-string limit
+// (MAX_ARG_STRLEN). Without this counter the refusal is silent: no Job is
+// created, so the fleet looks idle rather than blocked, and the task is
+// re-driven forever with no evidence of why.
+//
+// Carries no labels, so it is registered at 0 and needs no init() seeding —
+// unlike the CounterVecs there is no label combination to pre-initialise.
+var TaskContentTooLargeTotal = promauto.NewCounter(
+	prometheus.CounterOpts{
+		Name: "agent_executor_task_content_too_large_total",
+		Help: "Total number of spawns refused because the TASK_CONTENT env entry exceeded MAX_ARG_STRLEN.",
+	},
+)
+
 // ReconcileRedrivenTotal counts tasks re-driven by the reconcile loop after a
 // restart dropped their in-memory deferral state (spec 005).
 var ReconcileRedrivenTotal = promauto.NewCounter(

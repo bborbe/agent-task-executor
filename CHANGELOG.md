@@ -2,6 +2,10 @@
 
 All notable changes to this project will be documented in this file.
 
+## Unreleased
+
+- fix: **a task whose rendered `TASK_CONTENT` env entry would exceed the kernel's 128 KiB per-string limit is refused with a named error instead of being spawned into a Job that dies before its entrypoint runs.** Linux caps any single `argv`/`envp` string at `MAX_ARG_STRLEN` (32 pages), so `execve` fails with `E2BIG` — surfacing as `exec /main: argument list too long` — and the Job produces no log line the agent ever wrote; a re-drive fails identically. The budget is the whole `TASK_CONTENT=<value>` entry plus its NUL terminator, not the value alone, and it is measured on the string after `stripControlBytes` so the check sees what actually reaches `execve`. The refusal increments `agent_executor_task_content_too_large_total`, so a task that can never spawn is counted rather than reading as an idle fleet.
+
 ## v0.56.3
 
 - fix: strip ASCII control bytes (NUL, ESC, DEL, …; tab/newline/CR kept) from the rendered task content before it is set as `TASK_CONTENT` — Kubernetes rejects an env value containing `\x00`, so one corrupt task file failed every Job at container init and the executor re-dispatched it in a tight loop, starving the lane
