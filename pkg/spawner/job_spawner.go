@@ -6,6 +6,7 @@ package spawner
 
 import (
 	"context"
+	stderrors "errors"
 	"strings"
 
 	lib "github.com/bborbe/agent"
@@ -697,9 +698,10 @@ func (s *jobSpawner) buildJobEnvBuilder(
 	taskContentEntryBytes := len(taskContentEnvKey) + 1 + len(taskContentValue) + 1
 	if taskContentEntryBytes > maxEnvStringBytes {
 		metrics.TaskContentTooLargeTotal.Inc()
-		return nil, errors.Errorf(
+		return nil, errors.Wrapf(
 			ctx,
-			"task_content_too_large: task %s renders a %d-byte %s env entry, over the %d-byte MAX_ARG_STRLEN limit",
+			ErrTaskContentTooLarge,
+			"task %s renders a %d-byte %s env entry, over the %d-byte MAX_ARG_STRLEN limit",
 			task.TaskIdentifier,
 			taskContentEntryBytes,
 			taskContentEnvKey,
@@ -743,6 +745,15 @@ const maxEnvStringBytes = 32 * 4096
 
 // taskContentEnvKey names the env var carrying the rendered task markdown.
 const taskContentEnvKey = "TASK_CONTENT"
+
+// ErrTaskContentTooLarge marks a task whose rendered TASK_CONTENT env entry
+// exceeds MAX_ARG_STRLEN. The condition is deterministic — no redelivery can
+// shrink the body — so the consumer must classify it as a permanent spawn error,
+// dead-letter the event and skip it once. Retrying instead would return the error
+// from the consume loop, restart the executor with the Kafka offset unmarked, and
+// redeliver the identical message forever: one oversized task would become an
+// executor-wide crash loop rather than a single failed task.
+var ErrTaskContentTooLarge = stderrors.New("task_content_too_large")
 
 // renderTaskContent serializes task into the markdown form an agent expects:
 // "---\n<yaml-frontmatter>---\n<body>". When task.Frontmatter is empty, the

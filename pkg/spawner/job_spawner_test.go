@@ -6,6 +6,7 @@ package spawner_test
 
 import (
 	"context"
+	stderrors "errors"
 	"fmt"
 	"strconv"
 	"strings"
@@ -16,6 +17,7 @@ import (
 	libtimetest "github.com/bborbe/time/test"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
+	"github.com/prometheus/client_golang/prometheus/testutil"
 	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
 	k8serrors "k8s.io/apimachinery/pkg/api/errors"
@@ -28,6 +30,7 @@ import (
 
 	agentv1 "github.com/bborbe/agent-task-executor/k8s/apis/agent.benjamin-borbe.de/v1"
 	pkg "github.com/bborbe/agent-task-executor/pkg"
+	"github.com/bborbe/agent-task-executor/pkg/metrics"
 	"github.com/bborbe/agent-task-executor/pkg/spawner"
 )
 
@@ -321,12 +324,20 @@ var _ = Describe("JobSpawner", func() {
 					Content:        lib.TaskContent(strings.Repeat("x", failBodyLen)),
 				}
 				config := pkg.AgentConfiguration{Assignee: "claude", Image: "x:y"}
+				counterBefore := testutil.ToFloat64(metrics.TaskContentTooLargeTotal)
 
 				_, err := jobSpawner.SpawnJob(ctx, task, config)
 
+				counterAfter := testutil.ToFloat64(metrics.TaskContentTooLargeTotal)
 				Expect(err).To(HaveOccurred())
 				Expect(err.Error()).To(ContainSubstring("task_content_too_large"))
 				Expect(err.Error()).To(ContainSubstring(strconv.Itoa(maxArgStrlen + 1)))
+				// A permanent spawn error is what makes the consumer dead-letter
+				// this instead of retrying; without it one oversized task restarts
+				// the executor on every redelivery.
+				Expect(stderrors.Is(err, spawner.ErrTaskContentTooLarge)).To(BeTrue())
+				// Counted exactly once, so a refusal that stops counting fails here.
+				Expect(counterAfter - counterBefore).To(Equal(float64(1)))
 				jobs, listErr := fakeClient.BatchV1().
 					Jobs("test-ns").
 					List(ctx, metav1.ListOptions{})
@@ -343,10 +354,15 @@ var _ = Describe("JobSpawner", func() {
 						Content:        lib.TaskContent(strings.Repeat("x", passBodyLen)),
 					}
 					config := pkg.AgentConfiguration{Assignee: "claude", Image: "x:y"}
+					counterBefore := testutil.ToFloat64(metrics.TaskContentTooLargeTotal)
 
 					_, err := jobSpawner.SpawnJob(ctx, task, config)
 
 					Expect(err).To(BeNil())
+					// A task exactly at the limit is not refused, so nothing counts.
+					Expect(
+						testutil.ToFloat64(metrics.TaskContentTooLargeTotal) - counterBefore,
+					).To(Equal(float64(0)))
 					jobs, listErr := fakeClient.BatchV1().
 						Jobs("test-ns").
 						List(ctx, metav1.ListOptions{})

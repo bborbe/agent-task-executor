@@ -8,6 +8,7 @@ import (
 	"context"
 	"encoding/json"
 	stderrors "errors"
+	"fmt"
 
 	"github.com/IBM/sarama"
 	lib "github.com/bborbe/agent"
@@ -27,6 +28,7 @@ import (
 	pkg "github.com/bborbe/agent-task-executor/pkg"
 	"github.com/bborbe/agent-task-executor/pkg/handler"
 	"github.com/bborbe/agent-task-executor/pkg/metrics"
+	"github.com/bborbe/agent-task-executor/pkg/spawner"
 )
 
 // invalidJobNameError is the shape Kubernetes returns when it rejects a Job
@@ -176,6 +178,27 @@ var _ = Describe("Permanent message skip", func() {
 		h := build(handler.WithDeadLetterPublisher(deadLetter))
 
 		Expect(h.ConsumeMessage(ctx, message(task("tid-dlq-down")))).NotTo(Succeed())
+	})
+
+	// The oversized-TASK_CONTENT refusal is decided entirely by the task body, so
+	// redelivery can never fix it. It must be dead-lettered like any other
+	// permanent spawn error: returning it would leave the offset unmarked and
+	// restart the executor on every redelivery, turning one oversized task into a
+	// fleet-wide crash loop.
+	It("dead-letters the oversized-TASK_CONTENT refusal instead of retrying it", func() {
+		fakeSpawner.SpawnJobReturns(
+			"",
+			fmt.Errorf(
+				"task tid-oversize renders a 131073-byte entry: %w",
+				spawner.ErrTaskContentTooLarge,
+			),
+		)
+		h := build(handler.WithDeadLetterPublisher(deadLetter))
+
+		Expect(h.ConsumeMessage(ctx, message(task("tid-oversize")))).To(Succeed())
+		Expect(deadLetter.PublishCallCount()).To(Equal(1))
+		_, _, cause := deadLetter.PublishArgsForCall(0)
+		Expect(cause.Error()).To(ContainSubstring("task_content_too_large"))
 	})
 
 	It("counts the permanent skip", func() {
