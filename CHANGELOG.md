@@ -2,7 +2,7 @@
 
 All notable changes to this project will be documented in this file.
 
-## Unreleased
+## v0.56.3
 
 - fix: strip ASCII control bytes (NUL, ESC, DEL, …; tab/newline/CR kept) from the rendered task content before it is set as `TASK_CONTENT` — Kubernetes rejects an env value containing `\x00`, so one corrupt task file failed every Job at container init and the executor re-dispatched it in a tight loop, starving the lane
 
