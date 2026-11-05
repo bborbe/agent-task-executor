@@ -2,7 +2,7 @@
 
 All notable changes to this project will be documented in this file.
 
-## Unreleased
+## v0.56.5
 
 - fix: **the claim fence now resolves a task's Job namespace from its `task_type` when its assignee was cleared, instead of falling back to the executor's own namespace.** `namespaceFor` resolved the namespace from the task view's assignee alone; an empty assignee resolves to no Config (`ErrConfigNotFound`), so the lookup fell back to the executor's namespace, `IsJobRunning` read a Job running in the Config's sandbox as absent, and after `JoblessGrace` (300 s) `releaseJoblessClaims` released a claim whose Job was still running. A peer cluster then claimed the free ref — a plain create, needing no takeover — and started the same task id while the first run was still executing. Measured 2026-11-04: task ids `8e0eb923` and `bb0d817e` (`github-dark-factory-agent`, `jobNamespace: development-sandbox`) each ran a prod Job and a sun Job concurrently, `executor_claim_total{result="jobless_released"}` on prod seconds before each sun `claimed`, and no `taken_over` on either cluster. The assignee is not a reliable routing key — a task whose assignee was cleared keeps its `task_type`, which is the lookup startup recovery already uses for this shape — and `DeleteJob` shared the defect, so the fence deleted nothing for a sandboxed Job and released its claim. Both fallbacks now log `event=claim_job_namespace_fallback` with the reason, so a misresolved namespace is no longer silent.
 
