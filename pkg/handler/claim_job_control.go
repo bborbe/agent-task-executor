@@ -6,6 +6,7 @@ package handler
 
 import (
 	"context"
+	stderrors "errors"
 
 	lib "github.com/bborbe/agent"
 	"github.com/bborbe/errors"
@@ -93,6 +94,21 @@ func (c *kubeJobControl) namespaceFor(ctx context.Context, taskID string) libk8s
 	}
 	config, err := c.resolver.Resolve(ctx, task.Frontmatter.Assignee().String())
 	if err != nil {
+		// Only an absent Config routes by task_type. A provider failure or a
+		// cancelled context is not evidence that the assignee is unusable, and
+		// falling through on it would spend a second Config scan and log a
+		// fallback that did not happen — resolveConfigForReconcile draws the same
+		// line. ErrConfigNotFound covers the cleared-assignee shape too: an empty
+		// assignee composes to "-{vaultName}", which matches no Config.
+		if !stderrors.Is(err, pkg.ErrConfigNotFound) {
+			return c.namespace
+		}
+		// ResolveByTaskType is vault-agnostic (it scans every Config the informer
+		// holds), so the Config it returns may belong to another vault. That is
+		// bounded rather than dangerous here: the namespace only decides WHERE the
+		// lookup runs, while both the list and the delete are keyed on this task's
+		// own id label, so a foreign namespace can only answer "absent" — never act
+		// on another task's Job.
 		config, err = c.resolver.ResolveByTaskType(
 			ctx,
 			string(task.Frontmatter.TaskType()),
@@ -101,11 +117,12 @@ func (c *kubeJobControl) namespaceFor(ctx context.Context, taskID string) libk8s
 		if err != nil {
 			glog.Warningf(
 				"event=claim_job_namespace_fallback task=%s assignee=%q task_type=%q "+
-					"namespace=%s reason=no_config error=%v",
+					"namespace=%s reason=%s error=%v",
 				taskID,
 				task.Frontmatter.Assignee().String(),
 				task.Frontmatter.TaskType(),
 				c.namespace,
+				namespaceFallbackReason(err),
 				err,
 			)
 			return c.namespace
@@ -124,6 +141,21 @@ func (c *kubeJobControl) namespaceFor(ctx context.Context, taskID string) libk8s
 		return c.namespace
 	}
 	return namespace
+}
+
+// namespaceFallbackReason labels a namespace fallback with the cause an operator
+// needs. An ambiguous task_type and an absent Config are different fleet
+// problems — one needs the Configs narrowed, the other needs one added — so they
+// must not both read as "no_config".
+func namespaceFallbackReason(err error) string {
+	switch {
+	case stderrors.Is(err, pkg.ErrConfigAmbiguous):
+		return "ambiguous_config"
+	case stderrors.Is(err, pkg.ErrConfigNotFound):
+		return "no_config"
+	default:
+		return "resolve_error"
+	}
 }
 
 // IsJobRunning reports whether a non-terminal Job exists for taskID.
