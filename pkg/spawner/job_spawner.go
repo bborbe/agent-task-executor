@@ -738,9 +738,15 @@ func stripControlBytes(s string) string {
 }
 
 // maxEnvStringBytes is the kernel's per-string limit for a single argv/envp
-// entry: MAX_ARG_STRLEN, 32 pages. execve fails with E2BIG — surfaced as
-// "argument list too long" — before the container's entrypoint runs, so an
-// oversized value kills the Job with no log line the agent ever wrote.
+// entry: MAX_ARG_STRLEN, which is 32 * PAGE_SIZE. execve fails with E2BIG —
+// surfaced as "argument list too long" — before the container's entrypoint runs,
+// so an oversized value kills the Job with no log line the agent ever wrote.
+//
+// Pinned to the 4 KiB page size, not derived from os.Getpagesize(): this is the
+// conservative floor. On a larger-page node the real limit is higher, so the
+// executor may refuse a body the kernel would have accepted, but it can never
+// pass one the kernel rejects. Deriving it locally would also be wrong, because
+// the executor pod's kernel need not be the kernel the Job schedules onto.
 const maxEnvStringBytes = 32 * 4096
 
 // taskContentEnvKey names the env var carrying the rendered task markdown.

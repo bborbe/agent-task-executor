@@ -375,6 +375,37 @@ var _ = Describe("JobSpawner", func() {
 					Expect(envMap["TASK_CONTENT"]).To(HaveLen(passBodyLen))
 				},
 			)
+
+			// Pins the strip-then-measure ordering. The raw body here is over the
+			// limit, but 100 of its bytes are NULs that stripControlBytes removes,
+			// leaving an entry exactly at MAX_ARG_STRLEN. Measuring the raw string
+			// would refuse it, so a guard that checked before stripping fails here.
+			It("measures the entry after control bytes are stripped, not before", func() {
+				task := lib.Task{
+					TaskIdentifier: lib.TaskIdentifier("strip-order-task"),
+					Frontmatter:    lib.TaskFrontmatter{},
+					Content: lib.TaskContent(
+						strings.Repeat("x", passBodyLen) + strings.Repeat("\x00", 100),
+					),
+				}
+				config := pkg.AgentConfiguration{Assignee: "claude", Image: "x:y"}
+
+				_, err := jobSpawner.SpawnJob(ctx, task, config)
+
+				Expect(err).To(BeNil())
+				jobs, listErr := fakeClient.BatchV1().
+					Jobs("test-ns").
+					List(ctx, metav1.ListOptions{})
+				Expect(listErr).To(BeNil())
+				Expect(jobs.Items).To(HaveLen(1))
+				envMap := make(map[string]string)
+				for _, e := range jobs.Items[0].Spec.Template.Spec.Containers[0].Env {
+					envMap[e.Name] = e.Value
+				}
+				// The NULs are gone, so the value the container receives is the
+				// stripped body, exactly at the budget.
+				Expect(envMap["TASK_CONTENT"]).To(HaveLen(passBodyLen))
+			})
 		})
 
 		It("strips NUL and other control bytes from TASK_CONTENT", func() {
