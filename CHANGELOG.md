@@ -2,7 +2,7 @@
 
 All notable changes to this project will be documented in this file.
 
-## Unreleased
+## v0.56.4
 
 - fix: **a task whose rendered `TASK_CONTENT` env entry would exceed the kernel's 128 KiB per-string limit is refused with a named error instead of being spawned into a Job that dies before its entrypoint runs.** Linux caps any single `argv`/`envp` string at `MAX_ARG_STRLEN` (32 pages), so `execve` fails with `E2BIG` — surfacing as `exec /main: argument list too long` — and the Job produces no log line the agent ever wrote; a re-drive fails identically. The budget is the whole `TASK_CONTENT=<value>` entry plus its NUL terminator, not the value alone, and it is measured on the string after `stripControlBytes` so the check sees what actually reaches `execve`. The refusal increments `agent_executor_task_content_too_large_total`, so a task that can never spawn is counted rather than reading as an idle fleet. It is also classified as a **permanent** spawn error: the condition depends only on the task body, so redelivery cannot fix it, and `isPermanentSpawnError` now matches the exported `spawner.ErrTaskContentTooLarge` alongside Kubernetes' `Invalid`/`BadRequest`. Without that arm the refusal would return from `ConsumeMessage` with the Kafka offset unmarked, restart the executor, and redeliver the identical message forever — one oversized task becoming an executor-wide crash loop with the counter inflating on every cycle, instead of a single dead-lettered task.
 
