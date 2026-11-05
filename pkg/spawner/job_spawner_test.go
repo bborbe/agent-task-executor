@@ -299,6 +299,36 @@ var _ = Describe("JobSpawner", func() {
 			Expect(envMap["TASK_CONTENT"]).NotTo(ContainSubstring("{}"))
 		})
 
+		It("strips NUL and other control bytes from TASK_CONTENT", func() {
+			task := lib.Task{
+				TaskIdentifier: lib.TaskIdentifier("nul-task"),
+				Frontmatter: lib.TaskFrontmatter{
+					"assignee": "claude",
+				},
+				Content: lib.TaskContent(
+					"billomat-client-v1~\x00\x00 failed\x01\x1b\x7f\n\tline two\r\n",
+				),
+			}
+			config := pkg.AgentConfiguration{Assignee: "claude", Image: "x:y"}
+			_, err := jobSpawner.SpawnJob(ctx, task, config)
+			Expect(err).To(BeNil())
+
+			jobs, err := fakeClient.BatchV1().Jobs("test-ns").List(ctx, metav1.ListOptions{})
+			Expect(err).To(BeNil())
+			container := jobs.Items[0].Spec.Template.Spec.Containers[0]
+			envMap := make(map[string]string)
+			for _, e := range container.Env {
+				envMap[e.Name] = e.Value
+			}
+			got := envMap["TASK_CONTENT"]
+			Expect(got).NotTo(ContainSubstring("\x00"))
+			Expect(got).NotTo(ContainSubstring("\x01"))
+			Expect(got).NotTo(ContainSubstring("\x1b"))
+			Expect(got).NotTo(ContainSubstring("\x7f"))
+			Expect(got).To(ContainSubstring("assignee: claude"))
+			Expect(got).To(HaveSuffix("\n---\nbillomat-client-v1~ failed\n\tline two\r\n"))
+		})
+
 		It("injects empty PHASE when task frontmatter has no phase", func() {
 			task := lib.Task{
 				TaskIdentifier: lib.TaskIdentifier("no-phase-task"),
