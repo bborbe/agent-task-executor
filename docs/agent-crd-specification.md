@@ -44,7 +44,7 @@ spec:
 | `spec.taskType` | conditional | Task type this agent handles; must match `^[a-z0-9-]+$`, max 63 chars. **Deprecated: prefer `spec.taskTypes` (list).** Stays functional indefinitely. Required unless `spec.taskTypes` is non-empty. |
 | `spec.taskTypes` | no | List of task_type values this agent handles; overrides nothing, supplements `taskType`. Each element must match `^[a-z0-9-]+$`, max 63 chars. At least one of `taskType` or `taskTypes` must be non-empty. Filtering on this list is enforced by a follow-up spec. |
 | `spec.resources` | no | CPU/memory/storage requests for the job pod |
-| `spec.env` | no | Per-agent environment variables, merged with shared vars (`TASK_CONTENT`, `TASK_ID`, `KAFKA_BROKERS`, `BRANCH`) |
+| `spec.env` | no | Per-agent environment variables, merged with shared vars (`TASK_CONTENT`, `TASK_ID`, `KAFKA_BROKERS`, `BRANCH`). `TASK_CONTENT` carries the full task markdown and is bounded at 128 KiB — see *Shared env vars* below. |
 | `spec.secretName` | no | Name of an existing K8s Secret mounted on the container via `envFrom` |
 | `spec.volumeClaim` | no | Name of an existing PVC mounted into the container |
 | `spec.volumeMountPath` | conditional | Container path for `volumeClaim` mount — required when `volumeClaim` is set |
@@ -58,6 +58,18 @@ spec:
 If `spec.trigger` is omitted, or if `trigger.phases` / `trigger.statuses` are absent or empty, the executor applies its built-in defaults (phases: `planning`, `execution`, `ai_review`; statuses: `in_progress`). There is no way to configure a Config that triggers on nothing — an empty list is equivalent to the field being absent.
 
 With a per-vault executor, each instance serves one Obsidian vault: it learns its vault from the required `VAULT_NAME` environment variable and resolves Config CRs by the composed `{assignee}-{vaultName}` key. Config CR names follow the `{assignee}-{vault}` convention. A Config CR whose assignee is the plain value without the vault suffix never matches, so unmatched tasks keep the existing unknown-assignee skip behavior.
+
+## Shared env vars
+
+Every spawned Job receives `TASK_ID`, `TASK_CONTENT`, `KAFKA_BROKERS`, `BRANCH`, `TOPIC_PREFIX`, `PHASE` and `TASK_TYPE`, plus whatever `spec.env` adds.
+
+`TASK_CONTENT` carries the rendered task markdown (frontmatter + body) and is bounded at **128 KiB**. Linux caps any single `argv`/`envp` string at `MAX_ARG_STRLEN` — 32 pages — so an entry over that makes `execve` fail with `E2BIG`, surfacing as `exec /main: argument list too long` before the container's entrypoint runs. The Job then produces no log line the agent ever wrote, and every re-drive fails identically.
+
+The executor therefore measures the **whole** `TASK_CONTENT=<value>` entry plus its NUL terminator — not the value alone, which is why a body a few bytes under the limit still fails — against that budget, on the string *after* control bytes are stripped. An oversized entry is refused before the Job is created: no Job, a named `task_content_too_large` error carrying the entry's byte count, and one increment of `agent_executor_task_content_too_large_total` so the refusal is counted rather than reading as an idle fleet. The refusal is classified as a **permanent** spawn error, so the event is dead-lettered and skipped once rather than retried: the condition depends only on the task body, and retrying would restart the executor on every redelivery.
+
+**The guarantee is scoped to `TASK_CONTENT` alone.** `spec.env` values, values injected through `spec.secretName`'s `envFrom`, and the aggregate `ARG_MAX` across all `argv`+`envp` entries are not measured. A single large `spec.env` entry, or a combination that exceeds the aggregate budget, can still reach `E2BIG` without this guard firing — so a new oversized variable is not covered merely because `TASK_CONTENT` is.
+
+There is no truncation path. A task whose body cannot fit must shrink, or the body must move out of the env var (a mounted file or a fetch by `TASK_ID`) — both are consumer-visible contract changes across every agent image, not executor-only.
 
 ## Job and Pod Observation
 

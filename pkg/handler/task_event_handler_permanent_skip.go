@@ -14,6 +14,7 @@ import (
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 
 	"github.com/bborbe/agent-task-executor/pkg/metrics"
+	"github.com/bborbe/agent-task-executor/pkg/spawner"
 )
 
 // classifySpawnError is the consumer's last step after a spawn attempt. A
@@ -73,11 +74,19 @@ func (h *taskEventHandler) skipPermanentMessage(
 
 // isPermanentSpawnError reports whether err is a deterministic validation
 // failure that redelivery cannot fix. It is intentionally narrow: only errors
-// Kubernetes classifies as Invalid or BadRequest qualify, so a transient API,
-// network or vault error is never mistaken for a permanent one.
+// Kubernetes classifies as Invalid or BadRequest, plus the executor's own
+// pre-flight refusals that depend on nothing but the task body, qualify — so a
+// transient API, network or vault error is never mistaken for a permanent one.
 func isPermanentSpawnError(err error) bool {
 	if err == nil {
 		return false
+	}
+	// An oversized TASK_CONTENT is decided entirely by the task body, which
+	// redelivery does not change. Without this arm the refusal surfaces as a
+	// consumer error: the offset stays unmarked, the executor restarts, and the
+	// identical message is redelivered on every restart.
+	if errors.Is(err, spawner.ErrTaskContentTooLarge) {
+		return true
 	}
 	return apierrors.IsInvalid(err) || apierrors.IsBadRequest(err)
 }

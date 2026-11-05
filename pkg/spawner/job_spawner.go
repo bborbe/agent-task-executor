@@ -6,6 +6,7 @@ package spawner
 
 import (
 	"context"
+	stderrors "errors"
 	"strings"
 
 	lib "github.com/bborbe/agent"
@@ -22,6 +23,7 @@ import (
 	"k8s.io/client-go/kubernetes"
 
 	pkg "github.com/bborbe/agent-task-executor/pkg"
+	"github.com/bborbe/agent-task-executor/pkg/metrics"
 )
 
 // taskIDLabelKey labels a spawned Job with the task UUID so IsJobActive
@@ -687,8 +689,27 @@ func (s *jobSpawner) buildJobEnvBuilder(
 	if err != nil {
 		return nil, err
 	}
+	taskContentValue := stripControlBytes(taskContent)
+	// execve rejects any single argv/envp string over MAX_ARG_STRLEN, and the
+	// kernel counts the whole "KEY=value" entry including its NUL terminator —
+	// so the budget is not len(value) <= 131072. An oversized entry fails before
+	// the container's entrypoint runs, leaving a Job with no log line the agent
+	// ever wrote and a re-drive that fails identically, so refuse it here.
+	taskContentEntryBytes := len(taskContentEnvKey) + 1 + len(taskContentValue) + 1
+	if taskContentEntryBytes > maxEnvStringBytes {
+		metrics.TaskContentTooLargeTotal.Inc()
+		return nil, errors.Wrapf(
+			ctx,
+			ErrTaskContentTooLarge,
+			"task %s renders a %d-byte %s env entry, over the %d-byte MAX_ARG_STRLEN limit",
+			task.TaskIdentifier,
+			taskContentEntryBytes,
+			taskContentEnvKey,
+			maxEnvStringBytes,
+		)
+	}
 	envBuilder := k8s.NewEnvBuilder()
-	envBuilder.Add("TASK_CONTENT", stripControlBytes(taskContent))
+	envBuilder.Add(taskContentEnvKey, taskContentValue)
 	envBuilder.Add("TASK_ID", string(task.TaskIdentifier))
 	envBuilder.Add("KAFKA_BROKERS", s.kafkaBrokers)
 	envBuilder.Add("BRANCH", s.branch)
@@ -715,6 +736,30 @@ func stripControlBytes(s string) string {
 		return r
 	}, s)
 }
+
+// maxEnvStringBytes is the kernel's per-string limit for a single argv/envp
+// entry: MAX_ARG_STRLEN, which is 32 * PAGE_SIZE. execve fails with E2BIG —
+// surfaced as "argument list too long" — before the container's entrypoint runs,
+// so an oversized value kills the Job with no log line the agent ever wrote.
+//
+// Pinned to the 4 KiB page size, not derived from os.Getpagesize(): this is the
+// conservative floor. On a larger-page node the real limit is higher, so the
+// executor may refuse a body the kernel would have accepted, but it can never
+// pass one the kernel rejects. Deriving it locally would also be wrong, because
+// the executor pod's kernel need not be the kernel the Job schedules onto.
+const maxEnvStringBytes = 32 * 4096
+
+// taskContentEnvKey names the env var carrying the rendered task markdown.
+const taskContentEnvKey = "TASK_CONTENT"
+
+// ErrTaskContentTooLarge marks a task whose rendered TASK_CONTENT env entry
+// exceeds MAX_ARG_STRLEN. The condition is deterministic — no redelivery can
+// shrink the body — so the consumer must classify it as a permanent spawn error,
+// dead-letter the event and skip it once. Retrying instead would return the error
+// from the consume loop, restart the executor with the Kafka offset unmarked, and
+// redeliver the identical message forever: one oversized task would become an
+// executor-wide crash loop rather than a single failed task.
+var ErrTaskContentTooLarge = stderrors.New("task_content_too_large")
 
 // renderTaskContent serializes task into the markdown form an agent expects:
 // "---\n<yaml-frontmatter>---\n<body>". When task.Frontmatter is empty, the
