@@ -10,6 +10,7 @@ import (
 	"github.com/bborbe/errors"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
+	corev1 "k8s.io/api/core/v1"
 
 	agentv1 "github.com/bborbe/agent-task-executor/k8s/apis/agent.benjamin-borbe.de/v1"
 	pkg "github.com/bborbe/agent-task-executor/pkg"
@@ -437,6 +438,31 @@ var _ = Describe("ConfigResolver", func() {
 				Expect(errors.Is(err, pkg.ErrConfigAmbiguous)).To(BeTrue())
 			})
 		})
+
+		It(
+			"carries nodeSelector and tolerations from the Config CR into the resolved configuration",
+			func() {
+				toleration := corev1.Toleration{
+					Key:      "dedicated",
+					Operator: corev1.TolerationOpEqual,
+					Value:    "agent",
+					Effect:   corev1.TaintEffectNoSchedule,
+				}
+				provider.items = []agentv1.Config{{
+					Spec: agentv1.ConfigSpec{
+						Assignee:     "placed-agent",
+						Image:        "img",
+						TaskTypes:    []string{"placed-type"},
+						NodeSelector: map[string]string{"pool": "agent"},
+						Tolerations:  []corev1.Toleration{toleration},
+					},
+				}}
+				config, err := resolver.ResolveByTaskType(ctx, "placed-type", "")
+				Expect(err).To(BeNil())
+				Expect(config.NodeSelector).To(Equal(map[string]string{"pool": "agent"}))
+				Expect(config.Tolerations).To(Equal([]corev1.Toleration{toleration}))
+			},
+		)
 
 		Describe("designated default", func() {
 			// defaulted builds the same two-Config shared-type population as

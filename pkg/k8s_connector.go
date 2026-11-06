@@ -295,6 +295,49 @@ func configMapItemsSchema() apiextensionsv1.JSONSchemaProps {
 	}
 }
 
+// stringMapSchema is the OpenAPI schema for a map[string]string field
+// (ConfigSpec.env, ConfigSpec.nodeSelector).
+func stringMapSchema() apiextensionsv1.JSONSchemaProps {
+	return apiextensionsv1.JSONSchemaProps{
+		Type: "object",
+		AdditionalProperties: &apiextensionsv1.JSONSchemaPropsOrBool{
+			Schema: &apiextensionsv1.JSONSchemaProps{Type: "string"},
+		},
+	}
+}
+
+// tolerationsSchema is the OpenAPI schema for ConfigSpec.tolerations — a list
+// of corev1.Toleration objects stamped onto Job PodTemplates.
+func tolerationsSchema() apiextensionsv1.JSONSchemaProps {
+	return apiextensionsv1.JSONSchemaProps{
+		Type: "array",
+		Items: &apiextensionsv1.JSONSchemaPropsOrArray{
+			Schema: &apiextensionsv1.JSONSchemaProps{
+				Type: "object",
+				Properties: map[string]apiextensionsv1.JSONSchemaProps{
+					"key":      {Type: "string"},
+					"operator": {Type: "string", Enum: jsonEnum("Exists", "Equal")},
+					"value":    {Type: "string"},
+					"effect": {
+						Type: "string",
+						Enum: jsonEnum("", "NoSchedule", "PreferNoSchedule", "NoExecute"),
+					},
+					"tolerationSeconds": {Type: "integer", Format: "int64"},
+				},
+			},
+		},
+	}
+}
+
+// jsonEnum converts string values into the JSON form a CRD enum expects.
+func jsonEnum(values ...string) []apiextensionsv1.JSON {
+	result := make([]apiextensionsv1.JSON, 0, len(values))
+	for _, v := range values {
+		result = append(result, apiextensionsv1.JSON{Raw: []byte(`"` + v + `"`)})
+	}
+	return result
+}
+
 // defaultForTaskTypesSchema is the OpenAPI schema for
 // ConfigSpec.defaultForTaskTypes. Extracted from configSpecProperties to keep
 // that function under the funlen limit, mirroring configMapItemsSchema.
@@ -355,12 +398,7 @@ func configSpecProperties() map[string]apiextensionsv1.JSONSchemaProps {
 				"limits":   resourceList,
 			},
 		},
-		"env": {
-			Type: "object",
-			AdditionalProperties: &apiextensionsv1.JSONSchemaPropsOrBool{
-				Schema: &apiextensionsv1.JSONSchemaProps{Type: "string"},
-			},
-		},
+		"env":                stringMapSchema(),
 		"secretName":         {Type: "string"},
 		"volumeClaim":        {Type: "string"},
 		"volumeMountPath":    {Type: "string"},
@@ -368,6 +406,8 @@ func configSpecProperties() map[string]apiextensionsv1.JSONSchemaProps {
 		"configMapMountPath": {Type: "string"},
 		"configMapItems":     configMapItemsSchema(),
 		"priorityClassName":  {Type: "string", Pattern: crdDNS1123Label},
+		"nodeSelector":       stringMapSchema(),
+		"tolerations":        tolerationsSchema(),
 		"jobNamespace":       {Type: "string", Pattern: crdDNS1123Label, MaxLength: &crdMaxNameLen},
 		"imagePullSecret":    {Type: "string"},
 		// 0 = unlimited (see AgentConfiguration.MaxConcurrentJobs).

@@ -7,6 +7,7 @@ package spawner
 import (
 	"context"
 	stderrors "errors"
+	"maps"
 	"strings"
 
 	lib "github.com/bborbe/agent"
@@ -192,9 +193,7 @@ func (s *jobSpawner) SpawnJob(
 	applySecretEnvFrom(config, job)
 	applyEphemeralStorage(config, job)
 	s.applyKafkaCertVolumes(job)
-	if config.PriorityClassName != "" {
-		job.Spec.Template.Spec.PriorityClassName = config.PriorityClassName
-	}
+	applyScheduling(config, job)
 	applyActiveDeadlineSeconds(config, jobName, task.TaskIdentifier, job)
 
 	if err := s.createJob(ctx, jobNamespace, job, jobName, task.TaskIdentifier, config.Image); err != nil {
@@ -554,6 +553,22 @@ func applyTaskPhaseAnnotation(phase string, job *batchv1.Job) {
 		job.Annotations = map[string]string{}
 	}
 	job.Annotations[pkg.TaskPhaseAnnotationKey] = phase
+}
+
+// applyScheduling stamps the config's scheduling constraints — priorityClassName,
+// nodeSelector and tolerations — onto the Job PodTemplate. Unset fields leave the
+// PodTemplate untouched.
+func applyScheduling(config pkg.AgentConfiguration, job *batchv1.Job) {
+	podSpec := &job.Spec.Template.Spec
+	if config.PriorityClassName != "" {
+		podSpec.PriorityClassName = config.PriorityClassName
+	}
+	if len(config.NodeSelector) > 0 {
+		podSpec.NodeSelector = maps.Clone(config.NodeSelector)
+	}
+	if len(config.Tolerations) > 0 {
+		podSpec.Tolerations = append(podSpec.Tolerations, config.Tolerations...)
+	}
 }
 
 // applyActiveDeadlineSeconds stamps Job.Spec.ActiveDeadlineSeconds from the config's
