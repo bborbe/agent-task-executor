@@ -5,7 +5,11 @@
 package pkg
 
 import (
+	"maps"
+	"slices"
 	"strings"
+
+	corev1 "k8s.io/api/core/v1"
 
 	agentv1 "github.com/bborbe/agent-task-executor/k8s/apis/agent.benjamin-borbe.de/v1"
 )
@@ -76,6 +80,10 @@ type AgentConfiguration struct {
 	MaxConcurrentJobs int
 	// PriorityClassName is stamped on Job PodTemplates and on a service StatefulSet pod template.
 	PriorityClassName string
+	// NodeSelector is stamped on Job PodTemplates. Empty leaves scheduling unconstrained.
+	NodeSelector map[string]string
+	// Tolerations are stamped on Job PodTemplates. Empty adds none.
+	Tolerations []corev1.Toleration
 	// JobNamespace is the namespace this Config's Jobs must be created in, from
 	// ConfigSpec.JobNamespace. Empty means the executor's own namespace. Resolve
 	// it with ResolveJobNamespace before use.
@@ -149,6 +157,8 @@ func (a AgentConfigurations) TaggedConfigurations(branch string) AgentConfigurat
 			Resources:               c.Resources.DeepCopy(),
 			MaxConcurrentJobs:       c.MaxConcurrentJobs,
 			PriorityClassName:       c.PriorityClassName,
+			NodeSelector:            maps.Clone(c.NodeSelector),
+			Tolerations:             slices.Clone(c.Tolerations),
 			JobNamespace:            c.JobNamespace,
 			ImagePullSecret:         c.ImagePullSecret,
 			Trigger:                 c.Trigger,

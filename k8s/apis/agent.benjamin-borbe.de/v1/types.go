@@ -14,6 +14,7 @@ import (
 	libk8s "github.com/bborbe/k8s"
 	"github.com/bborbe/validation"
 	"github.com/bborbe/vault-cli/pkg/domain"
+	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
@@ -149,6 +150,12 @@ type ConfigSpec struct {
 	ConfigMapItems []ConfigMapItem `json:"configMapItems,omitempty"`
 	// PriorityClassName is stamped on Job PodTemplates and on a service StatefulSet pod template.
 	PriorityClassName string `json:"priorityClassName,omitempty"`
+	// NodeSelector is stamped on Job PodTemplates. Empty (the default) leaves
+	// scheduling unconstrained. Pair it with Tolerations to place Jobs on a
+	// dedicated, tainted node pool.
+	NodeSelector map[string]string `json:"nodeSelector,omitempty"`
+	// Tolerations are stamped on Job PodTemplates. Empty (the default) adds none.
+	Tolerations []corev1.Toleration `json:"tolerations,omitempty"`
 	// JobNamespace is the namespace the executor creates this Config's Jobs in.
 	// Empty (the default) means the executor's own namespace, so every Config that
 	// does not set it behaves exactly as before. A value equal to the executor's
@@ -287,6 +294,8 @@ func (s ConfigSpec) Equal(o ConfigSpec) bool {
 		s.ConfigMapMountPath == o.ConfigMapMountPath &&
 		reflect.DeepEqual(s.ConfigMapItems, o.ConfigMapItems) &&
 		s.PriorityClassName == o.PriorityClassName &&
+		reflect.DeepEqual(s.NodeSelector, o.NodeSelector) &&
+		reflect.DeepEqual(s.Tolerations, o.Tolerations) &&
 		s.JobNamespace == o.JobNamespace &&
 		s.MaxConcurrentJobs == o.MaxConcurrentJobs &&
 		reflect.DeepEqual(s.RerunOnLostClaim, o.RerunOnLostClaim) &&

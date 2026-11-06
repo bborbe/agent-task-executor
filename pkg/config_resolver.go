@@ -7,6 +7,8 @@ package pkg
 import (
 	"context"
 	stderrors "errors"
+	"maps"
+	"slices"
 
 	"github.com/bborbe/cqrs/base"
 	"github.com/bborbe/errors"
@@ -287,6 +289,8 @@ func convert(ctx context.Context, obj agentv1.Config, branch string) (AgentConfi
 		Resources:               obj.Spec.Resources.DeepCopy(),
 		MaxConcurrentJobs:       obj.Spec.MaxConcurrentJobs,
 		PriorityClassName:       obj.Spec.PriorityClassName,
+		NodeSelector:            maps.Clone(obj.Spec.NodeSelector),
+		Tolerations:             slices.Clone(obj.Spec.Tolerations),
 		JobNamespace:            obj.Spec.JobNamespace,
 		Trigger:                 obj.Spec.Trigger,
 		RerunOnLostClaim:        obj.Spec.RerunOnLostClaim,

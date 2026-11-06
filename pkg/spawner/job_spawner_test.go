@@ -1062,6 +1062,61 @@ var _ = Describe("JobSpawner", func() {
 			Expect(jobs.Items[0].Spec.Template.Spec.PriorityClassName).To(BeEmpty())
 		})
 
+		It(
+			"stamps nodeSelector and tolerations on the spawned Job when config has them set",
+			func() {
+				task := lib.Task{
+					TaskIdentifier: lib.TaskIdentifier("test-task-uuid-node-1"),
+					Frontmatter: lib.TaskFrontmatter{
+						"assignee": "claude-agent",
+					},
+				}
+				toleration := corev1.Toleration{
+					Key:      "dedicated",
+					Operator: corev1.TolerationOpEqual,
+					Value:    "agent",
+					Effect:   corev1.TaintEffectNoSchedule,
+				}
+				config := pkg.AgentConfiguration{
+					Assignee:     "claude-agent",
+					Image:        "example/image:latest",
+					NodeSelector: map[string]string{"pool": "agent"},
+					Tolerations:  []corev1.Toleration{toleration},
+				}
+				_, err := jobSpawner.SpawnJob(ctx, task, config)
+				Expect(err).To(BeNil())
+
+				jobs, err := fakeClient.BatchV1().Jobs("test-ns").List(ctx, metav1.ListOptions{})
+				Expect(err).To(BeNil())
+				Expect(jobs.Items).To(HaveLen(1))
+				podSpec := jobs.Items[0].Spec.Template.Spec
+				Expect(podSpec.NodeSelector).To(Equal(map[string]string{"pool": "agent"}))
+				Expect(podSpec.Tolerations).To(ContainElement(toleration))
+			},
+		)
+
+		It("leaves nodeSelector and tolerations unset when config has none", func() {
+			task := lib.Task{
+				TaskIdentifier: lib.TaskIdentifier("test-task-uuid-node-2"),
+				Frontmatter: lib.TaskFrontmatter{
+					"assignee": "claude-agent",
+				},
+			}
+			config := pkg.AgentConfiguration{
+				Assignee: "claude-agent",
+				Image:    "example/image:latest",
+			}
+			_, err := jobSpawner.SpawnJob(ctx, task, config)
+			Expect(err).To(BeNil())
+
+			jobs, err := fakeClient.BatchV1().Jobs("test-ns").List(ctx, metav1.ListOptions{})
+			Expect(err).To(BeNil())
+			Expect(jobs.Items).To(HaveLen(1))
+			podSpec := jobs.Items[0].Spec.Template.Spec
+			Expect(podSpec.NodeSelector).To(BeEmpty())
+			Expect(podSpec.Tolerations).To(BeEmpty())
+		})
+
 		It("includes TASK_TYPE env var matching the frontmatter task_type value", func() {
 			task := lib.Task{
 				TaskIdentifier: lib.TaskIdentifier("healthcheck-task-id"),
