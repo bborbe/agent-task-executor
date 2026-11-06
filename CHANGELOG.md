@@ -2,7 +2,7 @@
 
 All notable changes to this project will be documented in this file.
 
-## Unreleased
+## v0.57.0
 
 - feat: **a Config can place its Jobs on a dedicated node pool through new `nodeSelector` and `tolerations` fields, which the spawner stamps onto every Job PodTemplate.** Until now `priorityClassName` was the only scheduling knob, so an agent's Jobs could only land wherever the default scheduler put them. Measured 2026-11-05 on Octopus prod: a pr-reviewer Job landed on a node at the 110-pod cap while its pool sat at autoscaler max, its image pull took 29 minutes, and `activeDeadlineSeconds` killed it before it did any work. Both fields are optional and empty by default, so a Config that sets neither spawns exactly as before. The CRD schema accepts a string map and a list of `corev1.Toleration` objects. The DeepCopy blocks are hand-added, because `make generatek8s` is still broken on master.
 - chore: bump `github.com/klauspost/compress` v1.20.0 → v1.20.2 (GO-2026-6865, panic on two-block frames)
