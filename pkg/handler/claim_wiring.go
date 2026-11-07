@@ -198,8 +198,15 @@ func (h *taskEventHandler) acquireSpawnClaim(
 			// the claim, and the next pass's Takeover fails against its own live
 			// lease, so claimFailureDecision proceeds and a Job is created for the
 			// task that was just parked.
+			// A takeover of a task this cluster never ran is not a second run:
+			// rerunOnLostClaim answers "may this agent run a task a previous
+			// owner already ran", and a task with no current_job and no
+			// job_started_at carries no evidence of any run. Parking it writes
+			// human_review onto a task no executor ever claimed, and the empty
+			// assignee that write leaves makes the task unspawnable for good.
 			if h.claimMode == pkg.ClaimModeOn &&
-				config.LostClaimAction() == agentv1.ParkAfterLostClaim {
+				config.LostClaimAction() == agentv1.ParkAfterLostClaim &&
+				taskShowsPriorRun(task) {
 				h.parkAfterLostClaim(ctx, primary, task)
 				return false
 			}
@@ -272,6 +279,28 @@ func ownerRepoFromCloneURL(raw string) (string, string, bool) {
 		return "", "", false
 	}
 	return splitOwnerRepo(path)
+}
+
+// taskShowsPriorRun reports whether the task carries evidence that some
+// executor already ran it: a non-empty current_job or job_started_at.
+//
+// It exists because rerunOnLostClaim guards a *second* run. A claim conflict
+// proves only that another holder had the key, not that a Job was ever created
+// for this task — a non-owning cluster can acquire the claim and then skip the
+// spawn, which leaves the key held with nothing behind it. Parking on that
+// conflict alone writes human_review onto a task that never ran, and the
+// assignee clear the human_review chokepoint applies then makes the task
+// permanently unspawnable. Both fields are absent on a task that has never been
+// dispatched, so either one present is the evidence that a rerun decision
+// actually applies.
+func taskShowsPriorRun(task lib.Task) bool {
+	if currentJob, ok := task.Frontmatter.String("current_job"); ok && currentJob != "" {
+		return true
+	}
+	if startedAt, ok := task.Frontmatter.String("job_started_at"); ok && startedAt != "" {
+		return true
+	}
+	return false
 }
 
 // parkAfterLostClaim stops a task whose claim another executor took over, when

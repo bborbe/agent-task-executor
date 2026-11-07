@@ -2,6 +2,10 @@
 
 All notable changes to this project will be documented in this file.
 
+## Unreleased
+
+- fix: **a takeover no longer parks a task this cluster never ran.** `rerunOnLostClaim` answers "may this agent run a task a previous owner already ran", but the park branch fired on any `ErrLeaseConflict` + successful takeover, including a task with no `current_job` and no `job_started_at` — no evidence of any run. The claim key is derived from the repo rather than the vault, so a non-owning cluster can hold the key with nothing behind it; the owning cluster then took it over and parked the task at `human_review`, and the assignee clear the human_review chokepoint applies made it permanently unspawnable. Measured on a pr-review task parked 40 s after creation with no Job, no `current_job` and no `job_started_at`. The park branch now requires `taskShowsPriorRun`, so a first run is never mistaken for a rerun decision.
+
 ## v0.57.0
 
 - feat: **a Config can place its Jobs on a dedicated node pool through new `nodeSelector` and `tolerations` fields, which the spawner stamps onto every Job PodTemplate.** Until now `priorityClassName` was the only scheduling knob, so an agent's Jobs could only land wherever the default scheduler put them. Measured 2026-11-05 on Octopus prod: a pr-reviewer Job landed on a node at the 110-pod cap while its pool sat at autoscaler max, its image pull took 29 minutes, and `activeDeadlineSeconds` killed it before it did any work. Both fields are optional and empty by default, so a Config that sets neither spawns exactly as before. The CRD schema accepts a string map and a list of `corev1.Toleration` objects. The DeepCopy blocks are hand-added, because `make generatek8s` is still broken on master.

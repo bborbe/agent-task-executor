@@ -501,6 +501,9 @@ var _ = Describe("claim gate", func() {
 			RerunOnLostClaim: claimBoolPtr(false),
 		}, nil)
 		task := qualifyingClaimTask()
+		// A rerun decision applies only to a task that has already run, so give
+		// it the Job evidence a second run would be about.
+		task.Frontmatter["current_job"] = "pr-reviewer-agent-" + string(task.TaskIdentifier)
 		key := claimKeyFor(task)
 		harness.client.PutStub = conflictOnCreate()
 		harness.client.ListReturns([]claim.ClaimRef{
