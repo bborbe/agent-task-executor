@@ -1,8 +1,9 @@
 ---
-status: prompted
+status: verifying
 approved: "2026-11-08T14:50:14Z"
 generating: "2026-11-08T15:03:34Z"
 prompted: "2026-11-08T15:03:34Z"
+verifying: "2026-11-08T15:20:22Z"
 branch: dark-factory/clear-ghost-current-job
 ---
 
