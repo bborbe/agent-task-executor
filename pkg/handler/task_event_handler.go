@@ -1334,6 +1334,8 @@ func (h *taskEventHandler) ReconcileOnce(ctx context.Context) error {
 		}
 		c.add(h.driveCandidate(passCtx, candidate))
 	}
+	// Ghost current_job step: see ghost_current_job.go.
+	h.clearGhostCurrentJobs(passCtx, owned)
 	// Counted on every pass that got past the vault classification, so
 	// rate(ok)==0 is a true "the backstop is not running" signal rather than an
 	// absence of errors.
