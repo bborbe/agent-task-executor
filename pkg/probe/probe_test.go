@@ -10,6 +10,7 @@ import (
 
 	taskcmd "github.com/bborbe/agent/command/task"
 	cqrsmocks "github.com/bborbe/cqrs/mocks"
+	"github.com/bborbe/vault-cli/pkg/domain"
 	"github.com/google/uuid"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
@@ -96,6 +97,90 @@ var _ = Describe("HealthcheckRunner", func() {
 		It("returns no error", func() {
 			Expect(runner.Run(ctx)).To(Succeed())
 		})
+	})
+
+	Context("probe phase follows the Config trigger", func() {
+		DescribeTable("both published commands carry the selected phase",
+			func(trigger *agentv1.Trigger, want string) {
+				configProvider.GetReturns([]agentv1.Config{
+					{
+						ObjectMeta: metav1.ObjectMeta{Name: "agent-a"},
+						Spec:       agentv1.ConfigSpec{Assignee: "agent-a", Trigger: trigger},
+					},
+				}, nil)
+
+				Expect(runner.Run(ctx)).To(Succeed())
+
+				_, _, createPayload := publisher.PublishArgsForCall(0)
+				createCmd, ok := createPayload.(taskcmd.CreateCommand)
+				Expect(ok).To(BeTrue())
+				Expect(createCmd.Frontmatter).To(HaveKeyWithValue("phase", want))
+
+				_, _, updatePayload := publisher.PublishArgsForCall(1)
+				updateCmd, ok := updatePayload.(taskcmd.UpdateFrontmatterCommand)
+				Expect(ok).To(BeTrue())
+				Expect(updateCmd.Updates).To(HaveKeyWithValue("phase", want))
+			},
+			Entry("[planning]", &agentv1.Trigger{
+				Phases: domain.TaskPhases{domain.TaskPhasePlanning},
+			}, "planning"),
+			Entry("[execution]", &agentv1.Trigger{
+				Phases: domain.TaskPhases{domain.TaskPhaseExecution},
+			}, "execution"),
+			Entry("[execution, planning] prefers planning", &agentv1.Trigger{
+				Phases: domain.TaskPhases{domain.TaskPhaseExecution, domain.TaskPhasePlanning},
+			}, "planning"),
+			Entry("[todo, planning, execution, ai_review] prefers planning", &agentv1.Trigger{
+				Phases: domain.TaskPhases{
+					domain.TaskPhaseTodo,
+					domain.TaskPhasePlanning,
+					domain.TaskPhaseExecution,
+					domain.TaskPhaseAIReview,
+				},
+			}, "planning"),
+			Entry("[todo, execution] skips todo", &agentv1.Trigger{
+				Phases: domain.TaskPhases{domain.TaskPhaseTodo, domain.TaskPhaseExecution},
+			}, "execution"),
+			Entry("[ai_review]", &agentv1.Trigger{
+				Phases: domain.TaskPhases{domain.TaskPhaseAIReview},
+			}, "ai_review"),
+			Entry("[human_review, execution] skips the terminal phase", &agentv1.Trigger{
+				Phases: domain.TaskPhases{domain.TaskPhaseHumanReview, domain.TaskPhaseExecution},
+			}, "execution"),
+			Entry("nil trigger falls back to planning", nil, "planning"),
+			Entry("empty phases fall back to planning", &agentv1.Trigger{
+				Phases: domain.TaskPhases{},
+			}, "planning"),
+		)
+	})
+
+	Context("a Config with no spawnable trigger phase is not probed", func() {
+		DescribeTable("only the normal Config is probed",
+			func(trigger *agentv1.Trigger) {
+				configProvider.GetReturns([]agentv1.Config{
+					{
+						ObjectMeta: metav1.ObjectMeta{Name: "skip-agent"},
+						Spec:       agentv1.ConfigSpec{Assignee: "skip-agent", Trigger: trigger},
+					},
+					{
+						ObjectMeta: metav1.ObjectMeta{Name: "agent-a"},
+						Spec:       agentv1.ConfigSpec{Assignee: "agent-a"},
+					},
+				}, nil)
+
+				Expect(runner.Run(ctx)).To(Succeed())
+				Expect(publisher.PublishCallCount()).To(Equal(2))
+			},
+			Entry("[todo]", &agentv1.Trigger{
+				Phases: domain.TaskPhases{domain.TaskPhaseTodo},
+			}),
+			Entry("[human_review]", &agentv1.Trigger{
+				Phases: domain.TaskPhases{domain.TaskPhaseHumanReview},
+			}),
+			Entry("[done]", &agentv1.Trigger{
+				Phases: domain.TaskPhases{domain.TaskPhaseDone},
+			}),
+		)
 	})
 
 	Context("create-task publish fails", func() {
@@ -268,20 +353,20 @@ var _ = Describe("HealthcheckRunner", func() {
 			Expect(createCmd.Frontmatter).To(HaveKeyWithValue("stage", "dev"))
 		})
 
-		It("create-task frontmatter has phase in_progress", func() {
+		It("create-task frontmatter has the default phase planning", func() {
 			Expect(runner.Run(ctx)).To(Succeed())
 			_, _, payload := publisher.PublishArgsForCall(0)
 			createCmd, ok := payload.(taskcmd.CreateCommand)
 			Expect(ok).To(BeTrue())
-			Expect(createCmd.Frontmatter).To(HaveKeyWithValue("phase", "in_progress"))
+			Expect(createCmd.Frontmatter).To(HaveKeyWithValue("phase", "planning"))
 		})
 
-		It("update-frontmatter has phase in_progress", func() {
+		It("update-frontmatter has the default phase planning", func() {
 			Expect(runner.Run(ctx)).To(Succeed())
 			_, _, payload := publisher.PublishArgsForCall(1)
 			updateCmd, ok := payload.(taskcmd.UpdateFrontmatterCommand)
 			Expect(ok).To(BeTrue())
-			Expect(updateCmd.Updates).To(HaveKeyWithValue("phase", "in_progress"))
+			Expect(updateCmd.Updates).To(HaveKeyWithValue("phase", "planning"))
 		})
 
 		It("update-frontmatter resets status to in_progress (spec AC line 76)", func() {

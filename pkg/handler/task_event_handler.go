@@ -30,11 +30,8 @@ import (
 )
 
 // defaultTriggerPhases is the fallback phase allow-list when the per-Config Trigger is absent or empty.
-var defaultTriggerPhases = domain.TaskPhases{
-	domain.TaskPhasePlanning,
-	domain.TaskPhaseExecution,
-	domain.TaskPhaseAIReview,
-}
+// It aliases pkg.DefaultTriggerPhases so the spawn gate and the liveness probe cannot drift apart.
+var defaultTriggerPhases = pkg.DefaultTriggerPhases
 
 // defaultTriggerStatuses is the fallback status allow-list when the per-Config Trigger is absent or empty.
 var defaultTriggerStatuses = domain.TaskStatuses{
@@ -820,10 +817,10 @@ func taskTypeMismatchReason(task lib.Task, cfg *pkg.AgentConfiguration) string {
 // effectiveTriggerPhases returns the phase allow-list from the Config trigger,
 // falling back to defaultTriggerPhases when Trigger is absent or the list is empty.
 func effectiveTriggerPhases(cfg *pkg.AgentConfiguration) domain.TaskPhases {
-	if cfg == nil || cfg.Trigger == nil || len(cfg.Trigger.Phases) == 0 {
+	if cfg == nil {
 		return defaultTriggerPhases
 	}
-	return cfg.Trigger.Phases
+	return pkg.EffectiveTriggerPhases(cfg.Trigger)
 }
 
 // effectiveTriggerStatuses returns the status allow-list from the Config trigger,

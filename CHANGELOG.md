@@ -2,6 +2,10 @@
 
 All notable changes to this project will be documented in this file.
 
+## Unreleased
+
+- fix: the liveness probe writes a phase its target Config's trigger accepts and the executor runs (planning preferred; never todo, human_review or done) instead of the status value in_progress, which the executor read as execution — so [planning]-only lanes such as sentry-collector-agent and sentry-fix-agent were skipped and never probed
+
 ## v0.57.1
 
 - chore: restate the `do-not-merge` gate message to name its bypass actors — the Admin repository role and Integration `3907226`, both `bypass_mode: always` in the `master-protection` ruleset — instead of asserting an unqualified block
