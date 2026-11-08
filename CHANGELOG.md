@@ -2,6 +2,10 @@
 
 All notable changes to this project will be documented in this file.
 
+## Unreleased
+
+- fix: **the reconcile pass now clears a `current_job` that names a Job absent from the cluster, but only when no Job for the task is active here, the named Job is gone, the shared claim reads free, and this executor has no spawn recorded or in flight (re-checked under the per-task claim lock), and it never clears while the named Job is inside the 300 s respawn grace window after `job_started_at`.** It writes only `current_job: ""`, leaving status, phase, the claim, the body and `job_started_at` untouched, and it never releases or renews a claim. Claim modes `off` and `shadow` never clear, because their probe cannot read a claim. Every pass that completes its drive loop logs `event=ghost_current_job_pass`, and every examined record logs `event=ghost_current_job_cleared` or `event=ghost_current_job_kept guard=<label>`; any read failure leaves the field set and is retried next pass. The field previously stayed set forever when the Job disappeared before an event the executor observed — TTL garbage collection across a restart, the weekly cluster reboot, or a manual delete. Incident: on 2026-11-06 one prod record named `pr-reviewer-agent-99750c2d-20261103233145` while the cluster held no agent Jobs.
+
 ## v0.57.1
 
 - chore: restate the `do-not-merge` gate message to name its bypass actors — the Admin repository role and Integration `3907226`, both `bypass_mode: always` in the `master-protection` ruleset — instead of asserting an unqualified block
