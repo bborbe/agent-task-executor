@@ -268,6 +268,9 @@ var _ = Describe("ghost current_job", func() {
 
 		Expect(harness.publisher.PublishClearCurrentJobCallCount()).To(Equal(0))
 		Expect(out).To(ContainSubstring("guard=read_failed"))
+		Expect(out).To(ContainSubstring(
+			"check named job ghost-job-1 for task ghost-task-1",
+		))
 	})
 
 	It("keeps the field when the active-Job read fails (row f2)", func() {
@@ -474,6 +477,8 @@ var _ = Describe("ghost current_job", func() {
 		runPass()
 
 		Expect(harness.publisher.PublishClearCurrentJobCallCount()).To(Equal(1))
+		Expect(harness.spawner.IsJobActiveCallCount()).To(Equal(1))
+		Expect(harness.spawner.JobExistsCallCount()).To(Equal(1))
 		_, activeNamespace, activeTaskID := harness.spawner.IsJobActiveArgsForCall(0)
 		Expect(activeNamespace).To(Equal(libk8s.Namespace("agent-sandbox")))
 		Expect(activeTaskID).To(Equal(lib.TaskIdentifier("ghost-task-1")))

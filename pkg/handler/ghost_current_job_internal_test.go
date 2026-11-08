@@ -40,22 +40,46 @@ func (v ghostView) Snapshot() []lib.Task { return v.tasks }
 
 func (v ghostView) Get(lib.TaskIdentifier) (lib.Task, bool) { return lib.Task{}, false }
 
-// ghostRecordingPublisher records every PublishClearCurrentJob call.
+// ghostRecordingPublisher records every PublishClearCurrentJob call, including
+// whether the per-task claim lock was held at publish time.
 type ghostRecordingPublisher struct {
 	stubResultPublisher
+	h      *taskEventHandler
 	mu     sync.Mutex
 	clears []string
+	held   []bool
 }
 
 func (p *ghostRecordingPublisher) PublishClearCurrentJob(
 	_ context.Context,
-	_ lib.Task,
+	task lib.Task,
 	jobName string,
 ) error {
+	held := p.lockHeld(task.TaskIdentifier)
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	p.clears = append(p.clears, jobName)
+	p.held = append(p.held, held)
 	return nil
+}
+
+// lockHeld reports whether the per-task claim lock is held right now, without
+// blocking the publisher. TryLock returning false means the lock is held by
+// some goroutine, not necessarily this publisher. The flag is only meaningful in
+// an uncontended spec (row q2); never assert it in row q, where the test itself
+// holds the lock.
+func (p *ghostRecordingPublisher) lockHeld(taskID lib.TaskIdentifier) bool {
+	p.h.claimLocksMu.Lock()
+	lock, ok := p.h.claimLocks[taskID]
+	p.h.claimLocksMu.Unlock()
+	if !ok {
+		return false
+	}
+	if lock.TryLock() {
+		lock.Unlock()
+		return false
+	}
+	return true
 }
 
 // clearCalls returns a copy of the recorded job names. Row q reads it while the
@@ -64,6 +88,13 @@ func (p *ghostRecordingPublisher) clearCalls() []string {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	return append([]string(nil), p.clears...)
+}
+
+// lockStates returns a copy of the recorded lock states, one per publish.
+func (p *ghostRecordingPublisher) lockStates() []bool {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return append([]bool(nil), p.held...)
 }
 
 // ghostCaptureInternalLog runs fn with glog writing to a pipe at V(2) and
@@ -138,6 +169,7 @@ func newGhostInternalHandler(
 	)
 	h, ok := raw.(*taskEventHandler)
 	Expect(ok).To(BeTrue())
+	publisher.h = h
 	return h
 }
 
@@ -194,10 +226,13 @@ var _ = Describe("ghost current_job locked re-check", func() {
 	})
 
 	It("publishes only under the per-task claim lock (row q)", func() {
+		reachedProbe := make(chan struct{})
+		var probeOnce sync.Once
 		h = newGhostInternalHandler(
 			ghostView{tasks: []lib.Task{ghostInternalTask()}},
 			publisher,
 			func(context.Context, claim.ClaimTarget) (*claim.Claim, error) {
+				probeOnce.Do(func() { close(reachedProbe) })
 				return nil, claim.ErrClaimFree
 			},
 		)
@@ -215,6 +250,10 @@ var _ = Describe("ghost current_job locked re-check", func() {
 			go func() {
 				done <- h.ReconcileOnce(ctx)
 			}()
+			// Wait until the pass has passed the claim probe and is about to
+			// take the lock, so the Consistently window proves the lock blocks
+			// the publish rather than the pass not having reached it yet.
+			Eventually(reachedProbe, 5*time.Second).Should(BeClosed())
 			// While the pass waits for the lock, nothing may be published.
 			Consistently(func() []string {
 				return publisher.clearCalls()
@@ -231,6 +270,23 @@ var _ = Describe("ghost current_job locked re-check", func() {
 
 		Expect(publisher.clearCalls()).To(BeEmpty())
 		Expect(out).To(ContainSubstring("guard=store_entry"))
+	})
+
+	It("publishes under the per-task claim lock (row q2)", func() {
+		h = newGhostInternalHandler(
+			ghostView{tasks: []lib.Task{ghostInternalTask()}},
+			publisher,
+			func(context.Context, claim.ClaimTarget) (*claim.Claim, error) {
+				return nil, claim.ErrClaimFree
+			},
+		)
+
+		ghostCaptureInternalLog(func() {
+			Expect(h.ReconcileOnce(ctx)).To(Succeed())
+		})
+
+		Expect(publisher.clearCalls()).To(Equal([]string{"ghost-job-1"}))
+		Expect(publisher.lockStates()).To(Equal([]bool{true}))
 	})
 
 	It("clears when nothing is pending", func() {

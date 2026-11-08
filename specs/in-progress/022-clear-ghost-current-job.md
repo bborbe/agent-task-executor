@@ -100,7 +100,8 @@ No other record's `current_job` is ever written by this step.
   | n | the record carries a `cluster` tag naming another cluster | **0** | 0 `JobExists` calls |
   | o | `job_started_at` 60 s before now (inside `defaultRespawnGracePeriod`) | **0** | `guard=grace_window`; 0 `IsJobActive` calls |
   | p | claim mode `shadow` | **0** | `guard=claim_unprobeable` |
-  | q | the test holds `lockClaimRelease(task)` while the pass runs; it marks the task spawn-pending, then releases | **0** while held (`Consistently`), then **0** after release | `guard=store_entry` — proves the publish happens under the lock |
+  | q | the test holds `lockClaimRelease(task)` while the pass runs and waits until the pass has reached the claim probe; it then marks the task spawn-pending and releases | **0** while held (`Consistently`), then **0** after release | `guard=store_entry` — proves the locked re-check runs |
+  | q2 | nothing (like a), uncontended | exactly 1 | the per-task lock is held at the moment `PublishClearCurrentJob` is called — proves the publish happens under the lock |
   | r | nothing (like a) | exactly 1 | `IsJobActive` called with (Config namespace, task id); `JobExists` called with (Config namespace, `"ghost-job-1"`) |
 
   Evidence: `go test ./pkg/handler/ -v -args -ginkgo.focus='ghost current_job' 2>&1 | tee /tmp/ghost.out | grep -qE 'Ran (1[3-9]|[2-9][0-9]) of' && grep -q 'SUCCESS!' /tmp/ghost.out`. Every row is a spec under a `Describe` whose text contains `ghost current_job`.

@@ -177,7 +177,13 @@ func (h *taskEventHandler) ghostCurrentJobGuard(
 	}
 	exists, err := h.jobSpawner.JobExists(ctx, namespace, jobName)
 	if err != nil {
-		return ghostGuardReadFailed, err
+		return ghostGuardReadFailed, errors.Wrapf(
+			ctx,
+			err,
+			"check named job %s for task %s",
+			jobName,
+			task.TaskIdentifier,
+		)
 	}
 	if exists {
 		return ghostGuardJobExists, nil
