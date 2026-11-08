@@ -2,7 +2,7 @@
 
 All notable changes to this project will be documented in this file.
 
-## Unreleased
+## v0.57.3
 
 - fix: the liveness probe writes a phase its target Config's trigger accepts and the executor runs (planning preferred; never todo, human_review or done) instead of the status value in_progress, which the executor read as execution — so [planning]-only lanes such as sentry-collector-agent and sentry-fix-agent were skipped and never probed
 
