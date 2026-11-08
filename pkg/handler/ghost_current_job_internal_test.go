@@ -9,6 +9,8 @@ import (
 	"flag"
 	"io"
 	"os"
+	"sync"
+	"time"
 
 	lib "github.com/bborbe/agent"
 	"github.com/bborbe/cqrs/base"
@@ -41,6 +43,7 @@ func (v ghostView) Get(lib.TaskIdentifier) (lib.Task, bool) { return lib.Task{},
 // ghostRecordingPublisher records every PublishClearCurrentJob call.
 type ghostRecordingPublisher struct {
 	stubResultPublisher
+	mu     sync.Mutex
 	clears []string
 }
 
@@ -49,8 +52,18 @@ func (p *ghostRecordingPublisher) PublishClearCurrentJob(
 	_ lib.Task,
 	jobName string,
 ) error {
+	p.mu.Lock()
+	defer p.mu.Unlock()
 	p.clears = append(p.clears, jobName)
 	return nil
+}
+
+// clearCalls returns a copy of the recorded job names. Row q reads it while the
+// pass runs in another goroutine, so the slice must be read under the lock.
+func (p *ghostRecordingPublisher) clearCalls() []string {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return append([]string(nil), p.clears...)
 }
 
 // ghostCaptureInternalLog runs fn with glog writing to a pipe at V(2) and
@@ -178,6 +191,46 @@ var _ = Describe("ghost current_job locked re-check", func() {
 		Expect(publisher.clears).To(BeEmpty())
 		Expect(out).To(ContainSubstring("guard=store_entry"))
 		Expect(probed).To(BeFalse())
+	})
+
+	It("publishes only under the per-task claim lock (row q)", func() {
+		h = newGhostInternalHandler(
+			ghostView{tasks: []lib.Task{ghostInternalTask()}},
+			publisher,
+			func(context.Context, claim.ClaimTarget) (*claim.Claim, error) {
+				return nil, claim.ErrClaimFree
+			},
+		)
+
+		unlock := h.lockClaimRelease("ghost-task-1")
+		released := false
+		defer func() {
+			if !released {
+				unlock()
+			}
+		}()
+
+		done := make(chan error, 1)
+		out := ghostCaptureInternalLog(func() {
+			go func() {
+				done <- h.ReconcileOnce(ctx)
+			}()
+			// While the pass waits for the lock, nothing may be published.
+			Consistently(func() []string {
+				return publisher.clearCalls()
+			}, 200*time.Millisecond).Should(BeEmpty())
+
+			h.markSpawnPending("ghost-task-1")
+			unlock()
+			released = true
+
+			var passErr error
+			Eventually(done).Should(Receive(&passErr))
+			Expect(passErr).ToNot(HaveOccurred())
+		})
+
+		Expect(publisher.clearCalls()).To(BeEmpty())
+		Expect(out).To(ContainSubstring("guard=store_entry"))
 	})
 
 	It("clears when nothing is pending", func() {

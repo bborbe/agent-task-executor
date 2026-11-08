@@ -199,10 +199,7 @@ var _ = Describe("ghost current_job", func() {
 	})
 
 	It("keeps the field when an active Job exists for the task (row c1)", func() {
-		harness.spawner.ListActiveJobsReturns(
-			map[lib.TaskIdentifier]bool{"ghost-task-1": true},
-			nil,
-		)
+		harness.spawner.IsJobActiveReturns(true, nil)
 		harness.view.SnapshotReturns([]lib.Task{baseTask})
 
 		out := runPass()
@@ -274,7 +271,7 @@ var _ = Describe("ghost current_job", func() {
 	})
 
 	It("keeps the field when the active-Job read fails (row f2)", func() {
-		harness.spawner.ListActiveJobsReturns(nil, stderrors.New("api down"))
+		harness.spawner.IsJobActiveReturns(false, stderrors.New("api down"))
 		harness.view.SnapshotReturns([]lib.Task{baseTask})
 
 		out := runPass()
@@ -438,6 +435,51 @@ var _ = Describe("ghost current_job", func() {
 		Expect(harness.publisher.PublishClearCurrentJobCallCount()).To(Equal(0))
 		Expect(harness.spawner.JobExistsCallCount()).To(Equal(0))
 		Expect(out).To(ContainSubstring("scanned=0"))
+	})
+
+	It("keeps the field while the Job is inside the respawn grace window (row o)", func() {
+		baseTask.Frontmatter["job_started_at"] = time.Now().
+			Add(-60 * time.Second).
+			UTC().
+			Format(time.RFC3339)
+		harness.view.SnapshotReturns([]lib.Task{baseTask})
+
+		out := runPass()
+
+		Expect(harness.publisher.PublishClearCurrentJobCallCount()).To(Equal(0))
+		Expect(out).To(ContainSubstring("guard=grace_window"))
+		Expect(harness.spawner.IsJobActiveCallCount()).To(Equal(0))
+		Expect(harness.spawner.JobExistsCallCount()).To(Equal(0))
+	})
+
+	It("keeps the field in shadow claim mode (row p)", func() {
+		harness = newGhostHarness(pkg.ClaimModeShadow, true)
+		harness.view.SnapshotReturns([]lib.Task{baseTask})
+
+		out := runPass()
+
+		Expect(harness.publisher.PublishClearCurrentJobCallCount()).To(Equal(0))
+		Expect(out).To(ContainSubstring("guard=claim_unprobeable"))
+		Expect(harness.claimClient.ReadCallCount()).To(Equal(0))
+	})
+
+	It("reads and publishes with the Config's Job namespace (row r)", func() {
+		harness.resolver.ResolveReturns(pkg.AgentConfiguration{
+			Assignee:     "claude",
+			Image:        "my-image:latest",
+			JobNamespace: "agent-sandbox",
+		}, nil)
+		harness.view.SnapshotReturns([]lib.Task{baseTask})
+
+		runPass()
+
+		Expect(harness.publisher.PublishClearCurrentJobCallCount()).To(Equal(1))
+		_, activeNamespace, activeTaskID := harness.spawner.IsJobActiveArgsForCall(0)
+		Expect(activeNamespace).To(Equal(libk8s.Namespace("agent-sandbox")))
+		Expect(activeTaskID).To(Equal(lib.TaskIdentifier("ghost-task-1")))
+		_, existsNamespace, existsJobName := harness.spawner.JobExistsArgsForCall(0)
+		Expect(existsNamespace).To(Equal(libk8s.Namespace("agent-sandbox")))
+		Expect(existsJobName).To(Equal("ghost-job-1"))
 	})
 
 	Context("ghost current_job pass summary", func() {

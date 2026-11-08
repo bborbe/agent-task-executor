@@ -18,6 +18,7 @@ import (
 // Guard labels for event=ghost_current_job_kept. Closed set.
 const (
 	ghostGuardStoreEntry          = "store_entry"
+	ghostGuardGraceWindow         = "grace_window"
 	ghostGuardNamespaceUnresolved = "namespace_unresolved"
 	ghostGuardJobActive           = "job_active"
 	ghostGuardJobExists           = "job_exists"
@@ -49,7 +50,7 @@ const (
 // can still be cleared here. No vault-side compare-and-set exists —
 // UpdateFrontmatterCommand carries no precondition — so the window is bounded
 // instead by the foreign cluster's held claim (a live claim keeps the guard at
-// claim_held), by isJobActive, and by the foreign job watcher writing the field
+// claim_held), by IsJobActive, and by the foreign job watcher writing the field
 // at terminal.
 func (h *taskEventHandler) clearGhostCurrentJobs(passCtx context.Context, owned []lib.Task) {
 	candidates := make([]lib.Task, 0, len(owned))
@@ -135,9 +136,11 @@ func (h *taskEventHandler) isGhostCandidate(task lib.Task) bool {
 // The order is load-bearing. The local store and the spawn marker are checked
 // first because they are the only evidence that does not cost a remote read,
 // and because a task this executor is actively spawning must never be cleared
-// on a stale remote view. The three remote reads that follow are the most this
-// step may make: the active-Job read (usually served from the pass cache),
-// JobExists, and the claim probe.
+// on a stale remote view. The grace window follows: it is a local clock read
+// that mirrors dispatch's respawn gate, and a Job that started moments ago must
+// not be cleared on a stale remote view either. The three remote reads that
+// follow are the most this step may make: the live, task-id-scoped
+// jobSpawner.IsJobActive list, JobExists, and the claim probe.
 func (h *taskEventHandler) ghostCurrentJobGuard(
 	ctx context.Context,
 	task lib.Task,
@@ -145,6 +148,9 @@ func (h *taskEventHandler) ghostCurrentJobGuard(
 ) (string, error) {
 	if h.hasLocalSpawnState(task.TaskIdentifier) {
 		return ghostGuardStoreEntry, nil
+	}
+	if h.withinGhostGraceWindow(task) {
+		return ghostGuardGraceWindow, nil
 	}
 	config, err := h.resolveConfigQuiet(ctx, task)
 	if err != nil {
@@ -157,9 +163,14 @@ func (h *taskEventHandler) ghostCurrentJobGuard(
 	if err != nil {
 		return ghostGuardNamespaceUnresolved, err
 	}
-	active, err := h.isJobActive(ctx, task, config)
+	active, err := h.jobSpawner.IsJobActive(ctx, namespace, task.TaskIdentifier)
 	if err != nil {
-		return ghostGuardReadFailed, err
+		return ghostGuardReadFailed, errors.Wrapf(
+			ctx,
+			err,
+			"check active job for task %s",
+			task.TaskIdentifier,
+		)
 	}
 	if active {
 		return ghostGuardJobActive, nil
@@ -185,6 +196,22 @@ func (h *taskEventHandler) ghostCurrentJobGuard(
 	}
 }
 
+// withinGhostGraceWindow reports whether job_started_at lies inside
+// defaultRespawnGracePeriod of now. It mirrors the time arithmetic of
+// withinRespawnGraceWindow but is a pure check: no log line, no metric and no
+// grace-window deferral store. A parse error or a zero value counts as elapsed,
+// matching dispatch, so a legacy record is still cleared.
+func (h *taskEventHandler) withinGhostGraceWindow(task lib.Task) bool {
+	jobStartedAt, err := task.Frontmatter.JobStartedAt()
+	if err != nil {
+		return false
+	}
+	if jobStartedAt.IsZero() {
+		return false
+	}
+	return h.currentDateTime.Now().Time().Sub(jobStartedAt) < defaultRespawnGracePeriod
+}
+
 // hasLocalSpawnState reports whether this executor knows of a spawn for the
 // task: a store entry, or a spawn between taking the claim and recording the
 // Job.
@@ -201,9 +228,12 @@ func (h *taskEventHandler) hasLocalSpawnState(taskID lib.TaskIdentifier) bool {
 // The re-check is what makes the concurrent spawn safe. The spawn path calls
 // markSpawnPending and only then takes lockClaimRelease for its claim. Either
 // the mark came first, and this re-check sees it, or the mark comes later, and
-// the spawn's claim and spawn notification follow the published clear. The
-// PublishClearCurrentJob call must happen while the lock is held; the snapshot
-// task is passed unchanged.
+// the spawn's claim and spawn notification are published after the clear. That
+// publish order does not fix apply order: commands are keyed by a random
+// RequestID, so the controller may apply the later spawn notification before
+// the clear. That inversion is the spec's accepted "Apply-order inversion"
+// residual. The PublishClearCurrentJob call must happen while the lock is held;
+// the snapshot task is passed unchanged.
 func (h *taskEventHandler) publishGhostClear(
 	ctx context.Context,
 	task lib.Task,

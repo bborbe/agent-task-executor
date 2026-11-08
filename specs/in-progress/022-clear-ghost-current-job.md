@@ -59,7 +59,7 @@ No other record's `current_job` is ever written by this step.
 - **Owned tasks.** `ownedTasks(snapshot, h.vaultMatcher)` yields tasks from the replay-backed view with complete frontmatter. `private-agent` records carry `target_vault: openclaw`, so the `agent-task-executor-openclaw` deployment owns them.
 - **The write.** `ResultPublisher.PublishClearCurrentJob(ctx, task, jobName)` writes only `current_job: ""`. Its 1 h LRU dedupe is keyed by `jobName` and shared with `PublishFailure`. A repeat call for the same name within that hour returns nil without writing.
 - **Cluster reads.**
-  - The step uses the handler method `h.isJobActive(ctx, task, config)`, the same call dispatch uses. With an assignee'd Config it answers from `activeJobsFor` → `jobSpawner.ListActiveJobs` (pass-cached; `finishSpawn` invalidates the entry). With no assignee it calls `jobSpawner.IsJobActive` directly.
+  - The step uses `jobSpawner.IsJobActive(ctx, namespace, taskIdentifier)`, the same live, task-id-scoped read that dispatch's `current_job` gate (`checkActiveCurrentJob`) uses. It deliberately does not use the assignee-scoped, pass-cached `h.isJobActive`, which misses a Job carrying another assignee label. *(Amended 2026-11-08 after review of PR #219.)*
   - `jobSpawner.JobExists(ctx, namespace, name)` returns false with no error on NotFound.
 - **Claim probe.** `h.claimProbe(ctx, task)` returns `claimProbeHeld`, `claimProbeFree` or `claimProbeUnavailable`, plus an error.
   - Claim modes `off` and `shadow` never return `claimProbeFree`, so this step never clears there.
@@ -78,7 +78,7 @@ No other record's `current_job` is ever written by this step.
   - `current_job: ghost-job-1`;
   - no store entry, not spawn-pending;
   - an assignee whose Config resolves.
-- **Fake defaults:** no active Job for the task (`ListActiveJobs` omits it, and `IsJobActive` is false for the no-assignee case), `JobExists` false, probe `claimProbeFree`, all with no error.
+- **Fake defaults:** no active Job for the task (`IsJobActive` returns false), `JobExists` false, probe `claimProbeFree`, all with no error.
 
 - [ ] **Decision table.** Every row passes, asserted on `PublishClearCurrentJob` call counts and on which reads were or were not made:
 
@@ -86,10 +86,10 @@ No other record's `current_job` is ever written by this step.
   |---|---|---|---|
   | a | nothing | exactly **1**, `jobName == "ghost-job-1"` | the cleared line |
   | b | `JobExists` true | **0** | probe not called (order) |
-  | c | the task is in `ListActiveJobs` for its assignee (and separately, a resolved Config whose `Assignee` is empty, via the fake resolver, with `IsJobActive` returning true) | **0** | `JobExists` not called (order) |
+  | c | `IsJobActive` returns true for the task id | **0** | `JobExists` not called (order) |
   | d | probe `claimProbeHeld` | **0** | kept line `guard=claim_held` |
   | e | probe error, and separately `claimProbeUnavailable` | **0** | `guard=claim_unprobeable` |
-  | f | `JobExists` errors, and separately `ListActiveJobs` errors | **0** | `guard=read_failed` |
+  | f | `JobExists` errors, and separately `IsJobActive` errors | **0** | `guard=read_failed` |
   | g | store entry inserted as a side effect of the fake claim client's read | **0** | `guard=store_entry` |
   | h | the task is marked spawn-pending as a side effect of the fake claim client's read (an `*_internal_test.go` spec calls `markSpawnPending` directly) | **0** | `guard=store_entry` |
   | i | `status: completed`, and separately `aborted` | **0** | 0 `JobExists` calls |
@@ -97,6 +97,11 @@ No other record's `current_job` is ever written by this step.
   | k | `current_job` empty | **0** | 0 `JobExists` calls |
   | l | an assignee that is unknown, or that is empty with no `task_type` match, and separately the namespace invalid | **0** | `guard=namespace_unresolved`; `TaskEventsTotal` and `SkippedUnknownAssigneeTotal` unchanged by the step |
   | m | publish returns an error | 1 per pass, each erroring | `guard=publish_failed`; the pass returns nil; 2 calls across 2 passes |
+  | n | the record carries a `cluster` tag naming another cluster | **0** | 0 `JobExists` calls |
+  | o | `job_started_at` 60 s before now (inside `defaultRespawnGracePeriod`) | **0** | `guard=grace_window`; 0 `IsJobActive` calls |
+  | p | claim mode `shadow` | **0** | `guard=claim_unprobeable` |
+  | q | the test holds `lockClaimRelease(task)` while the pass runs; it marks the task spawn-pending, then releases | **0** while held (`Consistently`), then **0** after release | `guard=store_entry` — proves the publish happens under the lock |
+  | r | nothing (like a) | exactly 1 | `IsJobActive` called with (Config namespace, task id); `JobExists` called with (Config namespace, `"ghost-job-1"`) |
 
   Evidence: `go test ./pkg/handler/ -v -args -ginkgo.focus='ghost current_job' 2>&1 | tee /tmp/ghost.out | grep -qE 'Ran (1[3-9]|[2-9][0-9]) of' && grep -q 'SUCCESS!' /tmp/ghost.out`. Every row is a spec under a `Describe` whose text contains `ghost current_job`.
 - [ ] **Summary line.** Every pass that completes the drive loop emits exactly one `glog.V(2)` line `event=ghost_current_job_pass scanned=<n> cleared=<n> kept=<n> unreached=<n>`, including when every count is 0.
@@ -106,7 +111,7 @@ No other record's `current_job` is ever written by this step.
   - Evidence: a focused spec runs two zero-candidate passes and captures 2 lines, a view-not-ready pass captures 0, and a pass whose context expires after the first of two candidates captures `scanned=1 … unreached=1`.
 - [ ] **Per-record lines.** Every candidate (DB2) emits exactly one of these per pass:
   - `glog.Infof` `event=ghost_current_job_cleared task=<id> job=<name>`;
-  - `glog.V(2)` `event=ghost_current_job_kept task=<id> job=<name> guard=<label>`, where `<label>` is one of `store_entry`, `namespace_unresolved`, `job_active`, `job_exists`, `claim_held`, `claim_unprobeable`, `read_failed`, `publish_failed`.
+  - `glog.V(2)` `event=ghost_current_job_kept task=<id> job=<name> guard=<label>`, where `<label>` is one of `store_entry`, `grace_window`, `namespace_unresolved`, `job_active`, `job_exists`, `claim_held`, `claim_unprobeable`, `read_failed`, `publish_failed`.
   - Evidence: rows a, d, e, f, g, l and m assert their line.
 - [ ] **Post-Deploy (Rung-2):** a seeded ghost clears on nuke dev.
   - `deploy_check:` `kubectlnukedev -n agent get deploy/agent-task-executor-openclaw -o jsonpath='{.spec.template.spec.containers[0].image}' | awk -F: '{print $NF}'`
@@ -152,14 +157,13 @@ No other record's `current_job` is ever written by this step.
    The stage rule is deliberately stricter than dispatch's `stageSkipResult`: it ignores `STAGE_FILTER=false`. Non-candidates get no reads and no lines.
 3. **Checks.** For each candidate, in order; the first failure keeps the field and names its label:
    1. A store entry exists or a spawn is pending → `store_entry`.
+   1b. `job_started_at` lies within `defaultRespawnGracePeriod` of now → `grace_window`. This is a pure check, with no metric and no deferral store, mirroring dispatch's `withinRespawnGraceWindow`. A parse error or a zero value counts as elapsed, as in dispatch. *(Amended.)*
    2. The Config is resolved with `resolveConfigForReconcile`'s rules (an unknown assignee is a skip; an empty assignee falls back to `task_type`), then the namespace with `jobNamespaceForTask`. A nil Config, a skip, or an error → `namespace_unresolved`. There is no fallback to the executor's own namespace. The step must not increment `TaskEventsTotal` or `SkippedUnknownAssigneeTotal`. Extracting a non-counting resolution core that `resolveConfigForReconcile` also calls is acceptable, provided the existing callers' counting is unchanged.
-   3. `h.isJobActive(ctx, task, config)` → `job_active`.
+   3. `jobSpawner.IsJobActive(ctx, namespace, taskIdentifier)` → `job_active`.
    4. `JobExists(current_job)` → `job_exists`.
    5. Claim probe: Held → `claim_held`; error or Unavailable → `claim_unprobeable`.
    A cluster-read error in step 3 or 4 → `read_failed`.
-4. **Publish.** Under `lockClaimRelease(taskID)`, the step repeats check 1. If it is still clear, it calls `PublishClearCurrentJob(ctx, task, current_job)` before releasing the lock. The spawn path marks the task pending and only then takes this lock for its claim, so one of two things happens:
-   - the mark came first, and the step sees pending;
-   - the mark came later, and the spawn's claim and spawn notification follow the published clear.
+4. **Publish.** Under `lockClaimRelease(taskID)`, the step repeats check 1. If it is still clear, it calls `PublishClearCurrentJob(ctx, task, current_job)` before releasing the lock. The spawn path marks the task pending and only then takes this lock for its claim, so either the mark came first and the step sees pending, or the mark came later and the spawn's claim and notification are *published* after the clear. *(Amended:)* publish order does not fix apply order. Commands are keyed by a random `RequestID`, so the controller may apply the later spawn notification before the clear. See the Failure Modes row "Apply-order inversion".
 5. **Errors.** Publish error → `publish_failed`. No outcome fails the pass, and the next pass re-evaluates from scratch.
 6. **Logging.** One summary line per pass that reaches the step, and one cleared or kept line per candidate. A clear repeated before the replayed view shows `""` hits the publisher dedupe and logs `cleared` again. That is expected, so the Rung-2 and Rung-3 evidence counts are `≥ 1`.
 
@@ -169,7 +173,7 @@ No other record's `current_job` is ever written by this step.
 - No new flags, env vars or metrics, and no `main.go` change.
 - The dispatch files listed under Verification are unchanged.
 - Ginkgo/Gomega, with Counterfeiter fakes for the interfaces. The task store is exercised as the real `*pkg.TaskStore`.
-- At most 3 remote reads (the active-Job read, which is usually served from the per-pass `ListActiveJobs` cache; `JobExists`; the claim probe) per candidate per pass.
+- At most 3 remote reads (the live, task-id-scoped `IsJobActive` list; `JobExists`; the claim probe) per candidate per pass.
 
 ## Failure Modes
 
@@ -179,6 +183,7 @@ No other record's `current_job` is ever written by this step.
 | Claim store (vault-api) unavailable | Field kept | Existing `event=claim_probe_failed`, plus `guard=claim_unprobeable` | Automatic on the next pass |
 | Kafka publish fails | Field kept; the dedupe is not recorded | `guard=publish_failed` | Automatic. Confirmed by a later `ghost_current_job_cleared task=<id>` |
 | The controller drops the clear command | View keeps the name; repeat calls hit the 1 h dedupe | Repeated `cleared` lines for one task over more than a few minutes | Retries after the dedupe TTL. Operator reads the controller log for the `taskIdentifier` |
+| Apply-order inversion: a spawn starts right after the step's locked re-check, and the controller applies its notification before the clear (commands are not keyed to one partition) | The record may read `current_job: ""` while the new Job runs on this cluster | The new Job's spawn log; the empty field on the record | Accepted and bounded. No double run follows: the store entry, `IsJobActive` and the held claim still suppress dispatch, and the job watcher writes the field at terminal. A true fix needs a controller-side compare-and-set or commands keyed by task id, which is cross-repo and out of scope |
 | This executor spawns the task concurrently | Locked re-check sees the store entry or the pending mark; no publish | `guard=store_entry` | None needed |
 | Another cluster spawns between the claim probe and the publish (residual; no vault-side compare-and-set exists) | Field may read `""` while the foreign Job runs | The foreign executor's spawn log; empty `current_job` on the record | Bounded. That cluster's held claim and its `IsJobActive` still gate dispatch, and its job watcher writes the field at terminal. No double run follows from the empty field |
 | Clock skew between clusters | The claim probe compares `LeaseUntil + TakeoverGrace` with the local clock, so a skewed clock can read a live lease as free | No direct signal | Bounded by the same guards as the previous row: `IsJobActive` (local) and the foreign claim fence |
