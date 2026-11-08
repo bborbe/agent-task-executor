@@ -110,12 +110,9 @@ func (h *taskEventHandler) parkSucceededWithoutPhaseMove(
 		// this pass, and the phase may still be about to move.
 		return false
 	}
-	// A park already published for this success is never published again. The
-	// window decides only what this pass does, because the task reading this
-	// phase has exactly two meanings and the window is what separates them:
-	// inside it the controller has not applied the park yet, so suppress; past it
-	// the park landed and an operator re-armed the task — the documented way out
-	// of human_review — so let it spawn.
+	// A park already published for this success is never published again inside
+	// the write-back window: the controller has not applied it yet, and the pass
+	// must not spawn the work again in the meantime.
 	if publishedAt, ok := h.taskStore.ParkPublishedAt(
 		task.TaskIdentifier,
 		succeeded.CompletedAt,
@@ -128,7 +125,33 @@ func (h *taskEventHandler) parkSucceededWithoutPhaseMove(
 			)
 			return true
 		}
-		return false
+		// Past the window the park has still not landed, and reaching this branch
+		// at all proves it: the success lookup above is phase-scoped, so a park the
+		// controller had applied would have moved the task off the phase the Job ran
+		// for and returned before here. Releasing on a timer therefore spawns the
+		// work a second time — measured on nukedev 2026-11-08, one task re-spawned
+		// every ~12 minutes for as long as it stayed at one phase. Re-publish and
+		// keep suppressing instead; the next pass either sees the park applied (and
+		// exits above) or retries the write. An operator re-arm still works: it
+		// moves the phase, which is the release signal, not this clock.
+		glog.Warningf(
+			"event=park_write_back_overdue task=%s phase=%s elapsed=%.0fs — re-publishing",
+			task.TaskIdentifier,
+			succeeded.Phase,
+			now.Sub(publishedAt).Seconds(),
+		)
+		metrics.TaskEventsTotal.WithLabelValues("park_write_back_overdue").Inc()
+		if err := h.resultPublisher.PublishParkSucceeded(ctx, current); err != nil {
+			glog.Errorf(
+				"re-publish overdue park for task %s (phase %s): %v",
+				task.TaskIdentifier,
+				succeeded.Phase,
+				err,
+			)
+			return true
+		}
+		h.taskStore.MarkParkPublished(task.TaskIdentifier, succeeded.CompletedAt, now)
+		return true
 	}
 	if err := h.resultPublisher.PublishParkSucceeded(ctx, current); err != nil {
 		// Suppress this pass rather than fall through to the spawn: spawning is

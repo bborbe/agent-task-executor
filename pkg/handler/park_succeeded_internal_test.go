@@ -188,18 +188,43 @@ func TestParkSucceededWithoutPhaseMoveSuppressesUntilTheParkIsObservable(t *test
 
 // Past the write-back window the task still reading this phase means an operator
 // re-armed it — the documented way out of human_review — so it must spawn.
-func TestParkSucceededWithoutPhaseMoveLetsAReArmSpawnOnceTheWindowHasPassed(t *testing.T) {
+// A park overdue past the write-back window is re-published, never released.
+// The old contract released it here on the theory that a re-arm must be the only
+// way a task still reads the succeeded phase this late — but a landed park moves
+// the phase and exits the phase-scoped lookup above, so this branch is
+// unreachable for a re-arm and reachable only for a write-back that never landed.
+func TestParkSucceededWithoutPhaseMoveRepublishesAnOverduePark(t *testing.T) {
 	h, publisher, task, now := parkFixture(t, "execution")
 	completedAt := now.Add(-longAgo)
 	h.taskStore.MarkSucceeded(task.TaskIdentifier, "execution", completedAt)
 	// A park published long ago, whose write-back window is over.
 	h.taskStore.MarkParkPublished(task.TaskIdentifier, completedAt, now.Add(-longAgo))
 
-	if h.parkSucceededWithoutPhaseMove(context.Background(), task) {
-		t.Fatal("re-armed task was suppressed; the park's window had passed")
+	if !h.parkSucceededWithoutPhaseMove(context.Background(), task) {
+		t.Fatal("overdue park was released; the task would be spawned a second time")
 	}
-	if got := len(publisher.parkedSucceeded); got != 0 {
-		t.Fatalf("park count = %d; want 0", got)
+	if got := len(publisher.parkedSucceeded); got != 1 {
+		t.Fatalf("re-publish count = %d; want 1", got)
+	}
+}
+
+// A park whose write-back has not landed must not release the task.
+//
+// Reaching the park branch at all proves the write has not landed: the success
+// lookup above is phase-scoped, so a park the controller had applied would have
+// moved the task to human_review and returned before this point. Releasing on a
+// timer therefore spawns the work a second time — measured on nukedev 2026-11-08,
+// one task re-spawned every ~12 minutes for as long as it stayed at one phase.
+func TestParkSucceededWithoutPhaseMoveDoesNotReleaseAParkThatNeverLanded(t *testing.T) {
+	h, _, task, now := parkFixture(t, "execution")
+	completedAt := now.Add(-longAgo)
+	h.taskStore.MarkSucceeded(task.TaskIdentifier, "execution", completedAt)
+	// The park went out long ago, but the task still reads the phase the Job ran
+	// for — the controller never applied it.
+	h.taskStore.MarkParkPublished(task.TaskIdentifier, completedAt, now.Add(-longAgo))
+
+	if !h.parkSucceededWithoutPhaseMove(context.Background(), task) {
+		t.Fatal("an unlanded park was released; the task would be spawned a second time")
 	}
 }
 

@@ -2,6 +2,10 @@
 
 All notable changes to this project will be documented in this file.
 
+## Unreleased
+
+- fix: **a task that already succeeded at its current phase is no longer spawned again once the park's write-back window elapses.** `parkSucceededWithoutPhaseMove` released the task after one `defaultRespawnGracePeriod` past publishing the `human_review` park, on the assumption that only an operator re-arm could leave a task reading the succeeded phase that late. That state is unreachable: a park the controller applied moves the task off the phase the Job ran for, so the phase-scoped success lookup returns before the park branch is reached — the branch is reachable only when the write-back never landed, and releasing there re-ran the work the park exists to stop. Measured on nukedev 2026-11-08: task `service-analysis-needs-input-probe-missing-path` was re-spawned every ~12 minutes for as long as it stayed at one phase, `event=task_rerun` fired 711 s after its success, and `executor_task_reruns_total` reached 3 on `task_type="llm"` and 2 on `task_type="strategy-prototype"`. An overdue park is now re-published and the pass keeps suppressing, logging `event=park_write_back_overdue` and incrementing `TaskEventsTotal{park_write_back_overdue}`, so a stuck write is visible instead of silently re-running the work. An operator re-arm still releases the task, because it moves the phase — that is the release signal, not this clock.
+
 ## v0.57.1
 
 - chore: restate the `do-not-merge` gate message to name its bypass actors — the Admin repository role and Integration `3907226`, both `bypass_mode: always` in the `master-protection` ruleset — instead of asserting an unqualified block
