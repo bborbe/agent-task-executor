@@ -2,7 +2,7 @@
 
 All notable changes to this project will be documented in this file.
 
-## Unreleased
+## v0.57.7
 
 - fix: **a parked task now records why it was parked, in a `## Parked` body section written in the same `UpdateFrontmatterCommand` as the `phase: human_review` key.** Previously both park paths wrote the phase alone, so an operator could not tell a deliberate hand-off from a stall. The lost-claim path names `parked_lost_claim`, the primary claim key it was derived under, and the previous holder read from the expired claim (`unavailable` when the takeover created the claim); the succeeded path names `parked_succeeded` and carries the reason line only. Both paths share the one write, so the phase and its reason never appear apart, and a retried publish replaces the section rather than duplicating it.
 
