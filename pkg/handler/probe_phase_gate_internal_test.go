@@ -104,7 +104,7 @@ func runProbe(t *testing.T, trigger *agentv1.Trigger) (lib.TaskFrontmatter, lib.
 	configProvider := new(mocks.FakeConfigProvider)
 	configProvider.GetReturns([]agentv1.Config{cfg}, nil)
 	publisher := new(mocks.FakeCommandPublisher)
-	runner := probe.NewHealthcheckRunner(configProvider, publisher, "dev")
+	runner := probe.NewHealthcheckRunner(configProvider, publisher, "dev", "personal")
 
 	if err := runner.Run(context.Background()); err != nil {
 		t.Fatalf("Run() error = %v", err)

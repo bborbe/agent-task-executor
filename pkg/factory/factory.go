@@ -373,10 +373,11 @@ func CreateHealthcheckRunner(
 	syncProducer libkafka.SyncProducer,
 	topicPrefix base.TopicPrefix,
 	branch base.Branch,
+	targetVault string,
 ) probe.HealthcheckRunner {
 	sender := cdb.NewCommandObjectSender(syncProducer, topicPrefix, log.DefaultSamplerFactory)
 	publisher := probe.NewCommandPublisher(sender)
-	return probe.NewHealthcheckRunner(configProvider, publisher, branch)
+	return probe.NewHealthcheckRunner(configProvider, publisher, branch, targetVault)
 }
 
 // CreateHealthcheckCron wraps the given runner in a cron scheduler. Pass the runner returned by

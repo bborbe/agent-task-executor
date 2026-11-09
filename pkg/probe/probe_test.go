@@ -33,7 +33,7 @@ var _ = Describe("HealthcheckRunner", func() {
 		ctx = context.Background()
 		configProvider = new(mocks.FakeConfigProvider)
 		publisher = new(mocks.FakeCommandPublisher)
-		runner = probe.NewHealthcheckRunner(configProvider, publisher, "dev")
+		runner = probe.NewHealthcheckRunner(configProvider, publisher, "dev", "personal")
 	})
 
 	Context("N configs produce 2N commands in the expected order", func() {
@@ -414,8 +414,8 @@ var _ = Describe("HealthcheckRunner", func() {
 
 			pubA := new(mocks.FakeCommandPublisher)
 			pubB := new(mocks.FakeCommandPublisher)
-			runnerA := probe.NewHealthcheckRunner(configProvider, pubA, "dev")
-			runnerB := probe.NewHealthcheckRunner(configProvider, pubB, "dev")
+			runnerA := probe.NewHealthcheckRunner(configProvider, pubA, "dev", "personal")
+			runnerB := probe.NewHealthcheckRunner(configProvider, pubB, "dev", "personal")
 			Expect(runnerA.Run(ctx)).To(Succeed())
 			Expect(runnerB.Run(ctx)).To(Succeed())
 
@@ -431,7 +431,7 @@ var _ = Describe("HealthcheckRunner", func() {
 		})
 
 		It("dev and prod runners produce different task IDs for the same agent", func() {
-			devRunner := probe.NewHealthcheckRunner(configProvider, publisher, "dev")
+			devRunner := probe.NewHealthcheckRunner(configProvider, publisher, "dev", "personal")
 			prodPublisher := new(mocks.FakeCommandPublisher)
 			configProvider.GetReturns([]agentv1.Config{
 				{
@@ -439,7 +439,12 @@ var _ = Describe("HealthcheckRunner", func() {
 					Spec:       agentv1.ConfigSpec{Assignee: "agent-a"},
 				},
 			}, nil)
-			prodRunner := probe.NewHealthcheckRunner(configProvider, prodPublisher, "prod")
+			prodRunner := probe.NewHealthcheckRunner(
+				configProvider,
+				prodPublisher,
+				"prod",
+				"personal",
+			)
 
 			Expect(devRunner.Run(ctx)).To(Succeed())
 			Expect(prodRunner.Run(ctx)).To(Succeed())
@@ -481,5 +486,48 @@ var _ = Describe("HealthcheckRunner", func() {
 			Expect(ok).To(BeTrue(), "payload at call 1 must be an UpdateFrontmatterCommand")
 			Expect(updateCmd.Validate(ctx)).To(Succeed())
 		})
+	})
+
+	// Regression: the create command carried no TargetVault, so the controller
+	// substituted routing.LegacyDefaultVault ("openclaw") and skipped every
+	// probe create on any other vault as a cross-vault write — silently, since
+	// the executor had already logged the publish as successful.
+	//
+	// Two distinct configured vaults are table-tested on purpose: a single
+	// vault cannot distinguish a value computed from the configured vault from
+	// a hard-coded literal that happens to equal it.
+	Context("create-task stamps the executor's configured vault (regression)", func() {
+		BeforeEach(func() {
+			configProvider.GetReturns([]agentv1.Config{
+				{
+					ObjectMeta: metav1.ObjectMeta{Name: "agent-a"},
+					Spec:       agentv1.ConfigSpec{Assignee: "agent-a"},
+				},
+			}, nil)
+		})
+
+		DescribeTable("published CreateCommand.TargetVault equals the configured vault",
+			func(configuredVault string) {
+				pub := new(mocks.FakeCommandPublisher)
+				vaultRunner := probe.NewHealthcheckRunner(
+					configProvider,
+					pub,
+					"dev",
+					configuredVault,
+				)
+
+				Expect(vaultRunner.Run(ctx)).To(Succeed())
+
+				_, op, payload := pub.PublishArgsForCall(0)
+				Expect(op).To(Equal("create-task"))
+				createCmd, ok := payload.(taskcmd.CreateCommand)
+				Expect(ok).To(BeTrue(), "payload at call 0 must be a CreateCommand")
+				Expect(createCmd.TargetVault).To(Equal(configuredVault))
+				Expect(createCmd.TargetVault).NotTo(BeEmpty(),
+					"an empty TargetVault makes the controller fall back to openclaw and skip the create")
+			},
+			Entry("non-default vault", "personal"),
+			Entry("the legacy default vault", "openclaw"),
+		)
 	})
 })
