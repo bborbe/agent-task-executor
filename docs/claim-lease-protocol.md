@@ -319,6 +319,43 @@ A takeover must win the pair: a live secondary refuses the takeover before any
 write, and a secondary conflict after the primary was taken releases the primary
 again so the pair is never half-held.
 
+## Parking
+
+A park moves a task to `human_review` and records why, in the same
+`UpdateFrontmatterCommand`: the `phase` key plus a `## Parked` body section, so
+the record never shows the phase without its reason. There are two park paths,
+and each writes its own reason token:
+
+| Path | Reason token | Evidence |
+|---|---|---|
+| Lost claim | `parked_lost_claim` | The claim key and the previous holder. |
+| Succeeded Job without a phase move | `parked_succeeded` | The reason line only. |
+
+The lost-claim park fires when this executor takes over an expired claim, the
+task's Config forbids a rerun (`rerunOnLostClaim: false`), and the task shows
+prior-run evidence (`current_job` or `job_started_at`). The claim key is the
+primary key derived for the task — `claims/pr/<owner>/<repo>/<n>`,
+`claims/task/<task id>`, or `claims/repo/<owner>/<repo>` — and the previous
+holder is the `TaskID` read from the expired claim. A takeover that creates a
+claim over an absent key has no previous holder, and the section writes
+`unavailable` rather than an empty field.
+
+The section is a fixed template, at most eight lines including the trailing
+newline, with no log tail and no echo of the task body:
+
+```markdown
+## Parked
+
+- **Reason:** parked_lost_claim
+- **Claim:** claims/task/<task id>
+- **Previous holder:** <task id or unavailable>
+```
+
+The succeeded path writes only the heading, a blank line and the reason line.
+Both paths share one publish helper, so the phase change and the reason are
+never split across two commands; a retried publish replaces the section rather
+than duplicating it, because a body section write is keyed by its heading.
+
 ## Restart recovery
 
 On start the manager lists `claims/` and keeps only entries whose `cluster`

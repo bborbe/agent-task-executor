@@ -517,8 +517,14 @@ var _ = Describe("claim gate", func() {
 		// created, and the task is parked at human_review instead.
 		Expect(harness.spawner.SpawnJobCallCount()).To(Equal(0))
 		Expect(harness.publisher.PublishParkLostClaimCallCount()).To(Equal(1))
-		_, parkedTask := harness.publisher.PublishParkLostClaimArgsForCall(0)
+		_, parkedTask, reason, claimKey, previousHolder := harness.publisher.
+			PublishParkLostClaimArgsForCall(0)
 		Expect(parkedTask.TaskIdentifier).To(Equal(task.TaskIdentifier))
+		// The publisher test cannot catch a swapped or wrong-field argument at
+		// this call site, so pin all three pieces of park evidence here.
+		Expect(reason).To(Equal("parked_lost_claim"))
+		Expect(claimKey).To(Equal(key))
+		Expect(previousHolder).To(Equal("previous-task"))
 		expectClaimDelta(before, snapshotClaims(), map[string]float64{
 			"conflict":   1,
 			"taken_over": 1,

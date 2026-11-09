@@ -182,7 +182,7 @@ func (h *taskEventHandler) acquireSpawnClaim(
 		// one inside the takeover grace) and a lost compare-and-swap race both
 		// leave the key with its current owner; the claim package has already
 		// counted conflict / takeover_too_early / taken_over / error.
-		_, takeoverErr := manager.TakeoverPair(
+		takeover, takeoverErr := manager.TakeoverPair(
 			ctx,
 			primary,
 			secondary,
@@ -207,7 +207,7 @@ func (h *taskEventHandler) acquireSpawnClaim(
 			if h.claimMode == pkg.ClaimModeOn &&
 				config.LostClaimAction() == agentv1.ParkAfterLostClaim &&
 				taskShowsPriorRun(task) {
-				h.parkAfterLostClaim(ctx, primary, task)
+				h.parkAfterLostClaim(ctx, primary, takeoverPreviousHolder(takeover), task)
 				return false
 			}
 			logClaimAcquired(primary, task.TaskIdentifier)
@@ -303,6 +303,16 @@ func taskShowsPriorRun(task lib.Task) bool {
 	return false
 }
 
+// takeoverPreviousHolder reads the previous holder from a takeover result. A nil
+// result is impossible on a nil error today, but the park must never panic on a
+// manager that returns one; an unknown holder renders as "unavailable".
+func takeoverPreviousHolder(takeover *claim.TakeoverResult) string {
+	if takeover == nil {
+		return ""
+	}
+	return takeover.PreviousTaskID
+}
+
 // parkAfterLostClaim stops a task whose claim another executor took over, when
 // its Config says the agent must not run a second time. The caller returns false
 // either way, so no Job is created here.
@@ -317,11 +327,18 @@ func taskShowsPriorRun(task lib.Task) bool {
 func (h *taskEventHandler) parkAfterLostClaim(
 	ctx context.Context,
 	key string,
+	previousHolder string,
 	task lib.Task,
 ) {
 	var err error
 	for attempt := 1; attempt <= parkWriteAttempts; attempt++ {
-		if err = h.resultPublisher.PublishParkLostClaim(ctx, task); err == nil {
+		if err = h.resultPublisher.PublishParkLostClaim(
+			ctx,
+			task,
+			pkg.ParkReasonLostClaim,
+			key,
+			previousHolder,
+		); err == nil {
 			glog.Infof("event=parked_lost_claim key=%s task=%s", key, task.TaskIdentifier)
 			metrics.ParkedLostClaimTotal.WithLabelValues("parked").Inc()
 			return

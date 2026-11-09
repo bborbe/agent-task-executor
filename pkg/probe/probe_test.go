@@ -506,7 +506,8 @@ var _ = Describe("HealthcheckRunner", func() {
 			}, nil)
 		})
 
-		DescribeTable("published CreateCommand and UpdateFrontmatterCommand TargetVault equal the configured vault",
+		DescribeTable(
+			"published CreateCommand and UpdateFrontmatterCommand TargetVault equal the configured vault",
 			func(configuredVault string) {
 				pub := new(mocks.FakeCommandPublisher)
 				vaultRunner := probe.NewHealthcheckRunner(

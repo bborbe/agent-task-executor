@@ -2,6 +2,10 @@
 
 All notable changes to this project will be documented in this file.
 
+## Unreleased
+
+- fix: **a parked task now records why it was parked, in a `## Parked` body section written in the same `UpdateFrontmatterCommand` as the `phase: human_review` key.** Previously both park paths wrote the phase alone, so an operator could not tell a deliberate hand-off from a stall. The lost-claim path names `parked_lost_claim`, the primary claim key it was derived under, and the previous holder read from the expired claim (`unavailable` when the takeover created the claim); the succeeded path names `parked_succeeded` and carries the reason line only. Both paths share the one write, so the phase and its reason never appear apart, and a retried publish replaces the section rather than duplicating it.
+
 ## v0.57.6
 
 - fix: **the probe's `update-frontmatter` carries the executor's vault, like the `create-task` beside it.** `v0.57.5` stamped only the create, so the paired update travelled unstamped: both controllers attempted it, and a not-found on the non-owner had to stay a silent skip — which meant a genuine miss on the owner was swallowed the same way. That is the arm the probe's `trigger_count` / `current_job` reset was lost through while `vault-api` could not yet see the task its create had just written. Both commands now carry `TargetVault`. ⚠️ The consuming half ships separately: `agent-task-controller` must distinguish a stamped not-found from an unstamped one before the stamp changes anything, and it does so in `bborbe/agent-task-controller#135`. Until that lands, a stamped not-found is still the old skip — this release only stops the probe from being the one producer that cannot tell the two apart. The two-vault table test asserts the update's stamp as well as the create's.

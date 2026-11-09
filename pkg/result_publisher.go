@@ -55,6 +55,18 @@ const (
 	AbortReasonTransientExhausted = metrics.RedriveAbortReasonTransientExhausted
 )
 
+// The reason tokens a park records in its "## Parked" section. The two park
+// paths must never share one: an operator reading the section has to be able to
+// tell a lost-claim hand-off from a succeeded Job that never moved the phase.
+const (
+	// ParkReasonLostClaim is the reason a task is parked after another executor
+	// took over its claim and its Config forbids a rerun.
+	ParkReasonLostClaim = "parked_lost_claim"
+	// ParkReasonSucceeded is the reason a task is parked after its Job succeeded
+	// without advancing the task's phase.
+	ParkReasonSucceeded = "parked_succeeded"
+)
+
 //counterfeiter:generate -o ../mocks/result_publisher.go --fake-name FakeResultPublisher . ResultPublisher
 
 // ResultPublisher publishes agent-task-v1-request commands to Kafka so the
@@ -174,17 +186,31 @@ type ResultPublisher interface {
 	// nothing else.
 	PublishRestoreAssignee(ctx context.Context, task lib.Task, assignee string) error
 	// PublishParkLostClaim writes phase "human_review" onto a task whose claim
-	// another executor took over and whose Config says not to re-run it. Writes
-	// the "phase" key and nothing else: status, assignee and the counters stay
-	// as they are. human_review is already in the executor's terminal-phase set,
-	// so a parked task is never re-spawned and needs no second guard.
-	PublishParkLostClaim(ctx context.Context, task lib.Task) error
+	// another executor took over and whose Config says not to re-run it. It
+	// writes the "phase" key in the frontmatter and, in one command, a "##
+	// Parked" body section naming the reason and the claim evidence. status,
+	// assignee and the counters stay as they are. human_review is already in the
+	// executor's terminal-phase set, so a parked task is never re-spawned and
+	// needs no second guard.
+	//
+	// reason is the path's token; claimKey and previousHolder are the lost-claim
+	// path's evidence and are empty on the succeeded path, whose section carries
+	// the reason line only.
+	PublishParkLostClaim(
+		ctx context.Context,
+		task lib.Task,
+		reason string,
+		claimKey string,
+		previousHolder string,
+	) error
 	// PublishParkSucceeded writes phase "human_review" onto a task whose Job
 	// succeeded but whose phase never moved — a deliberate human park, not a
-	// finished task. Writes the "phase" key and nothing else. human_review is
-	// already in the executor's terminal-phase set, so the reconcile pass stops
-	// re-driving it; without this write a task whose agent exits 0 without
-	// moving the phase is eligible on every pass and re-spawned forever.
+	// finished task. It writes the "phase" key plus a "## Parked" body section
+	// carrying the reason line only: the succeeded path has no claim key or
+	// previous holder. human_review is already in the executor's terminal-phase
+	// set, so the reconcile pass stops re-driving it; without this write a task
+	// whose agent exits 0 without moving the phase is eligible on every pass and
+	// re-spawned forever.
 	PublishParkSucceeded(ctx context.Context, task lib.Task) error
 	// PublishAbort closes a record the consecutive-re-drive cap has decided to
 	// stop driving. It writes status aborted plus the close-out pair vault-cli
@@ -1024,10 +1050,17 @@ func (p *resultPublisher) PublishRestoreAssignee(
 	return p.publishRaw(ctx, taskcmd.UpdateFrontmatterCommandOperation, cmd)
 }
 
-// PublishParkLostClaim writes phase "human_review" and nothing else.
+// PublishParkLostClaim writes phase "human_review" and a "## Parked" body
+// section in one UpdateFrontmatterCommand, so a record never shows the phase
+// without the reason it was parked. The section names the reason token and, on
+// the lost-claim path, the claim key and the previous holder (or "unavailable"
+// when the takeover created a fresh claim over an absent key).
 func (p *resultPublisher) PublishParkLostClaim(
 	ctx context.Context,
 	task lib.Task,
+	reason string,
+	claimKey string,
+	previousHolder string,
 ) error {
 	cmd := taskcmd.UpdateFrontmatterCommand{
 		TaskIdentifier: task.TaskIdentifier,
@@ -1035,20 +1068,46 @@ func (p *resultPublisher) PublishParkLostClaim(
 		Updates: lib.TaskFrontmatter{
 			"phase": string(domain.TaskPhaseHumanReview),
 		},
+		Body: &taskcmd.BodySection{
+			Heading: "## Parked",
+			Section: parkSection(reason, claimKey, previousHolder),
+		},
 	}
 	return p.publishRaw(ctx, taskcmd.UpdateFrontmatterCommandOperation, cmd)
 }
 
-// PublishParkSucceeded writes phase "human_review" and nothing else.
+// parkSection renders the fixed "## Parked" section. The heading is the first
+// line and the section ends with a newline, as taskcmd.BodySection requires.
+// An empty claim key means the succeeded path: it carries the reason line only.
+// A lost-claim park with no previous holder writes "unavailable" rather than an
+// empty field, so the evidence is never a blank line an operator has to
+// interpret.
+func parkSection(reason, claimKey, previousHolder string) string {
+	if claimKey == "" {
+		return fmt.Sprintf("## Parked\n\n- **Reason:** %s\n", reason)
+	}
+	if previousHolder == "" {
+		previousHolder = "unavailable"
+	}
+	return fmt.Sprintf(
+		"## Parked\n\n- **Reason:** %s\n- **Claim:** %s\n- **Previous holder:** %s\n",
+		reason,
+		claimKey,
+		previousHolder,
+	)
+}
+
+// PublishParkSucceeded writes phase "human_review" and a "## Parked" body
+// section carrying the reason line only.
 //
 // It delegates rather than repeating the command: the two parks differ only in
-// why they fire, and the write they make is identical. Duplicating it would let
-// a future change to the park payload drift between them.
+// why they fire, and the write they make is the same command. Duplicating it
+// would let a future change to the park payload drift between them.
 func (p *resultPublisher) PublishParkSucceeded(
 	ctx context.Context,
 	task lib.Task,
 ) error {
-	return p.PublishParkLostClaim(ctx, task)
+	return p.PublishParkLostClaim(ctx, task, ParkReasonSucceeded, "", "")
 }
 
 // PublishAbort closes a record the consecutive-re-drive cap has stopped
