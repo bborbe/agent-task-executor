@@ -82,18 +82,27 @@ type healthcheckRunner struct {
 	configProvider ConfigProvider
 	publisher      CommandPublisher
 	branch         base.Branch
+	targetVault    string
 }
 
 // NewHealthcheckRunner creates a HealthcheckRunner.
+//
+// targetVault is the vault this executor owns (TASK_VAULT, defaulting to
+// VAULT_NAME). It is stamped onto every published create-task command: the
+// controller substitutes routing.LegacyDefaultVault ("openclaw") when
+// TargetVault is empty and skips the create as a cross-vault write, so an
+// unstamped probe is silently dropped on every vault but openclaw.
 func NewHealthcheckRunner(
 	configProvider ConfigProvider,
 	publisher CommandPublisher,
 	branch base.Branch,
+	targetVault string,
 ) HealthcheckRunner {
 	return &healthcheckRunner{
 		configProvider: configProvider,
 		publisher:      publisher,
 		branch:         branch,
+		targetVault:    targetVault,
 	}
 }
 
@@ -155,7 +164,8 @@ func (r *healthcheckRunner) Run(ctx context.Context) error {
 				"assignee":  agentName,
 				"stage":     string(r.branch),
 			},
-			Body: "reply 'ok'",
+			Body:        "reply 'ok'",
+			TargetVault: r.targetVault,
 		}
 		if err := r.publisher.Publish(ctx, string(taskcmd.CreateCommandOperation), createCmd); err != nil {
 			return errors.Wrapf(ctx, err, "publish create-task for %s", agentName)

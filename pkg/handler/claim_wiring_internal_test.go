@@ -506,7 +506,9 @@ func TestAcquireSpawnClaimDoesNotParkATaskThatNeverRan(t *testing.T) {
 	})
 
 	if !ok {
-		t.Fatal("expected the spawn to proceed: a task with no current_job and no job_started_at has never run here")
+		t.Fatal(
+			"expected the spawn to proceed: a task with no current_job and no job_started_at has never run here",
+		)
 	}
 	if len(publisher.parked) != 0 {
 		t.Fatalf("park writes = %d, want 0 for a task that never ran", len(publisher.parked))

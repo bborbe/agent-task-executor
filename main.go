@@ -381,6 +381,7 @@ func (a *application) Run(ctx context.Context, sentryClient libsentry.Client) er
 		syncProducer,
 		a.TopicPrefix,
 		a.Branch,
+		a.effectiveTaskVault(),
 	)
 	healthcheckCron := factory.CreateHealthcheckCron(
 		libcron.Expression(a.HealthcheckCronExpression),
