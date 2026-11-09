@@ -1,7 +1,8 @@
 ---
-status: generating
+status: verifying
 approved: "2026-11-09T17:31:08Z"
 generating: "2026-11-09T17:51:21Z"
+verifying: "2026-11-09T18:06:53Z"
 branch: dark-factory/bug-park-writes-no-reason
 ---
 
