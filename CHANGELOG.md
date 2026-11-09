@@ -2,7 +2,7 @@
 
 All notable changes to this project will be documented in this file.
 
-## Unreleased
+## v0.57.8
 
 - fix: delete a failed or timed-out build Job after printing its logs, so a single failure no longer holds the K8sPodStatus alert; align build-job ttlSecondsAfterFinished to 46800
 
