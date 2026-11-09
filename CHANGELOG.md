@@ -6,6 +6,18 @@ All notable changes to this project will be documented in this file.
 
 - fix: **a takeover no longer parks a task this cluster never ran.** `rerunOnLostClaim` answers "may this agent run a task a previous owner already ran", but the park branch fired on any `ErrLeaseConflict` + successful takeover, including a task with no `current_job` and no `job_started_at` — no evidence of any run. The claim key is derived from the repo rather than the vault, so a non-owning cluster can hold the key with nothing behind it; the owning cluster then took it over and parked the task at `human_review`, and the assignee clear the human_review chokepoint applies made it permanently unspawnable. Measured on a pr-review task parked 40 s after creation with no Job, no `current_job` and no `job_started_at`. The park branch now requires `taskShowsPriorRun`, so a first run is never mistaken for a rerun decision.
 
+## v0.57.3
+
+- fix: the liveness probe writes a phase its target Config's trigger accepts and the executor runs (planning preferred; never todo, human_review or done) instead of the status value in_progress, which the executor read as execution — so [planning]-only lanes such as sentry-collector-agent and sentry-fix-agent were skipped and never probed
+
+## v0.57.2
+
+- fix: **the reconcile pass now clears a `current_job` that names a Job absent from the cluster, but only when no Job for the task is active here, the named Job is gone, the shared claim reads free, and this executor has no spawn recorded or in flight (re-checked under the per-task claim lock), and it never clears while the named Job is inside the 300 s respawn grace window after `job_started_at`.** It writes only `current_job: ""`, leaving status, phase, the claim, the body and `job_started_at` untouched, and it never releases or renews a claim. Claim modes `off` and `shadow` never clear, because their probe cannot read a claim. Every pass that completes its drive loop logs `event=ghost_current_job_pass`, and every examined record logs `event=ghost_current_job_cleared` or `event=ghost_current_job_kept guard=<label>`; any read failure leaves the field set and is retried next pass. The field previously stayed set forever when the Job disappeared before an event the executor observed — TTL garbage collection across a restart, the weekly cluster reboot, or a manual delete. Incident: on 2026-11-06 one prod record named `pr-reviewer-agent-99750c2d-20261103233145` while the cluster held no agent Jobs.
+
+## v0.57.1
+
+- chore: restate the `do-not-merge` gate message to name its bypass actors — the Admin repository role and Integration `3907226`, both `bypass_mode: always` in the `master-protection` ruleset — instead of asserting an unqualified block
+
 ## v0.57.0
 
 - feat: **a Config can place its Jobs on a dedicated node pool through new `nodeSelector` and `tolerations` fields, which the spawner stamps onto every Job PodTemplate.** Until now `priorityClassName` was the only scheduling knob, so an agent's Jobs could only land wherever the default scheduler put them. Measured 2026-11-05 on Octopus prod: a pr-reviewer Job landed on a node at the 110-pod cap while its pool sat at autoscaler max, its image pull took 29 minutes, and `activeDeadlineSeconds` killed it before it did any work. Both fields are optional and empty by default, so a Config that sets neither spawns exactly as before. The CRD schema accepts a string map and a list of `corev1.Toleration` objects. The DeepCopy blocks are hand-added, because `make generatek8s` is still broken on master.
