@@ -173,6 +173,12 @@ func (r *healthcheckRunner) Run(ctx context.Context) error {
 
 		updateCmd := taskcmd.UpdateFrontmatterCommand{
 			TaskIdentifier: taskID,
+			// Stamped for the same reason the create is, and it is load-bearing on
+			// the controller's side: a command addressed to a vault must find its
+			// task there, so a miss is a FAILURE. Unstamped, both controllers
+			// attempt the write and the non-owner's miss has to stay a skip — which
+			// would swallow a genuine miss on the owner too.
+			TargetVault: r.targetVault,
 			Updates: lib.TaskFrontmatter{
 				"status":        "in_progress",
 				"phase":         string(phase),

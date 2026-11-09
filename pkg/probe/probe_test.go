@@ -525,6 +525,19 @@ var _ = Describe("HealthcheckRunner", func() {
 				Expect(createCmd.TargetVault).To(Equal(configuredVault))
 				Expect(createCmd.TargetVault).NotTo(BeEmpty(),
 					"an empty TargetVault makes the controller fall back to openclaw and skip the create")
+
+				// The paired update must carry the same vault. The controller treats
+				// a not-found on a STAMPED command as a failure and on an unstamped
+				// one as a skip, so leaving this command unstamped would keep the
+				// probe's reset silently droppable — the very failure the pair
+				// exists to avoid.
+				_, op, payload = pub.PublishArgsForCall(1)
+				Expect(op).To(Equal("update-frontmatter"))
+				updateCmd, ok := payload.(taskcmd.UpdateFrontmatterCommand)
+				Expect(ok).To(BeTrue(), "payload at call 1 must be an UpdateFrontmatterCommand")
+				Expect(updateCmd.TargetVault).To(Equal(configuredVault))
+				Expect(updateCmd.TargetVault).NotTo(BeEmpty(),
+					"an empty TargetVault makes a genuine miss indistinguishable from another vault's command")
 			},
 			Entry("non-default vault", "personal"),
 			Entry("the legacy default vault", "openclaw"),

@@ -2,6 +2,10 @@
 
 All notable changes to this project will be documented in this file.
 
+## Unreleased
+
+- fix: **the probe's `update-frontmatter` carries the executor's vault, like the `create-task` beside it.** `v0.57.5` stamped only the create, so the paired update travelled unstamped: both controllers attempted it, and a not-found on the non-owner had to stay a silent skip — which meant a genuine miss on the owner was swallowed the same way. That is the arm the probe's `trigger_count` / `current_job` reset was lost through while `vault-api` could not yet see the task its create had just written. Both commands now carry `TargetVault`, so a not-found on the owner is a failure `agent-task-controller` reports rather than a success it invents. The two-vault table test asserts the update's stamp as well as the create's.
+
 ## v0.57.5
 
 - fix: **the healthcheck probe stamps the executor's own vault on every create-task command.** `pkg/probe` built its `CreateCommand` with no `TargetVault`, so `agent-task-controller` substituted `routing.LegacyDefaultVault` (`openclaw`) and skipped every probe create on any other vault as a cross-vault write — silently, because the executor had already logged the publish as successful, and the follow-up `update-frontmatter` then found no task and skipped too. Measured on nuke prod at the 2026-11-09 08:00Z tick: `create-task: skipped vault mismatch target="" effective="openclaw" vault="personal"`. `NewHealthcheckRunner` now takes the executor's effective task vault (`TASK_VAULT`, defaulting to `VAULT_NAME`) and stamps it on the create command; a two-vault table test (`personal`, `openclaw`) drives the runner with a fake publisher and proves the value is computed from configuration rather than a literal, since a single configured vault cannot tell the two apart.
