@@ -122,7 +122,9 @@ func (stubResultPublisher) PublishRestoreAssignee(
 	return nil
 }
 
-func (stubResultPublisher) PublishParkLostClaim(context.Context, lib.Task) error {
+func (stubResultPublisher) PublishParkLostClaim(
+	context.Context, lib.Task, string, string, string,
+) error {
 	return nil
 }
 

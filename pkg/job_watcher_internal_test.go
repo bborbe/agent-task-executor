@@ -557,6 +557,9 @@ func (f *fakeResultPublisher) PublishRestoreAssignee(
 func (f *fakeResultPublisher) PublishParkLostClaim(
 	ctx context.Context,
 	task lib.Task,
+	reason string,
+	claimKey string,
+	previousHolder string,
 ) error {
 	return nil
 }

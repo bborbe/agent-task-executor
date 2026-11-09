@@ -1074,7 +1074,7 @@ var _ = Describe("ResultPublisher", func() {
 
 	Describe("PublishParkSucceeded", func() {
 		It(
-			"writes exactly the phase key with human_review and nothing else",
+			"writes the phase key and a ## Parked section",
 			func() {
 				// The park's whole effect is this one key: human_review is what
 				// takes the record out of the executor's drive set. A wrong key
@@ -1113,7 +1113,14 @@ var _ = Describe("ResultPublisher", func() {
 					_, hasKey := cmd.Updates[key]
 					Expect(hasKey).To(BeFalse(), key+" must not be in the park update")
 				}
-				Expect(cmd.Body).To(BeNil())
+				// The succeeded path shares the lost-claim write, so it must carry
+				// the section too — but with the reason line only: it has no claim
+				// key and no holder, and writing either would misreport the park.
+				Expect(cmd.Body).NotTo(BeNil())
+				Expect(cmd.Body.Heading).To(Equal("## Parked"))
+				Expect(cmd.Body.Section).To(ContainSubstring("parked_succeeded"))
+				Expect(cmd.Body.Section).NotTo(ContainSubstring("**Claim:**"))
+				Expect(cmd.Body.Section).NotTo(ContainSubstring("unavailable"))
 				Expect(cmd.Validate(ctx)).To(Succeed())
 			},
 		)

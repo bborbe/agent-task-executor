@@ -319,6 +319,9 @@ type parkRecordingPublisher struct {
 func (s *parkRecordingPublisher) PublishParkLostClaim(
 	_ context.Context,
 	task lib.Task,
+	_ string,
+	_ string,
+	_ string,
 ) error {
 	if s.failFirst > 0 {
 		s.failFirst--
