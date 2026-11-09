@@ -496,7 +496,7 @@ var _ = Describe("HealthcheckRunner", func() {
 	// Two distinct configured vaults are table-tested on purpose: a single
 	// vault cannot distinguish a value computed from the configured vault from
 	// a hard-coded literal that happens to equal it.
-	Context("create-task stamps the executor's configured vault (regression)", func() {
+	Context("both published commands stamp the executor's configured vault (regression)", func() {
 		BeforeEach(func() {
 			configProvider.GetReturns([]agentv1.Config{
 				{
@@ -506,7 +506,7 @@ var _ = Describe("HealthcheckRunner", func() {
 			}, nil)
 		})
 
-		DescribeTable("published CreateCommand.TargetVault equals the configured vault",
+		DescribeTable("published CreateCommand and UpdateFrontmatterCommand TargetVault equal the configured vault",
 			func(configuredVault string) {
 				pub := new(mocks.FakeCommandPublisher)
 				vaultRunner := probe.NewHealthcheckRunner(
