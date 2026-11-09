@@ -203,6 +203,7 @@ fi
 
 echo "build-cluster: job ${NAMESPACE}/${JOB_NAME} ${outcome}; last log lines:" >&2
 logs --tail=100 >&2
+kc -n "${NAMESPACE}" delete job "${JOB_NAME}" --ignore-not-found || echo "build-cluster: could not delete job ${NAMESPACE}/${JOB_NAME}" >&2
 if [ "${outcome}" = timeout ]; then
 	die "job ${NAMESPACE}/${JOB_NAME} did not finish within ${TIMEOUT}s (+120s grace)"
 fi
