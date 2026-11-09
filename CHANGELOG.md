@@ -2,7 +2,7 @@
 
 All notable changes to this project will be documented in this file.
 
-## Unreleased
+## v0.57.4
 
 - fix: **a takeover no longer parks a task this cluster never ran.** `rerunOnLostClaim` answers "may this agent run a task a previous owner already ran", but the park branch fired on any `ErrLeaseConflict` + successful takeover, including a task with no `current_job` and no `job_started_at` — no evidence of any run. The claim key is derived from the repo rather than the vault, so a non-owning cluster can hold the key with nothing behind it; the owning cluster then took it over and parked the task at `human_review`, and the assignee clear the human_review chokepoint applies made it permanently unspawnable. Measured on a pr-review task parked 40 s after creation with no Job, no `current_job` and no `job_started_at`. The park branch now requires `taskShowsPriorRun`, so a first run is never mistaken for a rerun decision.
 
