@@ -88,10 +88,18 @@ type healthcheckRunner struct {
 // NewHealthcheckRunner creates a HealthcheckRunner.
 //
 // targetVault is the vault this executor owns (TASK_VAULT, defaulting to
-// VAULT_NAME). It is stamped onto every published create-task command: the
-// controller substitutes routing.LegacyDefaultVault ("openclaw") when
-// TargetVault is empty and skips the create as a cross-vault write, so an
-// unstamped probe is silently dropped on every vault but openclaw.
+// VAULT_NAME). It is stamped onto BOTH commands one tick publishes — the
+// create-task and the update-frontmatter that follows it — and the two need it
+// for different reasons.
+//
+// On the create, the controller substitutes routing.LegacyDefaultVault
+// ("openclaw") when TargetVault is empty and skips the write as cross-vault, so
+// an unstamped probe is silently dropped on every vault but openclaw.
+//
+// On the update, the stamp is what lets the controller tell a genuine miss from
+// another vault's command: a stamped miss is the controller's to report as a
+// failure, an unstamped one has to stay a skip because every controller attempts
+// it.
 func NewHealthcheckRunner(
 	configProvider ConfigProvider,
 	publisher CommandPublisher,
@@ -173,6 +181,14 @@ func (r *healthcheckRunner) Run(ctx context.Context) error {
 
 		updateCmd := taskcmd.UpdateFrontmatterCommand{
 			TaskIdentifier: taskID,
+			// Stamped for the same reason the create is, and it is load-bearing on
+			// the controller's side: a command addressed to a vault is supposed to
+			// find its task there, so its miss can be reported as a failure. Unstamped,
+			// every controller attempts the write and the non-owner's miss has to stay
+			// a skip — which swallows a genuine miss on the owner too. That split is
+			// the controller's to make (bborbe/agent-task-controller#135); this stamp
+			// is what makes it possible.
+			TargetVault: r.targetVault,
 			Updates: lib.TaskFrontmatter{
 				"status":        "in_progress",
 				"phase":         string(phase),
