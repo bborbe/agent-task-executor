@@ -204,6 +204,15 @@ var _ = Describe("the shared success record", func() {
 		}
 	}
 
+	// ranTask is eligibleTask plus the Job evidence a park is about: the park
+	// answers "a Job ran here and did not move the phase", so a task with no
+	// current_job and no job_started_at has no park to make.
+	ranTask := func(phase domain.TaskPhase) lib.Task {
+		task := eligibleTask(phase)
+		task.Frontmatter["current_job"] = "agent-tid-a"
+		return task
+	}
+
 	BeforeEach(func() {
 		ctx = context.Background()
 		now = time.Date(2026, 10, 28, 6, 0, 0, 0, time.UTC)
@@ -235,8 +244,8 @@ var _ = Describe("the shared success record", func() {
 		)
 
 		restarted := newHandler(pkg.NewTaskStore())
-		fakeView.SnapshotReturns([]lib.Task{eligibleTask(domain.TaskPhaseExecution)})
-		fakeView.GetReturns(eligibleTask(domain.TaskPhaseExecution), true)
+		fakeView.SnapshotReturns([]lib.Task{ranTask(domain.TaskPhaseExecution)})
+		fakeView.GetReturns(ranTask(domain.TaskPhaseExecution), true)
 		fakeSpawner.IsJobActiveReturns(false, nil)
 
 		Expect(restarted.ReconcileOnce(ctx)).To(BeNil())
@@ -309,8 +318,8 @@ var _ = Describe("the shared success record", func() {
 			nil,
 		)
 
-		fakeView.SnapshotReturns([]lib.Task{eligibleTask(domain.TaskPhaseExecution)})
-		fakeView.GetReturns(eligibleTask(domain.TaskPhaseExecution), true)
+		fakeView.SnapshotReturns([]lib.Task{ranTask(domain.TaskPhaseExecution)})
+		fakeView.GetReturns(ranTask(domain.TaskPhaseExecution), true)
 		fakeSpawner.IsJobActiveReturns(false, nil)
 
 		Expect(newHandlerWithStore(store).ReconcileOnce(ctx)).To(BeNil())

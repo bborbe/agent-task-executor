@@ -29,6 +29,9 @@ func parkFixture(
 			"phase":    phase,
 			"status":   "in_progress",
 			"assignee": "claude",
+			// A park answers "a Job ran here and did not move the phase", so the
+			// fixture carries the Job evidence every park spec is about.
+			"current_job": "agent-task-park",
 		},
 	}
 	// The park reads the phase from the view, never from the caller's snapshot.
@@ -38,6 +41,31 @@ func parkFixture(
 
 // longAgo is safely past the write-back grace.
 var longAgo = 2 * defaultRespawnGracePeriod
+
+// TestParkSucceededWithoutPhaseMoveDoesNotParkATaskThatNeverRan pins the rule
+// that a park answers "a Job ran here and did not move the phase".
+//
+// A success record alone is not that answer: the record is shared, so a success
+// written for this task by a cluster that could not spawn it — or one left by a
+// run whose Job this cluster never recorded — leaves a task with no
+// current_job and no job_started_at. Parking it writes human_review onto a task
+// that never ran, and the assignee clear that follows makes it unspawnable.
+// Measured on bborbe/github-releaser-agent#44 @ 28a4415b: created 23:46:28Z,
+// parked 00:07:58Z with `## Parked / Reason: parked_succeeded`, no current_job
+// and no job_started_at.
+func TestParkSucceededWithoutPhaseMoveDoesNotParkATaskThatNeverRan(t *testing.T) {
+	h, publisher, task, now := parkFixture(t, "execution")
+	delete(task.Frontmatter, "current_job")
+	h.view = &fakeTaskView{tasks: map[lib.TaskIdentifier]lib.Task{task.TaskIdentifier: task}}
+	h.taskStore.MarkSucceeded(task.TaskIdentifier, "execution", now.Add(-longAgo))
+
+	if h.parkSucceededWithoutPhaseMove(context.Background(), task) {
+		t.Fatal("parkSucceededWithoutPhaseMove = true; want false for a task that never ran here")
+	}
+	if got := len(publisher.parkedSucceeded); got != 0 {
+		t.Fatalf("park count = %d; want 0 for a task that never ran", got)
+	}
+}
 
 func TestParkSucceededWithoutPhaseMoveParksWhenThePhaseDidNotMove(t *testing.T) {
 	h, publisher, task, now := parkFixture(t, "execution")
