@@ -2,6 +2,10 @@
 
 All notable changes to this project will be documented in this file.
 
+## Unreleased
+
+- fix: a Config can name the vault its healthcheck probe is written to (`spec.targetVault`); every executor probing that Config now stamps it on both the create-task and the paired update-frontmatter, so one logical probe yields one record instead of one per executor in a different vault and phase. Empty keeps today's behaviour — the probing executor's own TASK_VAULT.
+
 ## v0.58.1
 
 - chore: update github.com/IBM/sarama to v1.61.1, github.com/bborbe/agent to v0.140.0, github.com/bborbe/cqrs to v0.6.15, github.com/bborbe/cron to v1.9.10, github.com/bborbe/errors to v1.6.6, github.com/bborbe/http to v1.26.33, github.com/bborbe/k8s to v1.14.33, github.com/bborbe/kafka to v1.29.13, github.com/bborbe/log to v1.7.8, github.com/bborbe/metrics to v0.6.11, github.com/bborbe/run to v1.11.11, github.com/bborbe/sentry to v1.10.7, github.com/bborbe/service to v1.11.3, github.com/bborbe/time to v1.27.27, github.com/bborbe/validation to v1.5.9, github.com/bborbe/vault-cli to v0.192.0, github.com/onsi/ginkgo/v2 to v2.34.0, github.com/onsi/gomega to v1.44.0, github.com/prometheus/client_golang to v1.25.0, k8s.io/api to v0.38.0-beta.0, k8s.io/apimachinery to v0.38.0-beta.0, k8s.io/client-go to v0.38.0-beta.0

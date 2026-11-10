@@ -87,10 +87,14 @@ type healthcheckRunner struct {
 
 // NewHealthcheckRunner creates a HealthcheckRunner.
 //
-// targetVault is the vault this executor owns (TASK_VAULT, defaulting to
-// VAULT_NAME). It is stamped onto BOTH commands one tick publishes — the
+// targetVault is the fallback vault this executor owns (TASK_VAULT, defaulting
+// to VAULT_NAME). Each Config's spec.targetVault overrides it when set; the
+// resolved value is stamped onto BOTH commands one tick publishes — the
 // create-task and the update-frontmatter that follows it — and the two need it
-// for different reasons.
+// for different reasons. The fallback is what every Config that does not set
+// spec.targetVault keeps. The override exists because every executor probes
+// every Config: stamping only the executor's own vault writes one logical probe
+// once per executor, each copy in a different vault and a different phase.
 //
 // On the create, the controller substitutes routing.LegacyDefaultVault
 // ("openclaw") when TargetVault is empty and skips the write as cross-vault, so
@@ -144,6 +148,17 @@ func probePhase(trigger *agentv1.Trigger) (domain.TaskPhase, bool) {
 	return "", false
 }
 
+// probeTargetVault returns the vault this Config's probe records belong in: the
+// Config's spec.targetVault when set, otherwise fallback. The empty case
+// preserves the pre-existing behaviour, where the probe goes to the probing
+// executor's own task vault.
+func probeTargetVault(config agentv1.Config, fallback string) string {
+	if config.Spec.TargetVault != "" {
+		return config.Spec.TargetVault
+	}
+	return fallback
+}
+
 // Run lists all Config CRs and publishes two commands per agent on each cron tick.
 func (r *healthcheckRunner) Run(ctx context.Context) error {
 	configs, err := r.configProvider.Get(ctx)
@@ -161,6 +176,7 @@ func (r *healthcheckRunner) Run(ctx context.Context) error {
 			continue
 		}
 		taskID := probeTaskID(agentName, string(r.branch))
+		targetVault := probeTargetVault(config, r.targetVault)
 
 		createCmd := taskcmd.CreateCommand{
 			TaskIdentifier: taskID,
@@ -173,7 +189,7 @@ func (r *healthcheckRunner) Run(ctx context.Context) error {
 				"stage":     string(r.branch),
 			},
 			Body:        "reply 'ok'",
-			TargetVault: r.targetVault,
+			TargetVault: targetVault,
 		}
 		if err := r.publisher.Publish(ctx, string(taskcmd.CreateCommandOperation), createCmd); err != nil {
 			return errors.Wrapf(ctx, err, "publish create-task for %s", agentName)
@@ -187,8 +203,10 @@ func (r *healthcheckRunner) Run(ctx context.Context) error {
 			// every controller attempts the write and the non-owner's miss has to stay
 			// a skip — which swallows a genuine miss on the owner too. That split is
 			// the controller's to make (bborbe/agent-task-controller#135); this stamp
-			// is what makes it possible.
-			TargetVault: r.targetVault,
+			// is what makes it possible. The stamped value is the per-Config resolved
+			// vault (the Config's spec.targetVault when set, otherwise this executor's
+			// own), not unconditionally this executor's vault.
+			TargetVault: targetVault,
 			Updates: lib.TaskFrontmatter{
 				"status":        "in_progress",
 				"phase":         string(phase),
