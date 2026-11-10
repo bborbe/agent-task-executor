@@ -1042,3 +1042,63 @@ var _ = Describe("Equal with jobNamespace", func() {
 		Expect(a.Equal(b)).To(BeTrue())
 	})
 })
+
+var _ = Describe("JSON round-trip for targetVault", func() {
+	It("round-trips targetVault through JSON", func() {
+		spec := agentv1.ConfigSpec{
+			Assignee:    "claude-agent",
+			Image:       "example/image:latest",
+			Heartbeat:   "30m",
+			TargetVault: "trading",
+		}
+		data, err := json.Marshal(spec)
+		Expect(err).To(BeNil())
+		var decoded agentv1.ConfigSpec
+		Expect(json.Unmarshal(data, &decoded)).To(Succeed())
+		Expect(decoded.TargetVault).To(Equal("trading"))
+	})
+
+	It("omits targetVault from JSON when empty", func() {
+		spec := agentv1.ConfigSpec{
+			Assignee:  "claude-agent",
+			Image:     "example/image:latest",
+			Heartbeat: "30m",
+		}
+		data, err := json.Marshal(spec)
+		Expect(err).To(BeNil())
+		Expect(string(data)).NotTo(ContainSubstring("targetVault"))
+	})
+})
+
+var _ = Describe("Equal with targetVault", func() {
+	It("returns false when TargetVault differs", func() {
+		a := agentv1.ConfigSpec{
+			Assignee:    "claude",
+			Image:       "registry/agent-claude",
+			Heartbeat:   "30m",
+			TargetVault: "trading",
+		}
+		b := agentv1.ConfigSpec{
+			Assignee:  "claude",
+			Image:     "registry/agent-claude",
+			Heartbeat: "30m",
+		}
+		Expect(a.Equal(b)).To(BeFalse())
+	})
+
+	It("returns true when TargetVault matches", func() {
+		a := agentv1.ConfigSpec{
+			Assignee:    "claude",
+			Image:       "registry/agent-claude",
+			Heartbeat:   "30m",
+			TargetVault: "trading",
+		}
+		b := agentv1.ConfigSpec{
+			Assignee:    "claude",
+			Image:       "registry/agent-claude",
+			Heartbeat:   "30m",
+			TargetVault: "trading",
+		}
+		Expect(a.Equal(b)).To(BeTrue())
+	})
+})

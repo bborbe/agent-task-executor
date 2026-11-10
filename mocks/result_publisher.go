@@ -146,12 +146,13 @@ type FakeResultPublisher struct {
 	publishSetTriggerScopeReturnsOnCall map[int]struct {
 		result1 error
 	}
-	PublishSpawnNotificationStub        func(context.Context, lib.Task, string) error
+	PublishSpawnNotificationStub        func(context.Context, lib.Task, string, string) error
 	publishSpawnNotificationMutex       sync.RWMutex
 	publishSpawnNotificationArgsForCall []struct {
 		arg1 context.Context
 		arg2 lib.Task
 		arg3 string
+		arg4 string
 	}
 	publishSpawnNotificationReturns struct {
 		result1 error
@@ -839,20 +840,21 @@ func (fake *FakeResultPublisher) PublishSetTriggerScopeReturnsOnCall(i int, resu
 	}{result1}
 }
 
-func (fake *FakeResultPublisher) PublishSpawnNotification(arg1 context.Context, arg2 lib.Task, arg3 string) error {
+func (fake *FakeResultPublisher) PublishSpawnNotification(arg1 context.Context, arg2 lib.Task, arg3 string, arg4 string) error {
 	fake.publishSpawnNotificationMutex.Lock()
 	ret, specificReturn := fake.publishSpawnNotificationReturnsOnCall[len(fake.publishSpawnNotificationArgsForCall)]
 	fake.publishSpawnNotificationArgsForCall = append(fake.publishSpawnNotificationArgsForCall, struct {
 		arg1 context.Context
 		arg2 lib.Task
 		arg3 string
-	}{arg1, arg2, arg3})
+		arg4 string
+	}{arg1, arg2, arg3, arg4})
 	stub := fake.PublishSpawnNotificationStub
 	fakeReturns := fake.publishSpawnNotificationReturns
-	fake.recordInvocation("PublishSpawnNotification", []interface{}{arg1, arg2, arg3})
+	fake.recordInvocation("PublishSpawnNotification", []interface{}{arg1, arg2, arg3, arg4})
 	fake.publishSpawnNotificationMutex.Unlock()
 	if stub != nil {
-		return stub(arg1, arg2, arg3)
+		return stub(arg1, arg2, arg3, arg4)
 	}
 	if specificReturn {
 		return ret.result1
@@ -866,17 +868,17 @@ func (fake *FakeResultPublisher) PublishSpawnNotificationCallCount() int {
 	return len(fake.publishSpawnNotificationArgsForCall)
 }
 
-func (fake *FakeResultPublisher) PublishSpawnNotificationCalls(stub func(context.Context, lib.Task, string) error) {
+func (fake *FakeResultPublisher) PublishSpawnNotificationCalls(stub func(context.Context, lib.Task, string, string) error) {
 	fake.publishSpawnNotificationMutex.Lock()
 	defer fake.publishSpawnNotificationMutex.Unlock()
 	fake.PublishSpawnNotificationStub = stub
 }
 
-func (fake *FakeResultPublisher) PublishSpawnNotificationArgsForCall(i int) (context.Context, lib.Task, string) {
+func (fake *FakeResultPublisher) PublishSpawnNotificationArgsForCall(i int) (context.Context, lib.Task, string, string) {
 	fake.publishSpawnNotificationMutex.RLock()
 	defer fake.publishSpawnNotificationMutex.RUnlock()
 	argsForCall := fake.publishSpawnNotificationArgsForCall[i]
-	return argsForCall.arg1, argsForCall.arg2, argsForCall.arg3
+	return argsForCall.arg1, argsForCall.arg2, argsForCall.arg3, argsForCall.arg4
 }
 
 func (fake *FakeResultPublisher) PublishSpawnNotificationReturns(result1 error) {

@@ -57,7 +57,12 @@ var _ = Describe("ResultPublisher topic naming", func() {
 			Content: lib.TaskContent("do the work"),
 		}
 		Expect(
-			publisher.PublishSpawnNotification(ctx, task, "claude-20260418120000"),
+			publisher.PublishSpawnNotification(
+				ctx,
+				task,
+				"claude-20260418120000",
+				"11111111-2222-3333-4444-555555555555",
+			),
 		).NotTo(HaveOccurred())
 
 		Expect(fakeSyncProducer.SendMessageCallCount()).To(Equal(1))

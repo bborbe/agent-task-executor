@@ -6,6 +6,18 @@ All notable changes to this project will be documented in this file.
 
 - feat: `make build` resolves `BUILD_TARGET` from a bounded sun probe - sun when reachable, local docker as the fallback. An explicit `BUILD_TARGET` always wins, and the decision prints at parse time so it is visible under `make -n`
 
+## v0.59.0
+
+- fix: a Config can name the vault its healthcheck probe is written to (`spec.targetVault`); every executor probing that Config now stamps it on both the create-task and the paired update-frontmatter, so one logical probe yields one record instead of one per executor in a different vault and phase. Empty keeps today's behaviour — the probing executor's own TASK_VAULT.
+
+## v0.58.1
+
+- chore: update github.com/IBM/sarama to v1.61.1, github.com/bborbe/agent to v0.140.0, github.com/bborbe/cqrs to v0.6.15, github.com/bborbe/cron to v1.9.10, github.com/bborbe/errors to v1.6.6, github.com/bborbe/http to v1.26.33, github.com/bborbe/k8s to v1.14.33, github.com/bborbe/kafka to v1.29.13, github.com/bborbe/log to v1.7.8, github.com/bborbe/metrics to v0.6.11, github.com/bborbe/run to v1.11.11, github.com/bborbe/sentry to v1.10.7, github.com/bborbe/service to v1.11.3, github.com/bborbe/time to v1.27.27, github.com/bborbe/validation to v1.5.9, github.com/bborbe/vault-cli to v0.192.0, github.com/onsi/ginkgo/v2 to v2.34.0, github.com/onsi/gomega to v1.44.0, github.com/prometheus/client_golang to v1.25.0, k8s.io/api to v0.38.0-beta.0, k8s.io/apimachinery to v0.38.0-beta.0, k8s.io/client-go to v0.38.0-beta.0
+
+## v0.58.0
+
+- feat: record `claude_session_id` in the task frontmatter on spawn and inject the same UUID into the Job as `CLAUDE_SESSION_ID`, so a live agent session can be attributed to the task it runs; one id is generated per spawn and shared by both writes
+
 ## v0.57.9
 
 - fix: **the succeeded-Job park no longer parks a task this cluster never ran.** `parkSucceededWithoutPhaseMove` answers "a Job ran here and did not move the phase", but it read only the shared success record, so a record written for a task this cluster could not spawn — or one whose Job it never recorded — parked a task with no `current_job` and no `job_started_at`. The park writes `human_review`, and the assignee clear that follows makes the task unspawnable. Measured on `bborbe/github-releaser-agent#44` @ `28a4415b`: created 2026-11-09T23:46:28Z, parked 00:07:58Z with `## Parked / Reason: parked_succeeded`, no `current_job`, no `job_started_at` — after the `v0.57.7` roll, so the takeover-path guard alone was not enough. The park now requires `taskShowsPriorRun` on the fresh view, the same evidence the takeover path uses.

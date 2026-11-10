@@ -72,9 +72,15 @@ const (
 // ResultPublisher publishes agent-task-v1-request commands to Kafka so the
 // controller writes them to the vault task file.
 type ResultPublisher interface {
-	// PublishSpawnNotification publishes current_job, job_started_at, and
-	// spawn_notification without touching any other frontmatter keys.
-	PublishSpawnNotification(ctx context.Context, task lib.Task, jobName string) error
+	// PublishSpawnNotification publishes spawn_notification, current_job,
+	// job_started_at, and claude_session_id without touching any other
+	// frontmatter keys.
+	PublishSpawnNotification(
+		ctx context.Context,
+		task lib.Task,
+		jobName string,
+		sessionID string,
+	) error
 	// PublishFailure publishes a zombie failure: clears current_job and atomically
 	// bumps trigger_count by 1 via a paired IncrementFrontmatterCommand. Leaves
 	// phase, status, and assignee untouched — the escalation is the controller's
@@ -510,6 +516,7 @@ func (p *resultPublisher) PublishSpawnNotification(
 	ctx context.Context,
 	task lib.Task,
 	jobName string,
+	sessionID string,
 ) error {
 	cmd := taskcmd.UpdateFrontmatterCommand{
 		TaskIdentifier: task.TaskIdentifier,
@@ -518,6 +525,7 @@ func (p *resultPublisher) PublishSpawnNotification(
 			"spawn_notification": true,
 			"current_job":        jobName,
 			"job_started_at":     p.currentDateTime.Now().UTC().Format("2006-01-02T15:04:05Z07:00"),
+			"claude_session_id":  sessionID,
 		},
 	}
 	return p.publishRaw(ctx, taskcmd.UpdateFrontmatterCommandOperation, cmd)

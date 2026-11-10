@@ -10,9 +10,9 @@ import (
 
 	"github.com/bborbe/errors"
 	libk8s "github.com/bborbe/k8s"
-	apiextensionsv1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
-	apiextensionsclient "k8s.io/apiextensions-apiserver/pkg/client/clientset/clientset"
-	apiextensionsv1client "k8s.io/apiextensions-apiserver/pkg/client/clientset/clientset/typed/apiextensions/v1"
+	apiextensionsv1 "k8s.io/apiextensions-api/pkg/apis/apiextensions/v1"
+	apiextensionsclient "k8s.io/apiextensions-api/pkg/client/clientset/clientset"
+	apiextensionsv1client "k8s.io/apiextensions-api/pkg/client/clientset/clientset/typed/apiextensions/v1"
 	"k8s.io/apimachinery/pkg/api/equality"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -78,6 +78,13 @@ const crdName = "configs.agent.benjamin-borbe.de"
 // unvalidated value would pass admission, resolve cleanly, and fail only at
 // Jobs(...).Create with a 422 the operator has to correlate by hand.
 const crdDNS1123Label = "^[a-z0-9]([-a-z0-9]*[a-z0-9])?$"
+
+// crdVaultSlug is the shape a vault slug must have: it is what bborbe/agent's
+// validateCreateTargetVault accepts, so a value this pattern admits can never be
+// rejected later by the command validator. Deliberately not crdDNS1123Label, which
+// allows a leading digit. main.go's vaultSlugRegexp states the same rule for the
+// executor's own VAULT_NAME/TASK_VAULT.
+const crdVaultSlug = "^[a-z][a-z0-9-]*$"
 
 // crdMaxNameLen is the 63-character ceiling a DNS-1123 label carries. The
 // pattern alone does not bound the length, so an over-long jobNamespace would
@@ -409,6 +416,7 @@ func configSpecProperties() map[string]apiextensionsv1.JSONSchemaProps {
 		"nodeSelector":       stringMapSchema(),
 		"tolerations":        tolerationsSchema(),
 		"jobNamespace":       {Type: "string", Pattern: crdDNS1123Label, MaxLength: &crdMaxNameLen},
+		"targetVault":        {Type: "string", Pattern: crdVaultSlug},
 		"imagePullSecret":    {Type: "string"},
 		// 0 = unlimited (see AgentConfiguration.MaxConcurrentJobs).
 		"maxConcurrentJobs": {Type: "integer", Minimum: &crdMinZero},

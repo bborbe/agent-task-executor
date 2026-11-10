@@ -544,4 +544,127 @@ var _ = Describe("HealthcheckRunner", func() {
 			Entry("the legacy default vault", "openclaw"),
 		)
 	})
+
+	// Every executor probes every Config, so stamping only the executor's own
+	// vault writes one logical probe record once per executor — each copy in a
+	// different vault and a different phase. A Config may name the vault its
+	// probe records belong in; the runner resolves it per Config.
+	Context("a Config's targetVault overrides the runner's own vault", func() {
+		DescribeTable("both published commands carry the Config's targetVault",
+			func(configVault string) {
+				configProvider.GetReturns([]agentv1.Config{
+					{
+						ObjectMeta: metav1.ObjectMeta{Name: "agent-a"},
+						Spec: agentv1.ConfigSpec{
+							Assignee:    "agent-a",
+							TargetVault: configVault,
+						},
+					},
+				}, nil)
+
+				Expect(runner.Run(ctx)).To(Succeed())
+
+				_, op, payload := publisher.PublishArgsForCall(0)
+				Expect(op).To(Equal("create-task"))
+				createCmd, ok := payload.(taskcmd.CreateCommand)
+				Expect(ok).To(BeTrue(), "payload at call 0 must be a CreateCommand")
+				Expect(createCmd.TargetVault).To(Equal(configVault))
+
+				_, op, payload = publisher.PublishArgsForCall(1)
+				Expect(op).To(Equal("update-frontmatter"))
+				updateCmd, ok := payload.(taskcmd.UpdateFrontmatterCommand)
+				Expect(ok).To(BeTrue(), "payload at call 1 must be an UpdateFrontmatterCommand")
+				Expect(updateCmd.TargetVault).To(Equal(configVault))
+
+				// A Config-derived vault is never exercised by the runner's own
+				// vault validation, so run it through the validator the consumer
+				// applies.
+				Expect(createCmd.Validate(ctx)).To(Succeed())
+				Expect(updateCmd.Validate(ctx)).To(Succeed())
+			},
+			// Non-default values on purpose: a single one cannot distinguish a
+			// value read from the Config from a literal that happens to equal it.
+			Entry("trading", "trading"),
+			Entry("openclaw", "openclaw"),
+			Entry("hyphenated vault", "private-trading"),
+		)
+
+		DescribeTable("an empty targetVault falls back to the runner's own vault",
+			func(configVault string) {
+				configProvider.GetReturns([]agentv1.Config{
+					{
+						ObjectMeta: metav1.ObjectMeta{Name: "agent-a"},
+						Spec: agentv1.ConfigSpec{
+							Assignee:    "agent-a",
+							TargetVault: configVault,
+						},
+					},
+				}, nil)
+
+				Expect(runner.Run(ctx)).To(Succeed())
+
+				_, op, payload := publisher.PublishArgsForCall(0)
+				Expect(op).To(Equal("create-task"))
+				createCmd, ok := payload.(taskcmd.CreateCommand)
+				Expect(ok).To(BeTrue(), "payload at call 0 must be a CreateCommand")
+				Expect(createCmd.TargetVault).To(Equal("personal"))
+				Expect(createCmd.TargetVault).NotTo(BeEmpty(),
+					"an empty TargetVault makes the controller fall back to openclaw and skip the create")
+
+				_, op, payload = publisher.PublishArgsForCall(1)
+				Expect(op).To(Equal("update-frontmatter"))
+				updateCmd, ok := payload.(taskcmd.UpdateFrontmatterCommand)
+				Expect(ok).To(BeTrue(), "payload at call 1 must be an UpdateFrontmatterCommand")
+				Expect(updateCmd.TargetVault).To(Equal("personal"))
+				Expect(updateCmd.TargetVault).NotTo(BeEmpty(),
+					"an empty TargetVault makes a genuine miss indistinguishable from another vault's command")
+			},
+			Entry("empty string", ""),
+		)
+
+		It("resolves the vault per Config, not per run", func() {
+			configProvider.GetReturns([]agentv1.Config{
+				{
+					ObjectMeta: metav1.ObjectMeta{Name: "agent-a"},
+					Spec: agentv1.ConfigSpec{
+						Assignee:    "agent-a",
+						TargetVault: "trading",
+					},
+				},
+				{
+					ObjectMeta: metav1.ObjectMeta{Name: "agent-b"},
+					Spec: agentv1.ConfigSpec{
+						Assignee: "agent-b",
+					},
+				},
+			}, nil)
+
+			Expect(runner.Run(ctx)).To(Succeed())
+			Expect(publisher.PublishCallCount()).To(Equal(4))
+
+			_, op, payload := publisher.PublishArgsForCall(0)
+			Expect(op).To(Equal("create-task"))
+			createA, ok := payload.(taskcmd.CreateCommand)
+			Expect(ok).To(BeTrue())
+			Expect(createA.TargetVault).To(Equal("trading"))
+
+			_, op, payload = publisher.PublishArgsForCall(1)
+			Expect(op).To(Equal("update-frontmatter"))
+			updateA, ok := payload.(taskcmd.UpdateFrontmatterCommand)
+			Expect(ok).To(BeTrue())
+			Expect(updateA.TargetVault).To(Equal("trading"))
+
+			_, op, payload = publisher.PublishArgsForCall(2)
+			Expect(op).To(Equal("create-task"))
+			createB, ok := payload.(taskcmd.CreateCommand)
+			Expect(ok).To(BeTrue())
+			Expect(createB.TargetVault).To(Equal("personal"))
+
+			_, op, payload = publisher.PublishArgsForCall(3)
+			Expect(op).To(Equal("update-frontmatter"))
+			updateB, ok := payload.(taskcmd.UpdateFrontmatterCommand)
+			Expect(ok).To(BeTrue())
+			Expect(updateB.TargetVault).To(Equal("personal"))
+		})
+	})
 })

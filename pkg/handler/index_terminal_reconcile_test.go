@@ -153,7 +153,7 @@ var _ = Describe("reconcile index-terminal gate", func() {
 	reconcileGateSpawnedIDs := func() []string {
 		ids := make([]string, 0, fakeSpawner.SpawnJobCallCount())
 		for i := 0; i < fakeSpawner.SpawnJobCallCount(); i++ {
-			_, task, _ := fakeSpawner.SpawnJobArgsForCall(i)
+			_, task, _, _ := fakeSpawner.SpawnJobArgsForCall(i)
 			ids = append(ids, string(task.TaskIdentifier))
 		}
 		return ids

@@ -178,6 +178,13 @@ type ConfigSpec struct {
 	RerunOnLostClaim *bool `json:"rerunOnLostClaim,omitempty"`
 	// Trigger declares the per-agent phase and status conditions under which the executor spawns a Job.
 	Trigger *Trigger `json:"trigger,omitempty"`
+	// TargetVault is the vault this Config's healthcheck probe records are
+	// written to. Empty (the default) means the probing executor's own
+	// TASK_VAULT, so every Config that does not set it behaves exactly as
+	// before. It exists because every executor probes every Config: without it,
+	// one logical probe record is written once per executor, each copy in a
+	// different vault and a different phase.
+	TargetVault string `json:"targetVault,omitempty"`
 	// ZombieSweeperIntervalSeconds is how often the executor's deadline sweeper
 	// walks the TaskStore looking for zombie jobs. Optional; when nil, the executor
 	// uses DefaultZombieSweeperIntervalSeconds (60). Values below
@@ -302,6 +309,7 @@ func (s ConfigSpec) Equal(o ConfigSpec) bool {
 		reflect.DeepEqual(s.Env, o.Env) &&
 		reflect.DeepEqual(s.Resources, o.Resources) &&
 		reflect.DeepEqual(s.Trigger, o.Trigger) &&
+		s.TargetVault == o.TargetVault &&
 		reflect.DeepEqual(s.ZombieSweeperIntervalSeconds, o.ZombieSweeperIntervalSeconds) &&
 		reflect.DeepEqual(s.ZombieJobTimeoutSeconds, o.ZombieJobTimeoutSeconds)
 }
