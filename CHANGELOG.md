@@ -2,7 +2,7 @@
 
 All notable changes to this project will be documented in this file.
 
-## Unreleased
+## v0.58.0
 
 - feat: record `claude_session_id` in the task frontmatter on spawn and inject the same UUID into the Job as `CLAUDE_SESSION_ID`, so a live agent session can be attributed to the task it runs; one id is generated per spawn and shared by both writes
 
