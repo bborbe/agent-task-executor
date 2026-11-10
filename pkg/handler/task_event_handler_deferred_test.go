@@ -439,8 +439,8 @@ var _ = Describe("TaskEventHandler", func() {
 				Expect(err).To(BeNil())
 				Expect(fakeSpawner.SpawnJobCallCount()).To(Equal(2))
 
-				_, spawnedTask0, _ := fakeSpawner.SpawnJobArgsForCall(0)
-				_, spawnedTask1, _ := fakeSpawner.SpawnJobArgsForCall(1)
+				_, spawnedTask0, _, _ := fakeSpawner.SpawnJobArgsForCall(0)
+				_, spawnedTask1, _, _ := fakeSpawner.SpawnJobArgsForCall(1)
 				Expect([]lib.TaskIdentifier{
 					spawnedTask0.TaskIdentifier,
 					spawnedTask1.TaskIdentifier,
@@ -480,7 +480,7 @@ var _ = Describe("TaskEventHandler", func() {
 					return activeJobs(running), nil
 				}
 				fakeSpawner.SpawnJobStub = func(
-					context.Context, lib.Task, pkg.AgentConfiguration,
+					context.Context, lib.Task, pkg.AgentConfiguration, string,
 				) (string, error) {
 					running = 1
 					return "job-admitted", nil
@@ -499,7 +499,7 @@ var _ = Describe("TaskEventHandler", func() {
 				Expect(h.EvalDeferredRespawns(ctx)).To(Succeed())
 
 				Expect(fakeSpawner.SpawnJobCallCount()).To(Equal(1))
-				_, spawnedTask, _ := fakeSpawner.SpawnJobArgsForCall(0)
+				_, spawnedTask, _, _ := fakeSpawner.SpawnJobArgsForCall(0)
 				Expect(spawnedTask.TaskIdentifier).To(Equal(lib.TaskIdentifier("tid-fresh")))
 			})
 
@@ -556,7 +556,7 @@ var _ = Describe("TaskEventHandler", func() {
 					return activeJobs(running), nil
 				}
 				fakeSpawner.SpawnJobStub = func(
-					context.Context, lib.Task, pkg.AgentConfiguration,
+					context.Context, lib.Task, pkg.AgentConfiguration, string,
 				) (string, error) {
 					running = 1
 					return "job-routed", nil
@@ -637,7 +637,7 @@ var _ = Describe("TaskEventHandler", func() {
 				Expect(routingHandler.EvalDeferredRespawns(ctx)).To(Succeed())
 
 				Expect(fakeSpawner.SpawnJobCallCount()).To(Equal(1))
-				_, spawnedTask, _ := fakeSpawner.SpawnJobArgsForCall(0)
+				_, spawnedTask, _, _ := fakeSpawner.SpawnJobArgsForCall(0)
 				Expect(spawnedTask.TaskIdentifier).To(Equal(lib.TaskIdentifier("tid-not-retagged")))
 			})
 
@@ -803,7 +803,7 @@ var _ = Describe("TaskEventHandler", func() {
 					return activeJobs(*running), nil
 				}
 				fakeSpawner.SpawnJobStub = func(
-					context.Context, lib.Task, pkg.AgentConfiguration,
+					context.Context, lib.Task, pkg.AgentConfiguration, string,
 				) (string, error) {
 					*running = 1
 					return "job-claim", nil
@@ -971,7 +971,7 @@ var _ = Describe("TaskEventHandler", func() {
 
 				Expect(evictedOther).To(BeTrue())
 				Expect(fakeSpawner.SpawnJobCallCount()).To(Equal(1))
-				_, spawnedTask, _ := fakeSpawner.SpawnJobArgsForCall(0)
+				_, spawnedTask, _, _ := fakeSpawner.SpawnJobArgsForCall(0)
 				Expect(spawnedTask.TaskIdentifier).
 					To(Equal(lib.TaskIdentifier("tid-replay-control")))
 			})
@@ -1119,7 +1119,7 @@ var _ = Describe("TaskEventHandler", func() {
 					return activeJobs(running), nil
 				}
 				fakeSpawner.SpawnJobStub = func(
-					context.Context, lib.Task, pkg.AgentConfiguration,
+					context.Context, lib.Task, pkg.AgentConfiguration, string,
 				) (string, error) {
 					return "job-reconcile", nil
 				}
@@ -1157,7 +1157,7 @@ var _ = Describe("TaskEventHandler", func() {
 					return activeJobs(running), nil
 				}
 				fakeSpawner.SpawnJobStub = func(
-					context.Context, lib.Task, pkg.AgentConfiguration,
+					context.Context, lib.Task, pkg.AgentConfiguration, string,
 				) (string, error) {
 					return "job-reconcile", nil
 				}
@@ -1195,7 +1195,7 @@ var _ = Describe("TaskEventHandler", func() {
 					return activeJobs(running), nil
 				}
 				fakeSpawner.SpawnJobStub = func(
-					context.Context, lib.Task, pkg.AgentConfiguration,
+					context.Context, lib.Task, pkg.AgentConfiguration, string,
 				) (string, error) {
 					running = 1
 					return "job-admitted", nil
@@ -1215,7 +1215,7 @@ var _ = Describe("TaskEventHandler", func() {
 				Expect(h.EvalDeferredRespawns(ctx)).To(Succeed())
 
 				Expect(fakeSpawner.SpawnJobCallCount()).To(Equal(1))
-				_, spawnedTask, _ := fakeSpawner.SpawnJobArgsForCall(0)
+				_, spawnedTask, _, _ := fakeSpawner.SpawnJobArgsForCall(0)
 				Expect(spawnedTask.TaskIdentifier).To(Equal(lib.TaskIdentifier("tid-early")))
 			})
 

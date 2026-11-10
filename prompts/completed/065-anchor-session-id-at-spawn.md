@@ -1,6 +1,12 @@
 ---
-status: draft
+status: completed
+summary: Generated one UUID per spawn, recorded it as claude_session_id in the spawn-notification frontmatter, and injected it as CLAUDE_SESSION_ID into the spawned Job env, with mocks, tests, docs and changelog updated.
+execution_id: agent-task-executor-anchor-session-id-exec-065-anchor-session-id-at-spawn
+dark-factory-version: v0.198.17
 created: "2026-11-10T18:15:00Z"
+queued: "2026-11-10T17:11:15Z"
+started: "2026-11-10T17:47:38Z"
+completed: "2026-11-10T17:56:39Z"
 ---
 
 # Record the agent's claude session id at spawn

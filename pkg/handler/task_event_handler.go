@@ -21,6 +21,7 @@ import (
 	libtime "github.com/bborbe/time"
 	"github.com/bborbe/vault-cli/pkg/domain"
 	"github.com/golang/glog"
+	"github.com/google/uuid"
 
 	agentv1 "github.com/bborbe/agent-task-executor/k8s/apis/agent.benjamin-borbe.de/v1"
 	pkg "github.com/bborbe/agent-task-executor/pkg"
@@ -1015,7 +1016,10 @@ func (h *taskEventHandler) spawnClaimedJob(
 	task lib.Task,
 	config *pkg.AgentConfiguration,
 ) (bool, error) {
-	jobName, err := h.jobSpawner.SpawnJob(ctx, task, *config)
+	// Generated once per spawn and threaded through both the Job env and the
+	// frontmatter notification, so a live session can be matched to its task.
+	sessionID := uuid.NewString()
+	jobName, err := h.jobSpawner.SpawnJob(ctx, task, *config, sessionID)
 	if err != nil {
 		metrics.TaskEventsTotal.WithLabelValues("error").Inc()
 		// A claim taken for a Job that was never created must not stay held.
@@ -1036,7 +1040,7 @@ func (h *taskEventHandler) spawnClaimedJob(
 		)
 	}
 
-	if err := h.finishSpawn(ctx, task, config, jobName); err != nil {
+	if err := h.finishSpawn(ctx, task, config, jobName, sessionID); err != nil {
 		return false, err
 	}
 	return true, nil
@@ -1051,6 +1055,7 @@ func (h *taskEventHandler) finishSpawn(
 	task lib.Task,
 	config *pkg.AgentConfiguration,
 	jobName string,
+	sessionID string,
 ) error {
 	h.bumpSpawnGen(config.Assignee)
 	h.storeSpawnedJob(task, jobName)
@@ -1060,15 +1065,15 @@ func (h *taskEventHandler) finishSpawn(
 		return err
 	}
 
-	if err := h.resultPublisher.PublishSpawnNotification(ctx, task, jobName); err != nil {
+	if err := h.resultPublisher.PublishSpawnNotification(ctx, task, jobName, sessionID); err != nil {
 		// Log but don't fail — job is already spawned, spawn notification is best-effort
 		glog.Warningf("publish spawn notification for task %s failed (job %s still running): %v",
 			task.TaskIdentifier, jobName, err)
 	}
 
 	glog.V(2).Infof(
-		"spawned job for task %s (assignee=%s image=%s)",
-		task.TaskIdentifier, task.Frontmatter.Assignee(), config.Image,
+		"spawned job for task %s (assignee=%s image=%s session_id=%s job=%s)",
+		task.TaskIdentifier, task.Frontmatter.Assignee(), config.Image, sessionID, jobName,
 	)
 	metrics.TaskEventsTotal.WithLabelValues("spawned").Inc()
 	metrics.JobsSpawnedTotal.WithLabelValues(h.spawnedNamespace(ctx, config)).Inc()

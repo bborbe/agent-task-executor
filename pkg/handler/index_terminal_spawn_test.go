@@ -173,7 +173,7 @@ var _ = Describe("spawn-path index-terminal gate", func() {
 			To(Succeed())
 
 		Expect(fakeSpawner.SpawnJobCallCount()).To(Equal(1))
-		_, spawnedTask, _ := fakeSpawner.SpawnJobArgsForCall(0)
+		_, spawnedTask, _, _ := fakeSpawner.SpawnJobArgsForCall(0)
 		Expect(string(spawnedTask.TaskIdentifier)).To(Equal("tid-live"))
 	})
 })

@@ -44,7 +44,7 @@ spec:
 | `spec.taskType` | conditional | Task type this agent handles; must match `^[a-z0-9-]+$`, max 63 chars. **Deprecated: prefer `spec.taskTypes` (list).** Stays functional indefinitely. Required unless `spec.taskTypes` is non-empty. |
 | `spec.taskTypes` | no | List of task_type values this agent handles; overrides nothing, supplements `taskType`. Each element must match `^[a-z0-9-]+$`, max 63 chars. At least one of `taskType` or `taskTypes` must be non-empty. Filtering on this list is enforced by a follow-up spec. |
 | `spec.resources` | no | CPU/memory/storage requests for the job pod |
-| `spec.env` | no | Per-agent environment variables, merged with shared vars (`TASK_CONTENT`, `TASK_ID`, `KAFKA_BROKERS`, `BRANCH`). `TASK_CONTENT` carries the full task markdown and is bounded at 128 KiB — see *Shared env vars* below. |
+| `spec.env` | no | Per-agent environment variables, merged with shared vars (`TASK_CONTENT`, `TASK_ID`, `CLAUDE_SESSION_ID`, `KAFKA_BROKERS`, `BRANCH`). `TASK_CONTENT` carries the full task markdown and is bounded at 128 KiB — see *Shared env vars* below. |
 | `spec.secretName` | no | Name of an existing K8s Secret mounted on the container via `envFrom` |
 | `spec.volumeClaim` | no | Name of an existing PVC mounted into the container |
 | `spec.volumeMountPath` | conditional | Container path for `volumeClaim` mount — required when `volumeClaim` is set |
@@ -61,7 +61,7 @@ With a per-vault executor, each instance serves one Obsidian vault: it learns it
 
 ## Shared env vars
 
-Every spawned Job receives `TASK_ID`, `TASK_CONTENT`, `KAFKA_BROKERS`, `BRANCH`, `TOPIC_PREFIX`, `PHASE` and `TASK_TYPE`, plus whatever `spec.env` adds.
+Every spawned Job receives `TASK_ID`, `TASK_CONTENT`, `CLAUDE_SESSION_ID`, `KAFKA_BROKERS`, `BRANCH`, `TOPIC_PREFIX`, `PHASE` and `TASK_TYPE`, plus whatever `spec.env` adds. `CLAUDE_SESSION_ID` is a fresh UUID generated once per spawn; the same value is recorded as `claude_session_id` in the task frontmatter, so a live agent session can be matched to the task it is running.
 
 `TASK_CONTENT` carries the rendered task markdown (frontmatter + body) and is bounded at **128 KiB**. Linux caps any single `argv`/`envp` string at `MAX_ARG_STRLEN` — 32 pages — so an entry over that makes `execve` fail with `E2BIG`, surfacing as `exec /main: argument list too long` before the container's entrypoint runs. The Job then produces no log line the agent ever wrote, and every re-drive fails identically.
 

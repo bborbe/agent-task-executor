@@ -345,7 +345,7 @@ func (s *parkRecordingPublisher) PublishParkSucceeded(
 }
 
 func (s *parkRecordingPublisher) PublishSpawnNotification(
-	context.Context, lib.Task, string,
+	context.Context, lib.Task, string, string,
 ) error {
 	return nil
 }
