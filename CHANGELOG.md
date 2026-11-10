@@ -2,6 +2,10 @@
 
 All notable changes to this project will be documented in this file.
 
+## Unreleased
+
+- feat: `make build` resolves `BUILD_TARGET` from a bounded sun probe - sun when reachable, local docker as the fallback. An explicit `BUILD_TARGET` always wins, and the decision prints at parse time so it is visible under `make -n`
+
 ## v0.59.0
 
 - fix: a Config can name the vault its healthcheck probe is written to (`spec.targetVault`); every executor probing that Config now stamps it on both the create-task and the paired update-frontmatter, so one logical probe yields one record instead of one per executor in a different vault and phase. Empty keeps today's behaviour — the probing executor's own TASK_VAULT.
