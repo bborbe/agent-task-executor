@@ -72,12 +72,13 @@ type FakeJobSpawner struct {
 		result1 map[lib.TaskIdentifier]bool
 		result2 error
 	}
-	SpawnJobStub        func(context.Context, lib.Task, pkg.AgentConfiguration) (string, error)
+	SpawnJobStub        func(context.Context, lib.Task, pkg.AgentConfiguration, string) (string, error)
 	spawnJobMutex       sync.RWMutex
 	spawnJobArgsForCall []struct {
 		arg1 context.Context
 		arg2 lib.Task
 		arg3 pkg.AgentConfiguration
+		arg4 string
 	}
 	spawnJobReturns struct {
 		result1 string
@@ -355,20 +356,21 @@ func (fake *FakeJobSpawner) ListActiveJobsReturnsOnCall(i int, result1 map[lib.T
 	}{result1, result2}
 }
 
-func (fake *FakeJobSpawner) SpawnJob(arg1 context.Context, arg2 lib.Task, arg3 pkg.AgentConfiguration) (string, error) {
+func (fake *FakeJobSpawner) SpawnJob(arg1 context.Context, arg2 lib.Task, arg3 pkg.AgentConfiguration, arg4 string) (string, error) {
 	fake.spawnJobMutex.Lock()
 	ret, specificReturn := fake.spawnJobReturnsOnCall[len(fake.spawnJobArgsForCall)]
 	fake.spawnJobArgsForCall = append(fake.spawnJobArgsForCall, struct {
 		arg1 context.Context
 		arg2 lib.Task
 		arg3 pkg.AgentConfiguration
-	}{arg1, arg2, arg3})
+		arg4 string
+	}{arg1, arg2, arg3, arg4})
 	stub := fake.SpawnJobStub
 	fakeReturns := fake.spawnJobReturns
-	fake.recordInvocation("SpawnJob", []interface{}{arg1, arg2, arg3})
+	fake.recordInvocation("SpawnJob", []interface{}{arg1, arg2, arg3, arg4})
 	fake.spawnJobMutex.Unlock()
 	if stub != nil {
-		return stub(arg1, arg2, arg3)
+		return stub(arg1, arg2, arg3, arg4)
 	}
 	if specificReturn {
 		return ret.result1, ret.result2
@@ -382,17 +384,17 @@ func (fake *FakeJobSpawner) SpawnJobCallCount() int {
 	return len(fake.spawnJobArgsForCall)
 }
 
-func (fake *FakeJobSpawner) SpawnJobCalls(stub func(context.Context, lib.Task, pkg.AgentConfiguration) (string, error)) {
+func (fake *FakeJobSpawner) SpawnJobCalls(stub func(context.Context, lib.Task, pkg.AgentConfiguration, string) (string, error)) {
 	fake.spawnJobMutex.Lock()
 	defer fake.spawnJobMutex.Unlock()
 	fake.SpawnJobStub = stub
 }
 
-func (fake *FakeJobSpawner) SpawnJobArgsForCall(i int) (context.Context, lib.Task, pkg.AgentConfiguration) {
+func (fake *FakeJobSpawner) SpawnJobArgsForCall(i int) (context.Context, lib.Task, pkg.AgentConfiguration, string) {
 	fake.spawnJobMutex.RLock()
 	defer fake.spawnJobMutex.RUnlock()
 	argsForCall := fake.spawnJobArgsForCall[i]
-	return argsForCall.arg1, argsForCall.arg2, argsForCall.arg3
+	return argsForCall.arg1, argsForCall.arg2, argsForCall.arg3, argsForCall.arg4
 }
 
 func (fake *FakeJobSpawner) SpawnJobReturns(result1 string, result2 error) {

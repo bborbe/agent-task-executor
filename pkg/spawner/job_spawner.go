@@ -49,7 +49,14 @@ const volumeNameAgentConfig = "agent-config"
 type JobSpawner interface {
 	// SpawnJob creates a K8s Job for the task and returns the job name.
 	// Returns the job name even when the job already exists (idempotent).
-	SpawnJob(ctx context.Context, task lib.Task, config pkg.AgentConfiguration) (string, error)
+	// sessionID is stamped onto the Job as CLAUDE_SESSION_ID so the agent CLI
+	// runs under the same id the caller recorded in the task frontmatter.
+	SpawnJob(
+		ctx context.Context,
+		task lib.Task,
+		config pkg.AgentConfiguration,
+		sessionID string,
+	) (string, error)
 	// IsJobActive returns true if an active (not completed/failed) K8s Job exists
 	// for the given task identifier in namespace. Uses the
 	// agent.benjamin-borbe.de/task-id label set by SpawnJob.
@@ -136,6 +143,7 @@ func (s *jobSpawner) SpawnJob(
 	ctx context.Context,
 	task lib.Task,
 	config pkg.AgentConfiguration,
+	sessionID string,
 ) (string, error) {
 	jobNamespace, err := pkg.ResolveJobNamespace(ctx, s.namespace, config.JobNamespace)
 	if err != nil {
@@ -146,7 +154,7 @@ func (s *jobSpawner) SpawnJob(
 	now := s.currentDateTimeGetter.Now()
 	jobName := jobNameFromTask(assignee, task.TaskIdentifier, now)
 
-	envBuilder, err := s.buildJobEnvBuilder(ctx, task, config)
+	envBuilder, err := s.buildJobEnvBuilder(ctx, task, config, sessionID)
 	if err != nil {
 		return "", err
 	}
@@ -699,6 +707,7 @@ func (s *jobSpawner) buildJobEnvBuilder(
 	ctx context.Context,
 	task lib.Task,
 	config pkg.AgentConfiguration,
+	sessionID string,
 ) (k8s.EnvBuilder, error) {
 	taskContent, err := renderTaskContent(ctx, task)
 	if err != nil {
@@ -726,6 +735,7 @@ func (s *jobSpawner) buildJobEnvBuilder(
 	envBuilder := k8s.NewEnvBuilder()
 	envBuilder.Add(taskContentEnvKey, taskContentValue)
 	envBuilder.Add("TASK_ID", string(task.TaskIdentifier))
+	envBuilder.Add("CLAUDE_SESSION_ID", sessionID)
 	envBuilder.Add("KAFKA_BROKERS", s.kafkaBrokers)
 	envBuilder.Add("BRANCH", s.branch)
 	envBuilder.Add("TOPIC_PREFIX", s.topicPrefix)

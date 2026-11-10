@@ -64,7 +64,7 @@ func (readOnlyClaimClient) Release(context.Context, claim.ClaimTarget, string) e
 type inactiveSpawner struct{}
 
 func (inactiveSpawner) SpawnJob(
-	context.Context, lib.Task, pkg.AgentConfiguration,
+	context.Context, lib.Task, pkg.AgentConfiguration, string,
 ) (string, error) {
 	return "", nil
 }

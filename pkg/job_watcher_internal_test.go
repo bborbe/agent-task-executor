@@ -449,6 +449,7 @@ func (f *fakeResultPublisher) PublishSpawnNotification(
 	ctx context.Context,
 	task lib.Task,
 	jobName string,
+	sessionID string,
 ) error {
 	return nil
 }

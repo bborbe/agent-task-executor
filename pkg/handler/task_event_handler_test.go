@@ -269,7 +269,7 @@ var _ = Describe("TaskEventHandler", func() {
 			err := h.ConsumeMessage(ctx, buildMsg(task))
 			Expect(err).To(BeNil())
 			Expect(fakeSpawner.SpawnJobCallCount()).To(Equal(1))
-			_, spawnedTask, config := fakeSpawner.SpawnJobArgsForCall(0)
+			_, spawnedTask, config, _ := fakeSpawner.SpawnJobArgsForCall(0)
 			Expect(string(spawnedTask.TaskIdentifier)).To(Equal("tid-8"))
 			Expect(config.Image).To(Equal("my-image:latest"))
 		})
@@ -402,6 +402,7 @@ var _ = Describe("TaskEventHandler", func() {
 				_ context.Context,
 				_ lib.Task,
 				_ pkg.AgentConfiguration,
+				_ string,
 			) (string, error) {
 				spawned.Add(1)
 				return "job-name", nil
@@ -509,12 +510,25 @@ var _ = Describe("TaskEventHandler", func() {
 			}
 			err := h.ConsumeMessage(ctx, buildMsg(task))
 			Expect(err).To(BeNil())
+			Expect(fakeSpawner.SpawnJobCallCount()).To(Equal(1))
 			Expect(fakeResultPublisher.PublishSpawnNotificationCallCount()).To(Equal(1))
-			_, calledTask, calledJobName := fakeResultPublisher.PublishSpawnNotificationArgsForCall(
-				0,
-			)
+			_, _, _, spawnSessionID := fakeSpawner.SpawnJobArgsForCall(0)
+			_, calledTask, calledJobName, notifiedSessionID :=
+				fakeResultPublisher.PublishSpawnNotificationArgsForCall(0)
 			Expect(string(calledTask.TaskIdentifier)).To(Equal("test-task-uuid-1234"))
 			Expect(calledJobName).To(Equal("claude-20260418120000"))
+			Expect(spawnSessionID).NotTo(BeEmpty())
+			Expect(notifiedSessionID).To(Equal(spawnSessionID))
+
+			// A second spawn must carry a different id: one id per spawn, never
+			// reused across runs.
+			secondTask := task
+			secondTask.TaskIdentifier = lib.TaskIdentifier("test-task-uuid-5678")
+			err = h.ConsumeMessage(ctx, buildMsg(secondTask))
+			Expect(err).To(BeNil())
+			Expect(fakeSpawner.SpawnJobCallCount()).To(Equal(2))
+			_, _, _, secondSessionID := fakeSpawner.SpawnJobArgsForCall(1)
+			Expect(secondSessionID).NotTo(Equal(spawnSessionID))
 		})
 
 		It(

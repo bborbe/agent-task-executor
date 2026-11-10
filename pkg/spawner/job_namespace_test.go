@@ -77,7 +77,7 @@ func TestSpawnRejectsExecutorNamespace(t *testing.T) {
 		JobNamespace: "dev",
 	}
 
-	_, err := jobSpawner.SpawnJob(ctx, task, config)
+	_, err := jobSpawner.SpawnJob(ctx, task, config, "session-id")
 	if err == nil {
 		t.Fatal("expected error when JobNamespace equals executor namespace")
 	}
@@ -99,7 +99,7 @@ func TestSpawnTargetNamespace(t *testing.T) {
 			Image:        "my-image:latest",
 			JobNamespace: "dev-agents-sandbox",
 		}
-		if _, err := jobSpawner.SpawnJob(ctx, namespaceTestTask(), config); err != nil {
+		if _, err := jobSpawner.SpawnJob(ctx, namespaceTestTask(), config, "session-id"); err != nil {
 			t.Fatalf("SpawnJob failed: %v", err)
 		}
 		if got := jobCreateNamespace(client); got != "dev-agents-sandbox" {
@@ -113,7 +113,7 @@ func TestSpawnTargetNamespace(t *testing.T) {
 			Assignee: "claude",
 			Image:    "my-image:latest",
 		}
-		if _, err := jobSpawner.SpawnJob(ctx, namespaceTestTask(), config); err != nil {
+		if _, err := jobSpawner.SpawnJob(ctx, namespaceTestTask(), config, "session-id"); err != nil {
 			t.Fatalf("SpawnJob failed: %v", err)
 		}
 		if got := jobCreateNamespace(client); got != "dev" {
@@ -130,7 +130,7 @@ func TestJobPodLabels(t *testing.T) {
 		Image:    "my-image:latest",
 	}
 
-	if _, err := jobSpawner.SpawnJob(ctx, namespaceTestTask(), config); err != nil {
+	if _, err := jobSpawner.SpawnJob(ctx, namespaceTestTask(), config, "session-id"); err != nil {
 		t.Fatalf("SpawnJob failed: %v", err)
 	}
 

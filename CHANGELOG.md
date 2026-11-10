@@ -2,6 +2,10 @@
 
 All notable changes to this project will be documented in this file.
 
+## Unreleased
+
+- feat: record `claude_session_id` in the task frontmatter on spawn and inject the same UUID into the Job as `CLAUDE_SESSION_ID`, so a live agent session can be attributed to the task it runs; one id is generated per spawn and shared by both writes
+
 ## v0.57.9
 
 - fix: **the succeeded-Job park no longer parks a task this cluster never ran.** `parkSucceededWithoutPhaseMove` answers "a Job ran here and did not move the phase", but it read only the shared success record, so a record written for a task this cluster could not spawn — or one whose Job it never recorded — parked a task with no `current_job` and no `job_started_at`. The park writes `human_review`, and the assignee clear that follows makes the task unspawnable. Measured on `bborbe/github-releaser-agent#44` @ `28a4415b`: created 2026-11-09T23:46:28Z, parked 00:07:58Z with `## Parked / Reason: parked_succeeded`, no `current_job`, no `job_started_at` — after the `v0.57.7` roll, so the takeover-path guard alone was not enough. The park now requires `taskShowsPriorRun` on the fresh view, the same evidence the takeover path uses.

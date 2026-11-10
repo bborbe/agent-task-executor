@@ -34,7 +34,7 @@ type stubJobSpawner struct {
 }
 
 func (s *stubJobSpawner) SpawnJob(
-	context.Context, lib.Task, pkg.AgentConfiguration,
+	context.Context, lib.Task, pkg.AgentConfiguration, string,
 ) (string, error) {
 	s.spawned++
 	return "job-1", nil
@@ -65,7 +65,7 @@ func (s *stubJobSpawner) JobExists(context.Context, libk8s.Namespace, string) (b
 type stubResultPublisher struct{}
 
 func (stubResultPublisher) PublishSpawnNotification(
-	context.Context, lib.Task, string,
+	context.Context, lib.Task, string, string,
 ) error {
 	return nil
 }

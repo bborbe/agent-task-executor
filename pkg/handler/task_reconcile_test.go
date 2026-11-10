@@ -704,7 +704,7 @@ var _ = Describe("TaskEventHandler reconcile loop", func() {
 			return activeJobs(running), nil
 		}
 		fakeSpawner.SpawnJobStub = func(
-			context.Context, lib.Task, pkg.AgentConfiguration,
+			context.Context, lib.Task, pkg.AgentConfiguration, string,
 		) (string, error) {
 			running = 1
 			return "job-newer", nil
@@ -713,7 +713,7 @@ var _ = Describe("TaskEventHandler reconcile loop", func() {
 		err := h.ReconcileOnce(ctx)
 		Expect(err).To(BeNil())
 		Expect(fakeSpawner.SpawnJobCallCount()).To(Equal(1))
-		_, spawnedTask, _ := fakeSpawner.SpawnJobArgsForCall(0)
+		_, spawnedTask, _, _ := fakeSpawner.SpawnJobArgsForCall(0)
 		Expect(spawnedTask.TaskIdentifier).To(Equal(lib.TaskIdentifier("tid-newer")))
 	})
 
@@ -869,6 +869,7 @@ var _ = Describe("TaskEventHandler reconcile loop", func() {
 				_ context.Context,
 				_ lib.Task,
 				_ pkg.AgentConfiguration,
+				_ string,
 			) (string, error) {
 				spawned.Add(1)
 				return "job-name", nil
@@ -1412,7 +1413,7 @@ var _ = Describe("TaskEventHandler reconcile loop", func() {
 		Eventually(passDone).Should(Receive(BeNil()))
 		spawned := make([]lib.TaskIdentifier, 0, fakeSpawner.SpawnJobCallCount())
 		for i := range fakeSpawner.SpawnJobCallCount() {
-			_, spawnedTask, _ := fakeSpawner.SpawnJobArgsForCall(i)
+			_, spawnedTask, _, _ := fakeSpawner.SpawnJobArgsForCall(i)
 			spawned = append(spawned, spawnedTask.TaskIdentifier)
 		}
 		// The event path read the live 4/6 and admitted; the frozen 6/6 would defer it.
@@ -1482,6 +1483,7 @@ var _ = Describe("TaskEventHandler reconcile loop", func() {
 			_ context.Context,
 			task lib.Task,
 			config pkg.AgentConfiguration,
+			sessionID string,
 		) (string, error) {
 			if config.Assignee == "claude" {
 				mu.Lock()
@@ -1637,7 +1639,7 @@ var _ = Describe("TaskEventHandler reconcile loop", func() {
 
 			Expect(h.ReconcileOnce(ctx)).To(Succeed())
 			Expect(fakeSpawner.SpawnJobCallCount()).To(Equal(1))
-			_, spawnedTask, _ := fakeSpawner.SpawnJobArgsForCall(0)
+			_, spawnedTask, _, _ := fakeSpawner.SpawnJobArgsForCall(0)
 			Expect(spawnedTask.TaskIdentifier).To(Equal(lib.TaskIdentifier("tid-owned")))
 		})
 
@@ -1856,7 +1858,7 @@ var _ = Describe("TaskEventHandler reconcile loop", func() {
 			Expect(h.EvalDeferredRespawns(ctx)).To(Succeed())
 
 			Expect(fakeSpawner.SpawnJobCallCount()).To(Equal(1))
-			_, spawnedTask, _ := fakeSpawner.SpawnJobArgsForCall(0)
+			_, spawnedTask, _, _ := fakeSpawner.SpawnJobArgsForCall(0)
 			queuedAt, ok := spawnedTask.Frontmatter.String("queued_at")
 			Expect(ok).To(BeTrue())
 			Expect(queuedAt).To(Equal(viewQueuedAt))

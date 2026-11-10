@@ -19,6 +19,7 @@ import (
 	libtime "github.com/bborbe/time"
 	libtimetest "github.com/bborbe/time/test"
 	"github.com/bborbe/vault-cli/pkg/domain"
+	"github.com/google/uuid"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 	"github.com/prometheus/client_golang/prometheus/testutil"
@@ -178,7 +179,7 @@ var _ = Describe("ResultPublisher", func() {
 	})
 
 	Describe("PublishSpawnNotification", func() {
-		It("sends exactly three keys via UpdateFrontmatterCommand", func() {
+		It("sends exactly four keys via UpdateFrontmatterCommand", func() {
 			task := lib.Task{
 				TaskIdentifier: lib.TaskIdentifier("test-task-1"),
 				Frontmatter: lib.TaskFrontmatter{
@@ -189,18 +190,30 @@ var _ = Describe("ResultPublisher", func() {
 				},
 				Content: lib.TaskContent("do the work"),
 			}
-			err := publisher.PublishSpawnNotification(ctx, task, "claude-20260418120000")
+			err := publisher.PublishSpawnNotification(
+				ctx,
+				task,
+				"claude-20260418120000",
+				"11111111-2222-3333-4444-555555555555",
+			)
 			Expect(err).NotTo(HaveOccurred())
 
 			Expect(producer.messages).To(HaveLen(1))
 			operation, cmd := decodeUpdateFrontmatterCommand(producer.messages[0])
 
 			Expect(string(operation)).To(Equal(string(taskcmd.UpdateFrontmatterCommandOperation)))
-			Expect(cmd.Updates).To(HaveLen(3))
+			Expect(cmd.Updates).To(HaveLen(4))
 
 			Expect(cmd.Updates["spawn_notification"]).To(Equal(true))
 			Expect(cmd.Updates["current_job"]).To(Equal("claude-20260418120000"))
 			Expect(cmd.Updates["job_started_at"]).To(Equal("2026-04-18T12:00:00Z"))
+			Expect(cmd.Updates["claude_session_id"]).To(
+				Equal("11111111-2222-3333-4444-555555555555"),
+			)
+			recordedSessionID, ok := cmd.Updates["claude_session_id"].(string)
+			Expect(ok).To(BeTrue())
+			_, parseErr := uuid.Parse(recordedSessionID)
+			Expect(parseErr).NotTo(HaveOccurred())
 
 			_, hasTriggerCount := cmd.Updates["trigger_count"]
 			Expect(hasTriggerCount).To(BeFalse(), "trigger_count must not be in spawn notification")
@@ -1353,7 +1366,12 @@ var _ = Describe("ResultPublisher", func() {
 					"target_vault": "personal",
 				},
 			}
-			err := publisher.PublishSpawnNotification(ctx, task, "claude-20260418120000")
+			err := publisher.PublishSpawnNotification(
+				ctx,
+				task,
+				"claude-20260418120000",
+				"11111111-2222-3333-4444-555555555555",
+			)
 			Expect(err).NotTo(HaveOccurred())
 
 			_, cmd := decodeUpdateFrontmatterCommand(producer.messages[0])
@@ -1371,7 +1389,12 @@ var _ = Describe("ResultPublisher", func() {
 			}
 
 			// PublishSpawnNotification
-			err := publisher.PublishSpawnNotification(ctx, task, "claude-20260418120000")
+			err := publisher.PublishSpawnNotification(
+				ctx,
+				task,
+				"claude-20260418120000",
+				"11111111-2222-3333-4444-555555555555",
+			)
 			Expect(err).NotTo(HaveOccurred())
 			Expect(producer.messages).To(HaveLen(1))
 			_, spawnCmd := decodeUpdateFrontmatterCommand(producer.messages[0])
@@ -1411,7 +1434,12 @@ var _ = Describe("ResultPublisher", func() {
 					"target_vault": 42,
 				},
 			}
-			err := publisher.PublishSpawnNotification(ctx, task, "claude-20260418120000")
+			err := publisher.PublishSpawnNotification(
+				ctx,
+				task,
+				"claude-20260418120000",
+				"11111111-2222-3333-4444-555555555555",
+			)
 			Expect(err).NotTo(HaveOccurred())
 
 			Expect(producer.messages).To(HaveLen(1))
