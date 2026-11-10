@@ -88,6 +88,17 @@ func (h *taskEventHandler) parkSucceededWithoutPhaseMove(
 	if !ok {
 		return false
 	}
+	// A park answers "a Job ran here and did not move the phase". The success
+	// record that drives it is shared, so it can exist for a task this cluster
+	// never ran — another cluster's success, or one whose Job this cluster never
+	// recorded. Parking on the record alone writes human_review onto a task with
+	// no run behind it, and the assignee clear the human_review chokepoint
+	// applies then makes it unspawnable. Judged on the fresh view, not the
+	// caller's snapshot. Measured on bborbe/github-releaser-agent#44 @ 28a4415b:
+	// no current_job, no job_started_at, `## Parked / Reason: parked_succeeded`.
+	if !taskShowsPriorRun(current) {
+		return false
+	}
 	// The success comes from the shared record, not the pod's own memory: the pod
 	// that ran the Job may be gone, and a restart must not turn a record that was
 	// due to be parked back into an eligible one. lastSuccess is phase-scoped, so

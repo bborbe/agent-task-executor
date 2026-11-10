@@ -317,7 +317,9 @@ var _ = Describe("TaskEventHandler reconcile loop", func() {
 			// silently re-running the work.
 			// The park reads the task from the view, not from the reconcile's
 			// own snapshot, so the view must hold it for this path to fire.
-			fakeView.GetReturns(eligibleTask(domain.TaskPhaseExecution), true)
+			parkedTask := eligibleTask(domain.TaskPhaseExecution)
+			parkedTask.Frontmatter["current_job"] = "agent-tid-a"
+			fakeView.GetReturns(parkedTask, true)
 			taskStore.MarkSucceeded("tid-a", "execution", now.Add(-10*time.Minute))
 
 			Expect(h.ReconcileOnce(ctx)).To(BeNil())
@@ -394,7 +396,9 @@ var _ = Describe("TaskEventHandler reconcile loop", func() {
 				[]lib.Task{recurringTask(domain.TaskPhaseExecution, "fortnightly")},
 			)
 			// The park reads the task from the view, so the view must hold it.
-			fakeView.GetReturns(eligibleTask(domain.TaskPhaseExecution), true)
+			parkedTask := eligibleTask(domain.TaskPhaseExecution)
+			parkedTask.Frontmatter["current_job"] = "agent-tid-a"
+			fakeView.GetReturns(parkedTask, true)
 			taskStore.MarkSucceeded("tid-a", "execution", now.Add(-10*24*time.Hour))
 
 			Expect(h.ReconcileOnce(ctx)).To(BeNil())
