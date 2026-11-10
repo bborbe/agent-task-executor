@@ -5,6 +5,8 @@
 package pkg
 
 import (
+	"regexp"
+
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 	apiextensionsv1 "k8s.io/apiextensions-api/pkg/apis/apiextensions/v1"
@@ -43,4 +45,34 @@ var _ = Describe("configSpecProperties", func() {
 		Expect(props).To(HaveKey("jobNamespace"))
 		Expect(props["jobNamespace"].Type).To(Equal("string"))
 	})
+
+	It("declares targetVault so the API server cannot prune it", func() {
+		props := configSpecProperties()
+		Expect(props).To(HaveKey("targetVault"))
+		Expect(props["targetVault"].Type).To(Equal("string"))
+		Expect(props["targetVault"].Pattern).To(Equal(crdVaultSlug))
+	})
+
+	// Comparing Pattern to crdVaultSlug asserts what was typed, not what
+	// admission accepts. Compile the pattern and exercise it, including the
+	// hyphenated vaults the probe actually targets: a pattern that lost "-"
+	// from its character class would pass the assertions above and then reject
+	// every one of those Configs at admission.
+	DescribeTable("targetVault pattern admits vault slugs and rejects non-slugs",
+		func(value string, want bool) {
+			props := configSpecProperties()
+			pattern := regexp.MustCompile(props["targetVault"].Pattern)
+			Expect(pattern.MatchString(value)).To(Equal(want))
+		},
+		Entry("openclaw", "openclaw", true),
+		Entry("personal", "personal", true),
+		Entry("private-agent", "private-agent", true),
+		Entry("private-personal", "private-personal", true),
+		Entry("private-trading", "private-trading", true),
+		Entry("uppercase", "Private", false),
+		Entry("leading digit", "1abc", false),
+		Entry("underscore", "private_agent", false),
+		Entry("space", "private agent", false),
+		Entry("leading hyphen", "-private", false),
+	)
 })

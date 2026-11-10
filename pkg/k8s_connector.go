@@ -79,6 +79,13 @@ const crdName = "configs.agent.benjamin-borbe.de"
 // Jobs(...).Create with a 422 the operator has to correlate by hand.
 const crdDNS1123Label = "^[a-z0-9]([-a-z0-9]*[a-z0-9])?$"
 
+// crdVaultSlug is the shape a vault slug must have: it is what bborbe/agent's
+// validateCreateTargetVault accepts, so a value this pattern admits can never be
+// rejected later by the command validator. Deliberately not crdDNS1123Label, which
+// allows a leading digit. main.go's vaultSlugRegexp states the same rule for the
+// executor's own VAULT_NAME/TASK_VAULT.
+const crdVaultSlug = "^[a-z][a-z0-9-]*$"
+
 // crdMaxNameLen is the 63-character ceiling a DNS-1123 label carries. The
 // pattern alone does not bound the length, so an over-long jobNamespace would
 // pass admission and fail later at Jobs().Create with a 422.
@@ -409,6 +416,7 @@ func configSpecProperties() map[string]apiextensionsv1.JSONSchemaProps {
 		"nodeSelector":       stringMapSchema(),
 		"tolerations":        tolerationsSchema(),
 		"jobNamespace":       {Type: "string", Pattern: crdDNS1123Label, MaxLength: &crdMaxNameLen},
+		"targetVault":        {Type: "string", Pattern: crdVaultSlug},
 		"imagePullSecret":    {Type: "string"},
 		// 0 = unlimited (see AgentConfiguration.MaxConcurrentJobs).
 		"maxConcurrentJobs": {Type: "integer", Minimum: &crdMinZero},
