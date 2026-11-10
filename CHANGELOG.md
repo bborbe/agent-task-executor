@@ -2,6 +2,10 @@
 
 All notable changes to this project will be documented in this file.
 
+## Unreleased
+
+- chore: update github.com/IBM/sarama to v1.61.1, github.com/bborbe/agent to v0.139.7, github.com/bborbe/cqrs to v0.6.15, github.com/bborbe/cron to v1.9.10, github.com/bborbe/errors to v1.6.6, github.com/bborbe/http to v1.26.33, github.com/bborbe/k8s to v1.14.32, github.com/bborbe/kafka to v1.29.12, github.com/bborbe/log to v1.7.8, github.com/bborbe/metrics to v0.6.10, github.com/bborbe/run to v1.11.10, github.com/bborbe/sentry to v1.10.7, github.com/bborbe/service to v1.11.2, github.com/bborbe/time to v1.27.26, github.com/bborbe/validation to v1.5.9, github.com/bborbe/vault-cli to v0.191.0, github.com/onsi/ginkgo/v2 to v2.34.0, github.com/onsi/gomega to v1.44.0, github.com/prometheus/client_golang to v1.25.0, k8s.io/api to v0.38.0-beta.0, k8s.io/apimachinery to v0.38.0-beta.0, k8s.io/client-go to v0.38.0-beta.0
+
 ## v0.57.9
 
 - fix: **the succeeded-Job park no longer parks a task this cluster never ran.** `parkSucceededWithoutPhaseMove` answers "a Job ran here and did not move the phase", but it read only the shared success record, so a record written for a task this cluster could not spawn — or one whose Job it never recorded — parked a task with no `current_job` and no `job_started_at`. The park writes `human_review`, and the assignee clear that follows makes the task unspawnable. Measured on `bborbe/github-releaser-agent#44` @ `28a4415b`: created 2026-11-09T23:46:28Z, parked 00:07:58Z with `## Parked / Reason: parked_succeeded`, no `current_job`, no `job_started_at` — after the `v0.57.7` roll, so the takeover-path guard alone was not enough. The park now requires `taskShowsPriorRun` on the fresh view, the same evidence the takeover path uses.
