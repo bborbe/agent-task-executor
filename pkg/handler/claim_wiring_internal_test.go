@@ -521,6 +521,109 @@ func TestAcquireSpawnClaimDoesNotParkATaskThatNeverRan(t *testing.T) {
 	}
 }
 
+// staleJobStartedTask builds the shape every observed lost-claim park carried:
+// a job_started_at left behind by a Job that is long gone, and no current_job.
+func staleJobStartedTask() lib.Task {
+	task := gateTask("", "")
+	task.Frontmatter["job_started_at"] = "2026-11-10T22:43:56Z"
+	return task
+}
+
+// unattributableTakeoverClient models the shape TakeoverPair reports as an empty
+// PreviousTaskID: the first ClaimPair read sees a held claim and conflicts, and
+// by the time TakeoverPair reads the same key it is free, so the takeover takes
+// its create path (pkg/claim/lease_manager.go:827) and displaces nobody.
+func unattributableTakeoverClient() *recordingClaimRefClient {
+	var keyReads int
+	return &recordingClaimRefClient{
+		put: func(
+			_ context.Context,
+			_ string,
+			_ string,
+			_ string,
+			_ string,
+			_ libtime.DateTime,
+		) (string, error) {
+			return "new-sha", nil
+		},
+		list: func(_ context.Context, prefix string) ([]claim.ClaimRef, error) {
+			if prefix != gateClaimKey {
+				return nil, nil
+			}
+			keyReads++
+			if keyReads > 1 {
+				return nil, nil
+			}
+			return []claim.ClaimRef{{
+				Ref:        "refs/" + gateClaimKey,
+				Sha:        "held-sha",
+				Cluster:    "other",
+				TaskID:     "previous-task",
+				LeaseUntil: stdtime.Now().UTC().Add(60 * stdtime.Second).Format(stdtime.RFC3339),
+			}}, nil
+		},
+	}
+}
+
+// TestAcquireSpawnClaimDoesNotParkATakeoverWithNoPreviousHolder pins the rule
+// that a takeover which displaced nobody is not a lost claim.
+//
+// TakeoverPair reports an empty PreviousTaskID only on its create path, where no
+// listed claim was replaced (pkg/claim/lease_manager.go:827,837) — so there is
+// no previous holder to have run the task. The task still carries a
+// job_started_at from an earlier dispatch, which is the shape all 9 measured
+// parked_lost_claim records had; the guard used to park on that alone, writing
+// human_review onto a task whose only claim had just been created here.
+func TestAcquireSpawnClaimDoesNotParkATakeoverWithNoPreviousHolder(t *testing.T) {
+	ctx := context.Background()
+	h := newGateHandler(pkg.ClaimModeOn, unattributableTakeoverClient())
+	publisher := &parkRecordingPublisher{}
+	h.resultPublisher = publisher
+
+	var ok bool
+	out := captureGlogStderr(t, func() {
+		ok = h.acquireSpawnClaim(ctx, staleJobStartedTask(), parkConfig())
+	})
+
+	if !ok {
+		t.Fatal(
+			"expected the spawn to proceed: a takeover that displaced no holder has no prior run to decide about",
+		)
+	}
+	if len(publisher.parked) != 0 {
+		t.Fatalf("park writes = %d, want 0 for an unattributable takeover", len(publisher.parked))
+	}
+	if strings.Contains(out, "event=parked_lost_claim") {
+		t.Errorf("stderr = %q, want no parked_lost_claim line for an unattributable takeover", out)
+	}
+	if !strings.Contains(out, "event=claim_acquired") {
+		t.Errorf("stderr = %q, want a claim_acquired line for the takeover create", out)
+	}
+}
+
+// TestAcquireSpawnClaimParksAnAttributableTakeover is the other arm: a takeover
+// that displaced a named holder still parks, so the narrowing does not capture
+// the case the guard exists for.
+func TestAcquireSpawnClaimParksAnAttributableTakeover(t *testing.T) {
+	ctx := context.Background()
+	h, publisher := parkOnLostClaimHandler()
+
+	var ok bool
+	out := captureGlogStderr(t, func() {
+		ok = h.acquireSpawnClaim(ctx, ranGateTask(), parkConfig())
+	})
+
+	if ok {
+		t.Fatal("expected no Job when the takeover displaced a named holder")
+	}
+	if len(publisher.parked) != 1 {
+		t.Fatalf("park writes = %d, want 1", len(publisher.parked))
+	}
+	if !strings.Contains(out, parkedLogLine) {
+		t.Errorf("stderr = %q, want it to contain %q", out, parkedLogLine)
+	}
+}
+
 // TestAcquireSpawnClaimRedispatchesOnLostClaimWhenRerunEnabled is SC2: the
 // explicit opt-in still runs the task under the new owner, so the parking
 // branch does not capture every Config.
