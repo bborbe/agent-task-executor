@@ -2,7 +2,7 @@
 
 All notable changes to this project will be documented in this file.
 
-## Unreleased
+## v0.60.2
 
 - fix: **the succeeded-Job park requires a `done` result, and a non-done result is re-driven up to a cap.** An agent that reports failure still exits 0 — publishing a failed result returns nil — so a transient failure left a succeeded Job at an unchanged phase, indistinguishable from an agent that parked on purpose, and the park wrote `human_review`, which is outside the trigger phases, so nothing re-drove the task and only a human could undo it. Observed 2026-11-09 on `bborbe/trading#480`: the reviewer agent hit `GH rate limit nearly exhausted (0/12500 remaining)`, reported failed, exited 0, and was parked — it never dispatched again.
 - fix: the park now reads `last_result_status` and parks **only** `done`. `failed`, `in_progress`, `needs_input`, an unrecognised value and an **absent** field all re-drive, bounded by `maxRedrivesWithoutAdvance` below. Parking `in_progress` would stop every multi-run task in the fleet at its first non-advancing run — a far larger blast radius than this defect — so the bound is a re-drive cap rather than a wider park. `PublishSpawnNotification` now writes `last_result_status: ""` so the value describes THIS run: without it the controller's on-disk-first merge keeps the previous run's `done`, and a run that fails with an empty `Output` publishes no frontmatter at all.
