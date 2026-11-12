@@ -99,6 +99,25 @@ func (h *taskEventHandler) parkSucceededWithoutPhaseMove(
 	if !taskShowsPriorRun(current) {
 		return false
 	}
+	// A succeeded Job is not by itself evidence of a deliberate park. An agent
+	// that reports failure still exits 0 — publishing a failed result returns nil —
+	// so a transient failure leaves a succeeded Job at an unchanged phase, and
+	// nothing in the Job distinguishes it from an agent that parked on purpose.
+	// The park therefore reads the result status the agent's delivery stamps
+	// (last_result_status, written by bborbe/agent delivery.content-generator) and
+	// parks only a done result.
+	//
+	// Every other value fails toward RE-DRIVING, never toward parking, and that
+	// includes an absent field: an older agent, a record written before the field
+	// existed, or any path that omits it must not be read as "done". Parking is
+	// the irreversible direction — it writes human_review, which is outside the
+	// trigger phases, so nothing re-drives the task and only a human can undo it.
+	// Observed 2026-11-09 on bborbe/trading#480: the reviewer agent hit
+	// `GH rate limit nearly exhausted (0/12500 remaining)`, reported failed, exited
+	// 0, and was parked here — where it stayed for good.
+	if resultStatus, _ := current.Frontmatter.String("last_result_status"); resultStatus != string(lib.AgentStatusDone) {
+		return false
+	}
 	// The success comes from the shared record, not the pod's own memory: the pod
 	// that ran the Job may be gone, and a restart must not turn a record that was
 	// due to be parked back into an eligible one. lastSuccess is phase-scoped, so

@@ -32,6 +32,10 @@ func parkFixture(
 			// A park answers "a Job ran here and did not move the phase", so the
 			// fixture carries the Job evidence every park spec is about.
 			"current_job": "agent-task-park",
+			// The park also requires a done result: a Job that exits 0 while
+			// reporting failure is not a deliberate park. The default fixture is a
+			// successful run; the status matrix is exercised separately.
+			"last_result_status": string(lib.AgentStatusDone),
 		},
 	}
 	// The park reads the phase from the view, never from the caller's snapshot.
@@ -64,6 +68,65 @@ func TestParkSucceededWithoutPhaseMoveDoesNotParkATaskThatNeverRan(t *testing.T)
 	}
 	if got := len(publisher.parkedSucceeded); got != 0 {
 		t.Fatalf("park count = %d; want 0 for a task that never ran", got)
+	}
+}
+
+// TestParkSucceededWithoutPhaseMoveParksOnlyOnADoneResult pins the rule that a
+// succeeded Job is not by itself a deliberate park.
+//
+// An agent that reports failure still exits 0 — publishing a failed result
+// returns nil — so a transient failure leaves a succeeded Job at an unchanged
+// phase and nothing in the Job separates it from an agent that parked on
+// purpose. The park therefore reads last_result_status, which the agent's
+// delivery stamps, and only a done result may park.
+//
+// The absent row is the one that matters most. Parking is the irreversible
+// direction: human_review is outside the trigger phases, so nothing re-drives
+// the task and only a human can undo it. An older agent, a record written before
+// the field existed, or any write path that omits it must therefore fail toward
+// RE-DRIVING, never toward parking — reading an absent field as "done" would
+// rebuild the original false premise in a new place.
+//
+// Observed 2026-11-09 on bborbe/trading#480: the reviewer agent hit
+// `GH rate limit nearly exhausted (0/12500 remaining)`, reported failed, exited
+// 0, and was parked here — where nothing dispatched it again.
+func TestParkSucceededWithoutPhaseMoveParksOnlyOnADoneResult(t *testing.T) {
+	cases := []struct {
+		name    string
+		status  string
+		present bool
+		want    bool
+	}{
+		{name: "done result parks", status: string(lib.AgentStatusDone), present: true, want: true},
+		{name: "failed result does not park", status: string(lib.AgentStatusFailed), present: true, want: false},
+		{name: "needs_input result does not park", status: string(lib.AgentStatusNeedsInput), present: true, want: false},
+		{name: "in_progress result does not park", status: string(lib.AgentStatusInProgress), present: true, want: false},
+		{name: "absent status does not park", present: false, want: false},
+		{name: "unrecognised status does not park", status: "something-else", present: true, want: false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			h, publisher, task, now := parkFixture(t, "execution")
+			if tc.present {
+				task.Frontmatter["last_result_status"] = tc.status
+			} else {
+				delete(task.Frontmatter, "last_result_status")
+			}
+			// The park reads the phase and the Job evidence from the view.
+			h.view = &fakeTaskView{tasks: map[lib.TaskIdentifier]lib.Task{task.TaskIdentifier: task}}
+			h.taskStore.MarkSucceeded(task.TaskIdentifier, "execution", now.Add(-longAgo))
+
+			if got := h.parkSucceededWithoutPhaseMove(context.Background(), task); got != tc.want {
+				t.Fatalf("parkSucceededWithoutPhaseMove = %t; want %t", got, tc.want)
+			}
+			wantPublish := 0
+			if tc.want {
+				wantPublish = 1
+			}
+			if got := len(publisher.parkedSucceeded); got != wantPublish {
+				t.Fatalf("park count = %d; want %d", got, wantPublish)
+			}
+		})
 	}
 }
 

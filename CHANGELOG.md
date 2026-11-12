@@ -2,6 +2,10 @@
 
 All notable changes to this project will be documented in this file.
 
+## Unreleased
+
+- fix: **the succeeded-Job park requires a `done` result.** An agent that reports failure still exits 0 — publishing a failed result returns nil — so a transient failure left a succeeded Job at an unchanged phase, indistinguishable from an agent that parked on purpose, and the park wrote `human_review`, which is outside the trigger phases, so nothing re-drove the task and only a human could undo it. Observed 2026-11-09 on `bborbe/trading#480`: the reviewer agent hit `GH rate limit nearly exhausted (0/12500 remaining)`, reported failed, exited 0, and was parked — it never dispatched again. The park now reads `last_result_status`, stamped by the `bborbe/agent` release that carries it, and parks only `done`. `failed`, `needs_input`, `in_progress`, an unrecognised value and an **absent** field all fall through to re-driving: parking is the irreversible direction, so a record written before the field existed must not be read as `done`.
+
 ## v0.60.1
 
 - fix: **the lost-claim park no longer parks a task no previous holder ran.** The takeover-path guard asked only whether the task carried run evidence, and `job_started_at` answers that question even when the Job is long gone — nothing in this repository clears the field, while `clearGhostCurrentJobs` clears `current_job` whenever the named Job runs nowhere. All 9 measured `parked_lost_claim` records carried a stale `job_started_at` beside an empty `current_job` and `Previous holder: unavailable`, meaning `TakeoverPair` had created the claim rather than replacing a listed one. The park now also requires a non-empty `TakeoverResult.PreviousTaskID`, i.e. a listed claim was actually displaced; the existing run-evidence clause is unchanged, so the succeeded-Job park (where `job_started_at` is the intended evidence, rewritten by the pod to its pre-spawn value) behaves as before.
