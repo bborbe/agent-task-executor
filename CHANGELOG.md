@@ -2,6 +2,10 @@
 
 All notable changes to this project will be documented in this file.
 
+## Unreleased
+
+- fix: **the lost-claim park no longer parks a task no previous holder ran.** The takeover-path guard asked only whether the task carried run evidence, and `job_started_at` answers that question even when the Job is long gone — nothing in this repository clears the field, while `clearGhostCurrentJobs` clears `current_job` whenever the named Job runs nowhere. All 9 measured `parked_lost_claim` records carried a stale `job_started_at` beside an empty `current_job` and `Previous holder: unavailable`, meaning `TakeoverPair` had created the claim rather than replacing a listed one. The park now also requires a non-empty `TakeoverResult.PreviousTaskID`, i.e. a listed claim was actually displaced; the existing run-evidence clause is unchanged, so the succeeded-Job park (where `job_started_at` is the intended evidence, rewritten by the pod to its pre-spawn value) behaves as before.
+
 ## v0.60.0
 
 - feat: `make build` resolves `BUILD_TARGET` from a bounded sun probe - sun when reachable, local docker as the fallback. An explicit `BUILD_TARGET` always wins, and the decision prints at parse time so it is visible under `make -n`

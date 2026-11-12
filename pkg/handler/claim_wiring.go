@@ -200,13 +200,11 @@ func (h *taskEventHandler) acquireSpawnClaim(
 			// task that was just parked.
 			// A takeover of a task this cluster never ran is not a second run:
 			// rerunOnLostClaim answers "may this agent run a task a previous
-			// owner already ran", and a task with no current_job and no
-			// job_started_at carries no evidence of any run. Parking it writes
-			// human_review onto a task no executor ever claimed, and the empty
-			// assignee that write leaves makes the task unspawnable for good.
+			// owner already ran", and a takeover that displaced no claim has no
+			// previous owner to ask about. attributablePriorRun owns that test.
 			if h.claimMode == pkg.ClaimModeOn &&
 				config.LostClaimAction() == agentv1.ParkAfterLostClaim &&
-				taskShowsPriorRun(task) {
+				attributablePriorRun(takeover, task) {
 				h.parkAfterLostClaim(ctx, primary, takeoverPreviousHolder(takeover), task)
 				return false
 			}
@@ -279,6 +277,25 @@ func ownerRepoFromCloneURL(raw string) (string, string, bool) {
 		return "", "", false
 	}
 	return splitOwnerRepo(path)
+}
+
+// attributablePriorRun reports whether a lost-claim park is justified: the
+// takeover displaced a claim that named a previous holder, and the task carries
+// evidence that a Job ran here.
+//
+// TakeoverResult.PreviousTaskID is non-empty only when TakeoverPair replaced a
+// listed claim (pkg/claim/lease_manager.go:859, :912). On its create path it is
+// "" because no claim existed to replace (:827, :837), so no previous holder
+// exists to have run the task and rerunOnLostClaim has nothing to decide.
+//
+// The two clauses catch different non-runs. PreviousTaskID catches the takeover
+// that displaced nobody — all 9 measured parked_lost_claim records had an empty
+// holder beside a stale job_started_at and an empty current_job, which is why the
+// guard parked work whose only claim had just been created here.
+// taskShowsPriorRun catches the mirror case the guard was originally written for:
+// a holder that took the claim and never spawned a Job.
+func attributablePriorRun(takeover *claim.TakeoverResult, task lib.Task) bool {
+	return takeoverPreviousHolder(takeover) != "" && taskShowsPriorRun(task)
 }
 
 // taskShowsPriorRun reports whether the task carries evidence that some
