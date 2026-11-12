@@ -188,9 +188,11 @@ func (h *taskEventHandler) parkSucceededWithoutPhaseMove(
 	// the reviewer agent hit `GH rate limit nearly exhausted (0/12500 remaining)`,
 	// reported failed, exited 0, and was parked here — where it stayed for good.
 	//
-	// Re-driving is bounded by maxRedrivesWithoutAdvance below, and that check runs
-	// after the success record and the grace gates so it fires only for a pass that
-	// would otherwise have parked.
+	// Re-driving is bounded by maxRedrivesWithoutAdvance below. That check sits
+	// after the success-record gate, so it cannot fire for a task with no run to
+	// park; it still runs above the grace and park-published gates, so a pass that
+	// ends in one of those can log park_redrive_cap without parking. That is
+	// deliberate — the log records the decision, not the outcome.
 	if resultStatus, _ := current.Frontmatter.String("last_result_status"); resultStatus != string(lib.AgentStatusDone) {
 		if !redriveBudgetSpent(current) {
 			return false
