@@ -96,6 +96,7 @@ func TestParkSucceededWithoutPhaseMoveParksOnlyOnADoneResult(t *testing.T) {
 		status       string
 		present      bool
 		triggerCount int
+		staleScope   bool
 		want         bool
 	}{
 		{name: "done result parks", status: string(lib.AgentStatusDone), present: true, want: true},
@@ -110,6 +111,10 @@ func TestParkSucceededWithoutPhaseMoveParksOnlyOnADoneResult(t *testing.T) {
 		{name: "failed result parks once the re-drive budget is spent", status: string(lib.AgentStatusFailed), present: true, triggerCount: maxRedrivesWithoutAdvance, want: true},
 		{name: "absent status parks once the re-drive budget is spent", present: false, triggerCount: maxRedrivesWithoutAdvance, want: true},
 		{name: "failed result still re-drives one spawn below the cap", status: string(lib.AgentStatusFailed), present: true, triggerCount: maxRedrivesWithoutAdvance - 1, want: false},
+		// The count only applies to the scope the task is still at: a task that
+		// has just advanced carries the previous scope's count until its next
+		// spawn rewrites it, and capping there would strand it.
+		{name: "failed result re-drives when the count belongs to a stale scope", status: string(lib.AgentStatusFailed), present: true, triggerCount: maxRedrivesWithoutAdvance, staleScope: true, want: false},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -120,6 +125,15 @@ func TestParkSucceededWithoutPhaseMoveParksOnlyOnADoneResult(t *testing.T) {
 				delete(task.Frontmatter, "last_result_status")
 			}
 			task.Frontmatter["trigger_count"] = tc.triggerCount
+			if tc.triggerCount > 0 {
+				// The cap honours the count only at the scope the task is still
+				// sitting at; the fixture's phase is "execution" and it carries no
+				// ref, so the computed scope is "execution:".
+				task.Frontmatter["trigger_scope"] = "execution:"
+				if tc.staleScope {
+					task.Frontmatter["trigger_scope"] = "planning:"
+				}
+			}
 			// The park reads the phase and the Job evidence from the view.
 			h.view = &fakeTaskView{tasks: map[lib.TaskIdentifier]lib.Task{task.TaskIdentifier: task}}
 			h.taskStore.MarkSucceeded(task.TaskIdentifier, "execution", now.Add(-longAgo))
