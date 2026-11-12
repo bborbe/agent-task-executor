@@ -92,10 +92,11 @@ func TestParkSucceededWithoutPhaseMoveDoesNotParkATaskThatNeverRan(t *testing.T)
 // 0, and was parked here — where nothing dispatched it again.
 func TestParkSucceededWithoutPhaseMoveParksOnlyOnADoneResult(t *testing.T) {
 	cases := []struct {
-		name    string
-		status  string
-		present bool
-		want    bool
+		name         string
+		status       string
+		present      bool
+		triggerCount int
+		want         bool
 	}{
 		{name: "done result parks", status: string(lib.AgentStatusDone), present: true, want: true},
 		{name: "failed result does not park", status: string(lib.AgentStatusFailed), present: true, want: false},
@@ -103,6 +104,12 @@ func TestParkSucceededWithoutPhaseMoveParksOnlyOnADoneResult(t *testing.T) {
 		{name: "in_progress result does not park", status: string(lib.AgentStatusInProgress), present: true, want: false},
 		{name: "absent status does not park", present: false, want: false},
 		{name: "unrecognised status does not park", status: "something-else", present: true, want: false},
+		// The re-drive cap: a task that cannot get past the phase is escalated
+		// once its spawn budget at this scope is spent, so the non-done statuses
+		// above cannot loop forever on an uncapped task.
+		{name: "failed result parks once the re-drive budget is spent", status: string(lib.AgentStatusFailed), present: true, triggerCount: maxRedrivesWithoutAdvance, want: true},
+		{name: "absent status parks once the re-drive budget is spent", present: false, triggerCount: maxRedrivesWithoutAdvance, want: true},
+		{name: "failed result still re-drives one spawn below the cap", status: string(lib.AgentStatusFailed), present: true, triggerCount: maxRedrivesWithoutAdvance - 1, want: false},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -112,6 +119,7 @@ func TestParkSucceededWithoutPhaseMoveParksOnlyOnADoneResult(t *testing.T) {
 			} else {
 				delete(task.Frontmatter, "last_result_status")
 			}
+			task.Frontmatter["trigger_count"] = tc.triggerCount
 			// The park reads the phase and the Job evidence from the view.
 			h.view = &fakeTaskView{tasks: map[lib.TaskIdentifier]lib.Task{task.TaskIdentifier: task}}
 			h.taskStore.MarkSucceeded(task.TaskIdentifier, "execution", now.Add(-longAgo))

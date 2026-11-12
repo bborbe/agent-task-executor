@@ -13,6 +13,19 @@ import (
 	"github.com/bborbe/agent-task-executor/pkg/metrics"
 )
 
+// maxRedrivesWithoutAdvance bounds how many spawns a task may accumulate at one
+// phase:ref scope on a non-done result before the park proceeds anyway.
+//
+// It exists because the park is the only thing that stops a task re-spawning
+// forever at an unchanged phase, and the trigger cap that would otherwise bound
+// it engages only for a task with a ref or an explicit max_triggers. A
+// human-authored task carrying neither is uncapped by design, so a run that ends
+// in_progress without advancing — a step runner saving progress and exiting —
+// would re-drive every grace period indefinitely. Three is deliberately more
+// permissive than the single run the park used to allow: a transient failure now
+// gets retried, and only a task that cannot get past the phase is escalated.
+const maxRedrivesWithoutAdvance = 3
+
 // suppressOrPark reports whether this pass must not spawn, and is the single
 // entry point the reconcile uses so both decisions share one clock: inside the
 // write-back grace recentlySucceeded suppresses, and past it a task still at the
@@ -37,11 +50,24 @@ func (h *taskEventHandler) suppressOrPark(ctx context.Context, task lib.Task) bo
 // It runs in the shared spawn funnel, immediately after recentlySucceeded — the
 // funnel every spawn path goes through (the reconcile, the Kafka consumer and
 // the deferred-respawn loop), not the reconcile alone. That placement is the
-// whole point: a succeeded Job whose phase never moved is a deliberate human
-// park — the agent exited 0 without advancing the task, so nothing will ever
-// move it, and without this the reconcile finds it eligible on every pass and
-// re-spawns it forever. v0.46.3 removed the cap charge that used to bound that
-// loop, so nothing else stops it.
+// whole point: a succeeded Job whose phase never moved will never be advanced by
+// anything else, so without a park the reconcile finds the task eligible on
+// every pass and re-spawns it forever.
+//
+// "Succeeded Job" is not the same as "the agent finished cleanly", and this is
+// where that distinction is made. The park reads last_result_status, which the
+// agent's delivery stamps and the spawn notification clears:
+//
+//   - done, in_progress, needs_input, unrecognised — the run ended without
+//     advancing the phase. Park.
+//   - failed — the run reported a transient failure. Re-drive, up to
+//     maxRedrivesWithoutAdvance spawns at this scope, then park anyway.
+//   - absent — unknown: an older agent, or a run that died before delivering.
+//     Treated like failed, because parking is the irreversible direction.
+//
+// The cap that bounds the re-drive loop engages only for a task with a ref or an
+// explicit max_triggers; an uncapped task relies on maxRedrivesWithoutAdvance
+// alone.
 //
 // Why here and not on the succeeded-Job path in the job watcher: the decision has
 // to wait out the write-back, because a succeeded Job means the agent published
@@ -116,7 +142,30 @@ func (h *taskEventHandler) parkSucceededWithoutPhaseMove(
 	// `GH rate limit nearly exhausted (0/12500 remaining)`, reported failed, exited
 	// 0, and was parked here — where it stayed for good.
 	if resultStatus, _ := current.Frontmatter.String("last_result_status"); resultStatus != string(lib.AgentStatusDone) {
-		return false
+		// A non-done result must not park — a transient failure has to be retried —
+		// but it must not re-drive forever either. The park was the only bound on
+		// that loop, and it is the bound only for tasks whose trigger budget is
+		// armed (ref or max_triggers); a human-authored task with neither is
+		// uncapped by design, so without this it would re-spawn every grace period
+		// for as long as the agent keeps reporting in_progress.
+		//
+		// trigger_count is the counter to use rather than a new one: it is charged
+		// once per spawn (recordTriggerSpawn) and scoped to phase:ref, resetting to
+		// 1 whenever that scope changes (triggerBudgetWrite). It therefore reads as
+		// "spawns at this scope since the task last advanced", which is exactly the
+		// quantity the loop is measured in. Once the budget is spent the park
+		// proceeds, so the task lands where a human can see it instead of churning.
+		if current.Frontmatter.TriggerCount() < maxRedrivesWithoutAdvance {
+			return false
+		}
+		glog.V(2).Infof(
+			"event=park_redrive_cap task=%s phase=%s last_result_status=%q trigger_count=%d",
+			task.TaskIdentifier,
+			taskPhase(current),
+			resultStatus,
+			current.Frontmatter.TriggerCount(),
+		)
+		metrics.TaskEventsTotal.WithLabelValues("park_redrive_cap").Inc()
 	}
 	// The success comes from the shared record, not the pod's own memory: the pod
 	// that ran the Job may be gone, and a restart must not turn a record that was

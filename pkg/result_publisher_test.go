@@ -202,11 +202,17 @@ var _ = Describe("ResultPublisher", func() {
 			operation, cmd := decodeUpdateFrontmatterCommand(producer.messages[0])
 
 			Expect(string(operation)).To(Equal(string(taskcmd.UpdateFrontmatterCommandOperation)))
-			Expect(cmd.Updates).To(HaveLen(4))
+			Expect(cmd.Updates).To(HaveLen(5))
 
 			Expect(cmd.Updates["spawn_notification"]).To(Equal(true))
 			Expect(cmd.Updates["current_job"]).To(Equal("claude-20260418120000"))
 			Expect(cmd.Updates["job_started_at"]).To(Equal("2026-04-18T12:00:00Z"))
+			// Cleared so the park gate reads THIS run's result, not the previous
+			// one's — an agent that fails with an empty Output publishes no
+			// frontmatter, and the controller's on-disk-first merge would keep a
+			// stale `done`.
+			Expect(cmd.Updates).To(HaveKey("last_result_status"))
+			Expect(cmd.Updates["last_result_status"]).To(Equal(""))
 			Expect(cmd.Updates["claude_session_id"]).To(
 				Equal("11111111-2222-3333-4444-555555555555"),
 			)

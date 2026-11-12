@@ -206,10 +206,13 @@ var _ = Describe("the shared success record", func() {
 
 	// ranTask is eligibleTask plus the Job evidence a park is about: the park
 	// answers "a Job ran here and did not move the phase", so a task with no
-	// current_job and no job_started_at has no park to make.
+	// current_job and no job_started_at has no park to make. It also carries a
+	// done result, the second half of that answer: a Job that exits 0 while
+	// reporting failure is re-driven, not parked.
 	ranTask := func(phase domain.TaskPhase) lib.Task {
 		task := eligibleTask(phase)
 		task.Frontmatter["current_job"] = "agent-tid-a"
+		task.Frontmatter["last_result_status"] = string(lib.AgentStatusDone)
 		return task
 	}
 
@@ -266,6 +269,9 @@ var _ = Describe("the shared success record", func() {
 		rewritten := eligibleTask(domain.TaskPhaseExecution)
 		rewritten.Frontmatter["trigger_scope"] = "planning:"
 		rewritten.Frontmatter["job_started_at"] = "2026-10-21T05:00:00Z"
+		// A done result is the second half of the park's answer; a Job that exits
+		// 0 while reporting failure is re-driven instead.
+		rewritten.Frontmatter["last_result_status"] = string(lib.AgentStatusDone)
 
 		restarted := newHandler(pkg.NewTaskStore())
 		fakeView.SnapshotReturns([]lib.Task{rewritten})

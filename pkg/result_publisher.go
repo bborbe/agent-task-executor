@@ -526,6 +526,17 @@ func (p *resultPublisher) PublishSpawnNotification(
 			"current_job":        jobName,
 			"job_started_at":     p.currentDateTime.Now().UTC().Format("2006-01-02T15:04:05Z07:00"),
 			"claude_session_id":  sessionID,
+			// Cleared at spawn so the value the park gate reads describes THIS
+			// run, not the last one that managed to deliver. Two cases need it.
+			// An agent that reports failure with an empty Output publishes no
+			// frontmatter at all — the passthrough generator stamps onto
+			// result.Output — so without this the controller's on-disk-first
+			// merge keeps the previous run's `done` and the park fires on a
+			// stale value. And a Job that exits 0 without delivering at all
+			// leaves the field empty rather than inheriting a success it never
+			// had. Empty is the safe direction: the park requires `done`, so an
+			// empty field re-drives instead of parking.
+			"last_result_status": "",
 		},
 	}
 	return p.publishRaw(ctx, taskcmd.UpdateFrontmatterCommandOperation, cmd)
