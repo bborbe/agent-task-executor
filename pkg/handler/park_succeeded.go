@@ -13,6 +13,49 @@ import (
 	"github.com/bborbe/agent-task-executor/pkg/metrics"
 )
 
+// maxRedrivesWithoutAdvance bounds how many spawns a task may accumulate at one
+// phase:ref scope on a non-done result before the park proceeds anyway.
+//
+// It exists because the park is the only thing that stops a task re-spawning
+// forever at an unchanged phase, and the trigger cap that would otherwise bound
+// it engages only for a task with a ref or an explicit max_triggers. A
+// human-authored task carrying neither is uncapped by design, so a run that ends
+// in_progress without advancing — a step runner saving progress and exiting —
+// would re-drive every grace period indefinitely. Three is deliberately more
+// permissive than the single run the park used to allow: a transient failure now
+// gets retried, and only a task that cannot get past the phase is escalated.
+const maxRedrivesWithoutAdvance = 3
+
+// redriveBudgetSpent reports whether a task has used up its re-drive budget at
+// the scope it is still sitting at, so a non-done result should park instead of
+// re-driving again.
+//
+// trigger_count is the counter rather than a new one: it is charged once per
+// spawn (recordTriggerSpawn) and scoped to phase:ref, resetting to 1 whenever
+// that scope changes (triggerBudgetWrite). It therefore reads as "spawns at this
+// scope since the task last advanced". That scoping only holds because
+// trigger_scope and trigger_count are CONTROLLER-owned — the controller's result
+// writer keeps the on-disk value over an agent's spawn-time snapshot
+// (bborbe/agent-task-controller, controllerOwnedFields, v0.22.3) — so an agent
+// pod cannot reset the counter it is being measured by. Without that guard the
+// count would be rewritten by every delivery and the cap would never fire.
+//
+// The scope comparison is load-bearing, not defensive: the scope is only
+// rewritten on the NEXT spawn, so between a phase change and that spawn the count
+// still belongs to the old scope. A count-only check would cap a task that has
+// just advanced, stranding exactly the task the reset exists to release — the
+// same hazard redriveStreakCapped documents for its own counter.
+func redriveBudgetSpent(task lib.Task) bool {
+	if task.Frontmatter.TriggerCount() < maxRedrivesWithoutAdvance {
+		return false
+	}
+	storedScope, hasScope := task.Frontmatter.String("trigger_scope")
+	if !hasScope || storedScope != triggerScope(task.Frontmatter) {
+		return false
+	}
+	return true
+}
+
 // suppressOrPark reports whether this pass must not spawn, and is the single
 // entry point the reconcile uses so both decisions share one clock: inside the
 // write-back grace recentlySucceeded suppresses, and past it a task still at the
@@ -37,11 +80,30 @@ func (h *taskEventHandler) suppressOrPark(ctx context.Context, task lib.Task) bo
 // It runs in the shared spawn funnel, immediately after recentlySucceeded — the
 // funnel every spawn path goes through (the reconcile, the Kafka consumer and
 // the deferred-respawn loop), not the reconcile alone. That placement is the
-// whole point: a succeeded Job whose phase never moved is a deliberate human
-// park — the agent exited 0 without advancing the task, so nothing will ever
-// move it, and without this the reconcile finds it eligible on every pass and
-// re-spawns it forever. v0.46.3 removed the cap charge that used to bound that
-// loop, so nothing else stops it.
+// whole point: a succeeded Job whose phase never moved will never be advanced by
+// anything else, so without a park the reconcile finds the task eligible on
+// every pass and re-spawns it forever.
+//
+// "Succeeded Job" is not the same as "the agent finished cleanly", and this is
+// where that distinction is made. The park reads last_result_status, which the
+// agent's delivery stamps and the spawn notification clears:
+//
+//   - done — the run finished and did not advance the phase. Park.
+//   - failed — the run reported a transient failure. Re-drive, up to
+//     maxRedrivesWithoutAdvance spawns at this scope, then park anyway.
+//   - in_progress — a step runner saving progress and exiting. Re-drive, same
+//     bound. Parking it would stop every multi-run task in the fleet at its
+//     first non-advancing run, which is a far larger blast radius than this
+//     defect and not reversible without another release.
+//   - needs_input — the agent asked for a human. Re-drive is harmless because
+//     the deliverer has already cleared the assignee, so the spawn funnel skips
+//     the task; it surfaces in the operator inbox either way.
+//   - absent or unrecognised — unknown: an older agent, or a run that died
+//     before delivering. Re-drive, because parking is the irreversible direction.
+//
+// The cap that bounds the re-drive loop engages only for a task with a ref or an
+// explicit max_triggers; an uncapped task relies on maxRedrivesWithoutAdvance
+// alone.
 //
 // Why here and not on the succeeded-Job path in the job watcher: the decision has
 // to wait out the write-back, because a succeeded Job means the agent published
@@ -108,6 +170,41 @@ func (h *taskEventHandler) parkSucceededWithoutPhaseMove(
 	succeeded, ok := h.lastSuccess(ctx, current, taskPhase(current))
 	if !ok {
 		return false
+	}
+	// A succeeded Job is not by itself evidence of a deliberate park. An agent
+	// that reports failure still exits 0 — publishing a failed result returns nil —
+	// so a transient failure leaves a succeeded Job at an unchanged phase, and
+	// nothing in the Job distinguishes it from an agent that parked on purpose.
+	// The park therefore reads the result status the agent's delivery stamps
+	// (last_result_status, written by bborbe/agent delivery.content-generator) and
+	// parks only a done result.
+	//
+	// failed, needs_input, in_progress, an unrecognised value and an ABSENT field
+	// all re-drive instead. Absent is the one most likely to be got wrong: an older
+	// agent, a record written before the field existed, or any path that omits it
+	// must not be read as "done". Parking is the irreversible direction — it writes
+	// human_review, which is outside the trigger phases, so nothing re-drives the
+	// task and only a human can undo it. Observed 2026-11-09 on bborbe/trading#480:
+	// the reviewer agent hit `GH rate limit nearly exhausted (0/12500 remaining)`,
+	// reported failed, exited 0, and was parked here — where it stayed for good.
+	//
+	// Re-driving is bounded by maxRedrivesWithoutAdvance below. That check sits
+	// after the success-record gate, so it cannot fire for a task with no run to
+	// park; it still runs above the grace and park-published gates, so a pass that
+	// ends in one of those can log park_redrive_cap without parking. That is
+	// deliberate — the log records the decision, not the outcome.
+	if resultStatus, _ := current.Frontmatter.String("last_result_status"); resultStatus != string(lib.AgentStatusDone) {
+		if !redriveBudgetSpent(current) {
+			return false
+		}
+		glog.V(2).Infof(
+			"event=park_redrive_cap task=%s phase=%s last_result_status=%q trigger_count=%d",
+			task.TaskIdentifier,
+			taskPhase(current),
+			resultStatus,
+			current.Frontmatter.TriggerCount(),
+		)
+		metrics.TaskEventsTotal.WithLabelValues("park_redrive_cap").Inc()
 	}
 	now := h.currentDateTime.Now().Time()
 	elapsed := now.Sub(succeeded.CompletedAt)

@@ -111,6 +111,10 @@ const DefaultReconcileInterval = 60 * time.Second
 // `scopeChanged` true on every spawn and resets the persisted `trigger_count` to
 // 1, so any counter living in that file is reset by the very loop it must count.
 //
+// ⚠️ SUPERSEDED: the controller's controllerOwnedFields guard (v0.22.3) keeps
+// trigger_count, trigger_scope and max_triggers over an agent's snapshot, so they
+// are NOT clobbered — which is what makes trigger_count a usable bound.
+//
 // The in-memory map remains as a floor. A failed store read falls back to it, a
 // failed write still increments it, and a failed read never retires a task that
 // memory has not capped. Conversely, a task capped only by the shared store is

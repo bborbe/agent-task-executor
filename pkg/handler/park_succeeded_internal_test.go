@@ -32,6 +32,10 @@ func parkFixture(
 			// A park answers "a Job ran here and did not move the phase", so the
 			// fixture carries the Job evidence every park spec is about.
 			"current_job": "agent-task-park",
+			// The park also requires a done result: a Job that exits 0 while
+			// reporting failure is not a deliberate park. The default fixture is a
+			// successful run; the status matrix is exercised separately.
+			"last_result_status": string(lib.AgentStatusDone),
 		},
 	}
 	// The park reads the phase from the view, never from the caller's snapshot.
@@ -64,6 +68,107 @@ func TestParkSucceededWithoutPhaseMoveDoesNotParkATaskThatNeverRan(t *testing.T)
 	}
 	if got := len(publisher.parkedSucceeded); got != 0 {
 		t.Fatalf("park count = %d; want 0 for a task that never ran", got)
+	}
+}
+
+// parkCase is one row of the park's result-status matrix.
+type parkCase struct {
+	name         string
+	status       string
+	present      bool
+	triggerCount int
+	staleScope   bool
+	want         bool
+}
+
+// seeded builds a handler whose view holds the task this row describes, with the
+// run evidence the park requires already recorded.
+func (tc parkCase) seeded(t *testing.T) (*taskEventHandler, *parkRecordingPublisher, lib.Task) {
+	t.Helper()
+	h, publisher, task, now := parkFixture(t, "execution")
+	seedLastResultStatus(task, tc.status, tc.present)
+	seedTriggerBudget(task, tc.triggerCount, tc.staleScope)
+	h.view = &fakeTaskView{tasks: map[lib.TaskIdentifier]lib.Task{task.TaskIdentifier: task}}
+	h.taskStore.MarkSucceeded(task.TaskIdentifier, "execution", now.Add(-longAgo))
+	return h, publisher, task
+}
+
+func seedLastResultStatus(task lib.Task, status string, present bool) {
+	if present {
+		task.Frontmatter["last_result_status"] = status
+		return
+	}
+	delete(task.Frontmatter, "last_result_status")
+}
+
+// seedTriggerBudget gives the task a spent or unspent spawn budget at the scope
+// it is sitting at. The fixture's phase is "execution" and it carries no ref, so
+// the computed scope is "execution:"; a stale row carries the scope the task had
+// before it advanced, which the cap must not honour.
+func seedTriggerBudget(task lib.Task, count int, stale bool) {
+	task.Frontmatter["trigger_count"] = count
+	if count == 0 {
+		return
+	}
+	task.Frontmatter["trigger_scope"] = "execution:"
+	if stale {
+		task.Frontmatter["trigger_scope"] = "planning:"
+	}
+}
+
+// TestParkSucceededWithoutPhaseMoveParksOnlyOnADoneResult pins the rule that a
+// succeeded Job is not by itself a deliberate park.
+//
+// An agent that reports failure still exits 0 — publishing a failed result
+// returns nil — so a transient failure leaves a succeeded Job at an unchanged
+// phase and nothing in the Job separates it from an agent that parked on
+// purpose. The park therefore reads last_result_status, which the agent's
+// delivery stamps, and only a done result may park.
+//
+// The absent row is the one that matters most. Parking is the irreversible
+// direction: human_review is outside the trigger phases, so nothing re-drives
+// the task and only a human can undo it. An older agent, a record written before
+// the field existed, or any write path that omits it must therefore fail toward
+// RE-DRIVING, never toward parking — reading an absent field as "done" would
+// rebuild the original false premise in a new place.
+//
+// Observed 2026-11-09 on bborbe/trading#480: the reviewer agent hit
+// `GH rate limit nearly exhausted (0/12500 remaining)`, reported failed, exited
+// 0, and was parked here — where nothing dispatched it again.
+func TestParkSucceededWithoutPhaseMoveParksOnlyOnADoneResult(t *testing.T) {
+	cases := []parkCase{
+		{name: "done result parks", status: string(lib.AgentStatusDone), present: true, want: true},
+		{name: "failed result does not park", status: string(lib.AgentStatusFailed), present: true, want: false},
+		{name: "needs_input result does not park", status: string(lib.AgentStatusNeedsInput), present: true, want: false},
+		{name: "in_progress result does not park", status: string(lib.AgentStatusInProgress), present: true, want: false},
+		{name: "absent status does not park", present: false, want: false},
+		{name: "unrecognised status does not park", status: "something-else", present: true, want: false},
+		// The re-drive cap: a task that cannot get past the phase is escalated
+		// once its spawn budget at this scope is spent, so the non-done statuses
+		// above cannot loop forever on an uncapped task.
+		{name: "failed result parks once the re-drive budget is spent", status: string(lib.AgentStatusFailed), present: true, triggerCount: maxRedrivesWithoutAdvance, want: true},
+		{name: "absent status parks once the re-drive budget is spent", present: false, triggerCount: maxRedrivesWithoutAdvance, want: true},
+		{name: "failed result still re-drives one spawn below the cap", status: string(lib.AgentStatusFailed), present: true, triggerCount: maxRedrivesWithoutAdvance - 1, want: false},
+		// The count only applies to the scope the task is still at: a task that
+		// has just advanced carries the previous scope's count until its next
+		// spawn rewrites it, and capping there would strand it.
+		{name: "failed result re-drives when the count belongs to a stale scope", status: string(lib.AgentStatusFailed), present: true, triggerCount: maxRedrivesWithoutAdvance, staleScope: true, want: false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			h, publisher, task := tc.seeded(t)
+			got := h.parkSucceededWithoutPhaseMove(context.Background(), task)
+			if got != tc.want {
+				t.Fatalf("parkSucceededWithoutPhaseMove = %t; want %t", got, tc.want)
+			}
+			wantPublish := 0
+			if tc.want {
+				wantPublish = 1
+			}
+			if published := len(publisher.parkedSucceeded); published != wantPublish {
+				t.Fatalf("park count = %d; want %d", published, wantPublish)
+			}
+		})
 	}
 }
 

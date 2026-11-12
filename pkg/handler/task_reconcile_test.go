@@ -319,6 +319,11 @@ var _ = Describe("TaskEventHandler reconcile loop", func() {
 			// own snapshot, so the view must hold it for this path to fire.
 			parkedTask := eligibleTask(domain.TaskPhaseExecution)
 			parkedTask.Frontmatter["current_job"] = "agent-tid-a"
+			// The park also requires a done result: a Job that exits 0 while
+			// reporting failure is re-driven instead, because a transient
+			// failure must be retried rather than escalated to a phase nothing
+			// dispatches.
+			parkedTask.Frontmatter["last_result_status"] = string(lib.AgentStatusDone)
 			fakeView.GetReturns(parkedTask, true)
 			taskStore.MarkSucceeded("tid-a", "execution", now.Add(-10*time.Minute))
 
@@ -398,6 +403,11 @@ var _ = Describe("TaskEventHandler reconcile loop", func() {
 			// The park reads the task from the view, so the view must hold it.
 			parkedTask := eligibleTask(domain.TaskPhaseExecution)
 			parkedTask.Frontmatter["current_job"] = "agent-tid-a"
+			// The park also requires a done result: a Job that exits 0 while
+			// reporting failure is re-driven instead, because a transient
+			// failure must be retried rather than escalated to a phase nothing
+			// dispatches.
+			parkedTask.Frontmatter["last_result_status"] = string(lib.AgentStatusDone)
 			fakeView.GetReturns(parkedTask, true)
 			taskStore.MarkSucceeded("tid-a", "execution", now.Add(-10*24*time.Hour))
 
