@@ -111,14 +111,9 @@ const DefaultReconcileInterval = 60 * time.Second
 // `scopeChanged` true on every spawn and resets the persisted `trigger_count` to
 // 1, so any counter living in that file is reset by the very loop it must count.
 //
-// ⚠️ The paragraph above is SUPERSEDED and kept only for its measurement. It
-// predates the controller's ownership guard (bborbe/agent-task-controller,
-// controllerOwnedFields, v0.22.3), which now keeps the on-disk value of
-// `trigger_count`, `trigger_scope` and `max_triggers` over an agent's spawn-time
-// snapshot. Those three are therefore NOT clobbered, which is what makes the
-// persisted `trigger_count` a usable bound — parkSucceededWithoutPhaseMove's
-// maxRedrivesWithoutAdvance reads it for exactly that reason. A counter in a
-// field the controller does not own WOULD still be reset by the loop it counts.
+// ⚠️ SUPERSEDED: the controller's controllerOwnedFields guard (v0.22.3) keeps
+// trigger_count, trigger_scope and max_triggers over an agent's snapshot, so they
+// are NOT clobbered — which is what makes trigger_count a usable bound.
 //
 // The in-memory map remains as a floor. A failed store read falls back to it, a
 // failed write still increments it, and a failed read never retires a task that

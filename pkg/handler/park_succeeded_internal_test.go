@@ -71,6 +71,51 @@ func TestParkSucceededWithoutPhaseMoveDoesNotParkATaskThatNeverRan(t *testing.T)
 	}
 }
 
+// parkCase is one row of the park's result-status matrix.
+type parkCase struct {
+	name         string
+	status       string
+	present      bool
+	triggerCount int
+	staleScope   bool
+	want         bool
+}
+
+// seeded builds a handler whose view holds the task this row describes, with the
+// run evidence the park requires already recorded.
+func (tc parkCase) seeded(t *testing.T) (*taskEventHandler, *parkRecordingPublisher, lib.Task) {
+	t.Helper()
+	h, publisher, task, now := parkFixture(t, "execution")
+	seedLastResultStatus(task, tc.status, tc.present)
+	seedTriggerBudget(task, tc.triggerCount, tc.staleScope)
+	h.view = &fakeTaskView{tasks: map[lib.TaskIdentifier]lib.Task{task.TaskIdentifier: task}}
+	h.taskStore.MarkSucceeded(task.TaskIdentifier, "execution", now.Add(-longAgo))
+	return h, publisher, task
+}
+
+func seedLastResultStatus(task lib.Task, status string, present bool) {
+	if present {
+		task.Frontmatter["last_result_status"] = status
+		return
+	}
+	delete(task.Frontmatter, "last_result_status")
+}
+
+// seedTriggerBudget gives the task a spent or unspent spawn budget at the scope
+// it is sitting at. The fixture's phase is "execution" and it carries no ref, so
+// the computed scope is "execution:"; a stale row carries the scope the task had
+// before it advanced, which the cap must not honour.
+func seedTriggerBudget(task lib.Task, count int, stale bool) {
+	task.Frontmatter["trigger_count"] = count
+	if count == 0 {
+		return
+	}
+	task.Frontmatter["trigger_scope"] = "execution:"
+	if stale {
+		task.Frontmatter["trigger_scope"] = "planning:"
+	}
+}
+
 // TestParkSucceededWithoutPhaseMoveParksOnlyOnADoneResult pins the rule that a
 // succeeded Job is not by itself a deliberate park.
 //
@@ -91,14 +136,7 @@ func TestParkSucceededWithoutPhaseMoveDoesNotParkATaskThatNeverRan(t *testing.T)
 // `GH rate limit nearly exhausted (0/12500 remaining)`, reported failed, exited
 // 0, and was parked here — where nothing dispatched it again.
 func TestParkSucceededWithoutPhaseMoveParksOnlyOnADoneResult(t *testing.T) {
-	cases := []struct {
-		name         string
-		status       string
-		present      bool
-		triggerCount int
-		staleScope   bool
-		want         bool
-	}{
+	cases := []parkCase{
 		{name: "done result parks", status: string(lib.AgentStatusDone), present: true, want: true},
 		{name: "failed result does not park", status: string(lib.AgentStatusFailed), present: true, want: false},
 		{name: "needs_input result does not park", status: string(lib.AgentStatusNeedsInput), present: true, want: false},
@@ -118,35 +156,17 @@ func TestParkSucceededWithoutPhaseMoveParksOnlyOnADoneResult(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			h, publisher, task, now := parkFixture(t, "execution")
-			if tc.present {
-				task.Frontmatter["last_result_status"] = tc.status
-			} else {
-				delete(task.Frontmatter, "last_result_status")
-			}
-			task.Frontmatter["trigger_count"] = tc.triggerCount
-			if tc.triggerCount > 0 {
-				// The cap honours the count only at the scope the task is still
-				// sitting at; the fixture's phase is "execution" and it carries no
-				// ref, so the computed scope is "execution:".
-				task.Frontmatter["trigger_scope"] = "execution:"
-				if tc.staleScope {
-					task.Frontmatter["trigger_scope"] = "planning:"
-				}
-			}
-			// The park reads the phase and the Job evidence from the view.
-			h.view = &fakeTaskView{tasks: map[lib.TaskIdentifier]lib.Task{task.TaskIdentifier: task}}
-			h.taskStore.MarkSucceeded(task.TaskIdentifier, "execution", now.Add(-longAgo))
-
-			if got := h.parkSucceededWithoutPhaseMove(context.Background(), task); got != tc.want {
+			h, publisher, task := tc.seeded(t)
+			got := h.parkSucceededWithoutPhaseMove(context.Background(), task)
+			if got != tc.want {
 				t.Fatalf("parkSucceededWithoutPhaseMove = %t; want %t", got, tc.want)
 			}
 			wantPublish := 0
 			if tc.want {
 				wantPublish = 1
 			}
-			if got := len(publisher.parkedSucceeded); got != wantPublish {
-				t.Fatalf("park count = %d; want %d", got, wantPublish)
+			if published := len(publisher.parkedSucceeded); published != wantPublish {
+				t.Fatalf("park count = %d; want %d", published, wantPublish)
 			}
 		})
 	}
