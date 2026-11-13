@@ -311,6 +311,51 @@ var _ = Describe("the shared success record", func() {
 		Expect(fakeSpawner.SpawnJobCallCount()).To(Equal(1))
 	})
 
+	It("does not suppress a run whose agent published a failed result", func() {
+		// A failed run still exits 0, so the Job watcher records a success for it
+		// and the suppression path sees only the success. Suppressing there hides
+		// the failure for the whole grace and then hands the task to the re-drive
+		// path, so the executor's view of a failed run is a success at every step.
+		// last_result_status is the agent's own verdict, carried in the same write
+		// that carries the phase, and it outranks the success record.
+		store := new(mocks.FakeSuccessStore)
+		store.SnapshotReturns(
+			map[string]map[string]libtime.DateTime{
+				"tid-a": {"execution": libtime.DateTime(now.Add(-1 * time.Minute))},
+			},
+			nil,
+		)
+
+		failed := ranTask(domain.TaskPhaseExecution)
+		failed.Frontmatter["last_result_status"] = string(lib.AgentStatusFailed)
+		fakeView.SnapshotReturns([]lib.Task{failed})
+		fakeView.GetReturns(failed, true)
+		fakeSpawner.IsJobActiveReturns(false, nil)
+
+		Expect(newHandlerWithStore(store).ReconcileOnce(ctx)).To(BeNil())
+		Expect(fakeSpawner.SpawnJobCallCount()).To(Equal(1))
+	})
+
+	It("still suppresses a done result inside the grace", func() {
+		// The control for the spec above: a done result at the same age and the
+		// same shared record must still be suppressed, so the bypass cannot be
+		// green because the guard refuses everything.
+		store := new(mocks.FakeSuccessStore)
+		store.SnapshotReturns(
+			map[string]map[string]libtime.DateTime{
+				"tid-a": {"execution": libtime.DateTime(now.Add(-1 * time.Minute))},
+			},
+			nil,
+		)
+
+		fakeView.SnapshotReturns([]lib.Task{ranTask(domain.TaskPhaseExecution)})
+		fakeView.GetReturns(ranTask(domain.TaskPhaseExecution), true)
+		fakeSpawner.IsJobActiveReturns(false, nil)
+
+		Expect(newHandlerWithStore(store).ReconcileOnce(ctx)).To(BeNil())
+		Expect(fakeSpawner.SpawnJobCallCount()).To(Equal(0))
+	})
+
 	It("parks from a shared record when the pod's memory is empty", func() {
 		// The read path itself, with no ref client in play: a store that answers
 		// with a completion at the task's phase suppresses the spawn — by parking,

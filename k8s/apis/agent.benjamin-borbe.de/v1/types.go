@@ -412,7 +412,12 @@ func validateRunWindow(ctx context.Context, w *RunWindow) error {
 	}
 	if w.Timezone != "" {
 		if _, err := time.LoadLocation(w.Timezone); err != nil {
-			return errors.Wrapf(ctx, validation.Error, "runWindow.timezone %q is not a valid IANA zone", w.Timezone)
+			return errors.Wrapf(
+				ctx,
+				validation.Error,
+				"runWindow.timezone %q is not a valid IANA zone",
+				w.Timezone,
+			)
 		}
 	}
 	for _, clock := range []struct{ name, value string }{
@@ -423,7 +428,13 @@ func validateRunWindow(ctx context.Context, w *RunWindow) error {
 			continue
 		}
 		if !validClock(clock.value) {
-			return errors.Wrapf(ctx, validation.Error, "runWindow.%s %q is not HH:MM", clock.name, clock.value)
+			return errors.Wrapf(
+				ctx,
+				validation.Error,
+				"runWindow.%s %q is not HH:MM",
+				clock.name,
+				clock.value,
+			)
 		}
 	}
 	return nil
