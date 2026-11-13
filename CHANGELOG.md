@@ -2,6 +2,10 @@
 
 All notable changes to this project will be documented in this file.
 
+## Unreleased
+
+- fix: **the succeeded-Job park closes the record instead of leaving it in `human_review`.** `PublishParkSucceeded` delegated to `PublishParkLostClaim`, so both parks wrote `phase: human_review` and a finished record never reached a terminal state. Measured 2026-11-13: **35 of 55** open `private-agent` records were `## Parked: parked_succeeded` sitting at `human_review`, every one closed by hand. The two parks share a body but not an outcome — a lost claim needs a human to look at it, a succeeded park is finished work — so the succeeded path now writes `status: completed` and `phase: done` in the same command as its `## Parked` section. `done` is already in `terminalPhases`, so the reconcile still stops re-driving it. Change set: `pkg/result_publisher.go`, `pkg/result_publisher_test.go`, `CHANGELOG.md`.
+
 ## v0.60.2
 
 - fix: **the succeeded-Job park requires a `done` result, and a non-done result is re-driven up to a cap.** An agent that reports failure still exits 0 — publishing a failed result returns nil — so a transient failure left a succeeded Job at an unchanged phase, indistinguishable from an agent that parked on purpose, and the park wrote `human_review`, which is outside the trigger phases, so nothing re-drove the task and only a human could undo it. Observed 2026-11-09 on `bborbe/trading#480`: the reviewer agent hit `GH rate limit nearly exhausted (0/12500 remaining)`, reported failed, exited 0, and was parked — it never dispatched again.

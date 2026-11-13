@@ -193,7 +193,9 @@ func (h *taskEventHandler) parkSucceededWithoutPhaseMove(
 	// park; it still runs above the grace and park-published gates, so a pass that
 	// ends in one of those can log park_redrive_cap without parking. That is
 	// deliberate — the log records the decision, not the outcome.
-	if resultStatus, _ := current.Frontmatter.String("last_result_status"); resultStatus != string(lib.AgentStatusDone) {
+	if resultStatus, _ := current.Frontmatter.String("last_result_status"); resultStatus != string(
+		lib.AgentStatusDone,
+	) {
 		if !redriveBudgetSpent(current) {
 			return false
 		}

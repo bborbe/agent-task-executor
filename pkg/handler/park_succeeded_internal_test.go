@@ -138,21 +138,65 @@ func seedTriggerBudget(task lib.Task, count int, stale bool) {
 func TestParkSucceededWithoutPhaseMoveParksOnlyOnADoneResult(t *testing.T) {
 	cases := []parkCase{
 		{name: "done result parks", status: string(lib.AgentStatusDone), present: true, want: true},
-		{name: "failed result does not park", status: string(lib.AgentStatusFailed), present: true, want: false},
-		{name: "needs_input result does not park", status: string(lib.AgentStatusNeedsInput), present: true, want: false},
-		{name: "in_progress result does not park", status: string(lib.AgentStatusInProgress), present: true, want: false},
+		{
+			name:    "failed result does not park",
+			status:  string(lib.AgentStatusFailed),
+			present: true,
+			want:    false,
+		},
+		{
+			name:    "needs_input result does not park",
+			status:  string(lib.AgentStatusNeedsInput),
+			present: true,
+			want:    false,
+		},
+		{
+			name:    "in_progress result does not park",
+			status:  string(lib.AgentStatusInProgress),
+			present: true,
+			want:    false,
+		},
 		{name: "absent status does not park", present: false, want: false},
-		{name: "unrecognised status does not park", status: "something-else", present: true, want: false},
+		{
+			name:    "unrecognised status does not park",
+			status:  "something-else",
+			present: true,
+			want:    false,
+		},
 		// The re-drive cap: a task that cannot get past the phase is escalated
 		// once its spawn budget at this scope is spent, so the non-done statuses
 		// above cannot loop forever on an uncapped task.
-		{name: "failed result parks once the re-drive budget is spent", status: string(lib.AgentStatusFailed), present: true, triggerCount: maxRedrivesWithoutAdvance, want: true},
-		{name: "absent status parks once the re-drive budget is spent", present: false, triggerCount: maxRedrivesWithoutAdvance, want: true},
-		{name: "failed result still re-drives one spawn below the cap", status: string(lib.AgentStatusFailed), present: true, triggerCount: maxRedrivesWithoutAdvance - 1, want: false},
+		{
+			name:         "failed result parks once the re-drive budget is spent",
+			status:       string(lib.AgentStatusFailed),
+			present:      true,
+			triggerCount: maxRedrivesWithoutAdvance,
+			want:         true,
+		},
+		{
+			name:         "absent status parks once the re-drive budget is spent",
+			present:      false,
+			triggerCount: maxRedrivesWithoutAdvance,
+			want:         true,
+		},
+		{
+			name:         "failed result still re-drives one spawn below the cap",
+			status:       string(lib.AgentStatusFailed),
+			present:      true,
+			triggerCount: maxRedrivesWithoutAdvance - 1,
+			want:         false,
+		},
 		// The count only applies to the scope the task is still at: a task that
 		// has just advanced carries the previous scope's count until its next
 		// spawn rewrites it, and capping there would strand it.
-		{name: "failed result re-drives when the count belongs to a stale scope", status: string(lib.AgentStatusFailed), present: true, triggerCount: maxRedrivesWithoutAdvance, staleScope: true, want: false},
+		{
+			name:         "failed result re-drives when the count belongs to a stale scope",
+			status:       string(lib.AgentStatusFailed),
+			present:      true,
+			triggerCount: maxRedrivesWithoutAdvance,
+			staleScope:   true,
+			want:         false,
+		},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

@@ -4,8 +4,6 @@ github.com/Masterminds/semver/v3 v3.5.0 h1:kQceYJfbupGfZOKZQg0kou0DgAKhzDg2NZPAw
 github.com/Masterminds/semver/v3 v3.5.0/go.mod h1:4V+yj/TJE1HU9XfppCwVMZq3I84lprf4nC11bSS5beM=
 github.com/a2aproject/a2a-go/v2 v2.7.0 h1:rwIpzO5O9Mxu/Rm4S2SZfHYzNcvF3FK9aaaTxP35kAo=
 github.com/a2aproject/a2a-go/v2 v2.7.0/go.mod h1:rvFIb0sBJl2qmJRYU2fQxI6hhIQksmGGMEhT/uRwWww=
-github.com/bborbe/agent v0.140.0 h1:8Lo9PD+J2ReTnLiS4XRUuWfwD3lQbn8M4F9TJNnQ23g=
-github.com/bborbe/agent v0.140.0/go.mod h1:PWVuZegSb6WQm8OOrrIHxUqsoP2K09XUPnrASpR8/mQ=
 github.com/bborbe/agent v0.141.1 h1:tTBHVCMHwpe+oME18UgKZj1rZ7+Kd8TjhudEgbzVAz8=
 github.com/bborbe/agent v0.141.1/go.mod h1:PWVuZegSb6WQm8OOrrIHxUqsoP2K09XUPnrASpR8/mQ=
 github.com/bborbe/argument/v2 v2.13.10 h1:C7/8A0sSwdGbTC577uqMlvfc0KA+EcM3ioj08YmwAGw=
