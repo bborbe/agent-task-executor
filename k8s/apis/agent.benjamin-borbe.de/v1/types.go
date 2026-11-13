@@ -199,6 +199,30 @@ type ConfigSpec struct {
 	// pathological short-deadline kills. Pointer-typed so "unset" is
 	// distinguishable from "0".
 	ZombieJobTimeoutSeconds *int32 `json:"zombieJobTimeoutSeconds,omitempty"`
+	// RunWindow restricts the hours in which this agent's Jobs may be spawned.
+	// Nil means no window: spawns are admitted at any time. A spawn outside the
+	// window is deferred, never dropped, and re-driven once the window opens.
+	RunWindow *RunWindow `json:"runWindow,omitempty"`
+	// RunBudgetSeconds caps a single run's wall-clock time, measured from the
+	// spawned Job's start. 0 (the default) means no separate budget. When both
+	// this and ZombieJobTimeoutSeconds are set, the smaller deadline wins.
+	RunBudgetSeconds int32 `json:"runBudgetSeconds,omitempty"`
+}
+
+// RunWindow declares the hours an agent may run in. The window is evaluated in
+// Timezone and may cross midnight (WeekdayStart later than WeekdayEnd), so a
+// Friday 20:00–06:00 window also admits Saturday morning.
+type RunWindow struct {
+	// Timezone is an IANA zone name (e.g. Europe/Berlin). Empty means UTC.
+	Timezone string `json:"timezone,omitempty"`
+	// WeekdayStart is the window's opening time on Monday–Friday, "HH:MM".
+	// Empty disables the weekday window entirely.
+	WeekdayStart string `json:"weekdayStart,omitempty"`
+	// WeekdayEnd is the window's closing time on Monday–Friday, "HH:MM".
+	// A value earlier than WeekdayStart means the window runs past midnight.
+	WeekdayEnd string `json:"weekdayEnd,omitempty"`
+	// WeekendAllDay admits Saturday and Sunday without time bounds.
+	WeekendAllDay bool `json:"weekendAllDay,omitempty"`
 }
 
 // AgentResources holds optional resource requests and limits for the agent container.

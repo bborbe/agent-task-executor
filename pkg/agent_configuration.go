@@ -103,6 +103,23 @@ type AgentConfiguration struct {
 	// uses it as the elapsed-time threshold. nil means "use the default
 	// DefaultZombieJobTimeoutSeconds from the CRD types package".
 	ZombieJobTimeoutSeconds *int32
+	// RunWindow mirrors ConfigSpec.RunWindow. nil means no window: spawns are
+	// admitted at any hour.
+	RunWindow *agentv1.RunWindow
+	// RunBudgetSeconds mirrors ConfigSpec.RunBudgetSeconds. 0 means no separate
+	// budget; the zombie timeout is the only deadline.
+	RunBudgetSeconds int32
+}
+
+// EffectiveRunDeadlineSeconds returns the hard deadline stamped on a spawned
+// Job: the run budget when it is set and stricter than the zombie timeout,
+// otherwise the effective zombie timeout.
+func (a AgentConfiguration) EffectiveRunDeadlineSeconds() int32 {
+	deadline := a.EffectiveZombieJobTimeoutSeconds()
+	if a.RunBudgetSeconds > 0 && a.RunBudgetSeconds < deadline {
+		return a.RunBudgetSeconds
+	}
+	return deadline
 }
 
 // LostClaimAction maps RerunOnLostClaim to the action to take after another

@@ -957,6 +957,16 @@ func (h *taskEventHandler) spawnIfNeededClaimed(
 		return spawnOutcomeCapped, nil
 	}
 
+	// The run window is checked before the concurrency cap: an agent outside its
+	// window must not occupy a slot it could not use, and the deferral is what
+	// re-drives it once the window opens.
+	if outside, windowErr := h.deferIfOutsideRunWindow(ctx, task, config); windowErr != nil {
+		metrics.TaskEventsTotal.WithLabelValues("error").Inc()
+		return spawnOutcomeSuppressed, windowErr
+	} else if outside {
+		return spawnOutcomeSuppressed, nil
+	}
+
 	capped, err := h.deferIfAtConcurrencyCap(ctx, task, config, claim)
 	if err != nil {
 		if h.handleJobLookupDenied(err) {

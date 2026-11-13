@@ -587,7 +587,7 @@ func applyActiveDeadlineSeconds(
 	taskID lib.TaskIdentifier,
 	job *batchv1.Job,
 ) {
-	deadline := int64(config.EffectiveZombieJobTimeoutSeconds())
+	deadline := int64(config.EffectiveRunDeadlineSeconds())
 	job.Spec.ActiveDeadlineSeconds = &deadline
 	glog.V(2).Infof("set activeDeadlineSeconds=%d on job %s for task %s", deadline, jobName, taskID)
 }

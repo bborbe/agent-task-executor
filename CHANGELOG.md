@@ -2,6 +2,11 @@
 
 All notable changes to this project will be documented in this file.
 
+## Unreleased
+
+- feat: **per-agent run window and per-run time budget.** Two new `ConfigSpec` fields, both optional and both inert when unset, so every existing Config behaves exactly as before. `spec.runWindow` (`timezone`, `weekdayStart`, `weekdayEnd`, `weekendAllDay`) admits a spawn only inside the declared hours; a spawn outside the window is **deferred, not dropped**, and re-driven at the next opening — the same edge-triggered contract the concurrency cap already obeys, because a skipped spawn would never be re-driven and the task would sit at `in_progress` forever. The window is evaluated in the declared IANA zone and may cross midnight, so a Friday 20:00–06:00 window admits Saturday morning without needing `weekendAllDay`. A malformed clock fails closed rather than silently disabling the constraint.
+- feat: `spec.runBudgetSeconds` stamps the Job's `ActiveDeadlineSeconds` from the run budget when it is stricter than `zombieJobTimeoutSeconds`, so a run is killed at its budget instead of at the zombie timeout.
+
 ## v0.60.2
 
 - fix: **the succeeded-Job park requires a `done` result, and a non-done result is re-driven up to a cap.** An agent that reports failure still exits 0 — publishing a failed result returns nil — so a transient failure left a succeeded Job at an unchanged phase, indistinguishable from an agent that parked on purpose, and the park wrote `human_review`, which is outside the trigger phases, so nothing re-drove the task and only a human could undo it. Observed 2026-11-09 on `bborbe/trading#480`: the reviewer agent hit `GH rate limit nearly exhausted (0/12500 remaining)`, reported failed, exited 0, and was parked — it never dispatched again.
