@@ -2,7 +2,7 @@
 
 All notable changes to this project will be documented in this file.
 
-## Unreleased
+## v0.61.2
 
 - fix: **a run is stopped at window close, not only at its budget.** The admission gate refused a spawn outside the window, but a run admitted late inside it outlived the window: a 05:50 start with a 7200s budget ran until 07:50, well into business hours. `ActiveDeadlineSeconds` is now the smaller of the run budget and the time left before the window closes, so the window bounds the whole run rather than only its start. `SecondsUntilRunWindowClose` reports no bound when there is no window, when the window is closed, or when the window never closes within the eight-day scan.
 
