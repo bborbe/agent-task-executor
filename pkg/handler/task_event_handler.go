@@ -957,7 +957,7 @@ func (h *taskEventHandler) spawnIfNeededClaimed(
 		return spawnOutcomeCapped, nil
 	}
 
-	capped, err := h.deferIfAtConcurrencyCap(ctx, task, config, claim)
+	capped, err := h.deferIfNotAdmitted(ctx, task, config, claim)
 	if err != nil {
 		if h.handleJobLookupDenied(err) {
 			return spawnOutcomeSuppressed, nil

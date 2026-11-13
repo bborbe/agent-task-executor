@@ -6,6 +6,7 @@ package handler
 
 import (
 	"context"
+	"time"
 
 	lib "github.com/bborbe/agent"
 	"github.com/golang/glog"
@@ -13,6 +14,56 @@ import (
 	pkg "github.com/bborbe/agent-task-executor/pkg"
 	"github.com/bborbe/agent-task-executor/pkg/metrics"
 )
+
+// deferIfNotAdmitted applies every admission bound this executor enforces: the
+// agent's run window first, then the concurrency cap. Both defer rather than
+// skip — task publication is edge-triggered on vault file changes, so a skipped
+// spawn would never be re-driven and the task would sit at in_progress forever,
+// indistinguishable from work in flight. The window runs first so an agent
+// outside its hours does not hold a slot it could not use.
+func (h *taskEventHandler) deferIfNotAdmitted(
+	ctx context.Context,
+	task lib.Task,
+	config *pkg.AgentConfiguration,
+	claim *deferredClaim,
+) (bool, error) {
+	if h.deferIfOutsideRunWindow(task, config) {
+		return true, nil
+	}
+	return h.deferIfAtConcurrencyCap(ctx, task, config, claim)
+}
+
+// deferIfOutsideRunWindow reports whether the agent's run window is currently
+// closed, and if so defers the respawn until it opens.
+func (h *taskEventHandler) deferIfOutsideRunWindow(
+	task lib.Task,
+	config *pkg.AgentConfiguration,
+) bool {
+	if config == nil || config.RunWindow == nil {
+		return false
+	}
+	now := h.currentDateTime.Now().Time()
+	allowed, nextOpen := pkg.IsWithinRunWindow(now, config.RunWindow)
+	if allowed {
+		return false
+	}
+	glog.V(1).Infof(
+		"event=run_window_closed task=%s assignee=%s now=%s next_open=%s",
+		task.TaskIdentifier,
+		config.Assignee,
+		now.Format(time.RFC3339),
+		nextOpen.Format(time.RFC3339),
+	)
+	metrics.TaskEventsTotal.WithLabelValues("deferred_run_window").Inc()
+	h.deferredMu.Lock()
+	h.deferredRespawns[task.TaskIdentifier] = deferredEntry{
+		task:       task,
+		config:     *config,
+		retryAfter: nextOpen,
+	}
+	h.deferredMu.Unlock()
+	return true
+}
 
 // deferIfAtConcurrencyCap reports whether the agent is already running its
 // effective capacity — the smaller positive value of MaxConcurrentJobs and the

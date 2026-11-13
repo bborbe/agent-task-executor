@@ -8,7 +8,9 @@ import (
 	"context"
 	"reflect"
 	"regexp"
+	"strconv"
 	"strings"
+	"time"
 
 	"github.com/bborbe/errors"
 	libk8s "github.com/bborbe/k8s"
@@ -199,6 +201,30 @@ type ConfigSpec struct {
 	// pathological short-deadline kills. Pointer-typed so "unset" is
 	// distinguishable from "0".
 	ZombieJobTimeoutSeconds *int32 `json:"zombieJobTimeoutSeconds,omitempty"`
+	// RunWindow restricts the hours in which this agent's Jobs may be spawned.
+	// Nil means no window: spawns are admitted at any time. A spawn outside the
+	// window is deferred, never dropped, and re-driven once the window opens.
+	RunWindow *RunWindow `json:"runWindow,omitempty"`
+	// RunBudgetSeconds caps a single run's wall-clock time, measured from the
+	// spawned Job's start. 0 (the default) means no separate budget. When both
+	// this and ZombieJobTimeoutSeconds are set, the smaller deadline wins.
+	RunBudgetSeconds int32 `json:"runBudgetSeconds,omitempty"`
+}
+
+// RunWindow declares the hours an agent may run in. The window is evaluated in
+// Timezone and may cross midnight (WeekdayStart later than WeekdayEnd), so a
+// Friday 20:00–06:00 window also admits Saturday morning.
+type RunWindow struct {
+	// Timezone is an IANA zone name (e.g. Europe/Berlin). Empty means UTC.
+	Timezone string `json:"timezone,omitempty"`
+	// WeekdayStart is the window's opening time on Monday–Friday, "HH:MM".
+	// Empty disables the weekday window entirely.
+	WeekdayStart string `json:"weekdayStart,omitempty"`
+	// WeekdayEnd is the window's closing time on Monday–Friday, "HH:MM".
+	// A value earlier than WeekdayStart means the window runs past midnight.
+	WeekdayEnd string `json:"weekdayEnd,omitempty"`
+	// WeekendAllDay admits Saturday and Sunday without time bounds.
+	WeekendAllDay bool `json:"weekendAllDay,omitempty"`
 }
 
 // AgentResources holds optional resource requests and limits for the agent container.
@@ -311,7 +337,9 @@ func (s ConfigSpec) Equal(o ConfigSpec) bool {
 		reflect.DeepEqual(s.Trigger, o.Trigger) &&
 		s.TargetVault == o.TargetVault &&
 		reflect.DeepEqual(s.ZombieSweeperIntervalSeconds, o.ZombieSweeperIntervalSeconds) &&
-		reflect.DeepEqual(s.ZombieJobTimeoutSeconds, o.ZombieJobTimeoutSeconds)
+		reflect.DeepEqual(s.ZombieJobTimeoutSeconds, o.ZombieJobTimeoutSeconds) &&
+		reflect.DeepEqual(s.RunWindow, o.RunWindow) &&
+		s.RunBudgetSeconds == o.RunBudgetSeconds
 }
 
 // Validate validates the ConfigSpec fields.
@@ -366,7 +394,55 @@ func (s ConfigSpec) Validate(ctx context.Context) error {
 	if err := validateZombieSweeperInterval(ctx, s.ZombieSweeperIntervalSeconds); err != nil {
 		return err
 	}
-	return validateZombieJobTimeout(ctx, s.ZombieJobTimeoutSeconds)
+	if err := validateZombieJobTimeout(ctx, s.ZombieJobTimeoutSeconds); err != nil {
+		return err
+	}
+	return validateRunWindow(ctx, s.RunWindow)
+}
+
+// validateRunWindow rejects a window the executor would otherwise have to guess
+// at. The timezone is checked because an unresolvable zone falls back to UTC,
+// which shifts a Europe/Berlin window by one or two hours with no error — the
+// exact silent misconfiguration this field exists to prevent. The clock strings
+// are checked here too, not only by the CRD's regex, so a Config applied
+// through a path that bypasses schema validation still fails loudly.
+func validateRunWindow(ctx context.Context, w *RunWindow) error {
+	if w == nil {
+		return nil
+	}
+	if w.Timezone != "" {
+		if _, err := time.LoadLocation(w.Timezone); err != nil {
+			return errors.Wrapf(ctx, validation.Error, "runWindow.timezone %q is not a valid IANA zone", w.Timezone)
+		}
+	}
+	for _, clock := range []struct{ name, value string }{
+		{"weekdayStart", w.WeekdayStart},
+		{"weekdayEnd", w.WeekdayEnd},
+	} {
+		if clock.value == "" {
+			continue
+		}
+		if !validClock(clock.value) {
+			return errors.Wrapf(ctx, validation.Error, "runWindow.%s %q is not HH:MM", clock.name, clock.value)
+		}
+	}
+	return nil
+}
+
+func validClock(value string) bool {
+	parts := strings.SplitN(value, ":", 2)
+	if len(parts) != 2 || len(parts[0]) != 2 || len(parts[1]) != 2 {
+		return false
+	}
+	hour, err := strconv.Atoi(parts[0])
+	if err != nil || hour < 0 || hour > 23 {
+		return false
+	}
+	minute, err := strconv.Atoi(parts[1])
+	if err != nil || minute < 0 || minute > 59 {
+		return false
+	}
+	return true
 }
 
 func validateZombieSweeperInterval(ctx context.Context, v *int32) error {
