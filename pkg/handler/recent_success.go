@@ -37,6 +37,28 @@ import (
 // nothing, so it is still re-driven.
 func (h *taskEventHandler) recentlySucceeded(ctx context.Context, task lib.Task) bool {
 	phase := taskPhase(task)
+	// A succeeded Job is not by itself evidence that the run succeeded: an agent
+	// that reports failure still exits 0, so the Job watcher records a success
+	// for it (pkg/job_watcher.go handleSucceededJob, MarkSucceeded). Suppressing
+	// on that record hides the failure for the whole write-back grace and then
+	// hands the task to the re-drive path, so the executor's view of a failed run
+	// is a success at every step.
+	//
+	// last_result_status is the agent's own verdict, stamped by its delivery in
+	// the same write that carries the phase, so an explicit `failed` outranks the
+	// success record: the run failed, and suppressing it would suppress work that
+	// did not happen. An absent or unrecognised value still suppresses — an older
+	// agent, or a write that has not landed, must not be read as a failure,
+	// because guessing wrong there re-spawns work that already ran.
+	if resultStatus, ok := task.Frontmatter.String("last_result_status"); ok &&
+		resultStatus == string(lib.AgentStatusFailed) {
+		glog.Infof(
+			"event=skip_recent_success_bypassed task=%s phase=%s last_result_status=%q",
+			task.TaskIdentifier, phase, resultStatus,
+		)
+		metrics.TaskEventsTotal.WithLabelValues("skip_recent_success_bypassed").Inc()
+		return false
+	}
 	succeeded, ok := h.lastSuccess(ctx, task, phase)
 	if !ok {
 		return false
