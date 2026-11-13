@@ -30,7 +30,8 @@ var _ = Describe("IsWithinRunWindow", func() {
 		return time.Date(year, month, day, hour, minute, 0, 0, mustLocation("Europe/Berlin"))
 	}
 
-	DescribeTable("the boundary",
+	DescribeTable(
+		"the boundary",
 		func(now time.Time, allowed bool) {
 			inside, _ := pkg.IsWithinRunWindow(now, window)
 			Expect(inside).To(Equal(allowed))
@@ -43,7 +44,11 @@ var _ = Describe("IsWithinRunWindow", func() {
 		Entry("Sunday midday is allowed", berlin(2026, time.November, 15, 12, 0), true),
 		Entry("Monday 06:01 is refused", berlin(2026, time.November, 16, 6, 1), false),
 		Entry("Friday 23:00 is allowed", berlin(2026, time.November, 13, 23, 0), true),
-		Entry("Saturday 05:00 is allowed via the weekend rule", berlin(2026, time.November, 14, 5, 0), true),
+		Entry(
+			"Saturday 05:00 is allowed via the weekend rule",
+			berlin(2026, time.November, 14, 5, 0),
+			true,
+		),
 	)
 
 	It("admits everything when no window is set", func() {
