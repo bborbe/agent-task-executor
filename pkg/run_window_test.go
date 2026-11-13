@@ -72,6 +72,49 @@ var _ = Describe("IsWithinRunWindow", func() {
 	})
 })
 
+var _ = Describe("SecondsUntilRunWindowClose", func() {
+	window := &agentv1.RunWindow{
+		Timezone:      "Europe/Berlin",
+		WeekdayStart:  "20:00",
+		WeekdayEnd:    "06:00",
+		WeekendAllDay: true,
+	}
+	berlin := func(year int, month time.Month, day, hour, minute int) time.Time {
+		return time.Date(year, month, day, hour, minute, 0, 0, mustLocation("Europe/Berlin"))
+	}
+
+	It("returns the time left before the morning close", func() {
+		remaining, ok := pkg.SecondsUntilRunWindowClose(berlin(2026, time.November, 17, 5, 0), window)
+		Expect(ok).To(BeTrue())
+		Expect(remaining).To(Equal(int32(3600)))
+	})
+
+	It("returns the time left before the morning close from the evening half", func() {
+		remaining, ok := pkg.SecondsUntilRunWindowClose(berlin(2026, time.November, 16, 21, 0), window)
+		Expect(ok).To(BeTrue())
+		Expect(remaining).To(Equal(int32(9 * 3600)))
+	})
+
+	It("never returns zero in the window's final second", func() {
+		last := time.Date(2026, time.November, 17, 5, 59, 59, 900_000_000, mustLocation("Europe/Berlin"))
+		remaining, ok := pkg.SecondsUntilRunWindowClose(last, window)
+		Expect(ok).To(BeTrue())
+		// Kubernetes rejects ActiveDeadlineSeconds: 0, so the truncating
+		// conversion must clamp rather than hand back a zero.
+		Expect(remaining).To(BeNumerically(">=", 1))
+	})
+
+	It("reports no bound when there is no window", func() {
+		_, ok := pkg.SecondsUntilRunWindowClose(berlin(2026, time.November, 16, 21, 0), nil)
+		Expect(ok).To(BeFalse())
+	})
+
+	It("reports no bound when the window is closed", func() {
+		_, ok := pkg.SecondsUntilRunWindowClose(berlin(2026, time.November, 16, 12, 0), window)
+		Expect(ok).To(BeFalse())
+	})
+})
+
 var _ = Describe("AgentConfiguration.EffectiveRunDeadlineSeconds", func() {
 	ptrInt32 := func(v int32) *int32 { return &v }
 

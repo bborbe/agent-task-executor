@@ -9,6 +9,7 @@ import (
 	stderrors "errors"
 	"maps"
 	"strings"
+	"time"
 
 	lib "github.com/bborbe/agent"
 	"github.com/bborbe/errors"
@@ -202,7 +203,7 @@ func (s *jobSpawner) SpawnJob(
 	applyEphemeralStorage(config, job)
 	s.applyKafkaCertVolumes(job)
 	applyScheduling(config, job)
-	applyActiveDeadlineSeconds(config, jobName, task.TaskIdentifier, job)
+	applyActiveDeadlineSeconds(config, jobName, task.TaskIdentifier, job, s.currentDateTimeGetter.Now().Time())
 
 	if err := s.createJob(ctx, jobNamespace, job, jobName, task.TaskIdentifier, config.Image); err != nil {
 		return "", err
@@ -586,8 +587,21 @@ func applyActiveDeadlineSeconds(
 	jobName string,
 	taskID lib.TaskIdentifier,
 	job *batchv1.Job,
+	now time.Time,
 ) {
 	deadline := int64(config.EffectiveRunDeadlineSeconds())
+	// A run admitted late in the window must not outlive it. Capping the deadline
+	// at the window's remaining time is what makes "stopped at window end" true
+	// for the whole run, not only for spawns that arrive after it — the budget
+	// alone would let a 05:50 start run two hours into business hours.
+	if remaining, ok := pkg.SecondsUntilRunWindowClose(now, config.RunWindow); ok &&
+		int64(remaining) < deadline {
+		deadline = int64(remaining)
+		glog.V(2).Infof(
+			"run window closes before the budget; deadline=%d on job %s for task %s",
+			deadline, jobName, taskID,
+		)
+	}
 	job.Spec.ActiveDeadlineSeconds = &deadline
 	glog.V(2).Infof("set activeDeadlineSeconds=%d on job %s for task %s", deadline, jobName, taskID)
 }

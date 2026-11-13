@@ -2,6 +2,10 @@
 
 All notable changes to this project will be documented in this file.
 
+## Unreleased
+
+- fix: **a run is stopped at window close, not only at its budget.** The admission gate refused a spawn outside the window, but a run admitted late inside it outlived the window: a 05:50 start with a 7200s budget ran until 07:50, well into business hours. `ActiveDeadlineSeconds` is now the smaller of the run budget and the time left before the window closes, so the window bounds the whole run rather than only its start. `SecondsUntilRunWindowClose` reports no bound when there is no window, when the window is closed, or when the window never closes within the eight-day scan.
+
 ## v0.61.1
 
 - fix: **a run whose agent published `failed` is no longer suppressed as a success.** A failed run still exits 0, so the Job watcher records a success for it (`handleSucceededJob` → `MarkSucceeded`) and the suppression path saw only that record — hiding the failure for the whole 300 s write-back grace and then handing the task to the re-drive path, three times, before parking it at `human_review`. `recentlySucceeded` now returns false when the task carries `last_result_status: failed`, so the run re-drives immediately instead of after the grace. An absent or unrecognised value still suppresses: an older agent, or a write that has not landed, must not be read as a failure, because guessing wrong there re-spawns work that already ran. The recording half is unchanged — `MarkSucceeded` still writes a success at Job completion, where the published result is not yet readable — so the success record remains a statement about the Job, not about the agent's verdict. Change set: `pkg/handler/recent_success.go`, `pkg/handler/success_record_test.go`, `CHANGELOG.md`.

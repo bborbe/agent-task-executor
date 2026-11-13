@@ -45,6 +45,37 @@ func NextRunWindowOpen(now time.Time, window *agentv1.RunWindow) time.Time {
 	return now.Add(7 * 24 * time.Hour)
 }
 
+// SecondsUntilRunWindowClose returns how long the window stays open from now.
+// The caller caps a Job's deadline with it so a run admitted near the end of the
+// window is stopped when the window closes rather than running into business
+// hours. ok is false when there is no window, or when the window never closes
+// within the eight-day scan (a permanently open configuration).
+func SecondsUntilRunWindowClose(now time.Time, window *agentv1.RunWindow) (int32, bool) {
+	if window == nil {
+		return 0, false
+	}
+	local := now.In(runWindowLocation(window.Timezone))
+	if !inRunWindowAt(local, window) {
+		return 0, false
+	}
+	probe := local.Truncate(time.Minute)
+	for i := 0; i < 8*24*60; i++ {
+		probe = probe.Add(time.Minute)
+		if !inRunWindowAt(probe, window) {
+			remaining := int32(probe.Sub(local).Seconds())
+			// Seconds() truncates, so a start in the window's final second yields
+			// 0 — and JobSpec rejects a non-positive ActiveDeadlineSeconds, which
+			// would turn a valid spawn into a failed one. One second is the
+			// smallest deadline that is still a deadline.
+			if remaining < 1 {
+				remaining = 1
+			}
+			return remaining, true
+		}
+	}
+	return 0, false
+}
+
 func runWindowLocation(name string) *time.Location {
 	if name == "" {
 		return time.UTC
