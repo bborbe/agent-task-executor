@@ -90,6 +90,15 @@ var _ = Describe("SecondsUntilRunWindowClose", func() {
 		Expect(remaining).To(Equal(int32(9 * 3600)))
 	})
 
+	It("never returns zero in the window's final second", func() {
+		last := time.Date(2026, time.November, 17, 5, 59, 59, 900_000_000, mustLocation("Europe/Berlin"))
+		remaining, ok := pkg.SecondsUntilRunWindowClose(last, window)
+		Expect(ok).To(BeTrue())
+		// Kubernetes rejects ActiveDeadlineSeconds: 0, so the truncating
+		// conversion must clamp rather than hand back a zero.
+		Expect(remaining).To(BeNumerically(">=", 1))
+	})
+
 	It("reports no bound when there is no window", func() {
 		_, ok := pkg.SecondsUntilRunWindowClose(berlin(2026, time.November, 16, 21, 0), nil)
 		Expect(ok).To(BeFalse())

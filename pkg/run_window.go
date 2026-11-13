@@ -62,7 +62,15 @@ func SecondsUntilRunWindowClose(now time.Time, window *agentv1.RunWindow) (int32
 	for i := 0; i < 8*24*60; i++ {
 		probe = probe.Add(time.Minute)
 		if !inRunWindowAt(probe, window) {
-			return int32(probe.Sub(local).Seconds()), true
+			remaining := int32(probe.Sub(local).Seconds())
+			// Seconds() truncates, so a start in the window's final second yields
+			// 0 — and JobSpec rejects a non-positive ActiveDeadlineSeconds, which
+			// would turn a valid spawn into a failed one. One second is the
+			// smallest deadline that is still a deadline.
+			if remaining < 1 {
+				remaining = 1
+			}
+			return remaining, true
 		}
 	}
 	return 0, false
