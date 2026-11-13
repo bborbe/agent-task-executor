@@ -2,7 +2,7 @@
 
 All notable changes to this project will be documented in this file.
 
-## Unreleased
+## v0.60.3
 
 - fix: **the succeeded-Job park closes the record instead of leaving it in `human_review`.** `PublishParkSucceeded` delegated to `PublishParkLostClaim`, so both parks wrote `phase: human_review` and a finished record never reached a terminal state. Measured 2026-11-13: **35 of 55** open `private-agent` records were `## Parked: parked_succeeded` sitting at `human_review`, every one closed by hand. The two parks share a body but not an outcome — a lost claim needs a human to look at it, a succeeded park is finished work — so the succeeded path now writes `status: completed` and `phase: done` in the same command as its `## Parked` section. `done` is already in `terminalPhases`, so the reconcile still stops re-driving it. ⚠️ **The cap-exhausted park is a third outcome and stays open:** the same handler function also parks a non-`done` result (`failed`, `needs_input`, `in_progress`, absent) once its re-drive budget is spent, and that run did not finish. It now goes through a separate `PublishParkRedriveCap` that keeps `phase: human_review`, so a failed task is never reported as completed. Change set: `pkg/result_publisher.go`, `pkg/result_publisher_test.go`, `pkg/handler/park_succeeded.go`, `pkg/handler/park_succeeded_internal_test.go`, `pkg/handler/claim_wiring_internal_test.go`, `pkg/handler/claim_spawn_order_internal_test.go`, `pkg/job_watcher_internal_test.go`, `mocks/result_publisher.go`, `CHANGELOG.md`.
 
