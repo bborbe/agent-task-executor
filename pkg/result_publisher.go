@@ -219,6 +219,12 @@ type ResultPublisher interface {
 	// forever; with human_review instead, a finished record never terminalises
 	// and has to be closed by hand.
 	PublishParkSucceeded(ctx context.Context, task lib.Task) error
+	// PublishParkRedriveCap writes phase "human_review" and a "## Parked" body
+	// section for a task whose Job succeeded but whose result never reported
+	// done, after its re-drive budget was spent. It is deliberately NOT
+	// terminal: the work did not finish, so the record has to stay open for a
+	// human. Only a done result closes the record.
+	PublishParkRedriveCap(ctx context.Context, task lib.Task) error
 	// PublishAbort closes a record the consecutive-re-drive cap has decided to
 	// stop driving. It writes status aborted plus the close-out pair vault-cli
 	// requires (aborted_reason and gate_successor) and clears current_job. It
@@ -1148,6 +1154,20 @@ func (p *resultPublisher) PublishParkSucceeded(
 		},
 	}
 	return p.publishRaw(ctx, taskcmd.UpdateFrontmatterCommandOperation, cmd)
+}
+
+// PublishParkRedriveCap writes phase "human_review" and a "## Parked" body
+// section for a task whose Job succeeded but whose result never reported done,
+// after its re-drive budget was spent.
+//
+// It shares PublishParkLostClaim's write because that write is exactly the
+// escalation: the record stays open for a human. It must never be terminal —
+// the work did not finish, and closing it would report failed work as completed.
+func (p *resultPublisher) PublishParkRedriveCap(
+	ctx context.Context,
+	task lib.Task,
+) error {
+	return p.PublishParkLostClaim(ctx, task, ParkReasonSucceeded, "", "")
 }
 
 // PublishAbort closes a record the consecutive-re-drive cap has stopped

@@ -1149,6 +1149,41 @@ var _ = Describe("ResultPublisher", func() {
 		)
 	})
 
+	Describe("PublishParkRedriveCap", func() {
+		It(
+			"leaves the record open at human_review, never closed as completed",
+			func() {
+				// The cap-exhausted park is the escalation for a run that did NOT
+				// finish, so it must stay open: writing completed here would report
+				// failed work as finished.
+				task := lib.Task{
+					TaskIdentifier: lib.TaskIdentifier("test-task-redrive-cap"),
+					Frontmatter: lib.TaskFrontmatter{
+						"status":       "in_progress",
+						"phase":        "execution",
+						"assignee":     "claude",
+						"current_job":  "job-1",
+						"target_vault": "work",
+					},
+				}
+				err := publisher.PublishParkRedriveCap(ctx, task)
+				Expect(err).NotTo(HaveOccurred())
+
+				Expect(producer.messages).To(HaveLen(1))
+				_, cmd := decodeUpdateFrontmatterCommand(producer.messages[0])
+
+				Expect(cmd.Updates).To(HaveLen(1))
+				Expect(cmd.Updates["phase"]).To(Equal("human_review"))
+				Expect(cmd.Updates).NotTo(HaveKey("status"))
+				Expect(cmd.Updates).NotTo(HaveKey("assignee"))
+				Expect(cmd.Updates).NotTo(HaveKey("current_job"))
+				Expect(cmd.Body).NotTo(BeNil())
+				Expect(cmd.Body.Heading).To(Equal("## Parked"))
+				Expect(cmd.Validate(ctx)).To(Succeed())
+			},
+		)
+	})
+
 	Describe("PublishRestoreAssignee", func() {
 		It(
 			"writes exactly one assignee key and no counter key via UpdateFrontmatterCommand",

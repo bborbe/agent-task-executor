@@ -79,6 +79,11 @@ type parkCase struct {
 	triggerCount int
 	staleScope   bool
 	want         bool
+	// wantCap marks a row that parks through the re-drive cap rather than on a
+	// done result. The two write different outcomes — the cap park stays open at
+	// human_review, the done park closes the record — so a row that asserts only
+	// "a park happened" cannot tell them apart.
+	wantCap bool
 }
 
 // seeded builds a handler whose view holds the task this row describes, with the
@@ -172,12 +177,14 @@ func TestParkSucceededWithoutPhaseMoveParksOnlyOnADoneResult(t *testing.T) {
 			present:      true,
 			triggerCount: maxRedrivesWithoutAdvance,
 			want:         true,
+			wantCap:      true,
 		},
 		{
 			name:         "absent status parks once the re-drive budget is spent",
 			present:      false,
 			triggerCount: maxRedrivesWithoutAdvance,
 			want:         true,
+			wantCap:      true,
 		},
 		{
 			name:         "failed result still re-drives one spawn below the cap",
@@ -205,14 +212,34 @@ func TestParkSucceededWithoutPhaseMoveParksOnlyOnADoneResult(t *testing.T) {
 			if got != tc.want {
 				t.Fatalf("parkSucceededWithoutPhaseMove = %t; want %t", got, tc.want)
 			}
-			wantPublish := 0
-			if tc.want {
-				wantPublish = 1
-			}
-			if published := len(publisher.parkedSucceeded); published != wantPublish {
-				t.Fatalf("park count = %d; want %d", published, wantPublish)
-			}
+			assertParkCalls(t, publisher, tc.want, tc.wantCap)
 		})
+	}
+}
+
+// assertParkCalls pins which of the two parks fired. A row that asserts only
+// that some park happened cannot tell the terminal done park from the open
+// cap-exhausted one, and getting that backwards reports failed work as finished.
+func assertParkCalls(
+	t *testing.T,
+	publisher *parkRecordingPublisher,
+	want bool,
+	wantCap bool,
+) {
+	t.Helper()
+	wantSucceeded, wantCaps := 0, 0
+	if want {
+		if wantCap {
+			wantCaps = 1
+		} else {
+			wantSucceeded = 1
+		}
+	}
+	if got := len(publisher.parkedSucceeded); got != wantSucceeded {
+		t.Fatalf("succeeded-park count = %d; want %d", got, wantSucceeded)
+	}
+	if got := len(publisher.parkedRedriveCap); got != wantCaps {
+		t.Fatalf("cap-park count = %d; want %d", got, wantCaps)
 	}
 }
 
