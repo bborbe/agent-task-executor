@@ -2,6 +2,10 @@
 
 All notable changes to this project will be documented in this file.
 
+## Unreleased
+
+- fix: **a run is stopped at window close, not only at its budget.** The admission gate refused a spawn outside the window, but a run admitted late inside it outlived the window: a 05:50 start with a 7200s budget ran until 07:50, well into business hours. `ActiveDeadlineSeconds` is now the smaller of the run budget and the time left before the window closes, so the window bounds the whole run rather than only its start. `SecondsUntilRunWindowClose` reports no bound when there is no window, when the window is closed, or when the window never closes within the eight-day scan.
+
 ## v0.61.0
 
 - feat: **per-agent run window and per-run time budget.** Two new `ConfigSpec` fields, both optional and both inert when unset, so every existing Config behaves exactly as before. `spec.runWindow` (`timezone`, `weekdayStart`, `weekdayEnd`, `weekendAllDay`) admits a spawn only inside the declared hours; a spawn outside the window is **deferred, not dropped**, and re-driven at the next opening — the same edge-triggered contract the concurrency cap already obeys, because a skipped spawn would never be re-driven and the task would sit at `in_progress` forever. The window is evaluated in the declared IANA zone and may cross midnight, so a Friday 20:00–06:00 window admits Saturday morning without needing `weekendAllDay`. A malformed clock fails closed rather than silently disabling the constraint.
