@@ -15,24 +15,37 @@ import (
 	"github.com/bborbe/agent-task-executor/pkg/metrics"
 )
 
-// deferIfOutsideRunWindow reports whether the agent's run window is currently
-// closed, and if so defers the respawn until it opens. Like the concurrency cap
-// it defers rather than skips: task publication is edge-triggered on vault file
-// changes, so a skipped spawn would never be re-driven and the task would sit at
-// in_progress forever, indistinguishable from work in flight.
-func (h *taskEventHandler) deferIfOutsideRunWindow(
+// deferIfNotAdmitted applies every admission bound this executor enforces: the
+// agent's run window first, then the concurrency cap. Both defer rather than
+// skip — task publication is edge-triggered on vault file changes, so a skipped
+// spawn would never be re-driven and the task would sit at in_progress forever,
+// indistinguishable from work in flight. The window runs first so an agent
+// outside its hours does not hold a slot it could not use.
+func (h *taskEventHandler) deferIfNotAdmitted(
 	ctx context.Context,
 	task lib.Task,
 	config *pkg.AgentConfiguration,
+	claim *deferredClaim,
 ) (bool, error) {
-	_ = ctx
+	if h.deferIfOutsideRunWindow(task, config) {
+		return true, nil
+	}
+	return h.deferIfAtConcurrencyCap(ctx, task, config, claim)
+}
+
+// deferIfOutsideRunWindow reports whether the agent's run window is currently
+// closed, and if so defers the respawn until it opens.
+func (h *taskEventHandler) deferIfOutsideRunWindow(
+	task lib.Task,
+	config *pkg.AgentConfiguration,
+) bool {
 	if config == nil || config.RunWindow == nil {
-		return false, nil
+		return false
 	}
 	now := h.currentDateTime.Now().Time()
 	allowed, nextOpen := pkg.IsWithinRunWindow(now, config.RunWindow)
 	if allowed {
-		return false, nil
+		return false
 	}
 	glog.V(1).Infof(
 		"event=run_window_closed task=%s assignee=%s now=%s next_open=%s",
@@ -49,7 +62,7 @@ func (h *taskEventHandler) deferIfOutsideRunWindow(
 		retryAfter: nextOpen,
 	}
 	h.deferredMu.Unlock()
-	return true, nil
+	return true
 }
 
 // deferIfAtConcurrencyCap reports whether the agent is already running its
