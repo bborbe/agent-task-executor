@@ -308,6 +308,9 @@ type parkRecordingPublisher struct {
 	// parkedSucceeded records the succeeded-Job parks, which write a different
 	// phase for a different cause and must not be conflated with the above.
 	parkedSucceeded []lib.Task
+	// parkedRedriveCap records the cap-exhausted parks, which stay open: the
+	// work did not finish, so they must never be recorded as succeeded.
+	parkedRedriveCap []lib.Task
 	// failParkSucceeded makes every succeeded-Job park fail, so a spec can pin
 	// the log-and-continue branch.
 	failParkSucceeded bool
@@ -341,6 +344,18 @@ func (s *parkRecordingPublisher) PublishParkSucceeded(
 		return stderrors.New("publish failed")
 	}
 	s.parkedSucceeded = append(s.parkedSucceeded, task)
+	return nil
+}
+
+// PublishParkRedriveCap records a cap-exhausted park, which must stay open.
+func (s *parkRecordingPublisher) PublishParkRedriveCap(
+	_ context.Context,
+	task lib.Task,
+) error {
+	if s.failParkSucceeded {
+		return stderrors.New("publish failed")
+	}
+	s.parkedRedriveCap = append(s.parkedRedriveCap, task)
 	return nil
 }
 

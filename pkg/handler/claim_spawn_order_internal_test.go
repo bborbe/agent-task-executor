@@ -132,6 +132,10 @@ func (stubResultPublisher) PublishParkSucceeded(context.Context, lib.Task) error
 	return nil
 }
 
+func (stubResultPublisher) PublishParkRedriveCap(context.Context, lib.Task) error {
+	return nil
+}
+
 func (stubResultPublisher) PublishAbort(
 	context.Context, lib.Task, string, int,
 ) error {

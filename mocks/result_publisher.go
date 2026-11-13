@@ -81,6 +81,18 @@ type FakeResultPublisher struct {
 	publishParkLostClaimReturnsOnCall map[int]struct {
 		result1 error
 	}
+	PublishParkRedriveCapStub        func(context.Context, lib.Task) error
+	publishParkRedriveCapMutex       sync.RWMutex
+	publishParkRedriveCapArgsForCall []struct {
+		arg1 context.Context
+		arg2 lib.Task
+	}
+	publishParkRedriveCapReturns struct {
+		result1 error
+	}
+	publishParkRedriveCapReturnsOnCall map[int]struct {
+		result1 error
+	}
 	PublishParkSucceededStub        func(context.Context, lib.Task) error
 	publishParkSucceededMutex       sync.RWMutex
 	publishParkSucceededArgsForCall []struct {
@@ -521,6 +533,68 @@ func (fake *FakeResultPublisher) PublishParkLostClaimReturnsOnCall(i int, result
 		})
 	}
 	fake.publishParkLostClaimReturnsOnCall[i] = struct {
+		result1 error
+	}{result1}
+}
+
+func (fake *FakeResultPublisher) PublishParkRedriveCap(arg1 context.Context, arg2 lib.Task) error {
+	fake.publishParkRedriveCapMutex.Lock()
+	ret, specificReturn := fake.publishParkRedriveCapReturnsOnCall[len(fake.publishParkRedriveCapArgsForCall)]
+	fake.publishParkRedriveCapArgsForCall = append(fake.publishParkRedriveCapArgsForCall, struct {
+		arg1 context.Context
+		arg2 lib.Task
+	}{arg1, arg2})
+	stub := fake.PublishParkRedriveCapStub
+	fakeReturns := fake.publishParkRedriveCapReturns
+	fake.recordInvocation("PublishParkRedriveCap", []interface{}{arg1, arg2})
+	fake.publishParkRedriveCapMutex.Unlock()
+	if stub != nil {
+		return stub(arg1, arg2)
+	}
+	if specificReturn {
+		return ret.result1
+	}
+	return fakeReturns.result1
+}
+
+func (fake *FakeResultPublisher) PublishParkRedriveCapCallCount() int {
+	fake.publishParkRedriveCapMutex.RLock()
+	defer fake.publishParkRedriveCapMutex.RUnlock()
+	return len(fake.publishParkRedriveCapArgsForCall)
+}
+
+func (fake *FakeResultPublisher) PublishParkRedriveCapCalls(stub func(context.Context, lib.Task) error) {
+	fake.publishParkRedriveCapMutex.Lock()
+	defer fake.publishParkRedriveCapMutex.Unlock()
+	fake.PublishParkRedriveCapStub = stub
+}
+
+func (fake *FakeResultPublisher) PublishParkRedriveCapArgsForCall(i int) (context.Context, lib.Task) {
+	fake.publishParkRedriveCapMutex.RLock()
+	defer fake.publishParkRedriveCapMutex.RUnlock()
+	argsForCall := fake.publishParkRedriveCapArgsForCall[i]
+	return argsForCall.arg1, argsForCall.arg2
+}
+
+func (fake *FakeResultPublisher) PublishParkRedriveCapReturns(result1 error) {
+	fake.publishParkRedriveCapMutex.Lock()
+	defer fake.publishParkRedriveCapMutex.Unlock()
+	fake.PublishParkRedriveCapStub = nil
+	fake.publishParkRedriveCapReturns = struct {
+		result1 error
+	}{result1}
+}
+
+func (fake *FakeResultPublisher) PublishParkRedriveCapReturnsOnCall(i int, result1 error) {
+	fake.publishParkRedriveCapMutex.Lock()
+	defer fake.publishParkRedriveCapMutex.Unlock()
+	fake.PublishParkRedriveCapStub = nil
+	if fake.publishParkRedriveCapReturnsOnCall == nil {
+		fake.publishParkRedriveCapReturnsOnCall = make(map[int]struct {
+			result1 error
+		})
+	}
+	fake.publishParkRedriveCapReturnsOnCall[i] = struct {
 		result1 error
 	}{result1}
 }
