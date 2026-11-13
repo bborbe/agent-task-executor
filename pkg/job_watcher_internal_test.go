@@ -572,6 +572,13 @@ func (f *fakeResultPublisher) PublishParkSucceeded(
 	return nil
 }
 
+func (f *fakeResultPublisher) PublishParkRedriveCap(
+	ctx context.Context,
+	task lib.Task,
+) error {
+	return nil
+}
+
 func (f *fakeResultPublisher) PublishQueueEntry(
 	ctx context.Context,
 	task lib.Task,

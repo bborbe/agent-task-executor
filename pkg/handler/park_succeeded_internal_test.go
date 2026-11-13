@@ -79,6 +79,11 @@ type parkCase struct {
 	triggerCount int
 	staleScope   bool
 	want         bool
+	// wantCap marks a row that parks through the re-drive cap rather than on a
+	// done result. The two write different outcomes — the cap park stays open at
+	// human_review, the done park closes the record — so a row that asserts only
+	// "a park happened" cannot tell them apart.
+	wantCap bool
 }
 
 // seeded builds a handler whose view holds the task this row describes, with the
@@ -138,21 +143,67 @@ func seedTriggerBudget(task lib.Task, count int, stale bool) {
 func TestParkSucceededWithoutPhaseMoveParksOnlyOnADoneResult(t *testing.T) {
 	cases := []parkCase{
 		{name: "done result parks", status: string(lib.AgentStatusDone), present: true, want: true},
-		{name: "failed result does not park", status: string(lib.AgentStatusFailed), present: true, want: false},
-		{name: "needs_input result does not park", status: string(lib.AgentStatusNeedsInput), present: true, want: false},
-		{name: "in_progress result does not park", status: string(lib.AgentStatusInProgress), present: true, want: false},
+		{
+			name:    "failed result does not park",
+			status:  string(lib.AgentStatusFailed),
+			present: true,
+			want:    false,
+		},
+		{
+			name:    "needs_input result does not park",
+			status:  string(lib.AgentStatusNeedsInput),
+			present: true,
+			want:    false,
+		},
+		{
+			name:    "in_progress result does not park",
+			status:  string(lib.AgentStatusInProgress),
+			present: true,
+			want:    false,
+		},
 		{name: "absent status does not park", present: false, want: false},
-		{name: "unrecognised status does not park", status: "something-else", present: true, want: false},
+		{
+			name:    "unrecognised status does not park",
+			status:  "something-else",
+			present: true,
+			want:    false,
+		},
 		// The re-drive cap: a task that cannot get past the phase is escalated
 		// once its spawn budget at this scope is spent, so the non-done statuses
 		// above cannot loop forever on an uncapped task.
-		{name: "failed result parks once the re-drive budget is spent", status: string(lib.AgentStatusFailed), present: true, triggerCount: maxRedrivesWithoutAdvance, want: true},
-		{name: "absent status parks once the re-drive budget is spent", present: false, triggerCount: maxRedrivesWithoutAdvance, want: true},
-		{name: "failed result still re-drives one spawn below the cap", status: string(lib.AgentStatusFailed), present: true, triggerCount: maxRedrivesWithoutAdvance - 1, want: false},
+		{
+			name:         "failed result parks once the re-drive budget is spent",
+			status:       string(lib.AgentStatusFailed),
+			present:      true,
+			triggerCount: maxRedrivesWithoutAdvance,
+			want:         true,
+			wantCap:      true,
+		},
+		{
+			name:         "absent status parks once the re-drive budget is spent",
+			present:      false,
+			triggerCount: maxRedrivesWithoutAdvance,
+			want:         true,
+			wantCap:      true,
+		},
+		{
+			name:         "failed result still re-drives one spawn below the cap",
+			status:       string(lib.AgentStatusFailed),
+			present:      true,
+			triggerCount: maxRedrivesWithoutAdvance - 1,
+			want:         false,
+		},
 		// The count only applies to the scope the task is still at: a task that
 		// has just advanced carries the previous scope's count until its next
 		// spawn rewrites it, and capping there would strand it.
-		{name: "failed result re-drives when the count belongs to a stale scope", status: string(lib.AgentStatusFailed), present: true, triggerCount: maxRedrivesWithoutAdvance, staleScope: true, want: false},
+		{
+			name:         "failed result re-drives when the count belongs to a stale scope",
+			status:       string(lib.AgentStatusFailed),
+			present:      true,
+			triggerCount: maxRedrivesWithoutAdvance,
+			staleScope:   true,
+			want:         false,
+		},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -161,14 +212,34 @@ func TestParkSucceededWithoutPhaseMoveParksOnlyOnADoneResult(t *testing.T) {
 			if got != tc.want {
 				t.Fatalf("parkSucceededWithoutPhaseMove = %t; want %t", got, tc.want)
 			}
-			wantPublish := 0
-			if tc.want {
-				wantPublish = 1
-			}
-			if published := len(publisher.parkedSucceeded); published != wantPublish {
-				t.Fatalf("park count = %d; want %d", published, wantPublish)
-			}
+			assertParkCalls(t, publisher, tc.want, tc.wantCap)
 		})
+	}
+}
+
+// assertParkCalls pins which of the two parks fired. A row that asserts only
+// that some park happened cannot tell the terminal done park from the open
+// cap-exhausted one, and getting that backwards reports failed work as finished.
+func assertParkCalls(
+	t *testing.T,
+	publisher *parkRecordingPublisher,
+	want bool,
+	wantCap bool,
+) {
+	t.Helper()
+	wantSucceeded, wantCaps := 0, 0
+	if want {
+		if wantCap {
+			wantCaps = 1
+		} else {
+			wantSucceeded = 1
+		}
+	}
+	if got := len(publisher.parkedSucceeded); got != wantSucceeded {
+		t.Fatalf("succeeded-park count = %d; want %d", got, wantSucceeded)
+	}
+	if got := len(publisher.parkedRedriveCap); got != wantCaps {
+		t.Fatalf("cap-park count = %d; want %d", got, wantCaps)
 	}
 }
 

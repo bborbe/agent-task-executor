@@ -193,7 +193,15 @@ func (h *taskEventHandler) parkSucceededWithoutPhaseMove(
 	// park; it still runs above the grace and park-published gates, so a pass that
 	// ends in one of those can log park_redrive_cap without parking. That is
 	// deliberate — the log records the decision, not the outcome.
-	if resultStatus, _ := current.Frontmatter.String("last_result_status"); resultStatus != string(lib.AgentStatusDone) {
+	// parkedAtCap separates the two parks this function can make, and the
+	// distinction is load-bearing: only a done result is finished work and may
+	// close the record. A non-done result that has spent its re-drive budget is
+	// an escalation to a human and must stay open — closing it would report
+	// failed work as completed.
+	parkedAtCap := false
+	if resultStatus, _ := current.Frontmatter.String("last_result_status"); resultStatus != string(
+		lib.AgentStatusDone,
+	) {
 		if !redriveBudgetSpent(current) {
 			return false
 		}
@@ -205,6 +213,7 @@ func (h *taskEventHandler) parkSucceededWithoutPhaseMove(
 			current.Frontmatter.TriggerCount(),
 		)
 		metrics.TaskEventsTotal.WithLabelValues("park_redrive_cap").Inc()
+		parkedAtCap = true
 	}
 	now := h.currentDateTime.Now().Time()
 	elapsed := now.Sub(succeeded.CompletedAt)
@@ -238,7 +247,13 @@ func (h *taskEventHandler) parkSucceededWithoutPhaseMove(
 		}
 		return false
 	}
-	if err := h.resultPublisher.PublishParkSucceeded(ctx, current); err != nil {
+	var publishErr error
+	if parkedAtCap {
+		publishErr = h.resultPublisher.PublishParkRedriveCap(ctx, current)
+	} else {
+		publishErr = h.resultPublisher.PublishParkSucceeded(ctx, current)
+	}
+	if publishErr != nil {
 		// Suppress this pass rather than fall through to the spawn: spawning is
 		// the loop the park exists to end, so a park that could not be written
 		// must not re-run the work. The next pass re-evaluates and retries.
@@ -246,7 +261,7 @@ func (h *taskEventHandler) parkSucceededWithoutPhaseMove(
 			"publish park for task %s (phase %s): %v",
 			task.TaskIdentifier,
 			succeeded.Phase,
-			err,
+			publishErr,
 		)
 		return true
 	}

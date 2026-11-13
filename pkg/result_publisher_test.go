@@ -1093,12 +1093,16 @@ var _ = Describe("ResultPublisher", func() {
 
 	Describe("PublishParkSucceeded", func() {
 		It(
-			"writes the phase key and a ## Parked section",
+			"closes the record with status completed and phase done, and a ## Parked section",
 			func() {
-				// The park's whole effect is this one key: human_review is what
-				// takes the record out of the executor's drive set. A wrong key
-				// or value would leave the loop running, and every watcher-side
-				// spec asserts only that the publisher was called.
+				// The park's whole effect is the terminal pair: status completed is
+				// what every reader treats as finished, and phase done is what takes
+				// the record out of the executor's drive set. Writing human_review
+				// here instead left finished work in the open population — measured
+				// 2026-11-13, 35 of 55 open private-agent records were
+				// parked_succeeded sitting at human_review. Every watcher-side spec
+				// asserts only that the publisher was called, so this one is the only
+				// place a wrong key or value can be caught.
 				task := lib.Task{
 					TaskIdentifier: lib.TaskIdentifier("test-task-parked"),
 					Frontmatter: lib.TaskFrontmatter{
@@ -1121,25 +1125,60 @@ var _ = Describe("ResultPublisher", func() {
 				Expect(cmd.TaskIdentifier).To(Equal(lib.TaskIdentifier("test-task-parked")))
 				Expect(cmd.TargetVault).To(Equal("work"))
 
-				Expect(cmd.Updates).To(HaveLen(1))
-				Expect(cmd.Updates["phase"]).To(Equal("human_review"))
+				Expect(cmd.Updates).To(HaveLen(2))
+				Expect(cmd.Updates["status"]).To(Equal("completed"))
+				Expect(cmd.Updates["phase"]).To(Equal("done"))
 
 				for _, key := range []string{
-					"status",
 					"assignee",
 					"current_job",
 				} {
 					_, hasKey := cmd.Updates[key]
 					Expect(hasKey).To(BeFalse(), key+" must not be in the park update")
 				}
-				// The succeeded path shares the lost-claim write, so it must carry
-				// the section too — but with the reason line only: it has no claim
-				// key and no holder, and writing either would misreport the park.
+				// The section still records why the record closed, but with the
+				// reason line only: the succeeded path has no claim key and no
+				// holder, and writing either would misreport the park.
 				Expect(cmd.Body).NotTo(BeNil())
 				Expect(cmd.Body.Heading).To(Equal("## Parked"))
 				Expect(cmd.Body.Section).To(ContainSubstring("parked_succeeded"))
 				Expect(cmd.Body.Section).NotTo(ContainSubstring("**Claim:**"))
 				Expect(cmd.Body.Section).NotTo(ContainSubstring("unavailable"))
+				Expect(cmd.Validate(ctx)).To(Succeed())
+			},
+		)
+	})
+
+	Describe("PublishParkRedriveCap", func() {
+		It(
+			"leaves the record open at human_review, never closed as completed",
+			func() {
+				// The cap-exhausted park is the escalation for a run that did NOT
+				// finish, so it must stay open: writing completed here would report
+				// failed work as finished.
+				task := lib.Task{
+					TaskIdentifier: lib.TaskIdentifier("test-task-redrive-cap"),
+					Frontmatter: lib.TaskFrontmatter{
+						"status":       "in_progress",
+						"phase":        "execution",
+						"assignee":     "claude",
+						"current_job":  "job-1",
+						"target_vault": "work",
+					},
+				}
+				err := publisher.PublishParkRedriveCap(ctx, task)
+				Expect(err).NotTo(HaveOccurred())
+
+				Expect(producer.messages).To(HaveLen(1))
+				_, cmd := decodeUpdateFrontmatterCommand(producer.messages[0])
+
+				Expect(cmd.Updates).To(HaveLen(1))
+				Expect(cmd.Updates["phase"]).To(Equal("human_review"))
+				Expect(cmd.Updates).NotTo(HaveKey("status"))
+				Expect(cmd.Updates).NotTo(HaveKey("assignee"))
+				Expect(cmd.Updates).NotTo(HaveKey("current_job"))
+				Expect(cmd.Body).NotTo(BeNil())
+				Expect(cmd.Body.Heading).To(Equal("## Parked"))
 				Expect(cmd.Validate(ctx)).To(Succeed())
 			},
 		)

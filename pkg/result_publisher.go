@@ -209,15 +209,22 @@ type ResultPublisher interface {
 		claimKey string,
 		previousHolder string,
 	) error
-	// PublishParkSucceeded writes phase "human_review" onto a task whose Job
-	// succeeded but whose phase never moved — a deliberate human park, not a
-	// finished task. It writes the "phase" key plus a "## Parked" body section
-	// carrying the reason line only: the succeeded path has no claim key or
-	// previous holder. human_review is already in the executor's terminal-phase
-	// set, so the reconcile pass stops re-driving it; without this write a task
-	// whose agent exits 0 without moving the phase is eligible on every pass and
-	// re-spawned forever.
+	// PublishParkSucceeded closes a task whose Job succeeded but whose phase
+	// never moved — the agent exited 0 without advancing it, so nothing will
+	// move it again. It writes status completed and phase done, plus a
+	// "## Parked" body section carrying the reason line only: the succeeded
+	// path has no claim key or previous holder. done is already in the
+	// executor's terminal-phase set, so the reconcile pass stops re-driving it.
+	// Without this write the task is eligible on every pass and re-spawned
+	// forever; with human_review instead, a finished record never terminalises
+	// and has to be closed by hand.
 	PublishParkSucceeded(ctx context.Context, task lib.Task) error
+	// PublishParkRedriveCap writes phase "human_review" and a "## Parked" body
+	// section for a task whose Job succeeded but whose result never reported
+	// done, after its re-drive budget was spent. It is deliberately NOT
+	// terminal: the work did not finish, so the record has to stay open for a
+	// human. Only a done result closes the record.
+	PublishParkRedriveCap(ctx context.Context, task lib.Task) error
 	// PublishAbort closes a record the consecutive-re-drive cap has decided to
 	// stop driving. It writes status aborted plus the close-out pair vault-cli
 	// requires (aborted_reason and gate_successor) and clears current_job. It
@@ -1116,13 +1123,47 @@ func parkSection(reason, claimKey, previousHolder string) string {
 	)
 }
 
-// PublishParkSucceeded writes phase "human_review" and a "## Parked" body
-// section carrying the reason line only.
+// PublishParkSucceeded closes a task whose Job succeeded but whose phase never
+// moved, and writes a "## Parked" body section carrying the reason line only.
 //
-// It delegates rather than repeating the command: the two parks differ only in
-// why they fire, and the write they make is the same command. Duplicating it
-// would let a future change to the park payload drift between them.
+// It deliberately does NOT delegate to PublishParkLostClaim. The two parks share
+// a body but not an outcome: a lost claim needs a human to look at it, while a
+// succeeded park is finished work. Delegating wrote human_review for both, so a
+// finished record never reached a terminal state — measured 2026-11-13, 35 of 55
+// open private-agent records were parked_succeeded sitting at human_review and
+// every one had to be closed by hand.
+//
+// status completed is what makes the record terminal for every reader; phase
+// done is what the executor's terminal-phase set reads to stop re-driving it.
+// Both are written in the same command as the body, so a record never shows one
+// without the other.
 func (p *resultPublisher) PublishParkSucceeded(
+	ctx context.Context,
+	task lib.Task,
+) error {
+	cmd := taskcmd.UpdateFrontmatterCommand{
+		TaskIdentifier: task.TaskIdentifier,
+		TargetVault:    targetVaultFromTask(task),
+		Updates: lib.TaskFrontmatter{
+			"status": string(domain.TaskStatusCompleted),
+			"phase":  string(domain.TaskPhaseDone),
+		},
+		Body: &taskcmd.BodySection{
+			Heading: "## Parked",
+			Section: parkSection(ParkReasonSucceeded, "", ""),
+		},
+	}
+	return p.publishRaw(ctx, taskcmd.UpdateFrontmatterCommandOperation, cmd)
+}
+
+// PublishParkRedriveCap writes phase "human_review" and a "## Parked" body
+// section for a task whose Job succeeded but whose result never reported done,
+// after its re-drive budget was spent.
+//
+// It shares PublishParkLostClaim's write because that write is exactly the
+// escalation: the record stays open for a human. It must never be terminal —
+// the work did not finish, and closing it would report failed work as completed.
+func (p *resultPublisher) PublishParkRedriveCap(
 	ctx context.Context,
 	task lib.Task,
 ) error {
