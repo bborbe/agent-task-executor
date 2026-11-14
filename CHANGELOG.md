@@ -2,7 +2,7 @@
 
 All notable changes to this project will be documented in this file.
 
-## Unreleased
+## v0.62.2
 
 - fix: **a finished record no longer counts an unknown-assignee skip, so `AgentUnknownAssignee` can clear.** The terminal-status gate already existed on both paths, but it ran *after* `resolveConfig` / `resolveConfigForReconcile`, and those are what increment `skipped_unknown_assignee` when an assignee resolves to no `Config`. A task at `completed` or `aborted` whose assignee was since retired was therefore counted on every reconcile pass — forever, because the executor re-reads every record in its view — and the alert built on that counter measured work that was already done. No operator action could clear it: the records it pointed at were already terminal. The gate now sits above config resolution in both `parseAndFilter` and `reconcileTask`, the same placement `skipForeignCluster` already used. Change set: `pkg/handler/task_event_handler.go`, `pkg/handler/task_event_handler_terminal_status_test.go`.
 
