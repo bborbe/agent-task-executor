@@ -2,6 +2,10 @@
 
 All notable changes to this project will be documented in this file.
 
+## Unreleased
+
+- fix: **a finished record no longer counts an unknown-assignee skip, so `AgentUnknownAssignee` can clear.** The terminal-status gate already existed on both paths, but it ran *after* `resolveConfig` / `resolveConfigForReconcile`, and those are what increment `skipped_unknown_assignee` when an assignee resolves to no `Config`. A task at `completed` or `aborted` whose assignee was since retired was therefore counted on every reconcile pass — forever, because the executor re-reads every record in its view — and the alert built on that counter measured work that was already done. No operator action could clear it: the records it pointed at were already terminal. The gate now sits above config resolution in both `parseAndFilter` and `reconcileTask`, the same placement `skipForeignCluster` already used. Change set: `pkg/handler/task_event_handler.go`, `pkg/handler/task_event_handler_terminal_status_test.go`.
+
 ## v0.62.1
 
 - fix: **the installed CRD schema now declares `runWindow` and `runBudgetSeconds`.** `desiredCRDSpec` is a hand-maintained copy of the `ConfigSpec` fields, separate from the Go types, and it is the copy the executor installs on every start. The window fields were added to the Go type only, so the installed schema lacked them and the API server pruned both from every Config — the CRD sets `preserveUnknownFields: false`. Nothing errored: the apply reported `success:true`, `maxConcurrentJobs` landed, and the window and budget silently did not exist, which is a failure mode invisible to tests, the render check and review alike. A new test reflects over `ConfigSpec`'s JSON tags and asserts every field has a schema property, so the next added field fails in CI rather than in a cluster.

@@ -11,6 +11,7 @@ import (
 	"github.com/IBM/sarama"
 	lib "github.com/bborbe/agent"
 	"github.com/bborbe/cqrs/base"
+	"github.com/bborbe/errors"
 	libtime "github.com/bborbe/time"
 	"github.com/bborbe/vault-cli/pkg/domain"
 	. "github.com/onsi/ginkgo/v2"
@@ -147,6 +148,39 @@ var _ = Describe("terminal status is never a candidate", func() {
 			task := terminalStatusTask("tid-terminal-status-control", domain.TaskStatusInProgress)
 			Expect(h.ConsumeMessage(ctx, buildMsg(task))).To(Succeed())
 			Expect(fakeSpawner.SpawnJobCallCount()).To(Equal(1))
+		})
+
+		// The ordering regression this guards: resolveConfig used to run BEFORE the
+		// terminal gate, so a finished record whose assignee had since been retired
+		// counted a skipped_unknown_assignee on every reconcile pass. The
+		// AgentUnknownAssignee alert is built on that counter, so it measured
+		// finished work and no operator action could ever clear it.
+		It("counts no unknown-assignee skip for a terminal task with a retired assignee", func() {
+			fakeResolver.ResolveReturns(
+				pkg.AgentConfiguration{},
+				errors.Wrapf(ctx, pkg.ErrConfigNotFound, "find assignee"),
+			)
+
+			beforeUnknown := testutil.ToFloat64(
+				metrics.SkippedUnknownAssigneeTotal.WithLabelValues("retired-agent"),
+			)
+			beforeTerminal := testutil.ToFloat64(
+				metrics.TaskEventsTotal.WithLabelValues("skipped_terminal_status"),
+			)
+
+			task := terminalStatusTask("tid-terminal-unknown-assignee", domain.TaskStatusCompleted)
+			task.Frontmatter["assignee"] = "retired-agent"
+			Expect(h.ConsumeMessage(ctx, buildMsg(task))).To(Succeed())
+
+			Expect(fakeSpawner.SpawnJobCallCount()).To(Equal(0))
+			// The point of the fix: the retired assignee is not counted at all.
+			Expect(testutil.ToFloat64(
+				metrics.SkippedUnknownAssigneeTotal.WithLabelValues("retired-agent"),
+			) - beforeUnknown).To(Equal(float64(0)))
+			// And the skip is still visible, attributed to the terminal gate.
+			Expect(testutil.ToFloat64(
+				metrics.TaskEventsTotal.WithLabelValues("skipped_terminal_status"),
+			) - beforeTerminal).To(Equal(float64(1)))
 		})
 	})
 

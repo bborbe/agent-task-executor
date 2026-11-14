@@ -610,6 +610,14 @@ func (h *taskEventHandler) parseAndFilter(
 		return lib.Task{}, nil, true, nil
 	}
 
+	// A terminal task is never driven, even when a Config lists its status in
+	// trigger.statuses — the status-side twin of the terminal-phase gate below.
+	// It sits ABOVE resolveConfig, which counts a skipped_unknown_assignee: a
+	// finished record with a retired assignee re-counted on every pass.
+	if IsTerminalStatus(task.Frontmatter.Status()) {
+		return h.skipAndEvict(task, "skipped_terminal_status")
+	}
+
 	// Resolve the per-agent Config before the status/phase checks so both filters
 	// can use the per-Config trigger. Skip lookup when assignee is empty.
 	config, skip, err := h.resolveConfig(ctx, task)
@@ -633,15 +641,6 @@ func (h *taskEventHandler) parseAndFilter(
 		}
 		glog.V(2).Infof("type mismatch: %s (task %s)", mismatch, task.TaskIdentifier)
 		return h.skipAndEvict(task, "type_mismatch")
-	}
-
-	// A terminal task is never driven, even when a Config lists its status in
-	// trigger.statuses — the status-side twin of the terminal-phase gate below,
-	// and unconditional for the same reason. cleanupTerminalTask above has already
-	// released the claim, dropped the store entry, cancelled any deferred respawn
-	// and cleared the streak for this event.
-	if IsTerminalStatus(task.Frontmatter.Status()) {
-		return h.skipAndEvict(task, "skipped_terminal_status")
 	}
 
 	if !effectiveTriggerStatuses(config).Contains(task.Frontmatter.Status()) {
@@ -1699,6 +1698,15 @@ func (h *taskEventHandler) reconcileTask(
 		h.removeDeferredEntry(task.TaskIdentifier)
 		return h.refuseReconcile(task, metrics.ReconcileRefusedGateForeignCluster)
 	}
+	// A terminal status is never a candidate, even when a Config lists it in
+	// trigger.statuses. This keeps a finished task out of the candidate set the
+	// re-drive cap is charged against, and sits ABOVE resolveConfigForReconcile
+	// because that call counts a skipped_unknown_assignee — the floor's half of
+	// the same defect.
+	if IsTerminalStatus(task.Frontmatter.Status()) {
+		return h.refuseReconcile(task, metrics.ReconcileRefusedGateTerminalStatus)
+	}
+
 	config, skip, err := h.resolveConfigForReconcile(ctx, task)
 	if err != nil {
 		return task, nil, false, err
@@ -1729,18 +1737,6 @@ func (h *taskEventHandler) reconcileTask(
 			"event=reconcile_type_mismatch task=%s reason=%q", task.TaskIdentifier, mismatch,
 		)
 		return h.refuseReconcile(task, metrics.ReconcileRefusedGateTypeMismatch)
-	}
-	// A task whose status is terminal is never a candidate, even when a Config
-	// lists that status in trigger.statuses — the status-side twin of the
-	// terminal-phase gate below, and unconditional for the same reason.
-	//
-	// This is the rule that keeps a finished task out of the candidate set, and
-	// the candidate set is what the re-drive cap is charged against: a terminal
-	// task admitted here is capped on every pass, forever, because the terminal
-	// transition that clears a streak fires on the event path and this task's
-	// happened before the executor was listening for it.
-	if IsTerminalStatus(task.Frontmatter.Status()) {
-		return h.refuseReconcile(task, metrics.ReconcileRefusedGateTerminalStatus)
 	}
 	if !effectiveTriggerStatuses(config).Contains(task.Frontmatter.Status()) {
 		return h.refuseReconcile(task, metrics.ReconcileRefusedGateStatusNotTriggered)
