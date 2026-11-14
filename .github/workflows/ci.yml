@@ -40,10 +40,15 @@ jobs:
         run: |
           set -euo pipefail
           base="https://github.com/aquasecurity/trivy/releases/download/v${TRIVY_VERSION}"
-          curl -sfL -o trivy.tar.gz "${base}/trivy_${TRIVY_VERSION}_Linux-64bit.tar.gz"
+          # Download under the asset's own name: `sha256sum -c` resolves each
+          # line's digest against a file of THAT name in the working directory,
+          # so renaming the tarball makes the check fail on a missing file even
+          # when the digest is right.
+          asset="trivy_${TRIVY_VERSION}_Linux-64bit.tar.gz"
+          curl -sfL -o "${asset}" "${base}/${asset}"
           curl -sfL -o trivy_checksums.txt "${base}/trivy_${TRIVY_VERSION}_checksums.txt"
-          grep " trivy_${TRIVY_VERSION}_Linux-64bit.tar.gz\$" trivy_checksums.txt | sha256sum -c -
-          tar -xzf trivy.tar.gz trivy
+          grep " ${asset}\$" trivy_checksums.txt | sha256sum -c -
+          tar -xzf "${asset}" trivy
           sudo install -m 0755 trivy /usr/local/bin/trivy
           trivy --version
 
