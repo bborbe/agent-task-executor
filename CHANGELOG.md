@@ -2,7 +2,7 @@
 
 All notable changes to this project will be documented in this file.
 
-## Unreleased
+## v0.62.0
 
 - fix: **a corrupt record batch no longer crash-loops the task-view reader.** `CreateTaskView` builds a non-group simple consumer that replays the compacted task event topic from offset 0 on every restart and never commits a position, so a CRC-decode failure inside it cannot be cleared by a consumer-group offset reset: the pod restarts, re-reads the same batch, and dies again. Measured 2026-11-14 on nuke dev: partition 0 offsets 980,929–985,739 of `develop-agent-task-v1-event` were corrupt, the group was reset to 985,740 and a rescan from there was clean, and all three executors still crash-looped. New opt-in `SKIP_CRC_CORRUPTION` (`skip-crc-corruption`, default `false`) threads `libkafka.WithSkipCorruptBatches` into that reader only, so a corrupt batch is logged, counted in `kafka_consumer_corrupt_batch_skipped_total{topic,partition}` and stepped over. It defaults off because a skipped batch is lost data — loud stays the default for every other topic. ⚠️ **What it does not fix:** the task-view reader still replays from offset 0 on every restart, so each start re-walks the whole topic (the topic is `cleanup.policy=compact` with `retention.ms=-1`, so the bad bytes never age out) and re-skips the same range; giving that reader a durable position is a separate design change. Change set: `pkg/factory/factory.go`, `pkg/factory/task_view_internal_test.go`, `main.go`, `main_internal_test.go`, `CHANGELOG.md`.
 
