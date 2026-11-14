@@ -2,7 +2,7 @@
 
 All notable changes to this project will be documented in this file.
 
-## Unreleased
+## v0.62.3
 
 - fix: **a failed success-store read is retried once, so one timeout no longer re-runs succeeded tasks.** The reconcile pass answers every candidate's success guard from a single `list refs` over the `claims/success/` prefix. When that call failed — a git-rest restart, a mirror rebuilding — the guard fell back to the pod's own memory, and a pod that had just restarted has none: it read "never succeeded" for work it had already done and spawned it again. Measured 2026-11-14 on nuke dev, `event=success_record_snapshot_failed` followed within minutes by `event=task_rerun` on the same tasks, with the store itself answering every other read. The fetch now retries once while the pass still has budget, which recovers the transient shape; a read that spends its full 30 s deadline leaves the pass context expired, and the spawn path's claim write on that same context refuses, so the pass holds the task instead of re-running it. The failure direction is unchanged — an unreadable store still falls back to memory rather than suppressing, and the fallback to "no record" on a genuinely dead store is untouched. Change set: `pkg/handler/success_cache.go`, `pkg/handler/success_record_test.go`, `CHANGELOG.md`.
 
