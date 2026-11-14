@@ -20,15 +20,32 @@ jobs:
           go-version-file: go.mod
           cache: true
 
-      # The apt-repo route needs `apt-key`, which Ubuntu 26.04 (the current
-      # ubuntu-latest image) no longer ships: the step died with
+      # Trivy comes from a PINNED release tarball whose SHA-256 is verified
+      # before it is unpacked — not from `curl … | sudo sh` against the
+      # project's `main` branch. This step runs as root in CI, and an unpinned
+      # remote script is a supply-chain hole nothing downstream can review.
+      #
+      # The apt-repo route this replaced needed `apt-key`, which Ubuntu 26.04
+      # (the current ubuntu-latest image) no longer ships: it failed with
       # `sudo: 'apt-key': command not found` on every run from 2026-11-14 on,
-      # including runs whose diff touched no workflow. The upstream install
-      # script is distro-agnostic and pins nothing to a release codename.
+      # including runs whose diff touched no workflow. The tarball route also
+      # drops the `$(lsb_release -sc)` dependency, which would have pointed at
+      # `resolute` — a codename the trivy apt repo does not publish.
+      #
+      # Bumping TRIVY_VERSION is a deliberate one-line change; the checksum is
+      # fetched from the same release, so a tampered asset fails the build.
       - name: Install Trivy
+        env:
+          TRIVY_VERSION: "0.76.2"
         run: |
-          curl -sfL https://raw.githubusercontent.com/aquasecurity/trivy/main/contrib/install.sh \
-            | sudo sh -s -- -b /usr/local/bin
+          set -euo pipefail
+          base="https://github.com/aquasecurity/trivy/releases/download/v${TRIVY_VERSION}"
+          curl -sfL -o trivy.tar.gz "${base}/trivy_${TRIVY_VERSION}_Linux-64bit.tar.gz"
+          curl -sfL -o trivy_checksums.txt "${base}/trivy_${TRIVY_VERSION}_checksums.txt"
+          grep " trivy_${TRIVY_VERSION}_Linux-64bit.tar.gz\$" trivy_checksums.txt | sha256sum -c -
+          tar -xzf trivy.tar.gz trivy
+          sudo install -m 0755 trivy /usr/local/bin/trivy
+          trivy --version
 
       - name: Run precommit checks
         run: make precommit
