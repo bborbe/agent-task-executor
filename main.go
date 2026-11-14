@@ -91,6 +91,12 @@ type application struct {
 	// loop. A non-positive value is rejected at startup.
 	ReconcilePassTimeout time.Duration `required:"false" arg:"reconcile-pass-timeout"         env:"RECONCILE_PASS_TIMEOUT"         usage:"Deadline for one reconcile pass over the in-memory task view"                                                                                                                                                                                                                       default:"45s"`
 	ReconcileInterval    time.Duration `required:"false" arg:"reconcile-interval"             env:"RECONCILE_INTERVAL"             usage:"Interval between reconcile passes"                                                                                                                                                                                                                                                  default:"60s"`
+	// SkipCRCCorruption makes the task-view reader step over a corrupt record
+	// batch instead of exiting. It is off by default because a skipped batch is
+	// lost data: turn it on only for a topic whose compacted log carries bytes
+	// that will never age out (retention.ms=-1), where the alternative is a
+	// crash-loop that blocks every task on the cluster.
+	SkipCRCCorruption bool `required:"false" arg:"skip-crc-corruption" env:"SKIP_CRC_CORRUPTION" usage:"Skip corrupt Kafka record batches in the task-view reader instead of crashing; the skipped messages are lost" default:"false"`
 }
 
 // vaultSlugRegexp mirrors the controller's VAULT_NAME validation (pkg/routing):
@@ -392,6 +398,7 @@ func (a *application) Run(ctx context.Context, sentryClient libsentry.Client) er
 		saramaClient,
 		a.TopicPrefix,
 		currentDateTimeGetter,
+		a.SkipCRCCorruption,
 	)
 
 	consumer, taskEventHandler := factory.CreateConsumer(
