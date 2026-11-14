@@ -74,6 +74,12 @@ func (h *taskEventHandler) recentlySucceeded(ctx context.Context, task lib.Task)
 	// transient failure", and the first is a contract defect the fleet can only
 	// see if it is named. Logged on the first pass that has a success record to
 	// decide on, before either outcome is taken.
+	//
+	// Bare Infof, not V(n), and deliberately: this line is the operator's only
+	// signal that an agent omitted the field, and a verbosity gate makes it
+	// invisible on any stage that does not pass -v=2 — which is precisely the
+	// silence this change exists to remove. The sibling event above
+	// (skip_recent_success_bypassed) is bare for the same reason.
 	resultStatus, statusPresent := task.Frontmatter.String("last_result_status")
 	if !statusPresent || resultStatus == "" {
 		glog.Infof(
