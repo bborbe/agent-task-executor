@@ -337,10 +337,26 @@ func newTaskOffsetManager(
 // from the oldest offset on every partition. The reader is a non-group simple
 // consumer: it never joins CONSUMER_GROUP and never commits offsets, so it cannot
 // steal partitions from, or move the offsets of, the live consumer.
+//
+// skipCorruptBatches is a deliberate opt-in escape hatch (SKIP_CRC_CORRUPTION,
+// default false): with it on, a CRC-decode failure is logged, counted in
+// kafka_consumer_corrupt_batch_skipped_total and stepped over to the next healthy
+// offset instead of killing the process. It stays off by default because a
+// skipped batch is lost data, and loud is the honest default for every other
+// topic.
+//
+// What this does NOT fix: the reader still replays from offset 0 on every
+// restart. A non-group simple consumer keeps no durable position, so each pod
+// start re-walks the whole compacted topic (retention.ms=-1 keeps the bad bytes
+// forever) and re-skips the same range. The skip stops the crash-loop; the
+// re-walk — and the broker reads and skipped-batch increments it costs on every
+// restart — stays. Giving this reader a durable position is a separate design
+// change.
 func CreateTaskView(
 	saramaClient sarama.Client,
 	topicPrefix base.TopicPrefix,
 	currentDateTimeGetter libtime.CurrentDateTimeGetter,
+	skipCorruptBatches bool,
 ) (handler.TaskView, run.Func) {
 	topic := lib.TaskV1SchemaID.EventTopic(topicPrefix)
 	view := handler.NewTaskView(
@@ -356,12 +372,23 @@ func CreateTaskView(
 		libkafka.OffsetOldest,
 		view,
 		log.DefaultSamplerFactory,
+		taskViewConsumerOptions(skipCorruptBatches)...,
 	)
 	return view, func(ctx context.Context) error {
 		if err := view.CaptureHighWaterMarks(ctx); err != nil {
 			return errors.Wrapf(ctx, err, "capture task view high-water marks")
 		}
 		return consumer.Consume(ctx)
+	}
+}
+
+// taskViewConsumerOptions is the option set the task-view reader is built with.
+// It is a named function so a test can assert the value reaches ConsumerOptions
+// without a live broker: NewSimpleConsumer applies the options internally and the
+// constructed Consumer exposes nothing to inspect.
+func taskViewConsumerOptions(skipCorruptBatches bool) []func(*libkafka.ConsumerOptions) {
+	return []func(*libkafka.ConsumerOptions){
+		libkafka.WithSkipCorruptBatches(skipCorruptBatches),
 	}
 }
 

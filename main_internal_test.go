@@ -161,6 +161,30 @@ func TestClaimTransportFieldTags(t *testing.T) {
 	}
 }
 
+// TestSkipCRCCorruptionFieldTags pins the escape hatch's env name and its
+// default. The default is the load-bearing half: the skip loses the messages
+// inside the corrupt batch, so it must never be on unless a deployment says so.
+func TestSkipCRCCorruptionFieldTags(t *testing.T) {
+	typ := reflect.TypeOf(application{})
+	f, ok := typ.FieldByName("SkipCRCCorruption")
+	if !ok {
+		t.Fatalf("field SkipCRCCorruption missing")
+	}
+	if f.Type.Kind() != reflect.Bool {
+		t.Fatalf("SkipCRCCorruption must be a bool, got %s", f.Type.Kind())
+	}
+	for tag, want := range map[string]string{
+		"env":      "SKIP_CRC_CORRUPTION",
+		"arg":      "skip-crc-corruption",
+		"required": "false",
+		"default":  "false",
+	} {
+		if got := f.Tag.Get(tag); got != want {
+			t.Fatalf("SkipCRCCorruption %s = %q, want %q", tag, got, want)
+		}
+	}
+}
+
 var _ = Describe("application struct field guards", func() {
 	Describe("VaultName field", func() {
 		It("declares the env and required tags", func() {
