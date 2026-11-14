@@ -2,7 +2,7 @@
 
 All notable changes to this project will be documented in this file.
 
-## Unreleased
+## v0.62.1
 
 - fix: **the installed CRD schema now declares `runWindow` and `runBudgetSeconds`.** `desiredCRDSpec` is a hand-maintained copy of the `ConfigSpec` fields, separate from the Go types, and it is the copy the executor installs on every start. The window fields were added to the Go type only, so the installed schema lacked them and the API server pruned both from every Config — the CRD sets `preserveUnknownFields: false`. Nothing errored: the apply reported `success:true`, `maxConcurrentJobs` landed, and the window and budget silently did not exist, which is a failure mode invisible to tests, the render check and review alike. A new test reflects over `ConfigSpec`'s JSON tags and asserts every field has a schema property, so the next added field fails in CI rather than in a cluster.
 
