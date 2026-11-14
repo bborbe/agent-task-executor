@@ -336,6 +336,54 @@ var _ = Describe("the shared success record", func() {
 		Expect(fakeSpawner.SpawnJobCallCount()).To(Equal(1))
 	})
 
+	It("names an absent result status instead of deciding on it silently", func() {
+		// The field is not something an agent is obliged to write, and the
+		// executor itself clears it at spawn, so absence is ordinary — but it is
+		// not a verdict, and an operator reading a re-drive cannot tell "this
+		// agent never wrote the field" from "this agent reported a failure". The
+		// counter is the machine-readable half of that naming; the log line is
+		// the other.
+		store := new(mocks.FakeSuccessStore)
+		store.SnapshotReturns(
+			map[string]map[string]libtime.DateTime{
+				"tid-a": {"execution": libtime.DateTime(now.Add(-1 * time.Minute))},
+			},
+			nil,
+		)
+
+		absent := ranTask(domain.TaskPhaseExecution)
+		delete(absent.Frontmatter, "last_result_status")
+		fakeView.SnapshotReturns([]lib.Task{absent})
+		fakeView.GetReturns(absent, true)
+		fakeSpawner.IsJobActiveReturns(false, nil)
+
+		before := ghostTaskEvents("absent_result_status")
+		Expect(newHandlerWithStore(store).ReconcileOnce(ctx)).To(BeNil())
+		Expect(ghostTaskEvents("absent_result_status")).To(Equal(before + 1))
+	})
+
+	It("does not name an absent result status when the agent wrote a verdict", func() {
+		// The control for the spec above: a done result must not increment the
+		// counter, or the event fires on every successful run and stops meaning
+		// "this agent omitted the field".
+		store := new(mocks.FakeSuccessStore)
+		store.SnapshotReturns(
+			map[string]map[string]libtime.DateTime{
+				"tid-a": {"execution": libtime.DateTime(now.Add(-1 * time.Minute))},
+			},
+			nil,
+		)
+
+		done := ranTask(domain.TaskPhaseExecution)
+		fakeView.SnapshotReturns([]lib.Task{done})
+		fakeView.GetReturns(done, true)
+		fakeSpawner.IsJobActiveReturns(false, nil)
+
+		before := ghostTaskEvents("absent_result_status")
+		Expect(newHandlerWithStore(store).ReconcileOnce(ctx)).To(BeNil())
+		Expect(ghostTaskEvents("absent_result_status")).To(Equal(before))
+	})
+
 	It("still suppresses a done result inside the grace", func() {
 		// The control for the spec above: a done result at the same age and the
 		// same shared record must still be suppressed, so the bypass cannot be
