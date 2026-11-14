@@ -86,6 +86,9 @@ const crdDNS1123Label = "^[a-z0-9]([-a-z0-9]*[a-z0-9])?$"
 // executor's own VAULT_NAME/TASK_VAULT.
 const crdVaultSlug = "^[a-z][a-z0-9-]*$"
 
+// crdClock matches "HH:MM", the shape RunWindow's weekday bounds are parsed from.
+const crdClock = "^([01][0-9]|2[0-3]):[0-5][0-9]$"
+
 // crdMaxNameLen is the 63-character ceiling a DNS-1123 label carries. The
 // pattern alone does not bound the length, so an over-long jobNamespace would
 // pass admission and fail later at Jobs().Create with a 422.
@@ -420,6 +423,27 @@ func configSpecProperties() map[string]apiextensionsv1.JSONSchemaProps {
 		"imagePullSecret":    {Type: "string"},
 		// 0 = unlimited (see AgentConfiguration.MaxConcurrentJobs).
 		"maxConcurrentJobs": {Type: "integer", Minimum: &crdMinZero},
+		// 0 = no separate budget. Stamped onto the Job's ActiveDeadlineSeconds
+		// when stricter than the zombie timeout.
+		"runBudgetSeconds": {Type: "integer", Minimum: &crdMinZero},
+		// Optional; unset means no window.
+		//
+		// Declared here AND in the Helm chart's crds/config-crd.yaml, because they
+		// are two separate copies of the same schema: the chart's is installed once
+		// on first helm install (helm never upgrades crds/), and this map is what
+		// the executor re-installs on every start. An undeclared field is pruned by
+		// the API server — the CRD sets preserveUnknownFields: false — so a field
+		// missing here silently does not exist, with no error at apply time. That
+		// is exactly how runWindow was lost on the first deploy.
+		"runWindow": {
+			Type: "object",
+			Properties: map[string]apiextensionsv1.JSONSchemaProps{
+				"timezone":      {Type: "string"},
+				"weekdayStart":  {Type: "string", Pattern: crdClock},
+				"weekdayEnd":    {Type: "string", Pattern: crdClock},
+				"weekendAllDay": {Type: "boolean"},
+			},
+		},
 		// Optional; unset means false. true re-dispatches a taken-over task;
 		// false or unset parks it at human_review.
 		"rerunOnLostClaim": {Type: "boolean"},
