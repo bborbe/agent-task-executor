@@ -2,7 +2,7 @@
 
 All notable changes to this project will be documented in this file.
 
-## Unreleased
+## v0.62.4
 
 - fix: **an absent `last_result_status` is now named instead of decided on silently.** The field is the agent's own verdict and no agent is obliged to write it — the executor itself clears it at spawn (`pkg/result_publisher.go` `PublishSpawnNotification`, *"Empty is the safe direction"*), so absence is the ordinary state of a task whose agent never delivered one. Both gates already handle it correctly: `recentlySucceeded` treats absent-or-unrecognised as not-failed and does not bypass the success record, and `parkSucceededWithoutPhaseMove` parks only `done`, so absence re-drives rather than parking. What was missing is that absence left no trace: an operator watching a task re-drive could not tell "this agent never wrote the field" from "this agent reported a transient failure", and the first is a contract defect the fleet could only see by reading the code. `recentlySucceeded` now emits `event=absent_result_status task=<id> phase=<phase>` and `task_events_total{event="absent_result_status"}` on the first pass that has a success record to decide on, before either outcome is taken. A task with no success record returns earlier and does not fire, so the event means "a Job succeeded and the agent did not say what it thought", not "nothing has run yet". Behaviour is otherwise unchanged — absence still re-drives — and the fleet's remaining exposure is the population of agents below `bborbe/agent v0.145.1`, which this does not alter. Change set: `pkg/handler/recent_success.go`, `pkg/handler/success_record_test.go`, `CHANGELOG.md`.
 
