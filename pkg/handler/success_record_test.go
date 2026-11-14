@@ -392,6 +392,35 @@ var _ = Describe("the shared success record", func() {
 		Expect(fakeSpawner.SpawnJobCallCount()).To(Equal(1))
 	})
 
+	It("retries a failed pass snapshot so one timeout does not blind the guard", func() {
+		// The 2026-11-14 nuke-dev failure. A restarted pod has no memory of its
+		// own, so when the `claims/success/` prefix listing failed the guard read
+		// "never succeeded" for a task it had just run — and spawned it again,
+		// which is the duplicate the success record exists to prevent. One retry
+		// recovers the transient shape (a git-rest restart, a mirror rebuilding),
+		// so the record is found and the task is parked rather than re-run.
+		store := new(mocks.FakeSuccessStore)
+		calls := 0
+		store.SnapshotStub = func(_ context.Context) (map[string]map[string]libtime.DateTime, error) {
+			calls++
+			if calls == 1 {
+				return nil, stderrors.New("git-rest restarting")
+			}
+			return map[string]map[string]libtime.DateTime{
+				"tid-a": {"execution": libtime.DateTime(now.Add(-2 * time.Hour))},
+			}, nil
+		}
+
+		fakeView.SnapshotReturns([]lib.Task{ranTask(domain.TaskPhaseExecution)})
+		fakeView.GetReturns(ranTask(domain.TaskPhaseExecution), true)
+		fakeSpawner.IsJobActiveReturns(false, nil)
+
+		Expect(newHandlerWithStore(store).ReconcileOnce(ctx)).To(BeNil())
+		Expect(store.SnapshotCallCount()).To(Equal(2))
+		Expect(fakeSpawner.SpawnJobCallCount()).To(Equal(0))
+		Expect(fakeResultPublisher.PublishParkSucceededCallCount()).To(Equal(1))
+	})
+
 	It("uses a newer shared record over a stale memory one", func() {
 		// The multi-cluster case the shared record exists for. This pod cached the
 		// completion it saw; a peer recorded a newer success at the same phase. On a

@@ -49,8 +49,9 @@ func successCacheFrom(ctx context.Context) *passSuccessCache {
 }
 
 // lookup returns taskID's recorded success at phase, fetching the pass snapshot
-// on the first call. A failed fetch is reported for every candidate of that pass,
-// which leaves each one on the in-memory record exactly as a failed Lookup does.
+// on the first call. A failed fetch is retried once while the pass has budget,
+// then reported for every candidate of that pass, which leaves each one on the
+// in-memory record exactly as a failed Lookup does.
 func (c *passSuccessCache) lookup(
 	ctx context.Context,
 	store claim.SuccessStore,
@@ -59,6 +60,23 @@ func (c *passSuccessCache) lookup(
 ) (libtime.DateTime, bool, error) {
 	c.once.Do(func() {
 		c.snapshot, c.err = store.Snapshot(ctx)
+		if c.err != nil && ctx.Err() == nil {
+			// One retry, and only while the pass still has budget. A transient
+			// failure — a git-rest restart, a refused connection, a mirror that
+			// was rebuilding — usually clears on the second attempt, and losing
+			// the whole pass's success records to it is what let a restarted
+			// executor re-run tasks it had already done (nuke dev, 2026-11-14:
+			// `event=success_record_snapshot_failed`, then `event=task_rerun` on
+			// the same tasks).
+			//
+			// A read that spent its own 30 s deadline is the other case: the
+			// retry inherits what is left of the pass's 45 s budget, so a slow
+			// store ends with an expired pass context. That is the safe ending —
+			// the spawn path's claim write runs on the same context and refuses,
+			// so the pass holds the task instead of re-running it.
+			glog.V(2).Infof("event=reconcile_success_snapshot_retry err=%v", c.err)
+			c.snapshot, c.err = store.Snapshot(ctx)
+		}
 		glog.V(2).Infof(
 			"event=reconcile_success_snapshot tasks=%d err=%v", len(c.snapshot), c.err,
 		)
