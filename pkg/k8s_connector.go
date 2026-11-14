@@ -89,6 +89,20 @@ const crdVaultSlug = "^[a-z][a-z0-9-]*$"
 // crdClock matches "HH:MM", the shape RunWindow's weekday bounds are parsed from.
 const crdClock = "^([01][0-9]|2[0-3]):[0-5][0-9]$"
 
+// runWindowSchema is the schema for a RunWindow, extracted so
+// configSpecProperties stays inside the funlen limit.
+func runWindowSchema() apiextensionsv1.JSONSchemaProps {
+	return apiextensionsv1.JSONSchemaProps{
+		Type: "object",
+		Properties: map[string]apiextensionsv1.JSONSchemaProps{
+			"timezone":      {Type: "string"},
+			"weekdayStart":  {Type: "string", Pattern: crdClock},
+			"weekdayEnd":    {Type: "string", Pattern: crdClock},
+			"weekendAllDay": {Type: "boolean"},
+		},
+	}
+}
+
 // crdMaxNameLen is the 63-character ceiling a DNS-1123 label carries. The
 // pattern alone does not bound the length, so an over-long jobNamespace would
 // pass admission and fail later at Jobs().Create with a 422.
@@ -435,15 +449,7 @@ func configSpecProperties() map[string]apiextensionsv1.JSONSchemaProps {
 		// the API server — the CRD sets preserveUnknownFields: false — so a field
 		// missing here silently does not exist, with no error at apply time. That
 		// is exactly how runWindow was lost on the first deploy.
-		"runWindow": {
-			Type: "object",
-			Properties: map[string]apiextensionsv1.JSONSchemaProps{
-				"timezone":      {Type: "string"},
-				"weekdayStart":  {Type: "string", Pattern: crdClock},
-				"weekdayEnd":    {Type: "string", Pattern: crdClock},
-				"weekendAllDay": {Type: "boolean"},
-			},
-		},
+		"runWindow": runWindowSchema(),
 		// Optional; unset means false. true re-dispatches a taken-over task;
 		// false or unset parks it at human_review.
 		"rerunOnLostClaim": {Type: "boolean"},
