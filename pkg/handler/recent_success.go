@@ -63,6 +63,25 @@ func (h *taskEventHandler) recentlySucceeded(ctx context.Context, task lib.Task)
 	if !ok {
 		return false
 	}
+	// The success record exists, so this pass has to decide park-versus-re-drive,
+	// and that decision is read from last_result_status. Absence there is not a
+	// verdict: it is the value the executor itself writes at spawn
+	// (pkg/result_publisher.go PublishSpawnNotification clears the field so the
+	// gate reads THIS run), so it is the ordinary state of a task whose agent
+	// never delivered one. It must not be read as done or as failed — and it must
+	// not be silent either. An operator watching a task re-drive cannot otherwise
+	// tell "this agent never wrote the field" from "this agent reported a
+	// transient failure", and the first is a contract defect the fleet can only
+	// see if it is named. Logged on the first pass that has a success record to
+	// decide on, before either outcome is taken.
+	resultStatus, statusPresent := task.Frontmatter.String("last_result_status")
+	if !statusPresent || resultStatus == "" {
+		glog.Infof(
+			"event=absent_result_status task=%s phase=%s",
+			task.TaskIdentifier, phase,
+		)
+		metrics.TaskEventsTotal.WithLabelValues("absent_result_status").Inc()
+	}
 	elapsed := h.currentDateTime.Now().Time().Sub(succeeded.CompletedAt)
 	if elapsed < 0 {
 		// completionTime is stamped by the API server, "now" by this pod; a
