@@ -20,14 +20,15 @@ jobs:
           go-version-file: go.mod
           cache: true
 
+      # The apt-repo route needs `apt-key`, which Ubuntu 26.04 (the current
+      # ubuntu-latest image) no longer ships: the step died with
+      # `sudo: 'apt-key': command not found` on every run from 2026-11-14 on,
+      # including runs whose diff touched no workflow. The upstream install
+      # script is distro-agnostic and pins nothing to a release codename.
       - name: Install Trivy
         run: |
-          sudo apt-get update
-          sudo apt-get install -y wget apt-transport-https gnupg lsb-release
-          wget -qO - https://aquasecurity.github.io/trivy-repo/deb/public.key | sudo apt-key add -
-          echo "deb https://aquasecurity.github.io/trivy-repo/deb $(lsb_release -sc) main" | sudo tee -a /etc/apt/sources.list.d/trivy.list
-          sudo apt-get update
-          sudo apt-get install -y trivy
+          curl -sfL https://raw.githubusercontent.com/aquasecurity/trivy/main/contrib/install.sh \
+            | sudo sh -s -- -b /usr/local/bin
 
       - name: Run precommit checks
         run: make precommit
