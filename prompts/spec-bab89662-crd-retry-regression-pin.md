@@ -1,14 +1,14 @@
 ---
 spec: ["bug-bab89662fe73a8bf4a0014d6f78791b3"]
 status: draft
-created: "2026-11-01T20:54:51Z"
+created: "2026-11-15T12:30:00Z"
 ---
 
 # Pin the CRD conflict retry's re-Get contract
 
 <summary>
-- The CRD install path already retries a lost update race, and the working tree already carries that fix and its regression tests — nothing in the production code changes here.
-- A retry only works if every attempt re-reads the CRD; today no test would notice if the read moved outside the retry loop and each attempt replayed a stale object.
+- The CRD install path already retries a lost-update race, and that fix has been in the codebase and the changelog since the conflict was first observed — no production code changes here.
+- A retry only helps because every attempt re-reads the CRD; today no test would notice if the read moved outside the retry loop and each attempt replayed a stale object.
 - One existing test is extended so the read-write-read-write interleaving is asserted, not just the number of writes.
 - A mutation that fetched once and retried only the write now fails a test instead of passing silently.
 - A second test pins the other half of the contract: a write that fails for a reason a retry cannot fix surfaces after exactly one attempt, instead of being retried.
@@ -18,24 +18,24 @@ created: "2026-11-01T20:54:51Z"
 </summary>
 
 <objective>
-Harden the regression coverage around the already-shipped `ensureCRD` conflict fix so that the property the fix actually depends on — each retry attempt re-reads the CRD and therefore writes with a fresh `resourceVersion` — is pinned by a test, and so that "retry conflicts only" is pinned against a retry-everything regression. Production code is not to change.
+Harden the regression coverage around the already-shipped `ensureCRD` conflict fix so that the property the fix actually depends on — each retry attempt re-reads the CRD and therefore writes with a fresh `resourceVersion` — is pinned by a test, and so that "retry conflicts only" is pinned against a retry-everything regression. Production code is not to change. The bug is the cluster-scoped CRD Get→Update race that made a losing executor crash on startup with a 409 during a concurrent rollout; the fix already prevents that, but only a test can keep a later refactor from silently undoing it.
 </objective>
 
 <context>
-Read `pkg/k8s_connector.go` — in particular `ensureCRD` (it wraps a Get→Create/Get→Update sequence in `retry.RetryOnConflict(retry.DefaultRetry, ...)`, re-`Get`s inside the closure on every attempt, and skips the `Update` entirely when `crdSpecEqual` reports the stored spec already matches), plus `desiredCRD` and `crdSpecEqual`. The doc comments on those functions state the two properties this prompt pins. `SetupCustomResourceDefinition` is the exported entry point the tests drive.
+Read `pkg/k8s_connector.go` — in particular `ensureCRD` (it wraps a Get→Create/Get→Update sequence in `retry.RetryOnConflict(retry.DefaultRetry, ...)` from `k8s.io/client-go/util/retry`, re-`Get`s inside the closure on every attempt, and skips the `Update` entirely when `crdSpecEqual` reports the stored spec already matches), plus `desiredCRD` and `crdSpecEqual`. The doc comments on those functions state the two properties this prompt pins. `SetupCustomResourceDefinition` is the exported entry point the tests drive.
 
 Read `pkg/k8s_connector_test.go` (package `pkg_test`, Ginkgo):
 - `differingCRD()` — a stored CRD whose spec deliberately differs, so the update path is taken.
-- `crdResource` — the `schema.GroupResource` used to construct a `apierrors.NewConflict`.
+- `crdResource` — the `schema.GroupResource` used to construct an `apierrors.NewConflict`.
 - `countVerb(actions, verb)` — the helper that counts actions by verb.
 - the spec `"retries the update when the CRD was modified concurrently"` — the test to extend. It currently asserts only `conflicts == 1` and `countVerb(..., "update") == 2`, which a stale-object retry also satisfies.
 - the spec `"returns a wrapped error when Get fails with a non-NotFound error"` — the existing precedent for a reactor returning a non-conflict API error and asserting the wrapped message.
 
 Read `pkg/k8s_connector_internal_test.go` for the adjacent `crdSpecEqual` specs (do not duplicate them). The Ginkgo suite bootstrap lives in `pkg/suite_test.go` (`TestPkg`, package `pkg_test`) and serves both `package pkg` and `package pkg_test` test files in this directory — do not add another `RunSpecs`.
 
-Read `/home/node/.claude/plugins/marketplaces/coding/docs/go-testing-guide.md` for the external-test-package and Ginkgo conventions this repo follows, and `/home/node/.claude/plugins/marketplaces/coding/docs/changelog-guide.md` for the entry shape.
+Read `/home/node/.claude/plugins/marketplaces/coding/docs/go-testing-guide.md` for the external-test-package and Ginkgo conventions this repo follows, and `/home/node/.claude/plugins/marketplaces/coding/docs/changelog-guide.md` for the entry shape and conventional-prefix rule.
 
-The fix itself is already recorded in `CHANGELOG.md` under the released heading `## v0.18.12`. This prompt adds test coverage only; it must not restate or re-implement that fix.
+The fix itself is already recorded in `CHANGELOG.md` under the released heading `## v0.18.12` (the bullet beginning "a concurrent rollout of the executors no longer kills the losers…"). This prompt adds test coverage only; it must not restate or re-implement that fix. The current changelog has no `## Unreleased` section — the top heading is `## v0.62.2` — so requirement 3 creates one.
 </context>
 
 <requirements>
@@ -86,11 +86,13 @@ The fix itself is already recorded in `CHANGELOG.md` under the released heading 
 
    `ctx` is set by the outer `Describe("K8sConnector")` `BeforeEach`. Every identifier used (`fake`, `rest`, `k8stesting`, `runtime`, `apierrors`, `stderrors`, `pkg`, `differingCRD`, `fakeBuilder`, `ctx`) is already imported or declared in this file — add no imports.
 
-3. Append one bullet to the existing `## Unreleased` section at the top of `CHANGELOG.md` (do not create a second section, do not touch any released heading), in the file's existing voice (`- <prefix>: **bold summary.** prose`):
+3. Add a `## Unreleased` section to `CHANGELOG.md` directly above the first `## v` heading (the preamble is `# Changelog`, a blank line, then the "All notable changes…" line; the first version heading is `## v0.62.2`). It does not exist yet — do not create a second one, and do not touch any released heading. Put exactly one bullet in it, in the file's existing voice (`- <prefix>: **bold summary.** prose`), using the `test:` prefix from the changelog guide:
 
    ```
    - test: **the CRD install path's conflict retry is pinned at the interleaving, not just the write count.** A retry only helps because each attempt re-reads `configs.agent.benjamin-borbe.de` and therefore writes a fresh `resourceVersion`; the previous assertion counted two `Update` actions, which a retry that replayed the object fetched before the loop would also satisfy. The spec now asserts `get, update, get, update`, and a second spec pins that an `Update` failing for a non-conflict reason surfaces as a wrapped `update CRD` error after exactly one attempt instead of being retried. No behaviour change.
    ```
+
+4. Before finishing, re-run `<verification>` and confirm it passes; walk each numbered requirement against the diff.
 </requirements>
 
 <constraints>
@@ -98,7 +100,8 @@ The fix itself is already recorded in `CHANGELOG.md` under the released heading 
 - Do NOT add handling for a concurrent `Create` (an `AlreadyExists` on the create path) and do NOT broaden the retry to non-conflict errors. Those would be behaviour changes outside this prompt's scope.
 - Do NOT add a new test file and do NOT add another `RunSpecs`; the suite bootstrap is `pkg/suite_test.go`.
 - Do NOT duplicate the `crdSpecEqual` specs in `pkg/k8s_connector_internal_test.go`.
-- Do NOT attempt any cluster access or deployment. Nothing in this prompt is verifiable against a live cluster.
+- Do NOT attempt any cluster access or deployment. Nothing in this prompt is verifiable against a live cluster; deploying the already-shipped fix to a dev cluster is a separate operator action, not part of this change.
+- Do NOT run `go mod vendor`, and never use `-mod=vendor`.
 - Do NOT commit — dark-factory handles git.
 - Existing tests must still pass.
 </constraints>
@@ -109,7 +112,11 @@ Run from the repository root:
 ```bash
 go test -mod=mod -count=1 ./pkg/
 ROOTDIR=/workspace make precommit
+grep -c '^## Unreleased$' CHANGELOG.md
+awk '/^## /{sec=$0} /conflict retry is pinned at the interleaving/{print sec}' CHANGELOG.md
 ```
 
-`make precommit` must pass. Then confirm the pin is real: temporarily move the `crds.Get(...)` call in `ensureCRD` outside the `retry.RetryOnConflict` closure so the retried attempt reuses the first `existing` object, run `go test -mod=mod -count=1 ./pkg/`, and confirm the extended conflict spec fails; revert the mutation and re-run to green.
+`make precommit` must pass. `grep -c '^## Unreleased$' CHANGELOG.md` must print `1`, and the `awk` line must print `## Unreleased` — together these prove the bullet landed in the unreleased section rather than under a released version.
+
+Then confirm the pin is real: temporarily move the `crds.Get(...)` call in `ensureCRD` outside the `retry.RetryOnConflict` closure so the retried attempt reuses the first `existing` object, run `go test -mod=mod -count=1 ./pkg/`, and confirm the extended conflict spec fails. Revert the mutation and re-run `go test -mod=mod -count=1 ./pkg/` to green. The final `make precommit` must be run after the revert — a forgotten mutation makes the extended spec fail, so a green `make precommit` is itself the proof that the production file was restored.
 </verification>

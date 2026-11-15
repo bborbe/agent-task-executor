@@ -2,6 +2,10 @@
 
 All notable changes to this project will be documented in this file.
 
+## Unreleased
+
+- docs: **record where the executor's `KAFKA_BROKERS` comes from and how to remediate a crash-looping Deployment.** The nuke-dev executor pointed at an in-cluster ClusterIP with no ready endpoints, so startup failed with Sarama `ErrOutOfBrokers`. The runbook names the external nodeport broker list, the `bborbe/trading` source of truth, and the remediation order: confirm the current value, update the source of truth, redeploy, and remove the dangling Strimzi Service last. No code change — the Deployment lives outside this repository.
+
 ## v0.63.1
 
 - fix: **`executor_task_reruns_total` counts only a genuine re-run, not the executor's own re-drive of a run that never finished.** The counter incremented on any spawn at a phase carrying a success record inside the 1 h window, and `parkSucceededWithoutPhaseMove` deliberately re-drives a run whose `last_result_status` is not `done` — failed, needs_input, in_progress, unrecognised, absent — up to `maxRedrivesWithoutAdvance` spawns at the same `phase:ref` scope. The success record exists because a Job that exits 0 is marked succeeded even when the agent delivered nothing, so every one of those sanctioned re-drives was counted and fired `TaskRerun` with the annotation "ran again after succeeding" — measured 2026-11-15 on nuke prod, where task `d8827b42` (`github-update-go`) spawned four times at `phase=planning` and was counted on three, while `skip_recent_success` correctly suppressed every pass from elapsed 58 s to 290 s. The alert fired on designed behaviour and buried the suppression failure it exists to catch. `recordTaskRerun` now requires `last_result_status: done` and logs the excluded spawn as `event=task_redrive_not_rerun` plus `task_events_total{event="redrive_not_rerun"}`, so the log and the counter disagree on the same event. The series still exists at 0 from the first spawn, which is what the absent-tier alert reads. Change set: `pkg/handler/recent_success.go`, `pkg/handler/task_rerun_metric_internal_test.go`, `CHANGELOG.md`.
