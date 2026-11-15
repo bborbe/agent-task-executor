@@ -2,7 +2,7 @@
 
 All notable changes to this project will be documented in this file.
 
-## Unreleased
+## v0.62.5
 
 - fix: **the healthcheck probe re-stamps its own `assignee` on every re-trigger, so a probe whose assignee was cleared still routes.** The probe publishes a create plus an update-frontmatter per Config per tick. The create writes only when no file exists or the existing one is terminal; a non-terminal probe record — exactly the state a skipped probe sits in — returns `ErrTaskAlreadyExists` and is left untouched, while probe files are reused per (agent, stage). An agent clears its own `assignee` when it finishes or escalates, so for that record the update was the only write left, and it carried `status`, `phase`, `trigger_count` and the run-state resets but not `assignee`. The record therefore kept the cleared value, `resolveConfig`'s assignee fast path was skipped, and the reconcile fell to `ResolveByTaskType`. On a stage whose Configs all declare `healthcheck` and none declares `defaultForTaskTypes` — measured on sun-k3s 2026-11-15: seven claimants, zero defaults — that resolves to `config ambiguous`, and the probe is skipped before any Job exists, so the documented per-agent smoke test proved nothing. Prod masks the same defect because `claude-headless` declares the designated default, which routes the probe to the default agent instead of the one it names. Stamping the assignee on the update keeps each probe on its own Config and never reaches the ambiguous recovery path. Change set: `pkg/probe/probe.go`, `pkg/probe/probe_test.go`, `CHANGELOG.md`.
 
