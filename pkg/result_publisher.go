@@ -65,6 +65,12 @@ const (
 	// ParkReasonSucceeded is the reason a task is parked after its Job succeeded
 	// without advancing the task's phase.
 	ParkReasonSucceeded = "parked_succeeded"
+	// ParkReasonRedriveCap is the reason a task is parked after its re-drive
+	// budget was spent on a result that never reported done. It is a distinct
+	// token from ParkReasonSucceeded on purpose: the two parks have opposite
+	// outcomes — one is finished work, the other is an escalation — and a shared
+	// token made a failed run's section byte-identical to a finished one's.
+	ParkReasonRedriveCap = "parked_redrive_cap"
 )
 
 //counterfeiter:generate -o ../mocks/result_publisher.go --fake-name FakeResultPublisher . ResultPublisher
@@ -219,11 +225,16 @@ type ResultPublisher interface {
 	// forever; with human_review instead, a finished record never terminalises
 	// and has to be closed by hand.
 	PublishParkSucceeded(ctx context.Context, task lib.Task) error
-	// PublishParkRedriveCap writes phase "human_review" and a "## Parked" body
-	// section for a task whose Job succeeded but whose result never reported
-	// done, after its re-drive budget was spent. It is deliberately NOT
-	// terminal: the work did not finish, so the record has to stay open for a
-	// human. Only a done result closes the record.
+	// PublishParkRedriveCap escalates a task whose Job succeeded but whose
+	// result never reported done, after its re-drive budget was spent. It writes
+	// status hold and phase planning plus a "## Parked" body section, and
+	// deliberately writes no terminal outcome: the work did not finish, so
+	// closing it would report failed work as completed. status hold is the
+	// escalation channel — it leaves the in_progress population while staying
+	// open for a human — and the phase moves to planning because vault-cli
+	// refuses hold alongside an active phase. The reason line names the
+	// non-done last_result_status, so the section is distinguishable from the
+	// succeeded park's bare token.
 	PublishParkRedriveCap(ctx context.Context, task lib.Task) error
 	// PublishAbort closes a record the consecutive-re-drive cap has decided to
 	// stop driving. It writes status aborted plus the close-out pair vault-cli
@@ -1156,18 +1167,70 @@ func (p *resultPublisher) PublishParkSucceeded(
 	return p.publishRaw(ctx, taskcmd.UpdateFrontmatterCommandOperation, cmd)
 }
 
-// PublishParkRedriveCap writes phase "human_review" and a "## Parked" body
-// section for a task whose Job succeeded but whose result never reported done,
-// after its re-drive budget was spent.
+// PublishParkRedriveCap escalates a task whose Job succeeded but whose result
+// never reported done, after its re-drive budget was spent.
 //
-// It shares PublishParkLostClaim's write because that write is exactly the
-// escalation: the record stays open for a human. It must never be terminal —
-// the work did not finish, and closing it would report failed work as completed.
+// It must never write a terminal outcome — the work did not finish, so closing
+// it as completed would report failed work as finished. It must equally not
+// leave the record in_progress: the earlier write reused PublishParkLostClaim,
+// which writes phase human_review and nothing else, and human_review is in the
+// executor's terminal-phase set. The record then read in_progress with no Job
+// and was never re-driven — invisible to the pipeline, indistinguishable from a
+// finished run, and a standing violation of "no task sits in_progress without a
+// job". Measured 2026-11-12: 53 github-update-go records at that triple.
+//
+// The landing is status hold, which is the escalation channel: the record stays
+// open for a human (hold is outside terminalStatuses, so nothing closes it) but
+// leaves the in_progress population, and an operator resumes it by setting the
+// status back to in_progress. The phase moves to planning in the same write
+// because vault-cli's lint flags hold alongside an active phase (execution,
+// in_progress, ai_review, human_review) — planning is the only phase that says
+// both "not finished" and "a human has to decide how to proceed". Resuming
+// therefore restarts at planning, which also re-scopes trigger_count, so a
+// re-armed run gets a fresh re-drive budget instead of inheriting the spent one.
+//
+// The reason line carries the evidence that separates this park from the
+// succeeded one: the reason token, the non-done last_result_status, the phase
+// the run never left, and the spawn count that spent the budget.
 func (p *resultPublisher) PublishParkRedriveCap(
 	ctx context.Context,
 	task lib.Task,
 ) error {
-	return p.PublishParkLostClaim(ctx, task, ParkReasonSucceeded, "", "")
+	cmd := taskcmd.UpdateFrontmatterCommand{
+		TaskIdentifier: task.TaskIdentifier,
+		TargetVault:    targetVaultFromTask(task),
+		Updates: lib.TaskFrontmatter{
+			"status": string(domain.TaskStatusHold),
+			"phase":  string(domain.TaskPhasePlanning),
+		},
+		Body: &taskcmd.BodySection{
+			Heading: "## Parked",
+			Section: parkSection(redriveCapReason(task), "", ""),
+		},
+	}
+	return p.publishRaw(ctx, taskcmd.UpdateFrontmatterCommandOperation, cmd)
+}
+
+// redriveCapReason renders the "## Parked" reason line for a cap-exhausted park.
+// The fields are the park's evidence, not decoration: an operator has to be able
+// to tell this escalation from the succeeded park by the section alone, which
+// writes the bare token and nothing else.
+func redriveCapReason(task lib.Task) string {
+	resultStatus, ok := task.Frontmatter.String("last_result_status")
+	if !ok || resultStatus == "" {
+		resultStatus = "absent"
+	}
+	phase, ok := task.Frontmatter.String("phase")
+	if !ok || phase == "" {
+		phase = "absent"
+	}
+	return fmt.Sprintf(
+		"%s last_result_status=%s phase=%s trigger_count=%d",
+		ParkReasonRedriveCap,
+		resultStatus,
+		phase,
+		task.Frontmatter.TriggerCount(),
+	)
 }
 
 // PublishAbort closes a record the consecutive-re-drive cap has stopped
