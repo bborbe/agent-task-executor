@@ -19,38 +19,14 @@ import (
 	"github.com/bborbe/agent-task-executor/pkg/claim"
 )
 
-// mutableClock is a CurrentDateTimeGetter a test can advance.
-type mutableClock struct {
-	mu  sync.Mutex
-	now libtime.DateTime
-}
-
-func newMutableClock() *mutableClock {
-	// Seeded from the real clock: the budget arithmetic compares a context
-	// deadline (real time) against this getter, so a fixed seed would make
-	// `remaining` meaningless. The TTL tests move it forward explicitly.
-	return &mutableClock{now: libtime.DateTime(time.Now())}
-}
-
-func (c *mutableClock) Now() libtime.DateTime {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	return c.now
-}
-
-func (c *mutableClock) advance(d time.Duration) {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	c.now = libtime.DateTime(time.Time(c.now).Add(d))
-}
-
-// countingSuccessStore answers Snapshot from a fixed map and counts the reads.
+// countingSuccessStore answers Snapshot from a fixed map, counts the reads and
+// can be told to fail, block, or fail only the first time.
 type countingSuccessStore struct {
 	mu        sync.Mutex
 	snapshot  map[string]map[string]libtime.DateTime
 	calls     int
+	failFirst bool
 	blockFor  func(context.Context) // nil means return immediately
-	returnErr error
 }
 
 func (s *countingSuccessStore) Record(context.Context, string, string, libtime.DateTime) error {
@@ -68,8 +44,9 @@ func (s *countingSuccessStore) Snapshot(
 ) (map[string]map[string]libtime.DateTime, error) {
 	s.mu.Lock()
 	s.calls++
+	call := s.calls
+	failFirst := s.failFirst
 	block := s.blockFor
-	err := s.returnErr
 	s.mu.Unlock()
 	if block != nil {
 		block(ctx)
@@ -79,8 +56,8 @@ func (s *countingSuccessStore) Snapshot(
 	if ctxErr := ctx.Err(); ctxErr != nil {
 		return nil, ctxErr
 	}
-	if err != nil {
-		return nil, err
+	if failFirst && call == 1 {
+		return nil, stderrors.New("connection refused")
 	}
 	return s.snapshot, nil
 }
@@ -91,69 +68,24 @@ func (s *countingSuccessStore) callCount() int {
 	return s.calls
 }
 
-func newTestPassCache(clock libtime.CurrentDateTimeGetter) *passSuccessCache {
-	return &passSuccessCache{
-		shared:          &successSnapshotCache{},
-		currentDateTime: clock,
-	}
-}
-
-// TestSuccessSnapshotServesManyPassesFromOneRead pins the whole point of the
-// cache: a 60 s pass must not pay a ~27 s prefix list on every pass. Before
-// this change each pass issued its own read, and on nuke dev 2026-11-15 that
-// read took long enough that the pass's spawn reads inherited an expired
-// context.
-func TestSuccessSnapshotServesManyPassesFromOneRead(t *testing.T) {
-	clock := newMutableClock()
+// TestReconcilePassReadsSuccessStoreOnce pins the batching: one prefix list
+// answers every candidate of a pass, never one per candidate.
+func TestReconcilePassReadsSuccessStoreOnce(t *testing.T) {
 	store := &countingSuccessStore{
-		snapshot: map[string]map[string]libtime.DateTime{
-			"task-a": {"execution": clock.Now()},
-		},
+		snapshot: map[string]map[string]libtime.DateTime{},
 	}
-	cache := newTestPassCache(clock)
+	cache := &passSuccessCache{}
 
-	for range 5 {
-		at, ok, err := cache.lookup(context.Background(), store, "task-a", "execution")
-		if err != nil {
+	for i := range 8 {
+		if _, _, err := cache.lookup(
+			context.Background(), store, string(rune('a'+i)), "execution",
+		); err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
-		if !ok {
-			t.Fatal("expected the cached record to be found")
-		}
-		if at.Time().IsZero() {
-			t.Fatal("expected a non-zero completion time")
-		}
 	}
 
 	if store.callCount() != 1 {
-		t.Fatalf("expected 1 snapshot read across 5 passes, got %d", store.callCount())
-	}
-}
-
-// TestSuccessSnapshotRefetchedAfterTTL keeps the cache bounded in age: a record
-// written by a peer must become visible within the TTL.
-func TestSuccessSnapshotRefetchedAfterTTL(t *testing.T) {
-	clock := newMutableClock()
-	store := &countingSuccessStore{snapshot: map[string]map[string]libtime.DateTime{}}
-	cache := newTestPassCache(clock)
-
-	if _, _, err := cache.lookup(context.Background(), store, "task-a", "execution"); err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	clock.advance(successSnapshotTTL - time.Second)
-	if _, _, err := cache.lookup(context.Background(), store, "task-a", "execution"); err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if store.callCount() != 1 {
-		t.Fatalf("expected the snapshot to still be cached inside its TTL, got %d reads",
-			store.callCount())
-	}
-	clock.advance(2 * time.Second)
-	if _, _, err := cache.lookup(context.Background(), store, "task-a", "execution"); err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if store.callCount() != 2 {
-		t.Fatalf("expected a re-read once the TTL elapsed, got %d reads", store.callCount())
+		t.Fatalf("expected 1 snapshot read for a pass, got %d", store.callCount())
 	}
 }
 
@@ -163,20 +95,16 @@ func TestSuccessSnapshotRefetchedAfterTTL(t *testing.T) {
 // The store blocks until its own context is done, which is the shape of the
 // 30 s RequestTimeout the real client enforces. The read must be given the
 // pass's remaining budget MINUS the reserve, so when it gives up the pass is
-// still alive and the resourcequota read and job list that follow can run. The
-// retry must not start either: after a read that spent everything down to the
-// reserve, a second full read does not fit.
+// still alive and the resourcequota read and job list that follow can run.
 func TestSlowSuccessSnapshotLeavesTheSpawnPathItsReserve(t *testing.T) {
-	clock := newMutableClock()
 	store := &countingSuccessStore{
 		snapshot: map[string]map[string]libtime.DateTime{},
 		blockFor: func(ctx context.Context) { <-ctx.Done() },
 	}
-	cache := newTestPassCache(clock)
+	cache := &passSuccessCache{}
 
 	// 17 s of pass budget leaves 2 s for the read once the 15 s reserve is
-	// subtracted. The clock is fixed, so the deadline arithmetic is measured
-	// against the real wall clock inside context.WithTimeout.
+	// subtracted.
 	passCtx, cancel := context.WithTimeout(context.Background(), 17*time.Second)
 	defer cancel()
 
@@ -191,13 +119,55 @@ func TestSlowSuccessSnapshotLeavesTheSpawnPathItsReserve(t *testing.T) {
 			err,
 		)
 	}
-	// A second of tolerance: the read returns a hair before its own deadline, so
-	// the reserve is measured with scheduling slack rather than exactly. The
-	// property under test is that the reserve SURVIVES — before this change the
-	// read consumed the whole pass and this was 0.
+	// A second of tolerance: the read returns a hair before its own deadline.
+	// The property under test is that the reserve SURVIVES — before this change
+	// the read consumed the whole pass and this was 0.
 	if remaining := time.Until(mustDeadline(t, passCtx)); remaining < successSnapshotReserve-time.Second {
 		t.Fatalf("expected at least %s of pass budget left, got %s",
 			successSnapshotReserve, remaining)
+	}
+}
+
+// TestSuccessSnapshotRetriesAFastFailure keeps the v0.62.3 recovery: a transient
+// failure that clears at once must still get its second attempt.
+func TestSuccessSnapshotRetriesAFastFailure(t *testing.T) {
+	store := &countingSuccessStore{
+		snapshot:  map[string]map[string]libtime.DateTime{"task-a": {"execution": libtime.DateTime(time.Now())}},
+		failFirst: true,
+	}
+	cache := &passSuccessCache{}
+
+	passCtx, cancel := context.WithTimeout(context.Background(), 45*time.Second)
+	defer cancel()
+
+	at, ok, err := cache.lookup(passCtx, store, "task-a", "execution")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !ok || at.Time().IsZero() {
+		t.Fatal("expected the retry's snapshot to answer the lookup")
+	}
+	if store.callCount() != 2 {
+		t.Fatalf("expected a retry after a fast failure, got %d reads", store.callCount())
+	}
+}
+
+// TestSuccessSnapshotSkipsRetryWithoutBudget stops the retry from spending the
+// spawn path's reserve on a second attempt that could not finish.
+func TestSuccessSnapshotSkipsRetryWithoutBudget(t *testing.T) {
+	store := &countingSuccessStore{
+		snapshot:  map[string]map[string]libtime.DateTime{},
+		failFirst: true,
+	}
+	cache := &passSuccessCache{}
+
+	// 20 s leaves 5 s for the first read. After a fast failure the pass has 20 s
+	// left, which is short of reserve+min_read (25 s), so no retry.
+	passCtx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
+
+	if _, _, err := cache.lookup(passCtx, store, "task-a", "execution"); err == nil {
+		t.Fatal("expected the failed read to report an error")
 	}
 	if store.callCount() != 1 {
 		t.Fatalf("expected the retry to be skipped for lack of budget, got %d reads",
@@ -208,9 +178,8 @@ func TestSlowSuccessSnapshotLeavesTheSpawnPathItsReserve(t *testing.T) {
 // TestSuccessSnapshotSkippedWithoutBudget refuses to start a read that could
 // only starve the spawn path.
 func TestSuccessSnapshotSkippedWithoutBudget(t *testing.T) {
-	clock := newMutableClock()
 	store := &countingSuccessStore{snapshot: map[string]map[string]libtime.DateTime{}}
-	cache := newTestPassCache(clock)
+	cache := &passSuccessCache{}
 
 	passCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
@@ -224,25 +193,6 @@ func TestSuccessSnapshotSkippedWithoutBudget(t *testing.T) {
 	}
 	if store.callCount() != 0 {
 		t.Fatalf("expected no snapshot read at all, got %d", store.callCount())
-	}
-}
-
-// TestSuccessSnapshotInvalidatedOnRecord makes a success this pod records
-// visible to the next pass instead of hiding it behind the TTL.
-func TestSuccessSnapshotInvalidatedOnRecord(t *testing.T) {
-	clock := newMutableClock()
-	store := &countingSuccessStore{snapshot: map[string]map[string]libtime.DateTime{}}
-	cache := newTestPassCache(clock)
-
-	if _, _, err := cache.lookup(context.Background(), store, "task-a", "execution"); err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	cache.shared.invalidate()
-	if _, _, err := cache.lookup(context.Background(), store, "task-a", "execution"); err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if store.callCount() != 2 {
-		t.Fatalf("expected a re-read after invalidation, got %d reads", store.callCount())
 	}
 }
 
