@@ -285,6 +285,7 @@ func CreateConsumer(
 		handler.WithClaimClientFactory(claimClientFactory),
 		handler.WithConfigProvider(configProvider),
 		handler.WithVaultAPIIndexClient(vaultIndexClient),
+		handler.WithTokenSpendReader(tokenSpendReaderFor(vaultIndexClient)),
 		handler.WithVaultAliases(vaultAliases),
 		handler.WithPodQuotaLimiter(spawner.NewPodQuotaLimiter(kubeClient, currentDateTimeGetter)),
 		handler.WithClaimJobControl(
@@ -414,4 +415,15 @@ func CreateHealthcheckCron(
 	runner probe.HealthcheckRunner,
 ) pkg.CronScheduler {
 	return libcron.NewExpressionCron(expression, runner)
+}
+
+// tokenSpendReaderFor returns the token-spend reader a vault client also implements,
+// or nil when it does not. The widening sits behind a type assertion so the
+// divergence-only test doubles satisfy VaultAPIIndexClient without implementing the
+// document reads.
+func tokenSpendReaderFor(client claim.VaultAPIIndexClient) claim.TokenSpendReader {
+	if reader, ok := client.(claim.TokenSpendReader); ok {
+		return reader
+	}
+	return nil
 }

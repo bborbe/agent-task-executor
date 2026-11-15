@@ -440,6 +440,9 @@ func configSpecProperties() map[string]apiextensionsv1.JSONSchemaProps {
 		// 0 = no separate budget. Stamped onto the Job's ActiveDeadlineSeconds
 		// when stricter than the zombie timeout.
 		"runBudgetSeconds": {Type: "integer", Minimum: &crdMinZero},
+		// Optional; unset or 0 means no token ceiling. Summed across the agent's
+		// runs in the current run window from each task's metrics_runs history.
+		"tokenCeiling": {Type: "integer", Minimum: &crdMinZero},
 		// Optional; unset means no window.
 		//
 		// Declared here AND in the Helm chart's crds/config-crd.yaml, because they

@@ -45,6 +45,32 @@ func NextRunWindowOpen(now time.Time, window *agentv1.RunWindow) time.Time {
 	return now.Add(7 * 24 * time.Hour)
 }
 
+// CurrentRunWindowStart returns the instant the current run window opened. It is
+// the lower bound for a per-window token sum: only runs that completed at or after
+// it count toward the current window. ok is false when window is nil or now is
+// outside the window — there is no current window to sum.
+func CurrentRunWindowStart(now time.Time, window *agentv1.RunWindow) (time.Time, bool) {
+	if window == nil {
+		return time.Time{}, false
+	}
+	local := now.In(runWindowLocation(window.Timezone))
+	if !inRunWindowAt(local, window) {
+		return time.Time{}, false
+	}
+	// Walk back a minute at a time to the first minute outside the window; the
+	// minute after it is the window's opening. Bounded to eight days, matching
+	// NextRunWindowOpen, so a malformed window cannot spin.
+	probe := local.Truncate(time.Minute)
+	for i := 0; i < 8*24*60; i++ {
+		prev := probe.Add(-time.Minute)
+		if !inRunWindowAt(prev, window) {
+			return probe, true
+		}
+		probe = prev
+	}
+	return time.Time{}, false
+}
+
 // SecondsUntilRunWindowClose returns how long the window stays open from now.
 // The caller caps a Job's deadline with it so a run admitted near the end of the
 // window is stopped when the window closes rather than running into business
