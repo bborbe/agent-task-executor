@@ -96,7 +96,7 @@ type application struct {
 	// lost data: turn it on only for a topic whose compacted log carries bytes
 	// that will never age out (retention.ms=-1), where the alternative is a
 	// crash-loop that blocks every task on the cluster.
-	SkipCRCCorruption bool `required:"false" arg:"skip-crc-corruption" env:"SKIP_CRC_CORRUPTION" usage:"Skip corrupt Kafka record batches in the task-view reader instead of crashing; the skipped messages are lost" default:"false"`
+	SkipCRCCorruption bool `required:"false" arg:"skip-crc-corruption"            env:"SKIP_CRC_CORRUPTION"            usage:"Skip corrupt Kafka record batches in the task-view reader instead of crashing; the skipped messages are lost"                                                                                                                                                                       default:"false"`
 }
 
 // vaultSlugRegexp mirrors the controller's VAULT_NAME validation (pkg/routing):

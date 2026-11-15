@@ -67,7 +67,13 @@ func TestApplyActiveDeadlineSecondsKeepsBudgetWellInsideTheWindow(t *testing.T) 
 		ZombieJobTimeoutSeconds: &zombie,
 	}
 
-	applyActiveDeadlineSeconds(config, "job", lib.TaskIdentifier("task"), job, berlinClock(t, 21, 0))
+	applyActiveDeadlineSeconds(
+		config,
+		"job",
+		lib.TaskIdentifier("task"),
+		job,
+		berlinClock(t, 21, 0),
+	)
 
 	if job.Spec.ActiveDeadlineSeconds == nil {
 		t.Fatal("ActiveDeadlineSeconds was not stamped")
