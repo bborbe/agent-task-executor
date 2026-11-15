@@ -36,8 +36,9 @@ var taskRerunCases = []taskRerunCase{
 	{
 		name: "same phase inside the window is a re-run",
 		frontmatter: lib.TaskFrontmatter{
-			"phase":     "execution",
-			"task_type": "rerun-same-phase-inside",
+			"phase":              "execution",
+			"task_type":          "rerun-same-phase-inside",
+			"last_result_status": "done",
 		},
 		succeeded:  true,
 		sucPhase:   "execution",
@@ -89,12 +90,15 @@ var taskRerunCases = []taskRerunCase{
 		wantReruns: 0,
 	},
 	{
-		name:        "an empty phase matches an empty success phase",
-		frontmatter: lib.TaskFrontmatter{"task_type": "rerun-empty-phase"},
-		succeeded:   true,
-		sucPhase:    "",
-		sucAge:      10 * time.Minute,
-		wantReruns:  1,
+		name: "an empty phase matches an empty success phase",
+		frontmatter: lib.TaskFrontmatter{
+			"task_type":          "rerun-empty-phase",
+			"last_result_status": "done",
+		},
+		succeeded:  true,
+		sucPhase:   "",
+		sucAge:     10 * time.Minute,
+		wantReruns: 1,
 	},
 	{
 		name:        "no recorded success is not a re-run",
@@ -102,19 +106,92 @@ var taskRerunCases = []taskRerunCase{
 		wantReruns:  0,
 	},
 	{
-		name:        "an absent task_type still counts under the empty label",
-		frontmatter: lib.TaskFrontmatter{"phase": "execution"},
-		succeeded:   true,
-		sucPhase:    "execution",
-		sucAge:      10 * time.Minute,
-		wantReruns:  1,
+		name: "an absent task_type still counts under the empty label",
+		frontmatter: lib.TaskFrontmatter{
+			"phase":              "execution",
+			"last_result_status": "done",
+		},
+		succeeded:  true,
+		sucPhase:   "execution",
+		sucAge:     10 * time.Minute,
+		wantReruns: 1,
+	},
+	// The other direction: a spawn after a run that did not finish is the
+	// executor's own bounded re-drive, not a re-run. Counting it fired the
+	// TaskRerun alert on designed behaviour — measured 2026-11-15 on nukeprod,
+	// where task d8827b42 (github-update-go) spawned four times at
+	// phase=planning and was counted on three of them.
+	{
+		name: "a re-drive of a failed run is not a re-run",
+		frontmatter: lib.TaskFrontmatter{
+			"phase":              "execution",
+			"task_type":          "redrive-failed",
+			"last_result_status": "failed",
+		},
+		succeeded:  true,
+		sucPhase:   "execution",
+		sucAge:     10 * time.Minute,
+		wantReruns: 0,
+	},
+	{
+		name: "a re-drive of an in_progress run is not a re-run",
+		frontmatter: lib.TaskFrontmatter{
+			"phase":              "execution",
+			"task_type":          "redrive-in-progress",
+			"last_result_status": "in_progress",
+		},
+		succeeded:  true,
+		sucPhase:   "execution",
+		sucAge:     10 * time.Minute,
+		wantReruns: 0,
+	},
+	{
+		name: "a re-drive of a needs_input run is not a re-run",
+		frontmatter: lib.TaskFrontmatter{
+			"phase":              "execution",
+			"task_type":          "redrive-needs-input",
+			"last_result_status": "needs_input",
+		},
+		succeeded:  true,
+		sucPhase:   "execution",
+		sucAge:     10 * time.Minute,
+		wantReruns: 0,
+	},
+	{
+		name: "an unrecognised result status is a re-drive, not a re-run",
+		frontmatter: lib.TaskFrontmatter{
+			"phase":              "execution",
+			"task_type":          "redrive-unrecognised",
+			"last_result_status": "weird",
+		},
+		succeeded:  true,
+		sucPhase:   "execution",
+		sucAge:     10 * time.Minute,
+		wantReruns: 0,
+	},
+	{
+		name: "a spawn with no result status is a re-drive, not a re-run",
+		frontmatter: lib.TaskFrontmatter{
+			"phase":     "execution",
+			"task_type": "redrive-absent-status",
+		},
+		succeeded:  true,
+		sucPhase:   "execution",
+		sucAge:     10 * time.Minute,
+		wantReruns: 0,
 	},
 }
 
-// TestRecordTaskRerun pins what counts as a re-run. The phase case is the one
-// that matters most: a task that succeeds at planning and is spawned again for
-// execution has advanced, not re-run, and counting that would fire the re-run
-// alert on every ordinary task.
+// TestRecordTaskRerun pins what counts as a re-run, in both directions. The
+// phase case is the one that matters most: a task that succeeds at planning and
+// is spawned again for execution has advanced, not re-run, and counting that
+// would fire the re-run alert on every ordinary task.
+//
+// The result-status cases are the mirror image, and the reason this table has to
+// assert both directions: a one-directional test passes while the counter goes
+// silent, which is exactly the failure the TaskRerun alert family keeps
+// producing. A spawn after a `done` run is the defect; a spawn after any other
+// outcome is the re-drive the park path authorises on purpose.
 func TestRecordTaskRerun(t *testing.T) {
 	for _, tc := range taskRerunCases {
 		t.Run(tc.name, func(t *testing.T) {
