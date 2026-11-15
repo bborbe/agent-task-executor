@@ -307,6 +307,8 @@ type taskEventHandler struct {
 	claimJobControl claim.JobControl
 	// vaultIndexClient nil means the deployment has no vault-api URL and the check is skipped.
 	vaultIndexClient claim.VaultAPIIndexClient
+	// tokenSpendReader nil means no token ceiling is enforced.
+	tokenSpendReader claim.TokenSpendReader
 	claimManagerOnce sync.Once
 	claimManager     claim.LeaseManager
 	claimManagerErr  error

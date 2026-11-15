@@ -30,6 +30,9 @@ func (h *taskEventHandler) deferIfNotAdmitted(
 	if h.deferIfOutsideRunWindow(task, config) {
 		return true, nil
 	}
+	if over, err := h.deferIfOverTokenCeiling(ctx, task, config); over || err != nil {
+		return over, err
+	}
 	return h.deferIfAtConcurrencyCap(ctx, task, config, claim)
 }
 
