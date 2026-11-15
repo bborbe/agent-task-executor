@@ -261,6 +261,17 @@ func recurringNextRun(
 // WithLabelValues creates the child metric on miss. That is what lets the
 // absent-tier alert tell "no re-run yet" from "the metric stopped being
 // exported" — the second being the failure that alert exists to catch.
+//
+// Only a run that reported `done` can be re-run. A spawn after a run that
+// reported anything else — failed, needs_input, in_progress, an unrecognised
+// value, or an absent field — is a re-drive, not a re-run:
+// parkSucceededWithoutPhaseMove releases exactly those runs, up to
+// maxRedrivesWithoutAdvance spawns at the same phase:ref scope, on purpose. The
+// success record that lets this counter see them exists only because a Job that
+// exits 0 is marked succeeded even when the agent delivered nothing, so without
+// this guard the alert fires on the executor's own designed behaviour — the
+// fastest way to teach an operator to ignore it, and it buries the suppression
+// failure the alert exists to catch.
 func (h *taskEventHandler) recordTaskRerun(task lib.Task) {
 	taskType := string(task.Frontmatter.TaskType())
 	counter := metrics.TaskRerunsTotal.WithLabelValues(taskType)
@@ -270,6 +281,20 @@ func (h *taskEventHandler) recordTaskRerun(task lib.Task) {
 	}
 	elapsed := h.currentDateTime.Now().Time().Sub(succeeded.CompletedAt)
 	if elapsed < 0 || elapsed >= taskRerunWindow {
+		return
+	}
+	if resultStatus, _ := task.Frontmatter.String("last_result_status"); resultStatus != string(
+		lib.AgentStatusDone,
+	) {
+		glog.Infof(
+			"event=task_redrive_not_rerun task=%s task_type=%s phase=%s last_result_status=%q elapsed=%.0fs",
+			task.TaskIdentifier,
+			taskType,
+			succeeded.Phase,
+			resultStatus,
+			elapsed.Seconds(),
+		)
+		metrics.TaskEventsTotal.WithLabelValues("redrive_not_rerun").Inc()
 		return
 	}
 	counter.Inc()
