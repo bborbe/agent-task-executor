@@ -55,9 +55,10 @@ const (
 	AbortReasonTransientExhausted = metrics.RedriveAbortReasonTransientExhausted
 )
 
-// The reason tokens a park records in its "## Parked" section. The two park
-// paths must never share one: an operator reading the section has to be able to
-// tell a lost-claim hand-off from a succeeded Job that never moved the phase.
+// The reason tokens a park records in its "## Parked" section. No two park paths
+// may share one: an operator reading the section has to be able to tell a
+// lost-claim hand-off from a succeeded Job that never moved the phase, and both
+// of those from a run that spent its re-drive budget without finishing.
 const (
 	// ParkReasonLostClaim is the reason a task is parked after another executor
 	// took over its claim and its Config forbids a rerun.
@@ -1115,7 +1116,8 @@ func (p *resultPublisher) PublishParkLostClaim(
 
 // parkSection renders the fixed "## Parked" section. The heading is the first
 // line and the section ends with a newline, as taskcmd.BodySection requires.
-// An empty claim key means the succeeded path: it carries the reason line only.
+// An empty claim key means a reason-only park — the succeeded and re-drive-cap
+// paths both take that shape: they carry the reason line and nothing else.
 // A lost-claim park with no previous holder writes "unavailable" rather than an
 // empty field, so the evidence is never a blank line an operator has to
 // interpret.
