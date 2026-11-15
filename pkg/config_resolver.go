@@ -297,6 +297,7 @@ func convert(ctx context.Context, obj agentv1.Config, branch string) (AgentConfi
 		ZombieJobTimeoutSeconds: obj.Spec.ZombieJobTimeoutSeconds,
 		RunWindow:               obj.Spec.RunWindow,
 		RunBudgetSeconds:        obj.Spec.RunBudgetSeconds,
+		TokenCeiling:            obj.Spec.TokenCeiling,
 	}, nil
 }
 
