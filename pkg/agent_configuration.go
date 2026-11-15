@@ -109,6 +109,8 @@ type AgentConfiguration struct {
 	// RunBudgetSeconds mirrors ConfigSpec.RunBudgetSeconds. 0 means no separate
 	// budget; the zombie timeout is the only deadline.
 	RunBudgetSeconds int32
+	// TokenCeiling mirrors ConfigSpec.TokenCeiling. nil or 0 means no ceiling.
+	TokenCeiling *int64
 }
 
 // EffectiveRunDeadlineSeconds returns the hard deadline stamped on a spawned

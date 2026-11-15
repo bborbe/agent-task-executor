@@ -65,6 +65,15 @@ func WithVaultAPIIndexClient(client claim.VaultAPIIndexClient) HandlerOption {
 	}
 }
 
+// WithTokenSpendReader supplies the per-task token-history reader the window token
+// ceiling sums. A nil reader (the default) disables the ceiling, which is the
+// no-vault deployment's shape.
+func WithTokenSpendReader(reader claim.TokenSpendReader) HandlerOption {
+	return func(h *taskEventHandler) {
+		h.tokenSpendReader = reader
+	}
+}
+
 // WithConfigProvider supplies the Config store the accepted-set metric reads.
 // Nil (the default) skips the refresh.
 func WithConfigProvider(provider libk8s.Provider[agentv1.Config]) HandlerOption {

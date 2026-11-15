@@ -9,6 +9,7 @@ import (
 	"encoding/json"
 	"io"
 	"net/http"
+	"net/url"
 	"strings"
 
 	"github.com/bborbe/errors"
@@ -38,6 +39,13 @@ type TaskIndex struct {
 	IndexAgeSeconds int
 }
 
+// TaskDocumentItem is one task read in full: its id and whole frontmatter, which
+// carries the per-run metrics_runs history a window token sum reads.
+type TaskDocumentItem struct {
+	ID          string         `json:"id"`
+	Frontmatter map[string]any `json:"frontmatter"`
+}
+
 // VaultAPIIndexClient reads vault-api's task index. It is read-only: the
 // divergence check never writes to the vault through it.
 //
@@ -49,10 +57,27 @@ type VaultAPIIndexClient interface {
 	Read(ctx context.Context) (*TaskIndex, error)
 }
 
+// TokenSpendReader reads the per-run token history a window budget sums. It is a
+// separate interface from VaultAPIIndexClient so a test double for the divergence
+// check need not implement the document reads.
+type TokenSpendReader interface {
+	// ReadForAssignee lists the tasks assigned to assignee.
+	ReadForAssignee(ctx context.Context, assignee string) ([]TaskIndexItem, error)
+	// ReadDocument reads one task's whole frontmatter by id.
+	ReadDocument(ctx context.Context, id string) (*TaskDocumentItem, error)
+}
+
+// VaultAPIClient is the full vault-api read surface the executor uses: the index for
+// divergence and the per-task documents for the token-window sum.
+type VaultAPIClient interface {
+	VaultAPIIndexClient
+	TokenSpendReader
+}
+
 // NewVaultAPIIndexClient creates a VaultAPIIndexClient for the vault API at
 // baseURL. gatewaySecret empty means no auth headers are sent. The secret is
 // held in memory only and must never appear in a log line or an error string.
-func NewVaultAPIIndexClient(baseURL, gatewaySecret, gatewayInitiator string) VaultAPIIndexClient {
+func NewVaultAPIIndexClient(baseURL, gatewaySecret, gatewayInitiator string) VaultAPIClient {
 	return &vaultAPIIndexClient{
 		baseURL:          strings.TrimRight(baseURL, "/"),
 		httpClient:       &http.Client{Timeout: RequestTimeout.Duration()},
@@ -123,6 +148,93 @@ func (c *vaultAPIIndexClient) Read(ctx context.Context) (*TaskIndex, error) {
 		return nil, errors.Errorf(ctx, "vault-api task index answered %d", resp.StatusCode)
 	}
 	return decodeTaskIndex(ctx, raw)
+}
+
+// ReadForAssignee lists the tasks assigned to assignee via GET /api/v1/tasks?assignee=.
+// The unfiltered Read is deliberately not reused: filtering server-side keeps the
+// per-agent token sum from reading the whole vault's documents.
+func (c *vaultAPIIndexClient) ReadForAssignee(
+	ctx context.Context,
+	assignee string,
+) ([]TaskIndexItem, error) {
+	if c.baseURL == "" {
+		return nil, errors.Errorf(ctx, "vault-api assignee index: base URL is empty")
+	}
+	ctx, cancel := context.WithTimeout(ctx, RequestTimeout.Duration())
+	defer cancel()
+	req, err := http.NewRequestWithContext(
+		ctx,
+		http.MethodGet,
+		c.baseURL+"/api/v1/tasks?assignee="+url.QueryEscape(assignee),
+		nil,
+	)
+	if err != nil {
+		return nil, errors.Wrapf(ctx, err, "create vault-api assignee index request")
+	}
+	setVaultAPIAuthHeaders(req, c.gatewaySecret, c.gatewayInitiator)
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return nil, errors.Wrapf(ctx, err, "read vault-api assignee index")
+	}
+	defer resp.Body.Close()
+	raw, err := io.ReadAll(io.LimitReader(resp.Body, maxIndexResponseBytes+1))
+	if err != nil {
+		return nil, errors.Wrapf(ctx, err, "read vault-api assignee index response")
+	}
+	if len(raw) > maxIndexResponseBytes {
+		return nil, errors.Errorf(
+			ctx,
+			"vault-api assignee index response exceeded %d bytes",
+			maxIndexResponseBytes,
+		)
+	}
+	if resp.StatusCode != http.StatusOK {
+		return nil, errors.Errorf(ctx, "vault-api assignee index answered %d", resp.StatusCode)
+	}
+	index, err := decodeTaskIndex(ctx, raw)
+	if err != nil {
+		return nil, err
+	}
+	return index.Items, nil
+}
+
+// ReadDocument reads one task's whole frontmatter via GET /api/v1/tasks/{id}.
+func (c *vaultAPIIndexClient) ReadDocument(
+	ctx context.Context,
+	id string,
+) (*TaskDocumentItem, error) {
+	if c.baseURL == "" {
+		return nil, errors.Errorf(ctx, "vault-api task document: base URL is empty")
+	}
+	ctx, cancel := context.WithTimeout(ctx, RequestTimeout.Duration())
+	defer cancel()
+	req, err := http.NewRequestWithContext(
+		ctx,
+		http.MethodGet,
+		c.baseURL+"/api/v1/tasks/"+url.PathEscape(id),
+		nil,
+	)
+	if err != nil {
+		return nil, errors.Wrapf(ctx, err, "create vault-api task document request")
+	}
+	setVaultAPIAuthHeaders(req, c.gatewaySecret, c.gatewayInitiator)
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return nil, errors.Wrapf(ctx, err, "read vault-api task document")
+	}
+	defer resp.Body.Close()
+	raw, err := io.ReadAll(io.LimitReader(resp.Body, maxIndexResponseBytes))
+	if err != nil {
+		return nil, errors.Wrapf(ctx, err, "read vault-api task document response")
+	}
+	if resp.StatusCode != http.StatusOK {
+		return nil, errors.Errorf(ctx, "vault-api task document answered %d", resp.StatusCode)
+	}
+	var doc TaskDocumentItem
+	if err := json.Unmarshal(raw, &doc); err != nil {
+		return nil, errors.Wrapf(ctx, err, "decode vault-api task document")
+	}
+	return &doc, nil
 }
 
 // decodeTaskIndex parses the index envelope.
