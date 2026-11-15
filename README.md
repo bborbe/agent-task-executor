@@ -12,6 +12,8 @@ pin, e.g. `…/agent-claude:v0.1.1`) is used as-is; an **untagged** image gets t
 running branch appended (`…/agent-backtest` → `…/agent-backtest:dev`). Deployed
 via the `agent` Helm chart; published image `docker.io/bborbe/agent-task-executor`.
 
+Runtime configuration (including `KAFKA_BROKERS`) and the Deployment itself live outside this repository; see [`docs/deployment-kafka-brokers.md`](docs/deployment-kafka-brokers.md) for the broker source of truth and the crash-loop remediation.
+
 ## Cluster routing
 
 A task can name the cluster that runs it with the optional `cluster:` frontmatter field. The canonical values are `nukedev`, `nukeprod` and `sun`.

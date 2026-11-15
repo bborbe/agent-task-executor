@@ -203,7 +203,13 @@ func (s *jobSpawner) SpawnJob(
 	applyEphemeralStorage(config, job)
 	s.applyKafkaCertVolumes(job)
 	applyScheduling(config, job)
-	applyActiveDeadlineSeconds(config, jobName, task.TaskIdentifier, job, s.currentDateTimeGetter.Now().Time())
+	applyActiveDeadlineSeconds(
+		config,
+		jobName,
+		task.TaskIdentifier,
+		job,
+		s.currentDateTimeGetter.Now().Time(),
+	)
 
 	if err := s.createJob(ctx, jobNamespace, job, jobName, task.TaskIdentifier, config.Image); err != nil {
 		return "", err

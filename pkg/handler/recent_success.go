@@ -63,6 +63,31 @@ func (h *taskEventHandler) recentlySucceeded(ctx context.Context, task lib.Task)
 	if !ok {
 		return false
 	}
+	// The success record exists, so this pass has to decide park-versus-re-drive,
+	// and that decision is read from last_result_status. Absence there is not a
+	// verdict: it is the value the executor itself writes at spawn
+	// (pkg/result_publisher.go PublishSpawnNotification clears the field so the
+	// gate reads THIS run), so it is the ordinary state of a task whose agent
+	// never delivered one. It must not be read as done or as failed — and it must
+	// not be silent either. An operator watching a task re-drive cannot otherwise
+	// tell "this agent never wrote the field" from "this agent reported a
+	// transient failure", and the first is a contract defect the fleet can only
+	// see if it is named. Logged on the first pass that has a success record to
+	// decide on, before either outcome is taken.
+	//
+	// Bare Infof, not V(n), and deliberately: this line is the operator's only
+	// signal that an agent omitted the field, and a verbosity gate makes it
+	// invisible on any stage that does not pass -v=2 — which is precisely the
+	// silence this change exists to remove. The sibling event above
+	// (skip_recent_success_bypassed) is bare for the same reason.
+	resultStatus, statusPresent := task.Frontmatter.String("last_result_status")
+	if !statusPresent || resultStatus == "" {
+		glog.Infof(
+			"event=absent_result_status task=%s phase=%s",
+			task.TaskIdentifier, phase,
+		)
+		metrics.TaskEventsTotal.WithLabelValues("absent_result_status").Inc()
+	}
 	elapsed := h.currentDateTime.Now().Time().Sub(succeeded.CompletedAt)
 	if elapsed < 0 {
 		// completionTime is stamped by the API server, "now" by this pod; a
@@ -236,6 +261,17 @@ func recurringNextRun(
 // WithLabelValues creates the child metric on miss. That is what lets the
 // absent-tier alert tell "no re-run yet" from "the metric stopped being
 // exported" — the second being the failure that alert exists to catch.
+//
+// Only a run that reported `done` can be re-run. A spawn after a run that
+// reported anything else — failed, needs_input, in_progress, an unrecognised
+// value, or an absent field — is a re-drive, not a re-run:
+// parkSucceededWithoutPhaseMove releases exactly those runs, up to
+// maxRedrivesWithoutAdvance spawns at the same phase:ref scope, on purpose. The
+// success record that lets this counter see them exists only because a Job that
+// exits 0 is marked succeeded even when the agent delivered nothing, so without
+// this guard the alert fires on the executor's own designed behaviour — the
+// fastest way to teach an operator to ignore it, and it buries the suppression
+// failure the alert exists to catch.
 func (h *taskEventHandler) recordTaskRerun(task lib.Task) {
 	taskType := string(task.Frontmatter.TaskType())
 	counter := metrics.TaskRerunsTotal.WithLabelValues(taskType)
@@ -245,6 +281,20 @@ func (h *taskEventHandler) recordTaskRerun(task lib.Task) {
 	}
 	elapsed := h.currentDateTime.Now().Time().Sub(succeeded.CompletedAt)
 	if elapsed < 0 || elapsed >= taskRerunWindow {
+		return
+	}
+	if resultStatus, _ := task.Frontmatter.String("last_result_status"); resultStatus != string(
+		lib.AgentStatusDone,
+	) {
+		glog.Infof(
+			"event=task_redrive_not_rerun task=%s task_type=%s phase=%s last_result_status=%q elapsed=%.0fs",
+			task.TaskIdentifier,
+			taskType,
+			succeeded.Phase,
+			resultStatus,
+			elapsed.Seconds(),
+		)
+		metrics.TaskEventsTotal.WithLabelValues("redrive_not_rerun").Inc()
 		return
 	}
 	counter.Inc()

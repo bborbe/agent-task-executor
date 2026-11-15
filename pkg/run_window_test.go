@@ -84,19 +84,34 @@ var _ = Describe("SecondsUntilRunWindowClose", func() {
 	}
 
 	It("returns the time left before the morning close", func() {
-		remaining, ok := pkg.SecondsUntilRunWindowClose(berlin(2026, time.November, 17, 5, 0), window)
+		remaining, ok := pkg.SecondsUntilRunWindowClose(
+			berlin(2026, time.November, 17, 5, 0),
+			window,
+		)
 		Expect(ok).To(BeTrue())
 		Expect(remaining).To(Equal(int32(3600)))
 	})
 
 	It("returns the time left before the morning close from the evening half", func() {
-		remaining, ok := pkg.SecondsUntilRunWindowClose(berlin(2026, time.November, 16, 21, 0), window)
+		remaining, ok := pkg.SecondsUntilRunWindowClose(
+			berlin(2026, time.November, 16, 21, 0),
+			window,
+		)
 		Expect(ok).To(BeTrue())
 		Expect(remaining).To(Equal(int32(9 * 3600)))
 	})
 
 	It("never returns zero in the window's final second", func() {
-		last := time.Date(2026, time.November, 17, 5, 59, 59, 900_000_000, mustLocation("Europe/Berlin"))
+		last := time.Date(
+			2026,
+			time.November,
+			17,
+			5,
+			59,
+			59,
+			900_000_000,
+			mustLocation("Europe/Berlin"),
+		)
 		remaining, ok := pkg.SecondsUntilRunWindowClose(last, window)
 		Expect(ok).To(BeTrue())
 		// Kubernetes rejects ActiveDeadlineSeconds: 0, so the truncating
