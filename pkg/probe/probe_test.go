@@ -416,7 +416,7 @@ var _ = Describe("HealthcheckRunner", func() {
 			// The exact Sun shape: seven Configs, every one declaring healthcheck,
 			// none declaring defaultForTaskTypes. ResolveByTaskType cannot narrow
 			// this set, so the record only routes if the probe names its Config.
-			claimants := []agentv1.Config{}
+			claimants := make([]agentv1.Config, 0, 7)
 			for _, name := range []string{
 				"build-fix-agent",
 				"claude-headless",
