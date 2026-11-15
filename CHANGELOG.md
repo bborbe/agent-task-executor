@@ -2,7 +2,7 @@
 
 All notable changes to this project will be documented in this file.
 
-## Unreleased
+## v0.63.0
 
 - feat(config): **per-agent `tokenCeiling` — refuse admission when an agent's window token spend meets its ceiling.** Adds `tokenCeiling` to `ConfigSpec`, the CRD schema, the resolver and `AgentConfiguration`, and a `deferIfOverTokenCeiling` admission check that sums each of the assignee's tasks' `metrics_runs` history for runs completed inside the current `runWindow` and defers the respawn at the ceiling. The sum is a durable read — `GET /api/v1/tasks?assignee=` then `GET /api/v1/tasks/{id}` — so it survives an executor restart; no in-memory accumulator. Nil or 0 means no ceiling. Change set: `pkg/claim/vault_api_index_client.go`, `pkg/handler/token_ceiling.go`, `pkg/handler/concurrency_admission.go`, `pkg/handler/task_event_handler.go`, `pkg/handler/task_event_handler_options.go`, `pkg/run_window.go`, `pkg/factory/factory.go`, `k8s/apis/agent.benjamin-borbe.de/v1/types.go`, `pkg/k8s_connector.go`, `pkg/config_resolver.go`, `pkg/agent_configuration.go`, `pkg/handler/token_ceiling_internal_test.go`, `CHANGELOG.md`.
 
