@@ -397,6 +397,65 @@ var _ = Describe("HealthcheckRunner", func() {
 			},
 		)
 
+		It("update-frontmatter re-stamps the probe's own assignee on every re-trigger", func() {
+			// Regression (sun-k3s, 2026-11-15): seven Configs declare healthcheck and
+			// none declares defaultForTaskTypes, so a probe record whose assignee an
+			// agent cleared resolves to ErrConfigAmbiguous and is skipped before any
+			// Job exists. The create writes only when no file exists or the existing
+			// one is terminal; a non-terminal record returns ErrTaskAlreadyExists and
+			// is left untouched, so the update is the only write a re-trigger makes
+			// and it must carry the routing value.
+			Expect(runner.Run(ctx)).To(Succeed())
+			_, _, payload := publisher.PublishArgsForCall(1)
+			updateCmd, ok := payload.(taskcmd.UpdateFrontmatterCommand)
+			Expect(ok).To(BeTrue())
+			Expect(updateCmd.Updates).To(HaveKeyWithValue("assignee", "agent-a"))
+		})
+
+		It("reproduces the seven-claimant ambiguity and routes by the stamped assignee", func() {
+			// The exact Sun shape: seven Configs, every one declaring healthcheck,
+			// none declaring defaultForTaskTypes. ResolveByTaskType cannot narrow
+			// this set, so the record only routes if the probe names its Config.
+			claimants := make([]agentv1.Config, 0, 7)
+			for _, name := range []string{
+				"build-fix-agent",
+				"claude-headless",
+				"github-dark-factory-agent",
+				"github-pr-review-agent",
+				"github-releaser-agent",
+				"github-update-go-agent",
+				"pi-headless",
+			} {
+				claimants = append(claimants, agentv1.Config{
+					ObjectMeta: metav1.ObjectMeta{Name: name},
+					Spec: agentv1.ConfigSpec{
+						Assignee:  name,
+						TaskTypes: []string{"healthcheck"},
+					},
+				})
+			}
+			configProvider.GetReturns(claimants, nil)
+
+			Expect(runner.Run(ctx)).To(Succeed())
+			Expect(publisher.PublishCallCount()).To(Equal(len(claimants) * 2))
+
+			for i := range claimants {
+				_, _, createPayload := publisher.PublishArgsForCall(i * 2)
+				createCmd, ok := createPayload.(taskcmd.CreateCommand)
+				Expect(ok).To(BeTrue())
+				assignee, ok := createCmd.Frontmatter["assignee"].(string)
+				Expect(ok).To(BeTrue())
+
+				_, _, updatePayload := publisher.PublishArgsForCall(i*2 + 1)
+				updateCmd, ok := updatePayload.(taskcmd.UpdateFrontmatterCommand)
+				Expect(ok).To(BeTrue())
+				// The update must name the same Config the create does: that value is
+				// what Resolve matches on Spec.Assignee, which is the only input the
+				// seven-claimant set cannot defeat.
+				Expect(updateCmd.Updates).To(HaveKeyWithValue("assignee", assignee))
+			}
+		})
+
 		It("probeTaskID is a pure function of (agent, stage) — boundary contract", func() {
 			// Direct unit-level boundary test per spec AC line 75:
 			// probeTaskID must be a pure function (no state, no randomness) so
