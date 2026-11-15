@@ -83,6 +83,11 @@ func (h *taskEventHandler) recordTaskSuccess(
 		)
 		return
 	}
+	// The snapshot the pass caches across passes is now out of date. Dropping it
+	// here is what keeps the TTL from hiding a success this pod just recorded —
+	// the in-memory record covers the local guard, but a peer or a restarted pod
+	// reading this executor's next pass must not see the stale set.
+	h.successSnapshot.invalidate()
 	glog.V(2).Infof(
 		"event=success_recorded task=%s phase=%s completed=%s",
 		taskID, phase, completedAt.UTC().Format(time.RFC3339),

@@ -346,6 +346,8 @@ type taskEventHandler struct {
 	// a pod restart; nil leaves the guard on the in-memory record.
 	successRecordStore claim.SuccessStore
 	successStoreOnce   sync.Once
+	// successSnapshot serves the success guard across passes; see success_cache.go.
+	successSnapshot successSnapshotCache
 	// spawnGens counts Jobs created by this executor per assignee, on any path.
 	// A pass cache entry read at an older generation is refetched, so a Job
 	// spawned by the Kafka consumer or the deferred loop mid-pass is never
@@ -1283,7 +1285,7 @@ func (h *taskEventHandler) ReconcileOnce(ctx context.Context) error {
 	// nothing. See redrive_streak_cache.go for the measurement.
 	passCtx = withRedriveStreakCache(passCtx)
 	// One `list refs` of the success prefix for the pass; see success_cache.go.
-	passCtx = withSuccessCache(passCtx)
+	passCtx = h.withSuccessCache(passCtx)
 	passCtx = withVaultIndexCache(passCtx)
 
 	if !h.view.Ready() {
