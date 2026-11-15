@@ -232,8 +232,8 @@ type ResultPublisher interface {
 	// deliberately writes no terminal outcome: the work did not finish, so
 	// closing it would report failed work as completed. status hold is the
 	// escalation channel — it leaves the in_progress population while staying
-	// open for a human — and the phase moves to planning because vault-cli
-	// refuses hold alongside an active phase. The reason line names the
+	// open for a human — and the phase moves to planning because vault-cli's
+	// lint flags hold alongside an active phase. The reason line names the
 	// non-done last_result_status, so the section is distinguishable from the
 	// succeeded park's bare token.
 	PublishParkRedriveCap(ctx context.Context, task lib.Task) error
