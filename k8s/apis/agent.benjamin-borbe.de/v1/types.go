@@ -209,6 +209,12 @@ type ConfigSpec struct {
 	// spawned Job's start. 0 (the default) means no separate budget. When both
 	// this and ZombieJobTimeoutSeconds are set, the smaller deadline wins.
 	RunBudgetSeconds int32 `json:"runBudgetSeconds,omitempty"`
+	// TokenCeiling caps the total tokens (input + output + cache-read + cache-creation)
+	// the agent may spend across its runs within one run window. Nil or 0 means no
+	// ceiling. A spawn whose window spend already meets the ceiling is deferred, not
+	// dropped, and re-driven once the window rolls over. Pointer-typed so "unset" is
+	// distinguishable from "0".
+	TokenCeiling *int64 `json:"tokenCeiling,omitempty"`
 }
 
 // RunWindow declares the hours an agent may run in. The window is evaluated in
