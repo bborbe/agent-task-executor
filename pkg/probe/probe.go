@@ -208,8 +208,24 @@ func (r *healthcheckRunner) Run(ctx context.Context) error {
 			// own), not unconditionally this executor's vault.
 			TargetVault: targetVault,
 			Updates: lib.TaskFrontmatter{
-				"status":        "in_progress",
-				"phase":         string(phase),
+				"status": "in_progress",
+				"phase":  string(phase),
+				// Re-stamp the routing value on EVERY re-trigger, not only on the
+				// create. The create writes only when no file exists or the existing
+				// one is terminal; a non-terminal probe record — exactly the state a
+				// skipped probe sits in — returns ErrTaskAlreadyExists and is left
+				// untouched (agent-task-controller/pkg/command/task_create_task_executor.go).
+				// Probe files are reused per (agent, stage), and an agent clears its
+				// own assignee when it finishes or escalates, so for that record this
+				// update was the only write left. Without the assignee here the record
+				// kept the cleared value, resolveConfig's assignee fast path was
+				// skipped, and the reconcile fell to ResolveByTaskType — where a stage
+				// whose Configs all declare healthcheck and none declares
+				// defaultForTaskTypes answers `config ambiguous` and the probe is
+				// skipped before any Job exists. Sun is that stage; prod masks it
+				// with claude-headless's designated default, which routes the
+				// probe to the default agent instead of the one it names.
+				"assignee":      agentName,
 				"trigger_count": 0,
 				// Clear the executor-owned run-state from the PRIOR run. Probe files are
 				// reused per (agent, stage), so without this the re-trigger reopens the
