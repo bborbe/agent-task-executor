@@ -2,7 +2,7 @@
 
 All notable changes to this project will be documented in this file.
 
-## Unreleased
+## v0.63.2
 
 - docs: **record where the executor's `KAFKA_BROKERS` comes from and how to remediate a crash-looping Deployment.** The nuke-dev executor pointed at an in-cluster ClusterIP with no ready endpoints, so startup failed with Sarama `ErrOutOfBrokers`. The runbook names the external nodeport broker list, the `bborbe/trading` source of truth, and the remediation order: confirm the current value, update the source of truth, redeploy, and remove the dangling Strimzi Service last. No code change — the Deployment lives outside this repository.
 
