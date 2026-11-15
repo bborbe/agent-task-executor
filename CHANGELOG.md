@@ -2,7 +2,7 @@
 
 All notable changes to this project will be documented in this file.
 
-## Unreleased
+## v0.63.3
 
 - fix: **a slow success-record read no longer spends the reconcile pass's whole budget, so the job-list and resourcequota reads that follow keep their time.** The pass answers every candidate's success guard from one `list refs` over `claims/success/`, and that prefix grows with the task set — 6024 records and ~27 s on nuke dev 2026-11-15. When the read crossed its own 30 s `RequestTimeout`, the v0.62.3 retry — guarded only by `ctx.Err() == nil` — spent the remaining 15 s of the 45 s pass, and the resourcequota read and job list that follow inherited an expired context. Measured on `agent-task-executor-trading` v0.63.1: a pass starting 19:05:01 logged the snapshot retry at 19:05:31 and then `pod_quota_read_failed` and `reconcile_skip … spawn_error err=… context deadline exceeded` at 19:05:46.326 — all in the same millisecond, the signature of one expired shared context rather than four slow APIs. The next pass, whose snapshot finished in 26.7 s, spawned normally. The read is now bounded by the pass's remaining budget minus a 15 s reserve, capped at `claim.RequestTimeout`, so it can never leave the spawn path an expired context; and the retry requires a useful second read to fit beside that reserve rather than merely `ctx.Err() == nil`. The snapshot stays per pass and is never shared across passes: the shared record is the authority for a peer's newer success, so a cached one would read "no record" — or "cadence elapsed" — for work a peer had already finished. Change set: `pkg/handler/success_cache.go`, `pkg/handler/success_cache_internal_test.go`, `CHANGELOG.md`.
 
