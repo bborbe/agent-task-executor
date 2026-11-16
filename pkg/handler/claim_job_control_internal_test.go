@@ -178,6 +178,8 @@ func (v *fakeTaskView) Get(id lib.TaskIdentifier) (lib.Task, bool) {
 	return task, ok
 }
 
+func (v *fakeTaskView) Evict(id lib.TaskIdentifier) { delete(v.tasks, id) }
+
 // viewWithTask returns a view holding one task assigned to claude.
 func viewWithTask(id lib.TaskIdentifier) *fakeTaskView {
 	return &fakeTaskView{tasks: map[lib.TaskIdentifier]lib.Task{

@@ -60,6 +60,17 @@ type TaskView interface {
 	Snapshot() []lib.Task
 	// Get returns the task for id, or false when the view has none.
 	Get(id lib.TaskIdentifier) (lib.Task, bool)
+	// Evict drops the entry for id.
+	//
+	// It exists for the one removal no event will ever deliver: a record whose
+	// task file was deleted from the vault. Kafka compaction keeps the last value
+	// for every key, so a deleted task never publishes the tombstone the view
+	// would need, and nothing else can take the entry out. The claim gate is the
+	// caller — a 404 from the vault is the proof that the file is gone.
+	//
+	// Eviction is safe to repeat and safe to race a live event: a later event for
+	// the same id simply re-adds it, which is what a restored task file publishes.
+	Evict(id lib.TaskIdentifier)
 }
 
 // NewTaskView creates an empty view for topic.
@@ -227,4 +238,11 @@ func (v *taskView) Get(id lib.TaskIdentifier) (lib.Task, bool) {
 	defer v.mu.RUnlock()
 	task, ok := v.tasks[id]
 	return task, ok
+}
+
+// Evict implements TaskView.
+func (v *taskView) Evict(id lib.TaskIdentifier) {
+	v.mu.Lock()
+	delete(v.tasks, id)
+	v.mu.Unlock()
 }
