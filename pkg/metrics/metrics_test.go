@@ -183,7 +183,7 @@ var _ = Describe("Metrics", func() {
 		}
 	})
 
-	It("pre-initialises exactly the ten reconcile-refusal gates at zero", func() {
+	It("pre-initialises exactly the eleven reconcile-refusal gates at zero", func() {
 		mfs, err := prometheus.DefaultGatherer.Gather()
 		Expect(err).NotTo(HaveOccurred())
 
@@ -193,6 +193,7 @@ var _ = Describe("Metrics", func() {
 			"foreign_cluster",
 			"unresolved_config",
 			"terminal_status",
+			"unclaimable",
 			"status_not_triggered",
 			"phase_not_triggered",
 			"terminal_phase",
@@ -208,6 +209,7 @@ var _ = Describe("Metrics", func() {
 			metrics.ReconcileRefusedGateForeignCluster,
 			metrics.ReconcileRefusedGateUnresolvedConfig,
 			metrics.ReconcileRefusedGateTerminalStatus,
+			metrics.ReconcileRefusedGateUnclaimable,
 			metrics.ReconcileRefusedGateStatusNotTriggered,
 			metrics.ReconcileRefusedGatePhaseNotTriggered,
 			metrics.ReconcileRefusedGateTerminalPhase,

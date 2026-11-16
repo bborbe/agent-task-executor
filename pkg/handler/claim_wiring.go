@@ -7,6 +7,7 @@ package handler
 import (
 	"context"
 	stderrors "errors"
+	"net/http"
 	"strings"
 	"time"
 
@@ -213,7 +214,57 @@ func (h *taskEventHandler) acquireSpawnClaim(
 		}
 		return h.claimFailureDecision(task, "takeover", takeoverErr)
 	}
+	// A 404 is the claim service saying it will not let anyone claim this
+	// record: the task is absent, or it is terminal. Neither answer can change
+	// by asking again, so re-driving the task on the next pass is an unbounded
+	// claim stream that can never succeed — measured 2026-11-16 at 507 attempts
+	// over 506 min for one aborted task on nuke prod. Record the id and refuse
+	// it in reconcileTask so the floor stops candidating it.
+	//
+	// Scoped to 404 deliberately. A 5xx is transient and stays retryable; a 401
+	// or 403 is a gateway-credential fault that must not permanently stop live
+	// work; 409 is the held/conflict path above and never reaches here.
+	if isTerminalClaimAnswer(claimErr) {
+		h.recordUnclaimable(task.TaskIdentifier)
+		glog.Warningf(
+			"event=claim_terminal task=%s error=%v",
+			task.TaskIdentifier, claimErr,
+		)
+		metrics.TaskEventsTotal.WithLabelValues("claim_terminal").Inc()
+		return false
+	}
 	return h.claimFailureDecision(task, "claim", claimErr)
+}
+
+// isTerminalClaimAnswer reports whether a claim failure can never succeed on a
+// retry, because the record it names is not claimable at all.
+//
+// It reads the status the client already typed: claim.StatusError carries the
+// HTTP code and Retryable() already answers ">= 500". Until this predicate
+// nothing in the handler consulted it, so a 404 was consumed as a transient
+// failure and retried once per reconcile tick, forever.
+func isTerminalClaimAnswer(err error) bool {
+	var statusErr *claim.StatusError
+	if !stderrors.As(err, &statusErr) {
+		return false
+	}
+	return statusErr.Status == http.StatusNotFound
+}
+
+// recordUnclaimable marks id as one whose claim answered a terminal 404, so the
+// reconcile floor refuses it instead of re-driving it every pass.
+func (h *taskEventHandler) recordUnclaimable(id lib.TaskIdentifier) {
+	h.unclaimableMu.Lock()
+	defer h.unclaimableMu.Unlock()
+	h.unclaimable[id] = struct{}{}
+}
+
+// isUnclaimable reports whether id's claim already answered a terminal 404.
+func (h *taskEventHandler) isUnclaimable(id lib.TaskIdentifier) bool {
+	h.unclaimableMu.Lock()
+	defer h.unclaimableMu.Unlock()
+	_, ok := h.unclaimable[id]
+	return ok
 }
 
 // claimOwnerRepo reads the task's single `repo` frontmatter key, which carries

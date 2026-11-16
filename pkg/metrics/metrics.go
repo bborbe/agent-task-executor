@@ -210,6 +210,12 @@ const (
 	ReconcileRefusedGateUnresolvedConfig = "unresolved_config"
 	// ReconcileRefusedGateTerminalStatus means the task's status is terminal.
 	ReconcileRefusedGateTerminalStatus = "terminal_status"
+	// ReconcileRefusedGateUnclaimable means the task's claim already answered a
+	// terminal 404, so the record it names is not claimable and no later pass can
+	// succeed. It is the one gate that reads the claim service rather than the
+	// task's own frontmatter, because a stale view can carry a terminal record as
+	// live through every status and phase check.
+	ReconcileRefusedGateUnclaimable = "unclaimable"
 	// ReconcileRefusedGateStatusNotTriggered means the Config's trigger.statuses
 	// does not list the task's status.
 	ReconcileRefusedGateStatusNotTriggered = "status_not_triggered"
@@ -430,6 +436,7 @@ func initReconcileRefusedGateSeries() {
 		ReconcileRefusedGateForeignCluster,
 		ReconcileRefusedGateUnresolvedConfig,
 		ReconcileRefusedGateTerminalStatus,
+		ReconcileRefusedGateUnclaimable,
 		ReconcileRefusedGateStatusNotTriggered,
 		ReconcileRefusedGatePhaseNotTriggered,
 		ReconcileRefusedGateTerminalPhase,

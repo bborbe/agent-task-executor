@@ -234,6 +234,7 @@ func NewTaskEventHandler(
 		deferredRespawns:        make(map[lib.TaskIdentifier]deferredEntry),
 		deferredEpochs:          make(map[lib.TaskIdentifier]uint64),
 		refusedGates:            make(map[lib.TaskIdentifier]string),
+		unclaimable:             make(map[lib.TaskIdentifier]struct{}),
 		queuedAtStamps:          make(map[lib.TaskIdentifier]string),
 		spawnLocks:              make(map[string]*sync.Mutex),
 		view:                    view,
@@ -269,6 +270,14 @@ type taskEventHandler struct {
 	// refusedMu guards refusedGates: the last reconcile gate that refused each task.
 	refusedMu    sync.Mutex
 	refusedGates map[lib.TaskIdentifier]string
+	// unclaimableMu guards unclaimable: ids whose claim answered a terminal 404.
+	// A 404 on acquire means the claim service will not let anyone claim the
+	// record — it is absent, or it is terminal — so no later pass can succeed and
+	// re-asking is a permanent claim stream. The set is what stops the reconcile
+	// floor candidating such an id again; it is in-memory, so a restart re-learns
+	// each id once, and a fresh event for a live task still drives normally.
+	unclaimableMu sync.Mutex
+	unclaimable   map[lib.TaskIdentifier]struct{}
 	// deferredEpochs counts removals per task, so a replay collected before an
 	// eviction can detect it. Entries are never deleted: resetting an epoch would
 	// re-validate a stale claim.
@@ -1709,6 +1718,17 @@ func (h *taskEventHandler) reconcileTask(
 	// the same defect.
 	if IsTerminalStatus(task.Frontmatter.Status()) {
 		return h.refuseReconcile(task, metrics.ReconcileRefusedGateTerminalStatus)
+	}
+	// An id whose claim already answered a terminal 404 is not a candidate again.
+	// The view can outlive the record: a terminal transition that never reached
+	// the task topic leaves a stale in_progress/execution snapshot here, and every
+	// status and phase gate above reads that snapshot rather than the vault, so
+	// they all pass. The claim is the first place the record's real state becomes
+	// visible, and the 404 it answers is final — re-driving the id can only fail
+	// the same way. Measured 2026-11-16: 507 attempts over 506 min for one aborted
+	// task, once per reconcile tick.
+	if h.isUnclaimable(task.TaskIdentifier) {
+		return h.refuseReconcile(task, metrics.ReconcileRefusedGateUnclaimable)
 	}
 
 	config, skip, err := h.resolveConfigForReconcile(ctx, task)
