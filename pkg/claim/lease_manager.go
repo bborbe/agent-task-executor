@@ -203,8 +203,18 @@ type leaseManager struct {
 }
 
 // countClaim increments executor_claim_total{result}.
+//
+// It also mirrors the one result that belongs to the spawn-claim story:
+// renew_failed is the precursor of a lost lease, so it is the "acquired and
+// then not renewed" class. Mirroring it here rather than at each call site is
+// deliberate — renew_failed is produced from the primary renewal read-back and
+// from the secondary-key renew, and a per-site increment would have to be
+// remembered in both.
 func countClaim(result string) {
 	metrics.ClaimTotal.WithLabelValues(result).Inc()
+	if result == "renew_failed" {
+		metrics.CountSpawnClaim(metrics.SpawnClaimResultLapsed, metrics.SpawnClaimStageRenew)
+	}
 }
 
 // countClaimRemoval increments executor_claim_total{result} and logs the one
@@ -215,6 +225,10 @@ func countClaim(result string) {
 func countClaimRemoval(key string, taskID string, result string, leaseToken string) {
 	metrics.ClaimTotal.WithLabelValues(result).Inc()
 	if result == "claim_lost" {
+		// The "acquired and then not renewed" class. A claim_lost is the
+		// definitive form: the lease is gone and the Job is being deleted, so
+		// this spawn's claim is provably not held any more.
+		metrics.CountSpawnClaim(metrics.SpawnClaimResultLapsed, metrics.SpawnClaimStageLost)
 		glog.Warningf(
 			"event=claim_released key=%s task=%s result=%s token=%s",
 			key,

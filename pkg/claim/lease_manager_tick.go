@@ -419,6 +419,8 @@ func (m *leaseManager) renewClaim(
 		m.claimLost(ctx, key, held)
 	default:
 		held.renewNextTick = true
+		// countClaim mirrors renew_failed into executor_spawn_claim_total as the
+		// lapsed/renew class, so this path needs no increment of its own.
 		countClaim("renew_failed")
 	}
 }

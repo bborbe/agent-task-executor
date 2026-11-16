@@ -289,6 +289,98 @@ var ClaimTotal = promauto.NewCounterVec(
 	[]string{"result"},
 )
 
+// SpawnClaimTotal counts the spawn-claim decision, by outcome and by the stage
+// that produced it. It exists because executor_claim_total answers "what did
+// the lease manager do" but not "what did this spawn decide", and the two
+// cannot be separated from it: a claim that was never acquired and a claim that
+// was acquired and then not renewed both leave the same aggregate trace once
+// the window is over.
+//
+// The outcome set is closed and exhaustive over the spawn path, so
+// acquired + unclaimed + fail_open + mode_off equals the number of spawn
+// attempts, and lapsed is the orthogonal post-spawn class. "unclaimed" and
+// "fail_open" are the same failure decision under different modes: `on` blocks
+// the spawn, `shadow` lets it through. That split is the whole reason this
+// metric exists — without it, a fail-open spawn is indistinguishable from one
+// that held a claim.
+//
+// No task id, claim key, assignee or cluster is ever a label value. Cluster
+// arrives as the Prometheus external label.
+var SpawnClaimTotal = promauto.NewCounterVec(
+	prometheus.CounterOpts{
+		Name: "executor_spawn_claim_total",
+		Help: "Total number of spawn-claim decisions by outcome and failure stage.",
+	},
+	[]string{"result", "stage"},
+)
+
+// The closed spawn-claim outcome vocabulary. Each is the label value written by
+// exactly one production branch; see SpawnClaimPairs for the reachable
+// combinations.
+const (
+	// SpawnClaimResultAcquired — a claim is held and the spawn proceeds.
+	SpawnClaimResultAcquired = "acquired"
+	// SpawnClaimResultUnclaimed — no claim was obtained and the spawn is
+	// blocked (claim mode on).
+	SpawnClaimResultUnclaimed = "unclaimed"
+	// SpawnClaimResultFailOpen — no claim was obtained and the spawn proceeds
+	// anyway (claim mode shadow).
+	SpawnClaimResultFailOpen = "fail_open"
+	// SpawnClaimResultModeOff — the spawn proceeds without attempting a claim
+	// at all (claim mode off).
+	SpawnClaimResultModeOff = "mode_off"
+	// SpawnClaimResultLapsed — a held claim was lost or its renewal failed
+	// after the spawn. The "acquired and not renewed" class.
+	SpawnClaimResultLapsed = "lapsed"
+)
+
+// The closed spawn-claim stage vocabulary. It mirrors the stages
+// claimFailureDecision already logs, plus the two post-spawn renewal stages and
+// the none value the non-failure branches carry.
+const (
+	SpawnClaimStageNone         = "none"
+	SpawnClaimStageLeaseManager = "lease_manager"
+	SpawnClaimStageClaimScheme  = "claim_scheme"
+	SpawnClaimStageDeriveKey    = "derive_key"
+	SpawnClaimStageTakeover     = "takeover"
+	SpawnClaimStageClaim        = "claim"
+	SpawnClaimStageRenew        = "renew"
+	SpawnClaimStageLost         = "lost"
+)
+
+// SpawnClaimPairs is the closed, reachable (result, stage) enumeration. It is
+// the seeding list: every pair is published at 0, so an absent series means the
+// metric stopped being exported rather than "this has not happened yet".
+//
+// It is deliberately not the full cross product. acquired and mode_off can only
+// carry stage none, and lapsed can only carry renew or lost, so seeding those
+// combinations would publish permanently-zero series that no branch can ever
+// move — which is a worse lie than an absent series, because it reads as
+// evidence the branch exists.
+var SpawnClaimPairs = [][2]string{
+	{SpawnClaimResultAcquired, SpawnClaimStageNone},
+	{SpawnClaimResultModeOff, SpawnClaimStageNone},
+	{SpawnClaimResultUnclaimed, SpawnClaimStageLeaseManager},
+	{SpawnClaimResultUnclaimed, SpawnClaimStageClaimScheme},
+	{SpawnClaimResultUnclaimed, SpawnClaimStageDeriveKey},
+	{SpawnClaimResultUnclaimed, SpawnClaimStageTakeover},
+	{SpawnClaimResultUnclaimed, SpawnClaimStageClaim},
+	{SpawnClaimResultFailOpen, SpawnClaimStageLeaseManager},
+	{SpawnClaimResultFailOpen, SpawnClaimStageClaimScheme},
+	{SpawnClaimResultFailOpen, SpawnClaimStageDeriveKey},
+	{SpawnClaimResultFailOpen, SpawnClaimStageTakeover},
+	{SpawnClaimResultFailOpen, SpawnClaimStageClaim},
+	{SpawnClaimResultLapsed, SpawnClaimStageRenew},
+	{SpawnClaimResultLapsed, SpawnClaimStageLost},
+}
+
+// CountSpawnClaim increments the spawn-claim outcome counter. It is the single
+// write path, so the closed vocabulary above is the only way a series can be
+// created.
+func CountSpawnClaim(result string, stage string) {
+	SpawnClaimTotal.WithLabelValues(result, stage).Inc()
+}
+
 // ClaimMismatchTotal counts held-claim / running-Job mismatches, one per case.
 var ClaimMismatchTotal = promauto.NewCounter(
 	prometheus.CounterOpts{
@@ -536,6 +628,13 @@ func init() {
 		"jobless_released",
 	} {
 		ClaimTotal.WithLabelValues(result).Add(0)
+	}
+	// Pre-initialise the closed spawn-claim enumeration, so a zero is
+	// distinguishable from an absent series after a pod restart. Without this,
+	// "this cluster has recorded no spawn decision" and "this build no longer
+	// exports the metric" are the same reading.
+	for _, pair := range SpawnClaimPairs {
+		SpawnClaimTotal.WithLabelValues(pair[0], pair[1]).Add(0)
 	}
 }
 

@@ -133,6 +133,10 @@ func (h *taskEventHandler) acquireSpawnClaim(
 	config *pkg.AgentConfiguration,
 ) bool {
 	if h.claimMode == pkg.ClaimModeOff {
+		// No claim is attempted at all, so this spawn proceeds without one and
+		// must be counted as such — otherwise acquired + unclaimed + fail_open
+		// silently under-counts the fleet's spawns by every mode-off instance.
+		metrics.CountSpawnClaim(metrics.SpawnClaimResultModeOff, metrics.SpawnClaimStageNone)
 		return true
 	}
 	manager, err := h.leaseManager(ctx)
@@ -385,15 +389,23 @@ func (h *taskEventHandler) parkAfterLostClaim(
 }
 
 // logClaimAcquired records one successful spawn claim, whether it was taken by
-// a fresh Claim or by a Takeover after a conflict.
+// a fresh Claim or by a Takeover after a conflict. The counter is the half that
+// makes the log line countable after the log has rotated away.
 func logClaimAcquired(key string, taskID lib.TaskIdentifier) {
+	metrics.CountSpawnClaim(metrics.SpawnClaimResultAcquired, metrics.SpawnClaimStageNone)
 	glog.Infof("event=claim_acquired key=%s task=%s", key, taskID)
 }
 
 // claimFailureDecision logs a claim failure and reports whether the spawn may
 // proceed: shadow proceeds, on fails closed. The claim package has already
 // incremented executor_claim_total for every request it made; this function
-// must not increment anything.
+// must not increment that, because a second increment would double-count a
+// single request.
+//
+// It does increment executor_spawn_claim_total, which is a different question:
+// whether this spawn proceeded holding a claim. The two outcomes are the same
+// decision under different modes and are deliberately split, because a
+// fail-open spawn is otherwise indistinguishable from one that held a claim.
 func (h *taskEventHandler) claimFailureDecision(
 	task lib.Task,
 	stage string,
@@ -403,5 +415,10 @@ func (h *taskEventHandler) claimFailureDecision(
 		"event=claim_failed stage=%s mode=%s task=%s error=%v",
 		stage, h.claimMode, task.TaskIdentifier, err,
 	)
-	return h.claimMode == pkg.ClaimModeShadow
+	if h.claimMode == pkg.ClaimModeShadow {
+		metrics.CountSpawnClaim(metrics.SpawnClaimResultFailOpen, stage)
+		return true
+	}
+	metrics.CountSpawnClaim(metrics.SpawnClaimResultUnclaimed, stage)
+	return false
 }
