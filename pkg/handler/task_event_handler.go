@@ -1053,42 +1053,6 @@ func (h *taskEventHandler) spawnClaimedJob(
 	return true, nil
 }
 
-// finishSpawn records a Job that was just created. A counter write that cannot
-// be recorded is a real fault and still propagates, but it no longer prevents
-// the spawn: the Job exists. The Job is stored before the counter write, so if
-// the write fails the in-memory store still knows the Job exists.
-func (h *taskEventHandler) finishSpawn(
-	ctx context.Context,
-	task lib.Task,
-	config *pkg.AgentConfiguration,
-	jobName string,
-	sessionID string,
-) error {
-	h.bumpSpawnGen(config.Assignee)
-	h.storeSpawnedJob(task, jobName)
-
-	if err := h.recordTriggerSpawn(ctx, task); err != nil {
-		metrics.TaskEventsTotal.WithLabelValues("error").Inc()
-		return err
-	}
-
-	if err := h.resultPublisher.PublishSpawnNotification(ctx, task, jobName, sessionID); err != nil {
-		// Log but don't fail — job is already spawned, spawn notification is best-effort
-		glog.Warningf("publish spawn notification for task %s failed (job %s still running): %v",
-			task.TaskIdentifier, jobName, err)
-	}
-
-	glog.V(2).Infof(
-		"spawned job for task %s (assignee=%s image=%s session_id=%s job=%s)",
-		task.TaskIdentifier, task.Frontmatter.Assignee(), config.Image, sessionID, jobName,
-	)
-	metrics.TaskEventsTotal.WithLabelValues("spawned").Inc()
-	metrics.JobsSpawnedTotal.WithLabelValues(h.spawnedNamespace(ctx, config)).Inc()
-	h.recordTaskRerun(task)
-	h.recordRedriveSpawn(task)
-	return nil
-}
-
 // storeSpawnedJob records the task under the job that was actually spawned. The
 // spawn notification is published to the vault asynchronously; without this the
 // in-memory entry keeps the pre-spawn event's current_job (the previous job or
