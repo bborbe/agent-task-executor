@@ -712,7 +712,9 @@ func (h *taskEventHandler) resolveConfig(
 	resolved, err := h.resolver.Resolve(ctx, string(task.Frontmatter.Assignee()))
 	if err != nil {
 		if stderrors.Is(err, pkg.ErrConfigNotFound) {
-			glog.Warningf(
+			// Not a warning: this fires once per event addressed to any other assignee, and
+			// the metrics below carry the signal. V(4) so a V(3) session does not flood on it.
+			glog.V(4).Infof(
 				"skip task %s: unknown assignee %s",
 				task.TaskIdentifier,
 				task.Frontmatter.Assignee(),
