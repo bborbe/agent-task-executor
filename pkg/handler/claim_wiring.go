@@ -120,6 +120,9 @@ func (h *taskEventHandler) createLeaseManager(
 	h.redriveStore = claim.NewRedriveStreakStore(refClient, h.currentDateTime)
 	h.redriveReasons = claim.NewRedriveReasonStore(refClient, h.currentDateTime)
 	h.claimSchemeGuard = claim.NewSchemeGuard(refClient, h.cluster, h.currentDateTime)
+	// Built here, under the same sync.Once as the manager, so a handler that
+	// takes no claim never allocates it and every claim failure has one.
+	h.claimAbsent = newClaimAbsentTracker()
 	return manager, nil
 }
 
@@ -174,6 +177,7 @@ func (h *taskEventHandler) acquireSpawnClaim(
 	}
 	_, claimErr := manager.ClaimPair(ctx, primary, secondary, string(task.TaskIdentifier))
 	if claimErr == nil {
+		h.noteClaimSuccess(task.TaskIdentifier)
 		logClaimAcquired(primary, task.TaskIdentifier)
 		return true
 	}
@@ -208,6 +212,7 @@ func (h *taskEventHandler) acquireSpawnClaim(
 				h.parkAfterLostClaim(ctx, primary, takeoverPreviousHolder(takeover), task)
 				return false
 			}
+			h.noteClaimSuccess(task.TaskIdentifier)
 			logClaimAcquired(primary, task.TaskIdentifier)
 			return true
 		}
@@ -394,6 +399,11 @@ func logClaimAcquired(key string, taskID lib.TaskIdentifier) {
 // proceed: shadow proceeds, on fails closed. The claim package has already
 // incremented executor_claim_total for every request it made; this function
 // must not increment anything.
+//
+// A repeated non-retryable 404 is the one failure that must not be retried
+// forever: the vault is saying the task does not exist, so no later pass will
+// change its answer. recordClaimFailure counts the streak and evicts the record
+// once the ambiguity of a fresh write has expired.
 func (h *taskEventHandler) claimFailureDecision(
 	task lib.Task,
 	stage string,
@@ -403,5 +413,6 @@ func (h *taskEventHandler) claimFailureDecision(
 		"event=claim_failed stage=%s mode=%s task=%s error=%v",
 		stage, h.claimMode, task.TaskIdentifier, err,
 	)
+	h.recordClaimFailure(task, err)
 	return h.claimMode == pkg.ClaimModeShadow
 }
