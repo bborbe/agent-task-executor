@@ -1053,10 +1053,12 @@ func (h *taskEventHandler) spawnClaimedJob(
 	return true, nil
 }
 
-// finishSpawn records a Job that was just created. A counter write that cannot
-// be recorded is a real fault and still propagates, but it no longer prevents
-// the spawn: the Job exists. The Job is stored before the counter write, so if
-// the write fails the in-memory store still knows the Job exists.
+// finishSpawn records a Job that was just created. The spawn notification is
+// published BEFORE the trigger-counter write: a counter write that cannot be
+// recorded is a real fault and still propagates, but it must not leave a running
+// Job with an empty current_job on the record, which reads as unclaimed and has
+// nothing that retries it. The Job is stored before either write, so the
+// in-memory store knows the Job exists even when both fail.
 func (h *taskEventHandler) finishSpawn(
 	ctx context.Context,
 	task lib.Task,
@@ -1067,15 +1069,17 @@ func (h *taskEventHandler) finishSpawn(
 	h.bumpSpawnGen(config.Assignee)
 	h.storeSpawnedJob(task, jobName)
 
-	if err := h.recordTriggerSpawn(ctx, task); err != nil {
-		metrics.TaskEventsTotal.WithLabelValues("error").Inc()
-		return err
-	}
-
 	if err := h.resultPublisher.PublishSpawnNotification(ctx, task, jobName, sessionID); err != nil {
 		// Log but don't fail — job is already spawned, spawn notification is best-effort
 		glog.Warningf("publish spawn notification for task %s failed (job %s still running): %v",
 			task.TaskIdentifier, jobName, err)
+	}
+
+	if err := h.recordTriggerSpawn(ctx, task); err != nil {
+		metrics.TaskEventsTotal.WithLabelValues("error").Inc()
+		glog.Warningf("event=trigger_write_failed task=%s job=%s err=%v",
+			task.TaskIdentifier, jobName, err)
+		return err
 	}
 
 	glog.V(2).Infof(
