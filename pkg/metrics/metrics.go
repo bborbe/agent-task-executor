@@ -327,6 +327,16 @@ var ParkedLostClaimTotal = promauto.NewCounterVec(prometheus.CounterOpts{
 	Help: "Total number of tasks parked at human_review after a lost claim, by outcome.",
 }, []string{"result"})
 
+// ClaimAbsentEvictedTotal counts view entries evicted because the vault
+// answered a non-retryable 404 to their claim across the whole grace window.
+// The record was in the executor's Kafka view but had no task file, so it could
+// never spawn, park or clear; eviction is the only terminal state available to
+// it without deleting the topic key by hand.
+var ClaimAbsentEvictedTotal = promauto.NewCounter(prometheus.CounterOpts{
+	Name: "executor_claim_absent_evicted_total",
+	Help: "Total number of view entries evicted after the vault answered 404 to their claim across the grace window.",
+})
+
 // TaskRerunsTotal counts spawns of a task whose previous Job succeeded inside
 // the re-run window. A re-run is a task that ran again after succeeding, which
 // is what a claim regression looks like on live data.

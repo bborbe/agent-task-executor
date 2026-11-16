@@ -313,9 +313,8 @@ type taskEventHandler struct {
 	claimManager     claim.LeaseManager
 	claimManagerErr  error
 	// claimSchemeGuard refuses a spawn whose claim-key scheme differs from the
-	// one the fleet has declared in git-rest. Built alongside the lease manager
-	// and nil until then; a nil guard admits, which is the same direction the
-	// guard takes when it cannot read the declaration.
+	// fleet's git-rest declaration. Built alongside the lease manager and nil
+	// until then; a nil guard admits, as it does when the read fails.
 	claimSchemeGuard claim.SchemeGuard
 	// probeState is the read-only claim client the foreign-current_job probe
 	// uses, built lazily and separately from the lease manager.
@@ -334,6 +333,7 @@ type taskEventHandler struct {
 	claimLocks     map[lib.TaskIdentifier]*sync.Mutex
 	redriveMu      sync.Mutex
 	redriveStreaks map[lib.TaskIdentifier]redriveStreak
+	claimAbsent    *claimAbsentTracker
 	// redriveStore is the shared, persisted half of the redrive streak. It is
 	// built with the lease manager from the same claim-ref client and stays nil
 	// when claim mode takes no claim.
