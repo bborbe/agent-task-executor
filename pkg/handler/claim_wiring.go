@@ -120,6 +120,9 @@ func (h *taskEventHandler) createLeaseManager(
 	h.redriveStore = claim.NewRedriveStreakStore(refClient, h.currentDateTime)
 	h.redriveReasons = claim.NewRedriveReasonStore(refClient, h.currentDateTime)
 	h.claimSchemeGuard = claim.NewSchemeGuard(refClient, h.cluster, h.currentDateTime)
+	// Built here, under the same sync.Once as the manager, so a handler that
+	// takes no claim never allocates it and every claim failure has one.
+	h.claimAbsent = newClaimAbsentTracker()
 	return manager, nil
 }
 
@@ -141,7 +144,7 @@ func (h *taskEventHandler) acquireSpawnClaim(
 	}
 	manager, err := h.leaseManager(ctx)
 	if err != nil {
-		return h.claimFailureDecision(task, "lease_manager", err)
+		return h.claimFailureDecision(ctx, task, "lease_manager", err)
 	}
 	// The scheme guard runs before any ref is derived or written. A mismatch
 	// means this cluster derives different key strings from its peers, so a claim
@@ -154,7 +157,7 @@ func (h *taskEventHandler) acquireSpawnClaim(
 	// the write and lets the spawn through, which is exactly its contract.
 	if guard := h.claimSchemeGuard; guard != nil {
 		if guardErr := guard.Check(ctx); guardErr != nil {
-			return h.claimFailureDecision(task, "claim_scheme", guardErr)
+			return h.claimFailureDecision(ctx, task, "claim_scheme", guardErr)
 		}
 	}
 	owner, repo := claimOwnerRepo(task)
@@ -167,7 +170,7 @@ func (h *taskEventHandler) acquireSpawnClaim(
 		string(task.Content),
 	)
 	if err != nil {
-		return h.claimFailureDecision(task, "derive_key", err)
+		return h.claimFailureDecision(ctx, task, "derive_key", err)
 	}
 	if fallback {
 		metrics.ClaimKeyFallbackTotal.Inc()
@@ -178,6 +181,7 @@ func (h *taskEventHandler) acquireSpawnClaim(
 	}
 	_, claimErr := manager.ClaimPair(ctx, primary, secondary, string(task.TaskIdentifier))
 	if claimErr == nil {
+		h.noteClaimSuccess(task.TaskIdentifier)
 		logClaimAcquired(primary, task.TaskIdentifier)
 		return true
 	}
@@ -212,12 +216,13 @@ func (h *taskEventHandler) acquireSpawnClaim(
 				h.parkAfterLostClaim(ctx, primary, takeoverPreviousHolder(takeover), task)
 				return false
 			}
+			h.noteClaimSuccess(task.TaskIdentifier)
 			logClaimAcquired(primary, task.TaskIdentifier)
 			return true
 		}
-		return h.claimFailureDecision(task, "takeover", takeoverErr)
+		return h.claimFailureDecision(ctx, task, "takeover", takeoverErr)
 	}
-	return h.claimFailureDecision(task, "claim", claimErr)
+	return h.claimFailureDecision(ctx, task, "claim", claimErr)
 }
 
 // claimOwnerRepo reads the task's single `repo` frontmatter key, which carries
@@ -406,7 +411,13 @@ func logClaimAcquired(key string, taskID lib.TaskIdentifier) {
 // whether this spawn proceeded holding a claim. The two outcomes are the same
 // decision under different modes and are deliberately split, because a
 // fail-open spawn is otherwise indistinguishable from one that held a claim.
+//
+// A repeated non-retryable 404 is the one failure that must not be retried
+// forever: the vault is saying the task does not exist, so no later pass will
+// change its answer. recordClaimFailure counts the streak and evicts the record
+// once the ambiguity of a fresh write has expired.
 func (h *taskEventHandler) claimFailureDecision(
+	ctx context.Context,
 	task lib.Task,
 	stage string,
 	err error,
@@ -415,6 +426,7 @@ func (h *taskEventHandler) claimFailureDecision(
 		"event=claim_failed stage=%s mode=%s task=%s error=%v",
 		stage, h.claimMode, task.TaskIdentifier, err,
 	)
+	h.recordClaimFailure(ctx, task, err)
 	if h.claimMode == pkg.ClaimModeShadow {
 		metrics.CountSpawnClaim(metrics.SpawnClaimResultFailOpen, stage)
 		return true

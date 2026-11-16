@@ -90,22 +90,21 @@ func usableClaimHandler(mode pkg.ClaimMode, client claim.ClaimRefClient) *taskEv
 	}
 }
 
-// TestAcquireSpawnClaimCountsExactlyOneOutcome drives each spawn-claim branch
-// through acquireSpawnClaim and asserts that exactly one outcome child moves.
-// It is the wiring half of the metric's contract: a build that pre-initialises
-// the children but wires only one branch passes every presence check and fails
-// here, which is the whole reason this test exists.
-func TestAcquireSpawnClaimCountsExactlyOneOutcome(t *testing.T) {
-	ctx := context.Background()
+// spawnClaimCase is one spawn-claim branch under test: the handler and task
+// that drive it, the child it must move, and whether the spawn proceeds.
+type spawnClaimCase struct {
+	name        string
+	handler     *taskEventHandler
+	task        lib.Task
+	wantResult  string
+	wantStage   string
+	wantProceed bool
+}
 
-	cases := []struct {
-		name        string
-		handler     *taskEventHandler
-		task        lib.Task
-		wantResult  string
-		wantStage   string
-		wantProceed bool
-	}{
+// spawnClaimCases builds the branch table. It is a separate function only to
+// keep the test body inside the repository's funlen budget.
+func spawnClaimCases() []spawnClaimCase {
+	return []spawnClaimCase{
 		{
 			name: "mode off proceeds without attempting a claim",
 			handler: &taskEventHandler{
@@ -179,8 +178,16 @@ func TestAcquireSpawnClaimCountsExactlyOneOutcome(t *testing.T) {
 			wantProceed: true,
 		},
 	}
+}
 
-	for _, tc := range cases {
+// TestAcquireSpawnClaimCountsExactlyOneOutcome drives each spawn-claim branch
+// through acquireSpawnClaim and asserts that exactly one outcome child moves.
+// It is the wiring half of the metric's contract: a build that pre-initialises
+// the children but wires only one branch passes every presence check and fails
+// here, which is the whole reason this test exists.
+func TestAcquireSpawnClaimCountsExactlyOneOutcome(t *testing.T) {
+	ctx := context.Background()
+	for _, tc := range spawnClaimCases() {
 		t.Run(tc.name, func(t *testing.T) {
 			before := snapshotSpawnClaims()
 			proceed := tc.handler.acquireSpawnClaim(ctx, tc.task, redispatchConfig())
