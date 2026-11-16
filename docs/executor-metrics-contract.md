@@ -1,4 +1,10 @@
-# Executor metrics contract: `executor_config_accepted`
+# Executor metrics contract
+
+Two contracts live here: `executor_config_accepted`, the right-hand half of the
+cross-repo `unreachable-phase` join, and `executor_spawn_claim_total`, the
+spawn-claim decision. Each section is independent.
+
+## `executor_config_accepted`
 
 This document records the right-hand half of the cross-repo `unreachable-phase`
 join. It is the executor-side counterpart of the controller's
@@ -130,3 +136,73 @@ Cardinality is bounded by Configs × trigger phases × task types. No task id,
 assignee, Config name or namespace is ever a label value. The `vault` label is
 the one per-instance dimension, and its cardinality is the number of executor
 deployments, not the number of tasks.
+
+## `executor_spawn_claim_total`
+
+`executor_claim_total` records what the **lease manager** did — every request it
+made, by result. It cannot say what a given **spawn** decided, and the two are
+not the same question: a claim that was never acquired and a claim that was
+acquired and then not renewed both leave the same aggregate trace once the
+window has closed and the log has rotated.
+
+This counter answers the spawn question. It is the only place a fail-open spawn
+is visible at all, because `claimFailureDecision` returns `true` in shadow mode
+and the spawn proceeds with no claim and no other trace.
+
+### Shape
+
+| Property | Value |
+|---|---|
+| Name | `executor_spawn_claim_total` |
+| Type | counter |
+| Labels | `result`, `stage` — in that declaration order |
+
+Cluster is **not** a label here. It arrives as the Prometheus `cluster`
+external label, which reaches this metric the same way it reaches
+`executor_claim_total`. Adding a series-level copy would duplicate the
+dimension.
+
+### The closed result set
+
+| Result | Meaning | Written by |
+|---|---|---|
+| `acquired` | a claim is held and the spawn proceeds | `logClaimAcquired`, both the fresh-claim and the takeover call sites |
+| `unclaimed` | no claim was obtained and the spawn is blocked | `claimFailureDecision` under claim mode `on` |
+| `fail_open` | no claim was obtained and the spawn proceeds anyway | `claimFailureDecision` under claim mode `shadow` |
+| `mode_off` | the spawn proceeds without attempting a claim at all | `acquireSpawnClaim`'s mode-off early return |
+| `lapsed` | a held claim was lost or its renewal failed, after the spawn | the renewal tick and `claimLost` |
+
+`acquired + unclaimed + fail_open + mode_off` equals the number of spawn
+attempts. `lapsed` is orthogonal — it happens after the spawn — and is the
+"acquired and then not renewed" class.
+
+`unclaimed` and `fail_open` are the same failure decision under different
+modes. Splitting them is the point of the metric: a single "claim failed"
+result would leave a fail-open spawn indistinguishable from one that held a
+claim.
+
+### The closed stage set
+
+`none`, `lease_manager`, `claim_scheme`, `derive_key`, `takeover`, `claim`,
+`renew`, `lost`.
+
+The first six mirror the stages `claimFailureDecision` already logs, so the
+metric and the log line name the same thing. `renew` and `lost` are the
+post-spawn stages of the `lapsed` result: `renew` is a failed renewal that may
+still be retried, `lost` is a lease proven gone.
+
+### Seeding and the reachable pairs
+
+`SpawnClaimPairs` in `pkg/metrics/metrics.go` is the closed, reachable
+`(result, stage)` enumeration, and `init()` seeds every pair at `0`. An absent
+series therefore means the metric stopped being exported, not "no claims yet".
+
+It is deliberately **not** the full cross product. `acquired` and `mode_off`
+can only carry `none`; `lapsed` can only carry `renew` or `lost`. Seeding the
+unreachable combinations would publish permanently-zero series that no branch
+can ever move, which reads as evidence a branch exists when it does not.
+
+### Cardinality
+
+Fourteen pairs, fixed at compile time. No task id, claim key, assignee, repo or
+cluster is ever a label value — the same rule `executor_claim_total` carries.

@@ -323,4 +323,41 @@ var _ = Describe("LeaseManager tick", func() {
 		cancel()
 		Expect(mgr.Tick(cancelled)).To(HaveOccurred())
 	})
+
+	// The next two specs cover the "acquired and then not renewed" class of
+	// executor_spawn_claim_total. They drive the renewal tick, not the counter
+	// helper, because the point of the metric is that a spawn which held a
+	// claim and then lost it is distinguishable from one that never held one —
+	// and only the production renewal path can produce that state.
+	It("counts a failed renewal as a lapsed spawn claim", func() {
+		_, err := mgr.Claim(ctx, tickKey, tickTask)
+		Expect(err).NotTo(HaveOccurred())
+		fake.SetFault(func(fakeRequest) *fakeFault {
+			return &fakeFault{Status: http.StatusInternalServerError}
+		})
+		before := snapshotSpawnClaims()
+		clock.SetNow(leaseTestT0.Add(60 * libtime.Second))
+		Expect(mgr.Tick(ctx)).To(Succeed())
+		expectSpawnClaimDelta(before, snapshotSpawnClaims(), map[string]float64{
+			"lapsed/renew": 1,
+		})
+	})
+
+	It("counts a lost lease as a lapsed spawn claim", func() {
+		_, err := mgr.Claim(ctx, tickKey, tickTask)
+		Expect(err).NotTo(HaveOccurred())
+		fake.Seed(
+			"refs/"+tickKey,
+			"S-other",
+			"other",
+			"t-other",
+			rfc3339(leaseTestT0.Add(claim.LeaseDuration)),
+		)
+		before := snapshotSpawnClaims()
+		clock.SetNow(leaseTestT0.Add(60 * libtime.Second))
+		Expect(mgr.Tick(ctx)).To(Succeed())
+		expectSpawnClaimDelta(before, snapshotSpawnClaims(), map[string]float64{
+			"lapsed/lost": 1,
+		})
+	})
 })
