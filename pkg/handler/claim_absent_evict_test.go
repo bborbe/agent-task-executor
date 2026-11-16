@@ -97,6 +97,14 @@ func (absentJobControl) IsJobRunning(context.Context, string) (bool, error) { re
 
 func (absentJobControl) DeleteJob(context.Context, string) error { return nil }
 
+// absentIndexClient reports a vault index that does not list the task. Its age
+// decides whether that silence corroborates the 404.
+type absentIndexClient struct{ ageSeconds int }
+
+func (c absentIndexClient) Read(context.Context) (*claim.TaskIndex, error) {
+	return &claim.TaskIndex{IndexAgeSeconds: c.ageSeconds}, nil
+}
+
 // absentClaimHarness is the wiring a reconcile pass needs to reach the claim
 // gate for one record the vault does not contain.
 type absentClaimHarness struct {
@@ -107,7 +115,11 @@ type absentClaimHarness struct {
 	task        lib.Task
 }
 
-func newAbsentClaimHarness(t *testing.T, clock *stepClock) *absentClaimHarness {
+func newAbsentClaimHarness(
+	t *testing.T,
+	clock *stepClock,
+	index claim.VaultAPIIndexClient,
+) *absentClaimHarness {
 	t.Helper()
 	ctx := context.Background()
 	// Real view: the assertion is that the NEXT pass no longer sees the record,
@@ -178,6 +190,7 @@ func newAbsentClaimHarness(t *testing.T, clock *stepClock) *absentClaimHarness {
 			func() claim.ClaimRefClient { return new(mocks.FakeClaimRefClient) },
 			handler.WithClaimJobControl(absentJobControl{}),
 			handler.WithClaimClientFactory(func() claim.ClaimClient { return claimClient }),
+			handler.WithVaultAPIIndexClient(index),
 		),
 	}
 }
@@ -189,7 +202,7 @@ func newAbsentClaimHarness(t *testing.T, clock *stepClock) *absentClaimHarness {
 func TestReconcileEvictsRecordWhoseClaimAnswers404(t *testing.T) {
 	ctx := context.Background()
 	clock := newStepClock(stdtime.Date(2026, 11, 16, 10, 0, 0, 0, stdtime.UTC))
-	harness := newAbsentClaimHarness(t, clock)
+	harness := newAbsentClaimHarness(t, clock, absentIndexClient{ageSeconds: 20})
 
 	// Pass 1: inside the grace, a single 404 must not remove the record — the
 	// index lags a fresh write, so the task may well exist.
@@ -213,5 +226,26 @@ func TestReconcileEvictsRecordWhoseClaimAnswers404(t *testing.T) {
 	}
 	if harness.spawner.SpawnJobCallCount() != 0 {
 		t.Fatalf("expected no spawn, got %d", harness.spawner.SpawnJobCallCount())
+	}
+}
+
+// TestReconcileKeepsRecordWhenTheIndexIsStale pins the second half of the
+// trigger: past the grace, a 404 alone is still not enough. A stale index omits
+// every task, so trusting its silence would evict live records during one
+// vault-api outage.
+func TestReconcileKeepsRecordWhenTheIndexIsStale(t *testing.T) {
+	ctx := context.Background()
+	clock := newStepClock(stdtime.Date(2026, 11, 16, 10, 0, 0, 0, stdtime.UTC))
+	harness := newAbsentClaimHarness(t, clock, absentIndexClient{ageSeconds: 3600})
+
+	if err := harness.handler.ReconcileOnce(ctx); err != nil {
+		t.Fatalf("first reconcile pass: %v", err)
+	}
+	clock.Advance(6 * stdtime.Minute)
+	if err := harness.handler.ReconcileOnce(ctx); err != nil {
+		t.Fatalf("second reconcile pass: %v", err)
+	}
+	if _, ok := harness.view.Get(harness.task.TaskIdentifier); !ok {
+		t.Fatal("record evicted on a stale index's silence")
 	}
 }

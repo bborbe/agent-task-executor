@@ -140,7 +140,7 @@ func (h *taskEventHandler) acquireSpawnClaim(
 	}
 	manager, err := h.leaseManager(ctx)
 	if err != nil {
-		return h.claimFailureDecision(task, "lease_manager", err)
+		return h.claimFailureDecision(ctx, task, "lease_manager", err)
 	}
 	// The scheme guard runs before any ref is derived or written. A mismatch
 	// means this cluster derives different key strings from its peers, so a claim
@@ -153,7 +153,7 @@ func (h *taskEventHandler) acquireSpawnClaim(
 	// the write and lets the spawn through, which is exactly its contract.
 	if guard := h.claimSchemeGuard; guard != nil {
 		if guardErr := guard.Check(ctx); guardErr != nil {
-			return h.claimFailureDecision(task, "claim_scheme", guardErr)
+			return h.claimFailureDecision(ctx, task, "claim_scheme", guardErr)
 		}
 	}
 	owner, repo := claimOwnerRepo(task)
@@ -166,7 +166,7 @@ func (h *taskEventHandler) acquireSpawnClaim(
 		string(task.Content),
 	)
 	if err != nil {
-		return h.claimFailureDecision(task, "derive_key", err)
+		return h.claimFailureDecision(ctx, task, "derive_key", err)
 	}
 	if fallback {
 		metrics.ClaimKeyFallbackTotal.Inc()
@@ -216,9 +216,9 @@ func (h *taskEventHandler) acquireSpawnClaim(
 			logClaimAcquired(primary, task.TaskIdentifier)
 			return true
 		}
-		return h.claimFailureDecision(task, "takeover", takeoverErr)
+		return h.claimFailureDecision(ctx, task, "takeover", takeoverErr)
 	}
-	return h.claimFailureDecision(task, "claim", claimErr)
+	return h.claimFailureDecision(ctx, task, "claim", claimErr)
 }
 
 // claimOwnerRepo reads the task's single `repo` frontmatter key, which carries
@@ -405,6 +405,7 @@ func logClaimAcquired(key string, taskID lib.TaskIdentifier) {
 // change its answer. recordClaimFailure counts the streak and evicts the record
 // once the ambiguity of a fresh write has expired.
 func (h *taskEventHandler) claimFailureDecision(
+	ctx context.Context,
 	task lib.Task,
 	stage string,
 	err error,
@@ -413,6 +414,6 @@ func (h *taskEventHandler) claimFailureDecision(
 		"event=claim_failed stage=%s mode=%s task=%s error=%v",
 		stage, h.claimMode, task.TaskIdentifier, err,
 	)
-	h.recordClaimFailure(task, err)
+	h.recordClaimFailure(ctx, task, err)
 	return h.claimMode == pkg.ClaimModeShadow
 }
