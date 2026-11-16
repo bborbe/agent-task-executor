@@ -2,7 +2,7 @@
 
 All notable changes to this project will be documented in this file.
 
-## Unreleased
+## v0.64.4
 
 - fix: **`finishSpawn` publishes the spawn notification before the trigger-counter write, so a failed `trigger_count` / `trigger_scope` write no longer leaves a running Job with an empty `current_job` on the record.** `finishSpawn` returned on a `recordTriggerSpawn` error before `PublishSpawnNotification` was attempted, so a record kept an empty `current_job` beside a live Job and read as unclaimed on the board — the exact state the agent task board exists to eliminate. Nothing retried the write: the error propagates as fatal, and every re-drive is suppressed by `skip task %s: active job exists`, which does not re-publish the notification. The only signal was the aggregate `agent_executor_task_events_total{result="error"}` counter, which carries neither a task nor a Job label, so the record could sit unclaimed indefinitely with live work behind it. The publish now runs first and the trigger error still propagates afterwards; a new `event=trigger_write_failed task=<id> job=<name> err=<err>` warning names both the task and the Job on that path. The log-and-return pair deliberately deviates from `go-logging-guide.md` § `no-log-and-return-error`: the log line is the attributable signal this change exists to add, and consuming the error would hide a real fault. Change set: `pkg/handler/task_event_handler.go`, `pkg/handler/finish_spawn.go`, `pkg/handler/finish_spawn_ordering_internal_test.go`, `CHANGELOG.md`.
 
