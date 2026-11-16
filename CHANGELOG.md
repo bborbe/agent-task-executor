@@ -2,7 +2,7 @@
 
 All notable changes to this project will be documented in this file.
 
-## Unreleased
+## v0.65.0
 
 - feat: **`executor_spawn_claim_total{result,stage}` records the spawn-claim decision, so "no claim was ever acquired" is separable from "a claim was acquired and then not renewed".** `executor_claim_total` answers what the lease manager did, but not what a given spawn decided: `logClaimAcquired` and `claimFailureDecision` were log-only, so "this spawn proceeded holding a claim" was not countable, and neither was "this spawn proceeded on a fail-open branch without one" — and both leave the same aggregate trace once the log has rotated. The new counter carries a closed five-value result set — `acquired`, `unclaimed` (mode `on` blocked the spawn), `fail_open` (mode `shadow` let it through), `mode_off` (no claim attempted), `lapsed` (a held claim's renewal failed or the lease was lost) — and a closed eight-value `stage` set mirroring the stages `claimFailureDecision` already logged plus `renew` and `lost` for the post-spawn class. The reachable pairs are seeded at `0` in `init()`, so an absent series means the metric stopped being exported rather than "no claims yet". No claim, lease or renewal behaviour changes: the diff is counter increments and label plumbing only. `acquired + unclaimed + fail_open + mode_off` equals the spawn attempts, which is the arithmetic that makes the fail-open class visible at all. Change set: `pkg/metrics/metrics.go`, `pkg/handler/claim_wiring.go`, `pkg/claim/lease_manager.go`, `pkg/claim/lease_manager_tick.go`, `pkg/handler/spawn_claim_metrics_internal_test.go`, `pkg/claim/lease_manager_tick_test.go`, `pkg/claim/lease_manager_test_helpers_test.go`, `docs/executor-metrics-contract.md`, `CHANGELOG.md`.
 
