@@ -712,7 +712,12 @@ func (h *taskEventHandler) resolveConfig(
 	resolved, err := h.resolver.Resolve(ctx, string(task.Frontmatter.Assignee()))
 	if err != nil {
 		if stderrors.Is(err, pkg.ErrConfigNotFound) {
-			glog.Warningf(
+			// Not a warning: every executor consumes the shared task-event topic, so this
+			// fires once per event addressed to any other assignee — the dominant share of
+			// this pod's log. The two metrics below carry the same signal, labelled by
+			// assignee. V(4), not the V(3) of the neighbouring skip paths, because this one
+			// fires per event: a V(3) troubleshooting session would flood on it.
+			glog.V(4).Infof(
 				"skip task %s: unknown assignee %s",
 				task.TaskIdentifier,
 				task.Frontmatter.Assignee(),

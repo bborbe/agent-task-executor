@@ -2,6 +2,10 @@
 
 All notable changes to this project will be documented in this file.
 
+## Unreleased
+
+- fix: **the unknown-assignee skip is logged at `V(4)` instead of as a warning, so the executor's container log stops filling with one line per event addressed to another assignee.** Every executor consumes the shared `master-agent-task-v1-event` topic, so `resolveConfig` fired `glog.Warningf("skip task %s: unknown assignee %s")` once for every event whose assignee resolves to no Config CR — measured on `agent-task-executor-openclaw` (prod) on 2026-11-15, 539 of 1 391 lines in a 15-minute window, and 6 706 of 8 462 on 2026-11-11. The skip is the ordinary case of a task not addressed to this executor, not an incident, and the signal is already carried by `agent_executor_task_events_total{result="skipped_unknown_assignee"}` and `agent_executor_skipped_unknown_assignee_total{assignee}` — the second labelled by the exact dimension the log line printed. `V(4)` rather than the `V(3)` of the neighbouring skip paths, because this call fires per event and a `V(3)` troubleshooting session would flood on it. The Deployment runs `-v=2`, so `V(2)` would not have silenced it. Change set: `pkg/handler/task_event_handler.go`, `CHANGELOG.md`.
+
 ## v0.64.0
 
 - feat: add a `check-task-link` gate that fails a PR whose body carries no `Task: <task_identifier>` line
