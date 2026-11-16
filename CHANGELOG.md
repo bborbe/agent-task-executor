@@ -2,6 +2,10 @@
 
 All notable changes to this project will be documented in this file.
 
+## Unreleased
+
+- fix: **a run that spent its re-drive budget on a non-`done` result escalates to `status: hold` instead of parking at `human_review` while staying `in_progress`.** `PublishParkRedriveCap` delegated to `PublishParkLostClaim`, which writes the `phase` key and nothing else — so a run whose `last_result_status` was `failed`, `needs_input`, `in_progress` or absent ended at `status: in_progress` + `phase: human_review` + no Job. `human_review` is in `terminalPhases`, so nothing re-drove it, and the record was indistinguishable from a finished run in the one field an operator reads: the `## Parked` section carried the succeeded path's bare `- **Reason:** parked_succeeded`. Measured 2026-11-12: 53 `github-update-go` records at exactly that triple with zero update-go pods running. The park now writes `status: hold` and `phase: planning` in one command with a `## Parked` section naming `parked_redrive_cap`, the non-done `last_result_status`, the phase the run never left and the `trigger_count` that spent the budget. `hold` is the escalation channel — it leaves the `in_progress` population while staying outside `terminalStatuses`, so nothing closes the record and an operator resumes it by setting the status back to `in_progress`. The phase moves to `planning` in the same write because vault-cli's lint flags `hold` alongside an active phase (`execution`, `in_progress`, `ai_review`, `human_review`); resuming therefore restarts at planning, which re-scopes `trigger_count` and gives a re-armed run a fresh re-drive budget instead of inheriting the spent one. Change set: `pkg/result_publisher.go`, `pkg/result_publisher_test.go`, `pkg/result_publisher_redrive_cap_test.go`, `docs/claim-lease-protocol.md`, `CHANGELOG.md`.
+
 ## v0.64.0
 
 - feat: add a `check-task-link` gate that fails a PR whose body carries no `Task: <task_identifier>` line

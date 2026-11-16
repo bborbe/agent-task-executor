@@ -321,15 +321,27 @@ again so the pair is never half-held.
 
 ## Parking
 
-A park moves a task to `human_review` and records why, in the same
-`UpdateFrontmatterCommand`: the `phase` key plus a `## Parked` body section, so
-the record never shows the phase without its reason. There are two park paths,
-and each writes its own reason token:
+A park records why a task stopped being driven, in the same
+`UpdateFrontmatterCommand` as the keys it changes, so the record never shows the
+new state without its reason. There are three park paths, and each writes its
+own reason token:
 
-| Path | Reason token | Evidence |
-|---|---|---|
-| Lost claim | `parked_lost_claim` | The claim key and the previous holder. |
-| Succeeded Job without a phase move | `parked_succeeded` | The reason line only. |
+| Path | Reason token | Written keys | Evidence |
+|---|---|---|---|
+| Lost claim | `parked_lost_claim` | `phase: human_review` | The claim key and the previous holder. |
+| Succeeded Job without a phase move | `parked_succeeded` | `status: completed`, `phase: done` | The reason line only. |
+| Re-drive budget spent on a non-`done` result | `parked_redrive_cap` | `status: hold`, `phase: planning` | `last_result_status`, the phase the run never left, and `trigger_count`. |
+
+The first two paths differ in outcome, not just in wording: a lost claim needs a
+human to look at it, while a succeeded Job is finished work. The third is an
+escalation — the run did not finish — so it must leave the `in_progress`
+population without closing the record. `status: hold` is what does that: it is
+outside `terminalStatuses`, so nothing closes the record, and an operator resumes
+it by setting the status back to `in_progress`. The phase moves to `planning` in
+the same write because vault-cli's lint flags `hold` beside an active phase
+(`execution`, `in_progress`, `ai_review`, `human_review`); resuming at planning
+re-scopes `trigger_count`, so a re-armed run starts with a fresh re-drive budget
+rather than the spent one.
 
 The lost-claim park fires when this executor takes over an expired claim, the
 task's Config forbids a rerun (`rerunOnLostClaim: false`), and the task shows
