@@ -8,10 +8,9 @@ import (
 	"context"
 	stderrors "errors"
 
+	libk8s "github.com/bborbe/k8s"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
-
-	libk8s "github.com/bborbe/k8s"
 	appsv1 "k8s.io/api/apps/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"

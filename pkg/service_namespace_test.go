@@ -7,10 +7,9 @@ package pkg_test
 import (
 	"context"
 
+	libk8s "github.com/bborbe/k8s"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
-
-	libk8s "github.com/bborbe/k8s"
 
 	pkg "github.com/bborbe/agent-task-executor/pkg"
 )
