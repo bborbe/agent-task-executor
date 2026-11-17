@@ -46,6 +46,33 @@ var _ = Describe("configSpecProperties", func() {
 		Expect(props["jobNamespace"].Type).To(Equal("string"))
 	})
 
+	It("declares serviceNamespace with the same contract as jobNamespace", func() {
+		props := configSpecProperties()
+		Expect(props).To(HaveKey("serviceNamespace"))
+		Expect(props["serviceNamespace"].Type).To(Equal("string"))
+		Expect(props["serviceNamespace"].Pattern).To(Equal(crdDNS1123Label))
+		Expect(props["serviceNamespace"].MaxLength).NotTo(BeNil())
+		Expect(*props["serviceNamespace"].MaxLength).To(Equal(int64(63)))
+	})
+
+	// Pins serviceNamespace to its sibling jobNamespace rather than to literals:
+	// a field missing from the map is pruned from every Config within seconds of
+	// the next restart, silently. Comparing the two entries keeps the pair in
+	// lockstep when either contract moves.
+	It("pins serviceNamespace's schema to jobNamespace's", func() {
+		props := configSpecProperties()
+		service, ok := props["serviceNamespace"]
+		Expect(ok).To(BeTrue(), "serviceNamespace missing from configSpecProperties")
+		job, ok := props["jobNamespace"]
+		Expect(ok).To(BeTrue(), "jobNamespace missing from configSpecProperties")
+
+		Expect(service.Type).To(Equal(job.Type))
+		Expect(service.Pattern).To(Equal(job.Pattern))
+		Expect(service.MaxLength).ToNot(BeNil())
+		Expect(job.MaxLength).ToNot(BeNil())
+		Expect(*service.MaxLength).To(Equal(*job.MaxLength))
+	})
+
 	It("declares targetVault so the API server cannot prune it", func() {
 		props := configSpecProperties()
 		Expect(props).To(HaveKey("targetVault"))

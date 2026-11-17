@@ -39,7 +39,7 @@ var _ = Describe("ServiceReconciler", func() {
 		fakeClient = fake.NewClientset()
 		reconciler = spawner.NewServiceReconciler(
 			libk8s.NewStatefulSetDeployer(fakeClient),
-			fakeClient.AppsV1().StatefulSets(namespace),
+			fakeClient,
 			namespace,
 			"standard",
 		)
@@ -397,7 +397,7 @@ var _ = Describe("ServiceReconciler", func() {
 			// (hardcoding "standard"), so the reconciler has to unset it.
 			defaulted := spawner.NewServiceReconciler(
 				libk8s.NewStatefulSetDeployer(fakeClient),
-				fakeClient.AppsV1().StatefulSets(namespace),
+				fakeClient,
 				namespace,
 				"",
 			)
@@ -469,7 +469,7 @@ var _ = Describe("ServiceReconciler", func() {
 	Describe("UndeployService", func() {
 		It("removes a StatefulSet this executor owns", func() {
 			Expect(reconciler.ReconcileService(ctx, serviceConf, serviceCfg)).To(Succeed())
-			Expect(reconciler.UndeployService(ctx, "identity")).To(Succeed())
+			Expect(reconciler.UndeployService(ctx, serviceConf)).To(Succeed())
 
 			list, err := fakeClient.AppsV1().StatefulSets(namespace).List(ctx, metav1.ListOptions{})
 			Expect(err).NotTo(HaveOccurred())
@@ -494,7 +494,8 @@ var _ = Describe("ServiceReconciler", func() {
 				Create(ctx, foreign, metav1.CreateOptions{})
 			Expect(err).NotTo(HaveOccurred())
 
-			Expect(reconciler.UndeployService(ctx, "claude-agent")).To(Succeed())
+			foreignConfig := agentv1.Config{ObjectMeta: metav1.ObjectMeta{Name: "claude-agent"}}
+			Expect(reconciler.UndeployService(ctx, foreignConfig)).To(Succeed())
 
 			list, err := fakeClient.AppsV1().StatefulSets(namespace).List(ctx, metav1.ListOptions{})
 			Expect(err).NotTo(HaveOccurred())
@@ -502,7 +503,9 @@ var _ = Describe("ServiceReconciler", func() {
 		})
 
 		It("is a silent no-op for a name that has no StatefulSet", func() {
-			Expect(reconciler.UndeployService(ctx, "never-deployed")).To(Succeed())
+			Expect(reconciler.UndeployService(ctx, agentv1.Config{
+				ObjectMeta: metav1.ObjectMeta{Name: "never-deployed"},
+			})).To(Succeed())
 		})
 	})
 })

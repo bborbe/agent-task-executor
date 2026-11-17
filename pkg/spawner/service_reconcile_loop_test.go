@@ -78,8 +78,8 @@ var _ = Describe("ServiceReconcileLoop", func() {
 		Expect(loop.ReconcileOnce(ctx)).To(Succeed())
 		Expect(reconciler.ReconcileServiceCallCount()).To(Equal(0))
 		Expect(reconciler.UndeployServiceCallCount()).To(Equal(1))
-		_, name := reconciler.UndeployServiceArgsForCall(0)
-		Expect(name).To(Equal("claude"))
+		_, config := reconciler.UndeployServiceArgsForCall(0)
+		Expect(config.Name).To(Equal("claude"))
 	})
 
 	It("treats an unset type as job, matching the CRD contract, and undeploys it", func() {
@@ -142,5 +142,22 @@ var _ = Describe("ServiceReconcileLoop", func() {
 
 		Expect(loop.ReconcileOnce(cancelled)).To(HaveOccurred())
 		Expect(reconciler.ReconcileServiceCallCount()).To(Equal(0))
+	})
+
+	// The reap is a pass-level operation, not a per-Config one: it lists the
+	// executor's own cross-namespace copies once and compares them against the
+	// whole Config set. Calling it per Config would both multiply the cluster-wide
+	// list by the Config count and make the two-pass gate mean "two Configs", so
+	// this pins the count to exactly one however many Configs the pass sees.
+	It("reaps once per pass, not once per Config", func() {
+		provider.configs = []agentv1.Config{
+			serviceConfig("identity"),
+			serviceConfig("claude-interactive"),
+			serviceConfig("pi-interactive"),
+		}
+
+		Expect(loop.ReconcileOnce(ctx)).To(Succeed())
+		Expect(reconciler.ReapOrphanedCopiesCallCount()).To(Equal(1))
+		Expect(reconciler.ReconcileServiceCallCount()).To(Equal(3))
 	})
 })

@@ -19,7 +19,9 @@ import (
 // defaultServiceReconcileInterval is how often the loop re-ensures service
 // StatefulSets. It matches the task reconcile floor: the loop is a backstop for
 // drift, not the primary mechanism — the StatefulSet controller owns pod
-// replacement, and the ownerRef owns garbage collection.
+// replacement, and the ownerRef owns garbage collection for same-namespace
+// copies. A cross-namespace copy carries no ownerRef (see ReapOrphanedCopies),
+// so this interval is also the orphan reap's only clock.
 const defaultServiceReconcileInterval = time.Minute
 
 //counterfeiter:generate -o ../../mocks/service_reconcile_loop.go --fake-name FakeServiceReconcileLoop . ServiceReconcileLoop
@@ -36,8 +38,10 @@ const defaultServiceReconcileInterval = time.Minute
 // It is deliberately a periodic pass rather than an informer hook: the Config
 // informer already exists to populate the resolver's store, and a loop keeps the
 // two concerns separate while giving the same convergence. A Config deleted
-// entirely is collected by the ownerRef, so only the "stopped being a service"
-// transition needs the explicit undeploy.
+// entirely is collected by the ownerRef only when its copy sits in the
+// executor's own namespace; a cross-namespace copy carries none, so the same
+// pass that reconciles also reaps it (see ReapOrphanedCopies), and the "stopped
+// being a service" transition needs the explicit undeploy.
 type ServiceReconcileLoop interface {
 	// ReconcileOnce runs one full pass over the known Configs.
 	ReconcileOnce(ctx context.Context) error
@@ -118,7 +122,7 @@ func (l *serviceReconcileLoop) ReconcileOnce(ctx context.Context) error {
 			// orphan a running workload for the life of the cluster.
 			// UndeployService is idempotent, so this is a no-op for the job
 			// Configs that never had one, which is most of them.
-			if err := l.reconciler.UndeployService(ctx, config.Name); err != nil {
+			if err := l.reconciler.UndeployService(ctx, config); err != nil {
 				failures = append(failures, err)
 				continue
 			}
@@ -133,6 +137,11 @@ func (l *serviceReconcileLoop) ReconcileOnce(ctx context.Context) error {
 
 	glog.V(2).
 		Infof("event=service_reconcile done configs=%d services=%d undeployed=%d failures=%d", len(configs), services, undeployed, len(failures))
+
+	// Once per pass, not per Config: a cross-namespace workload whose Config has been
+	// deleted is otherwise unreachable, because every other cleanup path is driven by
+	// a Config that still exists in the list above.
+	l.reconciler.ReapOrphanedCopies(ctx, configs)
 	if len(failures) > 0 {
 		return errors.Wrapf(
 			ctx,
