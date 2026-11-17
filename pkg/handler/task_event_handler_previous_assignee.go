@@ -42,7 +42,11 @@ func (h *taskEventHandler) inTypePreviousAssignee(
 	config, err := h.resolver.Resolve(ctx, previousAssignee)
 	if err != nil {
 		if stderrors.Is(err, pkg.ErrConfigNotFound) {
-			glog.V(2).Infof(
+			// V(4), not V(2): a retired assignee leaves this line firing on every
+			// reconcile pass, and the drop is the ordinary case, not an incident —
+			// the signal lives on the metrics, not this line. Mirrors the
+			// unknown-assignee skip's demotion to V(4) in v0.64.2.
+			glog.V(4).Infof(
 				"ignore previous_assignee %s: no config in this stage",
 				previousAssignee,
 			)
