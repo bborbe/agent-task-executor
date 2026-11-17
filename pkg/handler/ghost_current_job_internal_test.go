@@ -6,6 +6,7 @@ package handler
 
 import (
 	"context"
+	stderrors "errors"
 	"flag"
 	"io"
 	"os"
@@ -20,7 +21,7 @@ import (
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 
-	pkg "github.com/bborbe/agent-task-executor/pkg"
+	"github.com/bborbe/agent-task-executor/pkg"
 	"github.com/bborbe/agent-task-executor/pkg/claim"
 )
 
@@ -145,6 +146,23 @@ func newGhostInternalHandler(
 	publisher *ghostRecordingPublisher,
 	read func(context.Context, claim.ClaimTarget) (*claim.Claim, error),
 ) *taskEventHandler {
+	return newGhostInternalHandlerWithResolver(
+		view,
+		publisher,
+		read,
+		staticResolver{config: pkg.AgentConfiguration{Assignee: "claude", Image: "img"}},
+	)
+}
+
+// newGhostInternalHandlerWithResolver is newGhostInternalHandler with the
+// ConfigResolver under test's control, so a spec can drive the assignee and
+// task_type lookups independently.
+func newGhostInternalHandlerWithResolver(
+	view TaskView,
+	publisher *ghostRecordingPublisher,
+	read func(context.Context, claim.ClaimTarget) (*claim.Claim, error),
+	resolver pkg.ConfigResolver,
+) *taskEventHandler {
 	raw := NewTaskEventHandler(
 		goneSpawner{},
 		"dev",
@@ -152,7 +170,7 @@ func newGhostInternalHandler(
 		"",
 		true,
 		true,
-		staticResolver{config: pkg.AgentConfiguration{Assignee: "claude", Image: "img"}},
+		resolver,
 		publisher,
 		pkg.NewTaskStore(),
 		libtime.NewCurrentDateTime(),
@@ -303,5 +321,197 @@ var _ = Describe("ghost current_job locked re-check", func() {
 		})
 
 		Expect(publisher.clears).To(Equal([]string{"ghost-job-1"}))
+	})
+})
+
+// ghostInternalHumanAssignedTask is a ghost record whose assignee is a human —
+// non-empty, and matching no agent Config — carrying a task_type that does.
+func ghostInternalHumanAssignedTask() lib.Task {
+	task := ghostInternalTask()
+	task.TaskIdentifier = "ghost-human-task"
+	task.Frontmatter["assignee"] = "bborbe"
+	task.Frontmatter["task_type"] = "dark-factory-implement"
+	task.Frontmatter["current_job"] = "ghost-job-human"
+	return task
+}
+
+// ghostResolver answers the two Config lookups independently and records how
+// often each was reached. It is hand-written rather than the generated
+// mocks.FakeConfigResolver because that package imports pkg/handler (the
+// counterfeiter directives target it), so importing it here would close an
+// import cycle. staticResolver and failingResolver are hand-written in
+// claim_job_control_internal_test.go for the same reason.
+type ghostResolver struct {
+	config       pkg.AgentConfiguration
+	resolveErr   error
+	typeConfig   pkg.AgentConfiguration
+	typeErr      error
+	resolveCalls int
+	typeCalls    int
+	lastTaskType string
+	lastPrevious string
+}
+
+func (r *ghostResolver) Resolve(context.Context, string) (pkg.AgentConfiguration, error) {
+	r.resolveCalls++
+	return r.config, r.resolveErr
+}
+
+func (r *ghostResolver) ResolveByTaskType(
+	_ context.Context,
+	taskType string,
+	preferAssignee string,
+) (pkg.AgentConfiguration, error) {
+	r.typeCalls++
+	r.lastTaskType = taskType
+	r.lastPrevious = preferAssignee
+	return r.typeConfig, r.typeErr
+}
+
+var _ = Describe("ghost current_job config resolution", func() {
+	var (
+		ctx       context.Context
+		publisher *ghostRecordingPublisher
+		resolver  *ghostResolver
+		h         *taskEventHandler
+		claimFree = func(context.Context, claim.ClaimTarget) (*claim.Claim, error) {
+			return nil, claim.ErrClaimFree
+		}
+	)
+
+	BeforeEach(func() {
+		ctx = context.Background()
+		publisher = &ghostRecordingPublisher{}
+		resolver = &ghostResolver{
+			typeConfig: pkg.AgentConfiguration{Assignee: "claude", Image: "img"},
+		}
+		h = nil
+	})
+
+	Context("the assignee matches no Config and the task_type does", func() {
+		BeforeEach(func() {
+			resolver.resolveErr = pkg.ErrConfigNotFound
+		})
+
+		It("falls back to task_type and clears the ghost", func() {
+			h = newGhostInternalHandlerWithResolver(
+				ghostView{tasks: []lib.Task{ghostInternalHumanAssignedTask()}},
+				publisher,
+				claimFree,
+				resolver,
+			)
+
+			out := ghostCaptureInternalLog(func() {
+				Expect(h.ReconcileOnce(ctx)).To(Succeed())
+			})
+
+			Expect(publisher.clearCalls()).To(Equal([]string{"ghost-job-human"}))
+			Expect(
+				out,
+			).To(ContainSubstring("event=ghost_current_job_cleared task=ghost-human-task"))
+			Expect(resolver.typeCalls).To(Equal(1))
+			Expect(resolver.lastTaskType).To(Equal("dark-factory-implement"))
+			Expect(resolver.lastPrevious).To(BeEmpty())
+		})
+	})
+
+	Context("the assignee matches no Config and there is no task_type", func() {
+		BeforeEach(func() {
+			resolver.resolveErr = pkg.ErrConfigNotFound
+		})
+
+		It("still refuses with namespace_unresolved and never looks up by type", func() {
+			task := ghostInternalHumanAssignedTask()
+			delete(task.Frontmatter, "task_type")
+			h = newGhostInternalHandlerWithResolver(
+				ghostView{tasks: []lib.Task{task}},
+				publisher,
+				claimFree,
+				resolver,
+			)
+
+			out := ghostCaptureInternalLog(func() {
+				Expect(h.ReconcileOnce(ctx)).To(Succeed())
+			})
+
+			Expect(publisher.clearCalls()).To(BeEmpty())
+			Expect(out).To(ContainSubstring("guard=namespace_unresolved"))
+			Expect(resolver.typeCalls).To(Equal(0))
+		})
+	})
+
+	Context("the resolver fails with an error other than ErrConfigNotFound", func() {
+		BeforeEach(func() {
+			resolver.resolveErr = stderrors.New("resolver unavailable")
+		})
+
+		It("propagates the error instead of reading it as no Config", func() {
+			h = newGhostInternalHandlerWithResolver(
+				ghostView{tasks: []lib.Task{ghostInternalHumanAssignedTask()}},
+				publisher,
+				claimFree,
+				resolver,
+			)
+
+			out := ghostCaptureInternalLog(func() {
+				Expect(h.ReconcileOnce(ctx)).To(Succeed())
+			})
+
+			Expect(publisher.clearCalls()).To(BeEmpty())
+			Expect(out).To(ContainSubstring("guard=namespace_unresolved"))
+			Expect(out).To(ContainSubstring("resolver unavailable"))
+			Expect(resolver.typeCalls).To(Equal(0))
+		})
+	})
+
+	Context("the assignee resolves directly", func() {
+		BeforeEach(func() {
+			resolver.config = pkg.AgentConfiguration{Assignee: "claude", Image: "img"}
+		})
+
+		It("clears without consulting task_type", func() {
+			h = newGhostInternalHandlerWithResolver(
+				ghostView{tasks: []lib.Task{ghostInternalHumanAssignedTask()}},
+				publisher,
+				claimFree,
+				resolver,
+			)
+
+			ghostCaptureInternalLog(func() {
+				Expect(h.ReconcileOnce(ctx)).To(Succeed())
+			})
+
+			Expect(publisher.clearCalls()).To(Equal([]string{"ghost-job-human"}))
+			Expect(resolver.typeCalls).To(Equal(0))
+		})
+	})
+
+	Context("the assignee is empty", func() {
+		BeforeEach(func() {
+			resolver.resolveErr = pkg.ErrConfigNotFound
+		})
+
+		It("still falls back to task_type, as it did before the fix", func() {
+			task := ghostInternalHumanAssignedTask()
+			task.Frontmatter["assignee"] = ""
+			h = newGhostInternalHandlerWithResolver(
+				ghostView{tasks: []lib.Task{task}},
+				publisher,
+				claimFree,
+				resolver,
+			)
+
+			ghostCaptureInternalLog(func() {
+				Expect(h.ReconcileOnce(ctx)).To(Succeed())
+			})
+
+			Expect(publisher.clearCalls()).To(Equal([]string{"ghost-job-human"}))
+			Expect(resolver.resolveCalls).To(Equal(0))
+			// Not an exact count: an empty-assignee task also reaches the
+			// pass's own restore path, which resolves by task_type too. The
+			// claim here is that the ghost step still falls back, which the
+			// clear above already proves.
+			Expect(resolver.typeCalls).To(BeNumerically(">=", 1))
+		})
 	})
 })
