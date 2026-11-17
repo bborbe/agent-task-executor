@@ -341,31 +341,15 @@ reapLoop:
 		// place would make a copy that appears after this pass look like a second
 		// sighting on the next one, and the two-pass gate is this function's whole
 		// safety. A partially filled set only defers a reap, which is the safe direction.
-		// The label is load-bearing: a bare break would leave the select, not the loop.
-		select {
-		case <-ctx.Done():
+		if ctx.Err() != nil {
 			glog.V(2).Infof("event=service_orphan_reap_cancelled")
 			break reapLoop
-		default:
 		}
 		existing := &list.Items[i]
-		// Checked in code as well as in the selector: the selector is the server's
-		// job, and a client that ignores it (or an apiserver that answers more
-		// broadly) must not widen this delete to another executor's workload.
-		if existing.Labels[serviceExecutorLabelKey] != r.namespace.String() {
+		key, uid, reapable := r.reapCandidate(existing, live)
+		if !reapable {
 			continue
 		}
-		if len(existing.OwnerReferences) > 0 {
-			continue
-		}
-		uid := existing.Labels[serviceConfigUIDLabelKey]
-		if uid == "" {
-			continue
-		}
-		if _, ok := live[uid]; ok {
-			continue
-		}
-		key := existing.Namespace + "/" + existing.Name
 		current[key] = struct{}{}
 		if _, seen := previous[key]; !seen {
 			// First sighting. Recorded, not acted on.
@@ -395,6 +379,34 @@ reapLoop:
 		)
 	}
 	r.setReapCandidates(current)
+}
+
+// reapCandidate reports whether existing is a copy this executor may consider
+// reaping, and returns the candidate key that carries it across passes.
+//
+// Checked in code as well as in the selector: the selector is the server's job,
+// and a client that ignores it (or an apiserver that answers more broadly) must
+// not widen this delete to another executor's workload. An object the garbage
+// collector owns is never a candidate — the GC is authoritative there, and a
+// momentarily stale Config list must not be able to delete a live workload.
+func (r *serviceReconciler) reapCandidate(
+	existing *appsv1.StatefulSet,
+	live map[string]struct{},
+) (key string, uid string, ok bool) {
+	if existing.Labels[serviceExecutorLabelKey] != r.namespace.String() {
+		return "", "", false
+	}
+	if len(existing.OwnerReferences) > 0 {
+		return "", "", false
+	}
+	uid = existing.Labels[serviceConfigUIDLabelKey]
+	if uid == "" {
+		return "", "", false
+	}
+	if _, alive := live[uid]; alive {
+		return "", "", false
+	}
+	return existing.Namespace + "/" + existing.Name, uid, true
 }
 
 // setReapCandidates replaces the remembered candidate set for the next pass.
