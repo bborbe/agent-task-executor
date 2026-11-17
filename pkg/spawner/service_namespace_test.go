@@ -7,8 +7,9 @@ package spawner_test
 import (
 	"context"
 	stderrors "errors"
-	"strings"
-	"testing"
+
+	. "github.com/onsi/ginkgo/v2"
+	. "github.com/onsi/gomega"
 
 	libk8s "github.com/bborbe/k8s"
 	appsv1 "k8s.io/api/apps/v1"
@@ -26,11 +27,9 @@ import (
 )
 
 func newServiceNamespaceLoop(
-	t *testing.T,
 	executorNamespace string,
 	configs []agentv1.Config,
 ) (*fake.Clientset, spawner.ServiceReconcileLoop, *fakeProviderImpl) {
-	t.Helper()
 	client := fake.NewClientset()
 	reconciler := spawner.NewServiceReconciler(
 		libk8s.NewStatefulSetDeployer(client),
@@ -102,12 +101,10 @@ func statefulSetDeleteNamespaces(client *fake.Clientset) []string {
 // seedOwnedStatefulSet creates a StatefulSet in namespace carrying the same
 // owner reference buildStatefulSet emits, so the reconciler treats it as its own.
 func seedOwnedStatefulSet(
-	t *testing.T,
 	client *fake.Clientset,
 	config agentv1.Config,
 	namespace string,
 ) {
-	t.Helper()
 	seed := &appsv1.StatefulSet{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      config.Name,
@@ -120,236 +117,15 @@ func seedOwnedStatefulSet(
 			},
 		},
 	}
-	if _, err := client.AppsV1().
+	_, err := client.AppsV1().
 		StatefulSets(namespace).
-		Create(context.Background(), seed, metav1.CreateOptions{}); err != nil {
-		t.Fatalf("seed StatefulSet failed: %v", err)
-	}
-}
-
-func TestServiceReconcileRejectsExecutorNamespace(t *testing.T) {
-	ctx := context.Background()
-	config := serviceNamespaceConfig("identity", "dev", "dev")
-	client, loop, _ := newServiceNamespaceLoop(t, "dev", []agentv1.Config{config})
-
-	err := loop.ReconcileOnce(ctx)
-	if err == nil {
-		t.Fatal("expected error when serviceNamespace equals executor namespace")
-	}
-	if !strings.Contains(err.Error(), "may not equal the executor namespace") {
-		t.Fatalf("unexpected error message: %v", err)
-	}
-	if !strings.Contains(err.Error(), "identity") {
-		t.Fatalf("expected error to name the Config, got: %v", err)
-	}
-	if n := countStatefulSetCreateActions(client); n != 0 {
-		t.Fatalf("expected no statefulset create action, got %d", n)
-	}
-}
-
-func TestServiceReconcileTargetNamespace(t *testing.T) {
-	ctx := context.Background()
-
-	t.Run("explicit namespace", func(t *testing.T) {
-		config := serviceNamespaceConfig("identity", "dev", "agent-sandbox")
-		client, loop, _ := newServiceNamespaceLoop(t, "dev", []agentv1.Config{config})
-
-		if err := loop.ReconcileOnce(ctx); err != nil {
-			t.Fatalf("ReconcileOnce failed: %v", err)
-		}
-		if got := statefulSetCreateNamespace(client); got != "agent-sandbox" {
-			t.Fatalf("expected statefulset in agent-sandbox, got %q", got)
-		}
-	})
-
-	t.Run("unset namespace falls back to executor", func(t *testing.T) {
-		config := serviceNamespaceConfig("identity", "dev", "")
-		client, loop, _ := newServiceNamespaceLoop(t, "dev", []agentv1.Config{config})
-
-		if err := loop.ReconcileOnce(ctx); err != nil {
-			t.Fatalf("ReconcileOnce failed: %v", err)
-		}
-		if got := statefulSetCreateNamespace(client); got != "dev" {
-			t.Fatalf("expected statefulset in dev, got %q", got)
-		}
-	})
-}
-
-func TestServiceReconcileRemovesPreviousNamespace(t *testing.T) {
-	ctx := context.Background()
-
-	config := serviceNamespaceConfig("identity", "dev", "")
-	client, loop, provider := newServiceNamespaceLoop(t, "dev", []agentv1.Config{config})
-
-	// First pass deploys into the executor namespace. Building the object through
-	// the reconciler makes its owner reference genuinely owned, so the removal
-	// below cannot pass with a subtly wrong ownerRef.
-	if err := loop.ReconcileOnce(ctx); err != nil {
-		t.Fatalf("first ReconcileOnce failed: %v", err)
-	}
-
-	provider.configs = []agentv1.Config{serviceNamespaceConfig("identity", "dev", "agent-sandbox")}
-	if err := loop.ReconcileOnce(ctx); err != nil {
-		t.Fatalf("second ReconcileOnce failed: %v", err)
-	}
-
-	if got := statefulSetCreateNamespace(client); got != "agent-sandbox" {
-		t.Fatalf("expected statefulset created in agent-sandbox, got %q", got)
-	}
-	deleted := statefulSetDeleteNamespaces(client)
-	if len(deleted) != 1 || deleted[0] != "dev" {
-		t.Fatalf("expected one delete against dev, got %v", deleted)
-	}
-}
-
-func TestServiceReconcileUnsetNamespace(t *testing.T) {
-	ctx := context.Background()
-	config := serviceNamespaceConfig("identity", "dev", "")
-	client, loop, _ := newServiceNamespaceLoop(t, "dev", []agentv1.Config{config})
-
-	if err := loop.ReconcileOnce(ctx); err != nil {
-		t.Fatalf("ReconcileOnce failed: %v", err)
-	}
-	if got := statefulSetCreateNamespace(client); got != "dev" {
-		t.Fatalf("expected statefulset in dev, got %q", got)
-	}
-	if deleted := statefulSetDeleteNamespaces(client); len(deleted) != 0 {
-		t.Fatalf("expected no delete for an unchanged namespace, got %v", deleted)
-	}
-}
-
-func TestServiceReconcileSurvivesListDenial(t *testing.T) {
-	ctx := context.Background()
-	config := serviceNamespaceConfig("identity", "dev", "")
-	client, loop, _ := newServiceNamespaceLoop(t, "dev", []agentv1.Config{config})
-
-	// A refused cluster-wide list (the chart may not grant it yet) must not fail a
-	// reconcile that has already created its StatefulSet.
-	client.PrependReactor("list", "statefulsets", func(
-		action k8stesting.Action,
-	) (bool, runtime.Object, error) {
-		if action.GetNamespace() != "" {
-			return false, nil, nil
-		}
-		return true, nil, apierrors.NewForbidden(
-			schema.GroupResource{Group: "apps", Resource: "statefulsets"},
-			"",
-			stderrors.New("forbidden"),
-		)
-	})
-
-	if err := loop.ReconcileOnce(ctx); err != nil {
-		t.Fatalf("ReconcileOnce must succeed when the sweep list is denied: %v", err)
-	}
-	if n := countStatefulSetCreateActions(client); n != 1 {
-		t.Fatalf("expected one statefulset create action, got %d", n)
-	}
-	if deleted := statefulSetDeleteNamespaces(client); len(deleted) != 0 {
-		t.Fatalf("expected no delete when the list is denied, got %v", deleted)
-	}
-}
-
-func TestServiceUndeployTargetNamespace(t *testing.T) {
-	ctx := context.Background()
-
-	config := serviceNamespaceConfig("identity", "dev", "agent-sandbox")
-	config.Spec.Type = agentv1.AgentTypeJob
-	client, loop, _ := newServiceNamespaceLoop(t, "dev", []agentv1.Config{config})
-
-	seedOwnedStatefulSet(t, client, config, "agent-sandbox")
-
-	if err := loop.ReconcileOnce(ctx); err != nil {
-		t.Fatalf("ReconcileOnce failed: %v", err)
-	}
-
-	deleted := statefulSetDeleteNamespaces(client)
-	if len(deleted) != 1 || deleted[0] != "agent-sandbox" {
-		t.Fatalf("expected one delete against agent-sandbox, got %v", deleted)
-	}
-}
-
-func TestServiceUndeployRemovesPreviousNamespace(t *testing.T) {
-	ctx := context.Background()
-
-	// A Config that changed from service to job and cleared serviceNamespace
-	// resolves to the executor namespace, leaving the sandbox copy unreachable by
-	// the resolved-namespace lookup. The cluster-wide sweep must still remove it.
-	config := serviceNamespaceConfig("identity", "dev", "")
-	config.Spec.Type = agentv1.AgentTypeJob
-	client, loop, _ := newServiceNamespaceLoop(t, "dev", []agentv1.Config{config})
-
-	seedOwnedStatefulSet(t, client, config, "agent-sandbox")
-
-	if err := loop.ReconcileOnce(ctx); err != nil {
-		t.Fatalf("ReconcileOnce failed: %v", err)
-	}
-
-	deleted := statefulSetDeleteNamespaces(client)
-	if len(deleted) != 1 || deleted[0] != "agent-sandbox" {
-		t.Fatalf("expected one delete against agent-sandbox, got %v", deleted)
-	}
-}
-
-// TestServiceReconcileCrossNamespaceOwnerRef pins the rule that a cross-namespace
-// StatefulSet carries no ownerRef. A namespaced owner that does not exist in the
-// dependent's namespace is treated as absent, and Kubernetes then garbage-collects
-// the dependent — so stamping the Config as owner of a workload in another
-// namespace would make the moved agent delete itself. The label replaces it, and
-// the sweep uses the label to recognise what it may remove.
-func TestServiceReconcileCrossNamespaceOwnerRef(t *testing.T) {
-	ctx := context.Background()
-
-	t.Run("cross-namespace carries no ownerRef but is labelled", func(t *testing.T) {
-		config := serviceNamespaceConfig("identity", "dev", "agent-sandbox")
-		client, loop, _ := newServiceNamespaceLoop(t, "dev", []agentv1.Config{config})
-
-		if err := loop.ReconcileOnce(ctx); err != nil {
-			t.Fatalf("ReconcileOnce failed: %v", err)
-		}
-		created, err := client.AppsV1().StatefulSets("agent-sandbox").
-			Get(ctx, "identity", metav1.GetOptions{})
-		if err != nil {
-			t.Fatalf("get created statefulset: %v", err)
-		}
-		if len(created.OwnerReferences) != 0 {
-			t.Fatalf(
-				"cross-namespace statefulset must carry no ownerRef, got %v",
-				created.OwnerReferences,
-			)
-		}
-		if got := created.Labels["agent.benjamin-borbe.de/config-name"]; got != "identity" {
-			t.Fatalf("expected config-name label identity, got %q", got)
-		}
-	})
-
-	t.Run("same namespace keeps the Config ownerRef", func(t *testing.T) {
-		config := serviceNamespaceConfig("identity", "dev", "")
-		client, loop, _ := newServiceNamespaceLoop(t, "dev", []agentv1.Config{config})
-
-		if err := loop.ReconcileOnce(ctx); err != nil {
-			t.Fatalf("ReconcileOnce failed: %v", err)
-		}
-		created, err := client.AppsV1().StatefulSets("dev").
-			Get(ctx, "identity", metav1.GetOptions{})
-		if err != nil {
-			t.Fatalf("get created statefulset: %v", err)
-		}
-		if len(created.OwnerReferences) != 1 {
-			t.Fatalf(
-				"same-namespace statefulset must keep its ownerRef, got %v",
-				created.OwnerReferences,
-			)
-		}
-		if created.OwnerReferences[0].Kind != "Config" {
-			t.Fatalf("expected ownerRef kind Config, got %q", created.OwnerReferences[0].Kind)
-		}
-	})
+		Create(context.Background(), seed, metav1.CreateOptions{})
+	Expect(err).NotTo(HaveOccurred(), "seed StatefulSet failed")
 }
 
 // seedLabelledCopy creates a StatefulSet carrying the label trio buildStatefulSet
 // stamps. withOwnerRef=false is what a copy in another namespace looks like.
 func seedLabelledCopy(
-	t *testing.T,
 	client *fake.Clientset,
 	config agentv1.Config,
 	namespace string,
@@ -357,7 +133,6 @@ func seedLabelledCopy(
 	executorNS string,
 	withOwnerRef bool,
 ) {
-	t.Helper()
 	seed := &appsv1.StatefulSet{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      config.Name,
@@ -374,190 +149,321 @@ func seedLabelledCopy(
 			*metav1.NewControllerRef(&config, agentv1.SchemeGroupVersion.WithKind("Config")),
 		}
 	}
-	if _, err := client.AppsV1().
+	_, err := client.AppsV1().
 		StatefulSets(namespace).
-		Create(context.Background(), seed, metav1.CreateOptions{}); err != nil {
-		t.Fatalf("seed labelled copy failed: %v", err)
-	}
+		Create(context.Background(), seed, metav1.CreateOptions{})
+	Expect(err).NotTo(HaveOccurred(), "seed labelled copy failed")
 }
 
-// A StatefulSet labelled for a DIFFERENT Config object that happens to share this
-// one's name must survive the sweep. Two executors in one cluster each running a
-// `claude-interactive` is the dev/prod pairing this feature exists for, and a
-// name-only match made each delete the other's workload — and its PVC — every tick.
-func TestServiceSweepSparesAnotherConfigWithTheSameName(t *testing.T) {
-	ctx := context.Background()
-	config := serviceNamespaceConfig("claude-interactive", "dev", "dev-sandbox")
-	client, loop, _ := newServiceNamespaceLoop(t, "dev", []agentv1.Config{config})
-
-	seedLabelledCopy(
-		t,
-		client,
-		config,
-		"prod-sandbox",
-		"99999999-8888-7777-6666-555555555555",
-		"prod",
-		false,
-	)
-
-	if err := loop.ReconcileOnce(ctx); err != nil {
-		t.Fatalf("reconcile failed: %v", err)
-	}
-
-	if _, err := client.AppsV1().StatefulSets("prod-sandbox").
-		Get(ctx, config.Name, metav1.GetOptions{}); err != nil {
-		t.Fatalf("sweep deleted another Config's workload with the same name: %v", err)
-	}
-}
-
-// The sweep must still remove this Config's OWN previous copy, or a namespace
-// change leaves the old workload running with the Config's Secret.
-func TestServiceSweepRemovesOwnPreviousCopy(t *testing.T) {
-	ctx := context.Background()
-	config := serviceNamespaceConfig("claude-interactive", "dev", "dev-sandbox")
-	client, loop, _ := newServiceNamespaceLoop(t, "dev", []agentv1.Config{config})
-
-	seedLabelledCopy(t, client, config, "old-sandbox", string(config.UID), "dev", false)
-
-	if err := loop.ReconcileOnce(ctx); err != nil {
-		t.Fatalf("reconcile failed: %v", err)
-	}
-
-	if _, err := client.AppsV1().StatefulSets("old-sandbox").
-		Get(ctx, config.Name, metav1.GetOptions{}); !apierrors.IsNotFound(err) {
-		t.Fatalf("expected own previous copy to be removed, got err=%v", err)
-	}
-}
-
-// Deleting the Config CR removes it from the provider list, so no per-Config path
-// runs for it any more. Without the reaper its cross-namespace StatefulSet keeps
-// running with the Config's Secret env and its PVC, with nothing to collect it.
-//
-// ⚠️ A SECOND Config is kept alive on purpose. An empty list is not "everything was
-// deleted", it is an unsynced store, and the reaper refuses it — so modelling the
-// deletion as an empty list would test the wrong thing entirely.
-func TestServiceReapRemovesCopyWhoseConfigIsGone(t *testing.T) {
-	ctx := context.Background()
-	gone := serviceNamespaceConfig("claude-interactive", "dev", "dev-sandbox")
-	survivor := serviceNamespaceConfig("pi-interactive", "dev", "dev-sandbox")
-	survivor.UID = "aaaaaaaa-1111-2222-3333-444444444444"
-	client, loop, provider := newServiceNamespaceLoop(t, "dev", []agentv1.Config{gone, survivor})
-	seedLabelledCopy(t, client, gone, "dev-sandbox", string(gone.UID), "dev", false)
-
-	// The CR is deleted: the provider no longer lists it, but still lists the other.
-	provider.configs = []agentv1.Config{survivor}
-
-	// TWO passes, because one is never enough: the first sighting is only recorded.
-	// See TestServiceReapNeedsTwoPassesBeforeDeleting.
-	for i := 0; i < 2; i++ {
-		if err := loop.ReconcileOnce(ctx); err != nil {
-			t.Fatalf("reconcile %d failed: %v", i, err)
-		}
-	}
-
-	if _, err := client.AppsV1().StatefulSets("dev-sandbox").
-		Get(ctx, gone.Name, metav1.GetOptions{}); !apierrors.IsNotFound(err) {
-		t.Fatalf("expected orphaned cross-namespace copy to be reaped, got err=%v", err)
-	}
-}
-
-// ⚠️ One pass must never delete, and this is the guard that makes a partially
-// synced Config store harmless. The first reconcile pass after a restart runs
-// concurrently with the informer, and client-go delivers the initial LIST one
-// object at a time (`processDeltas` → `OnAdd` per object), so a pass can see a
-// non-empty SUBSET of the Configs. Every Config missing from that subset looks
-// deleted. Requiring a second sighting means the worst a partial store can do is
-// delay a reap by one interval.
-func TestServiceReapNeedsTwoPassesBeforeDeleting(t *testing.T) {
-	ctx := context.Background()
-	gone := serviceNamespaceConfig("claude-interactive", "dev", "dev-sandbox")
-	survivor := serviceNamespaceConfig("pi-interactive", "dev", "dev-sandbox")
-	survivor.UID = "aaaaaaaa-1111-2222-3333-444444444444"
-	client, loop, provider := newServiceNamespaceLoop(t, "dev", []agentv1.Config{gone, survivor})
-	seedLabelledCopy(t, client, gone, "dev-sandbox", string(gone.UID), "dev", false)
-
-	// A store that has delivered only SOME Configs: `gone` is absent, but this is a
-	// partial view, not a deletion.
-	provider.configs = []agentv1.Config{survivor}
-
-	if err := loop.ReconcileOnce(ctx); err != nil {
-		t.Fatalf("first reconcile failed: %v", err)
-	}
-
-	if _, err := client.AppsV1().StatefulSets("dev-sandbox").
-		Get(ctx, gone.Name, metav1.GetOptions{}); err != nil {
-		t.Fatalf("a single pass deleted a copy on a possibly-partial Config view: %v", err)
-	}
-}
-
-// The reaper must never touch a workload the garbage collector owns, must never
-// touch one whose Config still exists, and must never touch another executor's.
-// A stale or momentarily empty Config list would otherwise take every service
-// agent down — including, in the last case, a peer executor's.
-func TestServiceReapSparesLiveOwnedAndForeignWorkloads(t *testing.T) {
-	ctx := context.Background()
-	live := serviceNamespaceConfig("claude-interactive", "dev", "dev-sandbox")
+// newServiceReconciler builds a reconciler over a fresh fake clientset, for the
+// specs that drive ReapOrphanedCopies directly rather than through a pass.
+func newServiceReconciler() (*fake.Clientset, spawner.ServiceReconciler) {
 	client := fake.NewClientset()
-	reconciler := spawner.NewServiceReconciler(
+	return client, spawner.NewServiceReconciler(
 		libk8s.NewStatefulSetDeployer(client),
 		client,
 		libk8s.Namespace("dev"),
 		"standard",
 	)
+}
 
-	// Live Config, cross-namespace copy: keep.
-	seedLabelledCopy(t, client, live, "dev-sandbox", string(live.UID), "dev", false)
-	// Same-namespace copy: carries an ownerRef, so the GC is authoritative.
-	seedLabelledCopy(t, client, live, "dev", "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee", "dev", true)
-	// Another executor's copy, same Config name and a UID absent from this list.
-	// Its UID is not live here by definition, so only the executor label spares it.
-	seedLabelledCopy(
-		t,
-		client,
-		live,
-		"prod-sandbox",
-		"99999999-8888-7777-6666-555555555555",
-		"prod",
-		false,
-	)
+var _ = Describe("service namespace", func() {
+	var ctx context.Context
 
-	for i := 0; i < 2; i++ {
-		reconciler.ReapOrphanedCopies(ctx, []agentv1.Config{live})
-	}
+	BeforeEach(func() {
+		ctx = context.Background()
+	})
 
-	for _, ns := range []string{"dev-sandbox", "dev", "prod-sandbox"} {
-		if _, err := client.AppsV1().StatefulSets(ns).
-			Get(ctx, live.Name, metav1.GetOptions{}); err != nil {
-			t.Fatalf("reaper removed a workload it must spare in %s: %v", ns, err)
+	It("refuses a serviceNamespace equal to the executor namespace", func() {
+		config := serviceNamespaceConfig("identity", "dev", "dev")
+		client, loop, _ := newServiceNamespaceLoop("dev", []agentv1.Config{config})
+
+		err := loop.ReconcileOnce(ctx)
+		Expect(
+			err,
+		).To(HaveOccurred(), "expected error when serviceNamespace equals executor namespace")
+		Expect(err.Error()).To(ContainSubstring("may not equal the executor namespace"))
+		Expect(err.Error()).To(ContainSubstring("identity"), "error must name the Config")
+		Expect(countStatefulSetCreateActions(client)).To(Equal(0),
+			"a rejected namespace must not create a StatefulSet")
+	})
+
+	It("creates the StatefulSet in the named namespace", func() {
+		config := serviceNamespaceConfig("identity", "dev", "agent-sandbox")
+		client, loop, _ := newServiceNamespaceLoop("dev", []agentv1.Config{config})
+
+		Expect(loop.ReconcileOnce(ctx)).To(Succeed())
+		Expect(statefulSetCreateNamespace(client)).To(Equal("agent-sandbox"))
+	})
+
+	It("falls back to the executor namespace when the field is unset", func() {
+		config := serviceNamespaceConfig("identity", "dev", "")
+		client, loop, _ := newServiceNamespaceLoop("dev", []agentv1.Config{config})
+
+		Expect(loop.ReconcileOnce(ctx)).To(Succeed())
+		Expect(statefulSetCreateNamespace(client)).To(Equal("dev"))
+	})
+
+	It("removes the previous copy when the namespace changes", func() {
+		config := serviceNamespaceConfig("identity", "dev", "")
+		client, loop, provider := newServiceNamespaceLoop("dev", []agentv1.Config{config})
+
+		// First pass deploys into the executor namespace. Building the object through
+		// the reconciler makes its owner reference genuinely owned, so the removal
+		// below cannot pass with a subtly wrong ownerRef.
+		Expect(loop.ReconcileOnce(ctx)).To(Succeed(), "first pass")
+
+		provider.configs = []agentv1.Config{
+			serviceNamespaceConfig("identity", "dev", "agent-sandbox"),
 		}
-	}
-}
+		Expect(loop.ReconcileOnce(ctx)).To(Succeed(), "second pass")
 
-// ⚠️ The first reconcile pass after every restart runs before the Config store has
-// listed anything, and ReapOrphanedCopies receives an empty slice. Treating that as
-// "every Config is gone" deletes every cross-namespace service workload this executor
-// stamped — and their PVCs, because WhenDeleted is Delete. This is the difference
-// between a restart and data loss.
-func TestServiceReapDoesNothingOnAnEmptyConfigList(t *testing.T) {
-	ctx := context.Background()
-	live := serviceNamespaceConfig("claude-interactive", "dev", "dev-sandbox")
-	client := fake.NewClientset()
-	reconciler := spawner.NewServiceReconciler(
-		libk8s.NewStatefulSetDeployer(client),
-		client,
-		libk8s.Namespace("dev"),
-		"standard",
-	)
+		Expect(statefulSetCreateNamespace(client)).To(Equal("agent-sandbox"))
+		Expect(statefulSetDeleteNamespaces(client)).To(Equal([]string{"dev"}))
+	})
 
-	seedLabelledCopy(t, client, live, "dev-sandbox", string(live.UID), "dev", false)
+	It("deletes nothing for an unchanged unset Config", func() {
+		config := serviceNamespaceConfig("identity", "dev", "")
+		client, loop, _ := newServiceNamespaceLoop("dev", []agentv1.Config{config})
 
-	// Exactly what the store returns before the informer has synced.
-	for i := 0; i < 2; i++ {
-		reconciler.ReapOrphanedCopies(ctx, nil)
-	}
+		Expect(loop.ReconcileOnce(ctx)).To(Succeed())
+		Expect(statefulSetCreateNamespace(client)).To(Equal("dev"))
+		Expect(statefulSetDeleteNamespaces(client)).To(BeEmpty())
+	})
 
-	if _, err := client.AppsV1().StatefulSets("dev-sandbox").
-		Get(ctx, live.Name, metav1.GetOptions{}); err != nil {
-		t.Fatalf("an unsynced Config store destroyed a live cross-namespace workload: %v", err)
-	}
-}
+	It("survives a denied cluster-wide list", func() {
+		config := serviceNamespaceConfig("identity", "dev", "")
+		client, loop, _ := newServiceNamespaceLoop("dev", []agentv1.Config{config})
+
+		// A refused cluster-wide list (the chart may not grant it yet) must not fail a
+		// reconcile that has already created its StatefulSet.
+		client.PrependReactor("list", "statefulsets", func(
+			action k8stesting.Action,
+		) (bool, runtime.Object, error) {
+			if action.GetNamespace() != "" {
+				return false, nil, nil
+			}
+			return true, nil, apierrors.NewForbidden(
+				schema.GroupResource{Group: "apps", Resource: "statefulsets"},
+				"",
+				stderrors.New("forbidden"),
+			)
+		})
+
+		Expect(loop.ReconcileOnce(ctx)).To(Succeed(),
+			"a denied sweep list must not fail the reconcile")
+		Expect(countStatefulSetCreateActions(client)).To(Equal(1))
+		Expect(statefulSetDeleteNamespaces(client)).To(BeEmpty())
+	})
+
+	It("undeploys from the resolved namespace", func() {
+		config := serviceNamespaceConfig("identity", "dev", "agent-sandbox")
+		config.Spec.Type = agentv1.AgentTypeJob
+		client, loop, _ := newServiceNamespaceLoop("dev", []agentv1.Config{config})
+
+		seedOwnedStatefulSet(client, config, "agent-sandbox")
+
+		Expect(loop.ReconcileOnce(ctx)).To(Succeed())
+		Expect(statefulSetDeleteNamespaces(client)).To(Equal([]string{"agent-sandbox"}))
+	})
+
+	It("removes the sandbox copy when a service becomes a job", func() {
+		// A Config that changed from service to job and cleared serviceNamespace
+		// resolves to the executor namespace, leaving the sandbox copy unreachable by
+		// the resolved-namespace lookup. The cluster-wide sweep must still remove it.
+		config := serviceNamespaceConfig("identity", "dev", "")
+		config.Spec.Type = agentv1.AgentTypeJob
+		client, loop, _ := newServiceNamespaceLoop("dev", []agentv1.Config{config})
+
+		seedOwnedStatefulSet(client, config, "agent-sandbox")
+
+		Expect(loop.ReconcileOnce(ctx)).To(Succeed())
+		Expect(statefulSetDeleteNamespaces(client)).To(Equal([]string{"agent-sandbox"}))
+	})
+
+	// A cross-namespace StatefulSet carries no ownerRef. A namespaced owner that does
+	// not exist in the dependent's namespace is treated as absent, and Kubernetes then
+	// garbage-collects the dependent — so stamping the Config as owner of a workload
+	// in another namespace would make the moved agent delete itself. The label
+	// replaces it, and the sweep uses the label to recognise what it may remove.
+	It("gives a cross-namespace copy no ownerRef but the label trio", func() {
+		config := serviceNamespaceConfig("identity", "dev", "agent-sandbox")
+		client, loop, _ := newServiceNamespaceLoop("dev", []agentv1.Config{config})
+
+		Expect(loop.ReconcileOnce(ctx)).To(Succeed())
+		created, err := client.AppsV1().StatefulSets("agent-sandbox").
+			Get(ctx, "identity", metav1.GetOptions{})
+		Expect(err).NotTo(HaveOccurred(), "get created statefulset")
+		Expect(created.OwnerReferences).To(BeEmpty(),
+			"cross-namespace statefulset must carry no ownerRef")
+		Expect(created.Labels["agent.benjamin-borbe.de/config-name"]).To(Equal("identity"))
+	})
+
+	It("keeps the Config ownerRef on a same-namespace copy", func() {
+		config := serviceNamespaceConfig("identity", "dev", "")
+		client, loop, _ := newServiceNamespaceLoop("dev", []agentv1.Config{config})
+
+		Expect(loop.ReconcileOnce(ctx)).To(Succeed())
+		created, err := client.AppsV1().StatefulSets("dev").
+			Get(ctx, "identity", metav1.GetOptions{})
+		Expect(err).NotTo(HaveOccurred(), "get created statefulset")
+		Expect(created.OwnerReferences).To(HaveLen(1),
+			"same-namespace statefulset must keep its ownerRef")
+		Expect(created.OwnerReferences[0].Kind).To(Equal("Config"))
+	})
+
+	// A StatefulSet labelled for a DIFFERENT Config object that happens to share this
+	// one's name must survive the sweep. Two executors in one cluster each running a
+	// `claude-interactive` is the dev/prod pairing this feature exists for, and a
+	// name-only match made each delete the other's workload — and its PVC — every tick.
+	It("spares another Config's workload that shares this Config's name", func() {
+		config := serviceNamespaceConfig("claude-interactive", "dev", "dev-sandbox")
+		client, loop, _ := newServiceNamespaceLoop("dev", []agentv1.Config{config})
+
+		seedLabelledCopy(
+			client,
+			config,
+			"prod-sandbox",
+			"99999999-8888-7777-6666-555555555555",
+			"prod",
+			false,
+		)
+
+		Expect(loop.ReconcileOnce(ctx)).To(Succeed())
+		_, err := client.AppsV1().StatefulSets("prod-sandbox").
+			Get(ctx, config.Name, metav1.GetOptions{})
+		Expect(err).NotTo(HaveOccurred(),
+			"sweep deleted another Config's workload with the same name")
+	})
+
+	// The sweep must still remove this Config's OWN previous copy, or a namespace
+	// change leaves the old workload running with the Config's Secret.
+	It("removes this Config's own previous copy", func() {
+		config := serviceNamespaceConfig("claude-interactive", "dev", "dev-sandbox")
+		client, loop, _ := newServiceNamespaceLoop("dev", []agentv1.Config{config})
+
+		seedLabelledCopy(client, config, "old-sandbox", string(config.UID), "dev", false)
+
+		Expect(loop.ReconcileOnce(ctx)).To(Succeed())
+		_, err := client.AppsV1().StatefulSets("old-sandbox").
+			Get(ctx, config.Name, metav1.GetOptions{})
+		Expect(apierrors.IsNotFound(err)).To(BeTrue(), "expected own previous copy to be removed")
+	})
+
+	// Deleting the Config CR removes it from the provider list, so no per-Config path
+	// runs for it any more. Without the reaper its cross-namespace StatefulSet keeps
+	// running with the Config's Secret env and its PVC, with nothing to collect it.
+	//
+	// ⚠️ A SECOND Config is kept alive on purpose. An empty list is not "everything was
+	// deleted", it is an unsynced store, and the reaper refuses it — so modelling the
+	// deletion as an empty list would test the wrong thing entirely.
+	It("reaps a copy whose Config is gone", func() {
+		gone := serviceNamespaceConfig("claude-interactive", "dev", "dev-sandbox")
+		survivor := serviceNamespaceConfig("pi-interactive", "dev", "dev-sandbox")
+		survivor.UID = "aaaaaaaa-1111-2222-3333-444444444444"
+		client, loop, provider := newServiceNamespaceLoop(
+			"dev",
+			[]agentv1.Config{gone, survivor},
+		)
+		seedLabelledCopy(client, gone, "dev-sandbox", string(gone.UID), "dev", false)
+
+		// The CR is deleted: the provider no longer lists it, but still lists the other.
+		provider.configs = []agentv1.Config{survivor}
+
+		// TWO passes, because one is never enough: the first sighting is only recorded.
+		for i := 0; i < 2; i++ {
+			Expect(loop.ReconcileOnce(ctx)).To(Succeed(), "reconcile pass")
+		}
+
+		_, err := client.AppsV1().StatefulSets("dev-sandbox").
+			Get(ctx, gone.Name, metav1.GetOptions{})
+		Expect(apierrors.IsNotFound(err)).To(BeTrue(),
+			"expected orphaned cross-namespace copy to be reaped")
+	})
+
+	// ⚠️ One pass must never delete, and this is the guard that makes a partially
+	// synced Config store harmless. The first reconcile pass after a restart runs
+	// concurrently with the informer, and client-go delivers the initial LIST one
+	// object at a time (`processDeltas` → `OnAdd` per object), so a pass can see a
+	// non-empty SUBSET of the Configs. Every Config missing from that subset looks
+	// deleted. Requiring a second sighting means the worst a partial store can do is
+	// delay a reap by one interval.
+	It("needs two consecutive passes before deleting", func() {
+		gone := serviceNamespaceConfig("claude-interactive", "dev", "dev-sandbox")
+		survivor := serviceNamespaceConfig("pi-interactive", "dev", "dev-sandbox")
+		survivor.UID = "aaaaaaaa-1111-2222-3333-444444444444"
+		client, loop, provider := newServiceNamespaceLoop(
+			"dev",
+			[]agentv1.Config{gone, survivor},
+		)
+		seedLabelledCopy(client, gone, "dev-sandbox", string(gone.UID), "dev", false)
+
+		// A store that has delivered only SOME Configs: `gone` is absent, but this is a
+		// partial view, not a deletion.
+		provider.configs = []agentv1.Config{survivor}
+
+		Expect(loop.ReconcileOnce(ctx)).To(Succeed(), "first pass")
+
+		_, err := client.AppsV1().StatefulSets("dev-sandbox").
+			Get(ctx, gone.Name, metav1.GetOptions{})
+		Expect(err).NotTo(HaveOccurred(),
+			"a single pass deleted a copy on a possibly-partial Config view")
+	})
+
+	// The reaper must never touch a workload the garbage collector owns, must never
+	// touch one whose Config still exists, and must never touch another executor's.
+	// A stale or momentarily empty Config list would otherwise take every service
+	// agent down — including, in the last case, a peer executor's.
+	It("spares live, owned and foreign workloads", func() {
+		live := serviceNamespaceConfig("claude-interactive", "dev", "dev-sandbox")
+		client, reconciler := newServiceReconciler()
+
+		// Live Config, cross-namespace copy: keep.
+		seedLabelledCopy(client, live, "dev-sandbox", string(live.UID), "dev", false)
+		// Same-namespace copy: carries an ownerRef, so the GC is authoritative.
+		seedLabelledCopy(
+			client, live, "dev", "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee", "dev", true,
+		)
+		// Another executor's copy, same Config name and a UID absent from this list.
+		// Its UID is not live here by definition, so only the executor label spares it.
+		seedLabelledCopy(
+			client,
+			live,
+			"prod-sandbox",
+			"99999999-8888-7777-6666-555555555555",
+			"prod",
+			false,
+		)
+
+		for i := 0; i < 2; i++ {
+			reconciler.ReapOrphanedCopies(ctx, []agentv1.Config{live})
+		}
+
+		for _, ns := range []string{"dev-sandbox", "dev", "prod-sandbox"} {
+			_, err := client.AppsV1().StatefulSets(ns).Get(ctx, live.Name, metav1.GetOptions{})
+			Expect(err).NotTo(HaveOccurred(), "reaper removed a workload it must spare in "+ns)
+		}
+	})
+
+	// ⚠️ The first reconcile pass after every restart runs before the Config store has
+	// listed anything, and ReapOrphanedCopies receives an empty slice. Treating that as
+	// "every Config is gone" deletes every cross-namespace service workload this executor
+	// stamped — and their PVCs, because WhenDeleted is Delete. This is the difference
+	// between a restart and data loss.
+	It("reaps nothing on an empty Config list", func() {
+		live := serviceNamespaceConfig("claude-interactive", "dev", "dev-sandbox")
+		client, reconciler := newServiceReconciler()
+
+		seedLabelledCopy(client, live, "dev-sandbox", string(live.UID), "dev", false)
+
+		// Exactly what the store returns before the informer has synced.
+		for i := 0; i < 2; i++ {
+			reconciler.ReapOrphanedCopies(ctx, nil)
+		}
+
+		_, err := client.AppsV1().StatefulSets("dev-sandbox").
+			Get(ctx, live.Name, metav1.GetOptions{})
+		Expect(err).NotTo(HaveOccurred(),
+			"an unsynced Config store destroyed a live cross-namespace workload")
+	})
+})

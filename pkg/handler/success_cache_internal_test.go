@@ -132,7 +132,9 @@ func TestSlowSuccessSnapshotLeavesTheSpawnPathItsReserve(t *testing.T) {
 // failure that clears at once must still get its second attempt.
 func TestSuccessSnapshotRetriesAFastFailure(t *testing.T) {
 	store := &countingSuccessStore{
-		snapshot:  map[string]map[string]libtime.DateTime{"task-a": {"execution": libtime.DateTime(time.Now())}},
+		snapshot: map[string]map[string]libtime.DateTime{
+			"task-a": {"execution": libtime.DateTime(time.Now())},
+		},
 		failFirst: true,
 	}
 	cache := &passSuccessCache{}

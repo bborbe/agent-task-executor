@@ -6,59 +6,34 @@ package pkg_test
 
 import (
 	"context"
-	"testing"
+
+	. "github.com/onsi/ginkgo/v2"
+	. "github.com/onsi/gomega"
 
 	agentv1 "github.com/bborbe/agent-task-executor/k8s/apis/agent.benjamin-borbe.de/v1"
 	pkg "github.com/bborbe/agent-task-executor/pkg"
 )
 
-func TestConvertCarriesServiceNamespace(t *testing.T) {
-	ctx := context.Background()
-
-	tests := []struct {
-		name             string
-		serviceNamespace string
-		expected         string
-	}{
-		{
-			name:             "explicit serviceNamespace survives the resolver",
-			serviceNamespace: "agent-sandbox",
-			expected:         "agent-sandbox",
-		},
-		{
-			name:             "unset serviceNamespace stays empty",
-			serviceNamespace: "",
-			expected:         "",
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			provider := &fakeProvider{
-				items: []agentv1.Config{
-					{
-						Spec: agentv1.ConfigSpec{
-							Assignee:         "claude",
-							Image:            "foo/bar",
-							Heartbeat:        "30m",
-							ServiceNamespace: tt.serviceNamespace,
-						},
+var _ = DescribeTable("convert carries serviceNamespace",
+	func(serviceNamespace string, expected string) {
+		provider := &fakeProvider{
+			items: []agentv1.Config{
+				{
+					Spec: agentv1.ConfigSpec{
+						Assignee:         "claude",
+						Image:            "foo/bar",
+						Heartbeat:        "30m",
+						ServiceNamespace: serviceNamespace,
 					},
 				},
-			}
+			},
+		}
 
-			resolved, err := pkg.NewConfigResolver(provider, "dev", "personal").
-				Resolve(ctx, "claude")
-			if err != nil {
-				t.Fatalf("Resolve failed: %v", err)
-			}
-			if resolved.ServiceNamespace != tt.expected {
-				t.Fatalf(
-					"expected ServiceNamespace %q, got %q",
-					tt.expected,
-					resolved.ServiceNamespace,
-				)
-			}
-		})
-	}
-}
+		resolved, err := pkg.NewConfigResolver(provider, "dev", "personal").
+			Resolve(context.Background(), "claude")
+		Expect(err).NotTo(HaveOccurred(), "Resolve failed")
+		Expect(resolved.ServiceNamespace).To(Equal(expected))
+	},
+	Entry("explicit serviceNamespace survives the resolver", "agent-sandbox", "agent-sandbox"),
+	Entry("unset serviceNamespace stays empty", "", ""),
+)
