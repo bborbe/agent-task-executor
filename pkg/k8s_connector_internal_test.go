@@ -5,11 +5,11 @@
 package pkg
 
 import (
-	"testing"
+	"regexp"
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
-	apiextensionsv1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
+	apiextensionsv1 "k8s.io/apiextensions-api/pkg/apis/apiextensions/v1"
 )
 
 var _ = Describe("crdSpecEqual", func() {
@@ -39,36 +39,6 @@ var _ = Describe("crdSpecEqual", func() {
 	})
 })
 
-// TestServiceNamespaceSchemaParity pins serviceNamespace's schema to the sibling
-// jobNamespace entry rather than to literals: a field missing from the map is
-// pruned from every Config within seconds of the next restart, silently.
-func TestServiceNamespaceSchemaParity(t *testing.T) {
-	props := configSpecProperties()
-
-	service, ok := props["serviceNamespace"]
-	if !ok {
-		t.Fatal("serviceNamespace missing from configSpecProperties")
-	}
-	job, ok := props["jobNamespace"]
-	if !ok {
-		t.Fatal("jobNamespace missing from configSpecProperties")
-	}
-
-	if service.Type != job.Type {
-		t.Fatalf("expected Type %q, got %q", job.Type, service.Type)
-	}
-	if service.Pattern != job.Pattern {
-		t.Fatalf("expected Pattern %q, got %q", job.Pattern, service.Pattern)
-	}
-	if service.MaxLength == nil || job.MaxLength == nil {
-		t.Fatalf("expected both MaxLength set, got service=%v job=%v",
-			service.MaxLength, job.MaxLength)
-	}
-	if *service.MaxLength != *job.MaxLength {
-		t.Fatalf("expected MaxLength %d, got %d", *job.MaxLength, *service.MaxLength)
-	}
-}
-
 var _ = Describe("configSpecProperties", func() {
 	It("declares jobNamespace so the API server cannot prune it", func() {
 		props := configSpecProperties()
@@ -84,4 +54,52 @@ var _ = Describe("configSpecProperties", func() {
 		Expect(props["serviceNamespace"].MaxLength).NotTo(BeNil())
 		Expect(*props["serviceNamespace"].MaxLength).To(Equal(int64(63)))
 	})
+
+	// Pins serviceNamespace to its sibling jobNamespace rather than to literals:
+	// a field missing from the map is pruned from every Config within seconds of
+	// the next restart, silently. Comparing the two entries keeps the pair in
+	// lockstep when either contract moves.
+	It("pins serviceNamespace's schema to jobNamespace's", func() {
+		props := configSpecProperties()
+		service, ok := props["serviceNamespace"]
+		Expect(ok).To(BeTrue(), "serviceNamespace missing from configSpecProperties")
+		job, ok := props["jobNamespace"]
+		Expect(ok).To(BeTrue(), "jobNamespace missing from configSpecProperties")
+
+		Expect(service.Type).To(Equal(job.Type))
+		Expect(service.Pattern).To(Equal(job.Pattern))
+		Expect(service.MaxLength).ToNot(BeNil())
+		Expect(job.MaxLength).ToNot(BeNil())
+		Expect(*service.MaxLength).To(Equal(*job.MaxLength))
+	})
+
+	It("declares targetVault so the API server cannot prune it", func() {
+		props := configSpecProperties()
+		Expect(props).To(HaveKey("targetVault"))
+		Expect(props["targetVault"].Type).To(Equal("string"))
+		Expect(props["targetVault"].Pattern).To(Equal(crdVaultSlug))
+	})
+
+	// Comparing Pattern to crdVaultSlug asserts what was typed, not what
+	// admission accepts. Compile the pattern and exercise it, including the
+	// hyphenated vaults the probe actually targets: a pattern that lost "-"
+	// from its character class would pass the assertions above and then reject
+	// every one of those Configs at admission.
+	DescribeTable("targetVault pattern admits vault slugs and rejects non-slugs",
+		func(value string, want bool) {
+			props := configSpecProperties()
+			pattern := regexp.MustCompile(props["targetVault"].Pattern)
+			Expect(pattern.MatchString(value)).To(Equal(want))
+		},
+		Entry("openclaw", "openclaw", true),
+		Entry("personal", "personal", true),
+		Entry("private-agent", "private-agent", true),
+		Entry("private-personal", "private-personal", true),
+		Entry("private-trading", "private-trading", true),
+		Entry("uppercase", "Private", false),
+		Entry("leading digit", "1abc", false),
+		Entry("underscore", "private_agent", false),
+		Entry("space", "private agent", false),
+		Entry("leading hyphen", "-private", false),
+	)
 })

@@ -58,6 +58,37 @@ func expectClaimDelta(before, after map[string]float64, expected map[string]floa
 	}
 }
 
+// spawnClaimKey is one (result, stage) child of executor_spawn_claim_total.
+type spawnClaimKey [2]string
+
+// snapshotSpawnClaims reads every child of executor_spawn_claim_total.
+func snapshotSpawnClaims() map[spawnClaimKey]float64 {
+	snapshot := make(map[spawnClaimKey]float64, len(metrics.SpawnClaimPairs))
+	for _, pair := range metrics.SpawnClaimPairs {
+		snapshot[spawnClaimKey{pair[0], pair[1]}] = testutil.ToFloat64(
+			metrics.SpawnClaimTotal.WithLabelValues(pair[0], pair[1]),
+		)
+	}
+	return snapshot
+}
+
+// expectSpawnClaimDelta asserts the delta for every spawn-claim child;
+// unlisted children must not change.
+func expectSpawnClaimDelta(
+	before, after map[spawnClaimKey]float64,
+	expected map[string]float64,
+) {
+	for _, pair := range metrics.SpawnClaimPairs {
+		key := spawnClaimKey{pair[0], pair[1]}
+		name := pair[0] + "/" + pair[1]
+		Expect(after[key]-before[key]).To(
+			Equal(expected[name]),
+			"executor_spawn_claim_total{result=%q,stage=%q} delta",
+			pair[0], pair[1],
+		)
+	}
+}
+
 // newTestClock returns a settable fake clock pinned at t0.
 func newTestClock(t0 libtime.DateTime) libtime.CurrentDateTime {
 	clock := libtime.NewCurrentDateTime()

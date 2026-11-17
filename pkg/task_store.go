@@ -27,6 +27,17 @@ type TaskStore struct {
 	mu        sync.RWMutex
 	tasks     map[lib.TaskIdentifier]lib.Task
 	succeeded map[lib.TaskIdentifier]SucceededJob
+	// parked records the last park published for a task: which success it was
+	// for, and when it went out. Keyed by the success's completion time because
+	// that is the only part a re-mark by the informer cannot change.
+	parked map[lib.TaskIdentifier]parkRecord
+}
+
+// parkRecord is one published park: the success it acted on and when the
+// publish went out.
+type parkRecord struct {
+	CompletedAt time.Time
+	PublishedAt time.Time
 }
 
 // SucceededJob is the latest successful Job of a task: the phase it was spawned
@@ -42,6 +53,7 @@ func NewTaskStore() *TaskStore {
 	return &TaskStore{
 		tasks:     make(map[lib.TaskIdentifier]lib.Task),
 		succeeded: make(map[lib.TaskIdentifier]SucceededJob),
+		parked:    make(map[lib.TaskIdentifier]parkRecord),
 	}
 }
 
@@ -56,6 +68,44 @@ func (s *TaskStore) MarkSucceeded(id lib.TaskIdentifier, phase string, at time.T
 		return
 	}
 	s.succeeded[id] = SucceededJob{Phase: phase, CompletedAt: at}
+}
+
+// MarkParkPublished records that a park for the success that completed at
+// completedAt went out at publishedAt.
+//
+// The publish time is what the caller needs, not just the fact: the phase only
+// becomes human_review once the controller applies the write, so between the
+// publish and that write-back the task still reads the phase it succeeded at.
+// A caller that saw only "a park was published" could not tell that window apart
+// from an operator re-arming the task to the same phase — and treating the
+// former as a re-arm re-spawns the very work the park exists to stop.
+//
+// Keyed by completion time because the Job informer re-stamps the identical
+// success record on every resync for the Job's whole TTL; a deletion-based
+// marker would be undone within minutes.
+func (s *TaskStore) MarkParkPublished(
+	id lib.TaskIdentifier,
+	completedAt time.Time,
+	publishedAt time.Time,
+) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.parked[id] = parkRecord{CompletedAt: completedAt, PublishedAt: publishedAt}
+}
+
+// ParkPublishedAt returns when the park for the success that completed at
+// completedAt went out, and whether such a park is recorded.
+func (s *TaskStore) ParkPublishedAt(
+	id lib.TaskIdentifier,
+	completedAt time.Time,
+) (time.Time, bool) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	record, ok := s.parked[id]
+	if !ok || !record.CompletedAt.Equal(completedAt) {
+		return time.Time{}, false
+	}
+	return record.PublishedAt, true
 }
 
 // LastSucceeded returns the task's latest successful Job, if one is recorded.

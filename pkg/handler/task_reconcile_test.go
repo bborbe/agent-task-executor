@@ -146,6 +146,17 @@ var _ = Describe("TaskEventHandler reconcile loop", func() {
 		Expect(untaggedResolver.ResolveCallCount()).To(Equal(0))
 	})
 
+	// typedConfig declares task types, so the type gate is live for it. The
+	// default resolver Config in BeforeEach declares none, which is why every
+	// pre-existing reconcile test still spawns.
+	typedConfig := func() pkg.AgentConfiguration {
+		return pkg.AgentConfiguration{
+			Assignee:  "claude",
+			Image:     "my-image:latest",
+			TaskTypes: []string{"github-update-go", "healthcheck"},
+		}
+	}
+
 	It("re-drives an eligible task from the view (AC 1)", func() {
 		fakeView.SnapshotReturns([]lib.Task{eligibleTask(domain.TaskPhasePlanning)})
 		fakeSpawner.IsJobActiveReturns(false, nil)
@@ -155,6 +166,41 @@ var _ = Describe("TaskEventHandler reconcile loop", func() {
 		Expect(err).To(BeNil())
 		Expect(fakeSpawner.SpawnJobCallCount()).To(Equal(1))
 		Expect(testutil.ToFloat64(metrics.ReconcileRedrivenTotal)).To(Equal(before + 1))
+	})
+
+	// The type gate must hold on the reconcile floor, not only in parseAndFilter.
+	// The floor re-derives candidates from the in-memory view and reaches
+	// spawnIfNeededClaimed without ever calling parseAndFilter, so before this
+	// gate a record with no task_type was refused by the Kafka path and spawned
+	// here: the Job started with an empty TASK_TYPE, the agent rejected it at
+	// startup, the pod exited 1 in one second, and the dead Job then held the
+	// assignee's single concurrency slot for the full 1800 s TTL.
+	It("does not spawn a task whose task_type is absent when the Config declares types", func() {
+		fakeResolver.ResolveReturns(typedConfig(), nil)
+		fakeView.SnapshotReturns([]lib.Task{eligibleTask(domain.TaskPhasePlanning)})
+		fakeSpawner.IsJobActiveReturns(false, nil)
+
+		Expect(h.ReconcileOnce(ctx)).To(BeNil())
+		Expect(fakeSpawner.SpawnJobCallCount()).To(Equal(0))
+		// Refused before the Job lookup, not merely after it, and the failure is
+		// published onto the record — that write clears the assignee and is what
+		// stops the record being re-candidated on every pass.
+		Expect(fakeSpawner.IsJobActiveCallCount()).To(Equal(0))
+		Expect(fakeResultPublisher.PublishTypeMismatchFailureCallCount()).To(Equal(1))
+		_, _, reason := fakeResultPublisher.PublishTypeMismatchFailureArgsForCall(0)
+		Expect(reason).To(ContainSubstring("no task_type"))
+	})
+
+	It("still spawns a task whose declared task_type the Config accepts", func() {
+		fakeResolver.ResolveReturns(typedConfig(), nil)
+		task := eligibleTask(domain.TaskPhasePlanning)
+		task.Frontmatter["task_type"] = "github-update-go"
+		fakeView.SnapshotReturns([]lib.Task{task})
+		fakeSpawner.IsJobActiveReturns(false, nil)
+
+		Expect(h.ReconcileOnce(ctx)).To(BeNil())
+		Expect(fakeSpawner.SpawnJobCallCount()).To(Equal(1))
+		Expect(fakeResultPublisher.PublishTypeMismatchFailureCallCount()).To(Equal(0))
 	})
 
 	// The reconcile floor has its own eligibility path (`reconcileTask`),
@@ -220,6 +266,14 @@ var _ = Describe("TaskEventHandler reconcile loop", func() {
 		// current_job, and every 60 s reconcile tick spawned it again.
 		var now time.Time
 
+		// recurringTask is eligibleTask plus a declared cadence, the shape a task
+		// file carries when its type recurs on a clock rather than advancing phase.
+		recurringTask := func(phase domain.TaskPhase, cadence string) lib.Task {
+			task := eligibleTask(phase)
+			task.Frontmatter["recurring"] = cadence
+			return task
+		}
+
 		BeforeEach(func() {
 			now = time.Date(2026, 10, 21, 5, 56, 23, 0, time.UTC)
 			currentDateTime.SetNow(libtime.DateTime(now))
@@ -252,11 +306,114 @@ var _ = Describe("TaskEventHandler reconcile loop", func() {
 			Expect(fakeSpawner.SpawnJobCallCount()).To(Equal(1))
 		})
 
-		It("is re-driven once the grace window has passed", func() {
+		It("is parked, not re-driven, once the grace window has passed", func() {
+			// The task is still at the phase its last Job succeeded for, so the
+			// agent exited 0 without moving it: a deliberate human park. This
+			// used to be re-driven — the redrive cap was what eventually stopped
+			// it — but v0.46.3 stopped charging a successful spawn against that
+			// cap, so the re-drive became unbounded and the park is now what
+			// ends the loop. A lost write-back is indistinguishable from a park
+			// at this distance, and parking leaves that to a human rather than
+			// silently re-running the work.
+			// The park reads the task from the view, not from the reconcile's
+			// own snapshot, so the view must hold it for this path to fire.
+			parkedTask := eligibleTask(domain.TaskPhaseExecution)
+			parkedTask.Frontmatter["current_job"] = "agent-tid-a"
+			// The park also requires a done result: a Job that exits 0 while
+			// reporting failure is re-driven instead, because a transient
+			// failure must be retried rather than escalated to a phase nothing
+			// dispatches.
+			parkedTask.Frontmatter["last_result_status"] = string(lib.AgentStatusDone)
+			fakeView.GetReturns(parkedTask, true)
 			taskStore.MarkSucceeded("tid-a", "execution", now.Add(-10*time.Minute))
 
 			Expect(h.ReconcileOnce(ctx)).To(BeNil())
+			Expect(fakeSpawner.SpawnJobCallCount()).To(Equal(0))
+			Expect(fakeResultPublisher.PublishParkSucceededCallCount()).To(Equal(1))
+		})
+
+		It("is not released before a recurring task's declared cadence has elapsed", func() {
+			fakeView.SnapshotReturns([]lib.Task{recurringTask(domain.TaskPhaseExecution, "weekly")})
+			taskStore.MarkSucceeded("tid-a", "execution", now.Add(-6*24*time.Hour))
+
+			Expect(h.ReconcileOnce(ctx)).To(BeNil())
+			Expect(fakeSpawner.SpawnJobCallCount()).To(Equal(0))
+			// Suppressed, not parked: a recurring task's phase does not advance
+			// between occurrences, so parking it would send a human to the same
+			// record on every run.
+			Expect(fakeResultPublisher.PublishParkSucceededCallCount()).To(Equal(0))
+		})
+
+		It("is released once a recurring task's declared cadence has elapsed", func() {
+			// A recurring task's phase does not advance between occurrences, so a
+			// phase-only release would suppress it for good — the failure the
+			// cadence exists to prevent.
+			fakeView.SnapshotReturns([]lib.Task{recurringTask(domain.TaskPhaseExecution, "weekly")})
+			taskStore.MarkSucceeded("tid-a", "execution", now.Add(-8*24*time.Hour))
+
+			Expect(h.ReconcileOnce(ctx)).To(BeNil())
 			Expect(fakeSpawner.SpawnJobCallCount()).To(Equal(1))
+			Expect(fakeResultPublisher.PublishParkSucceededCallCount()).To(Equal(0))
+		})
+
+		It("does not release a weekdays task over the weekend", func() {
+			// `weekdays` names a schedule, not a duration. A flat 24 h would release a
+			// Friday completion on Saturday, and this table is the only schedule
+			// control on the suppression path — nothing downstream re-imposes the
+			// weekday constraint.
+			taskStore.MarkSucceeded(
+				"tid-a", "execution", time.Date(2026, 10, 30, 18, 0, 0, 0, time.UTC),
+			)
+			fakeView.SnapshotReturns(
+				[]lib.Task{recurringTask(domain.TaskPhaseExecution, "weekdays")},
+			)
+
+			// Saturday evening: past the nominal 24 h, and still not released.
+			now = time.Date(2026, 10, 31, 19, 0, 0, 0, time.UTC)
+			currentDateTime.SetNow(libtime.DateTime(now))
+
+			Expect(h.ReconcileOnce(ctx)).To(BeNil())
+			Expect(fakeSpawner.SpawnJobCallCount()).To(Equal(0))
+		})
+
+		It("releases a weekdays task on the next weekday", func() {
+			// The discriminating half: the weekend skip must not suppress for good.
+			taskStore.MarkSucceeded(
+				"tid-a", "execution", time.Date(2026, 10, 30, 18, 0, 0, 0, time.UTC),
+			)
+			fakeView.SnapshotReturns(
+				[]lib.Task{recurringTask(domain.TaskPhaseExecution, "weekdays")},
+			)
+
+			now = time.Date(2026, 11, 2, 19, 0, 0, 0, time.UTC)
+			currentDateTime.SetNow(libtime.DateTime(now))
+
+			Expect(h.ReconcileOnce(ctx)).To(BeNil())
+			Expect(fakeSpawner.SpawnJobCallCount()).To(Equal(1))
+			Expect(fakeResultPublisher.PublishParkSucceededCallCount()).To(Equal(0))
+		})
+
+		It("treats an unrecognised recurring token as not recurring", func() {
+			// Defaulting an unknown token to a period would invent a cadence and
+			// suppress the task forever. Treated as not recurring, it parks like any
+			// other one-shot record, and the token is logged.
+			fakeView.SnapshotReturns(
+				[]lib.Task{recurringTask(domain.TaskPhaseExecution, "fortnightly")},
+			)
+			// The park reads the task from the view, so the view must hold it.
+			parkedTask := eligibleTask(domain.TaskPhaseExecution)
+			parkedTask.Frontmatter["current_job"] = "agent-tid-a"
+			// The park also requires a done result: a Job that exits 0 while
+			// reporting failure is re-driven instead, because a transient
+			// failure must be retried rather than escalated to a phase nothing
+			// dispatches.
+			parkedTask.Frontmatter["last_result_status"] = string(lib.AgentStatusDone)
+			fakeView.GetReturns(parkedTask, true)
+			taskStore.MarkSucceeded("tid-a", "execution", now.Add(-10*24*time.Hour))
+
+			Expect(h.ReconcileOnce(ctx)).To(BeNil())
+			Expect(fakeSpawner.SpawnJobCallCount()).To(Equal(0))
+			Expect(fakeResultPublisher.PublishParkSucceededCallCount()).To(Equal(1))
 		})
 
 		It("still re-drives a task whose Job failed, up to the redrive cap", func() {
@@ -324,7 +481,7 @@ var _ = Describe("TaskEventHandler reconcile loop", func() {
 			// Observed on dev 2026-10-13 and again 2026-10-14: a parked task
 			// carrying neither `ref` nor `max_triggers` produced a new Job every
 			// 15-30 min indefinitely. The trigger budget cannot bound it — with
-			// neither field set, applyTriggerBudget's cap branch is disarmed by
+			// neither field set, checkTriggerBudget's cap branch is disarmed by
 			// design (arming it re-creates the 2026-08-27 Daily Sentry Triage
 			// incident) — and the agent pods rewrite the frontmatter from their
 			// run-start snapshot on every completion, so trigger_scope is clobbered
@@ -557,7 +714,7 @@ var _ = Describe("TaskEventHandler reconcile loop", func() {
 			return activeJobs(running), nil
 		}
 		fakeSpawner.SpawnJobStub = func(
-			context.Context, lib.Task, pkg.AgentConfiguration,
+			context.Context, lib.Task, pkg.AgentConfiguration, string,
 		) (string, error) {
 			running = 1
 			return "job-newer", nil
@@ -566,7 +723,7 @@ var _ = Describe("TaskEventHandler reconcile loop", func() {
 		err := h.ReconcileOnce(ctx)
 		Expect(err).To(BeNil())
 		Expect(fakeSpawner.SpawnJobCallCount()).To(Equal(1))
-		_, spawnedTask, _ := fakeSpawner.SpawnJobArgsForCall(0)
+		_, spawnedTask, _, _ := fakeSpawner.SpawnJobArgsForCall(0)
 		Expect(spawnedTask.TaskIdentifier).To(Equal(lib.TaskIdentifier("tid-newer")))
 	})
 
@@ -722,6 +879,7 @@ var _ = Describe("TaskEventHandler reconcile loop", func() {
 				_ context.Context,
 				_ lib.Task,
 				_ pkg.AgentConfiguration,
+				_ string,
 			) (string, error) {
 				spawned.Add(1)
 				return "job-name", nil
@@ -1005,6 +1163,15 @@ var _ = Describe("TaskEventHandler reconcile loop", func() {
 		// escalation, is handed to the resolver only as a tie-break among the
 		// Configs that already declare the task_type, never as the sole routing
 		// source; the resolver decides, and the restore writes its Config's assignee.
+		// The name reaches the lookup at all only because its own Config declares
+		// the record's type — inTypePreviousAssignee drops it otherwise.
+		fakeResolver.ResolveReturns(
+			pkg.AgentConfiguration{
+				Assignee:  "tie-break-agent",
+				TaskTypes: []string{"github-update-go"},
+			},
+			nil,
+		)
 		fakeResolver.ResolveByTaskTypeReturns(
 			pkg.AgentConfiguration{Assignee: "tie-break-agent", Image: "my-image:latest"},
 			nil,
@@ -1024,9 +1191,69 @@ var _ = Describe("TaskEventHandler reconcile loop", func() {
 		Expect(assignee).To(Equal("tie-break-agent"))
 	})
 
+	It("does not pass previous_assignee when the named agent declares a different type", func() {
+		// The records this fix targets name an agent that claims none of the
+		// record's type: the probe-claude-interactive-* records carry
+		// task_type healthcheck and previous_assignee claude-interactive, whose
+		// Config declares llm. Handing that name to the lookup can only produce
+		// ErrConfigAmbiguous, and on the non-empty arm — which also hides the
+		// designated default, consulted only once preferAssignee is empty.
+		fakeResolver.ResolveReturns(
+			pkg.AgentConfiguration{
+				Assignee:  "claude-interactive",
+				TaskTypes: []string{"llm"},
+			},
+			nil,
+		)
+		fakeResolver.ResolveByTaskTypeReturns(
+			pkg.AgentConfiguration{Assignee: "healthcheck-dev", Image: "my-image:latest"},
+			nil,
+		)
+		task := parkedTask(domain.TaskPhaseExecution, "healthcheck")
+		task.Frontmatter["previous_assignee"] = "claude-interactive"
+		fakeView.SnapshotReturns([]lib.Task{task})
+
+		Expect(h.ReconcileOnce(ctx)).To(Succeed())
+
+		Expect(fakeResolver.ResolveByTaskTypeCallCount()).To(Equal(1))
+		_, resolvedType, preferAssignee := fakeResolver.ResolveByTaskTypeArgsForCall(0)
+		Expect(resolvedType).To(Equal("healthcheck"))
+		Expect(preferAssignee).To(Equal(""), "a cross-type previous_assignee must not be passed")
+		Expect(fakeResultPublisher.PublishRestoreAssigneeCallCount()).To(Equal(1))
+		_, _, assignee := fakeResultPublisher.PublishRestoreAssigneeArgsForCall(0)
+		Expect(assignee).To(Equal("healthcheck-dev"))
+	})
+
+	It("does not pass previous_assignee when no Config in this stage names it", func() {
+		// Two of the eight records name an agent with no Config in their own stage,
+		// so there is no type set to check the name against and it cannot tie-break.
+		fakeResolver.ResolveReturns(pkg.AgentConfiguration{}, pkg.ErrConfigNotFound)
+		fakeResolver.ResolveByTaskTypeReturns(
+			pkg.AgentConfiguration{Assignee: "healthcheck-dev", Image: "my-image:latest"},
+			nil,
+		)
+		task := parkedTask(domain.TaskPhaseExecution, "healthcheck")
+		task.Frontmatter["previous_assignee"] = "claude-interactive"
+		fakeView.SnapshotReturns([]lib.Task{task})
+
+		Expect(h.ReconcileOnce(ctx)).To(Succeed())
+
+		Expect(fakeResolver.ResolveByTaskTypeCallCount()).To(Equal(1))
+		_, _, preferAssignee := fakeResolver.ResolveByTaskTypeArgsForCall(0)
+		Expect(preferAssignee).To(Equal(""))
+		Expect(fakeResultPublisher.PublishRestoreAssigneeCallCount()).To(Equal(1))
+	})
+
 	It(
 		"still skips a parked task whose task_type matches no Config despite previous_assignee",
 		func() {
+			fakeResolver.ResolveReturns(
+				pkg.AgentConfiguration{
+					Assignee:  "tie-break-agent",
+					TaskTypes: []string{"no-such-type"},
+				},
+				nil,
+			)
 			fakeResolver.ResolveByTaskTypeReturns(pkg.AgentConfiguration{}, pkg.ErrConfigNotFound)
 			task := parkedTask(domain.TaskPhaseExecution, "no-such-type")
 			task.Frontmatter["previous_assignee"] = "tie-break-agent"
@@ -1196,7 +1423,7 @@ var _ = Describe("TaskEventHandler reconcile loop", func() {
 		Eventually(passDone).Should(Receive(BeNil()))
 		spawned := make([]lib.TaskIdentifier, 0, fakeSpawner.SpawnJobCallCount())
 		for i := range fakeSpawner.SpawnJobCallCount() {
-			_, spawnedTask, _ := fakeSpawner.SpawnJobArgsForCall(i)
+			_, spawnedTask, _, _ := fakeSpawner.SpawnJobArgsForCall(i)
 			spawned = append(spawned, spawnedTask.TaskIdentifier)
 		}
 		// The event path read the live 4/6 and admitted; the frozen 6/6 would defer it.
@@ -1266,6 +1493,7 @@ var _ = Describe("TaskEventHandler reconcile loop", func() {
 			_ context.Context,
 			task lib.Task,
 			config pkg.AgentConfiguration,
+			sessionID string,
 		) (string, error) {
 			if config.Assignee == "claude" {
 				mu.Lock()
@@ -1421,7 +1649,7 @@ var _ = Describe("TaskEventHandler reconcile loop", func() {
 
 			Expect(h.ReconcileOnce(ctx)).To(Succeed())
 			Expect(fakeSpawner.SpawnJobCallCount()).To(Equal(1))
-			_, spawnedTask, _ := fakeSpawner.SpawnJobArgsForCall(0)
+			_, spawnedTask, _, _ := fakeSpawner.SpawnJobArgsForCall(0)
 			Expect(spawnedTask.TaskIdentifier).To(Equal(lib.TaskIdentifier("tid-owned")))
 		})
 
@@ -1640,7 +1868,7 @@ var _ = Describe("TaskEventHandler reconcile loop", func() {
 			Expect(h.EvalDeferredRespawns(ctx)).To(Succeed())
 
 			Expect(fakeSpawner.SpawnJobCallCount()).To(Equal(1))
-			_, spawnedTask, _ := fakeSpawner.SpawnJobArgsForCall(0)
+			_, spawnedTask, _, _ := fakeSpawner.SpawnJobArgsForCall(0)
 			queuedAt, ok := spawnedTask.Frontmatter.String("queued_at")
 			Expect(ok).To(BeTrue())
 			Expect(queuedAt).To(Equal(viewQueuedAt))

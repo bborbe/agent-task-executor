@@ -83,10 +83,13 @@ var _ = Describe("Metrics", func() {
 			"skipped_unknown_assignee",
 			"skipped_active_job",
 			"skipped_recent_success",
+			"success_before_cache_sync",
 			"error",
 			"type_mismatch",
 			"deferred_claim_invalidated",
 			"deferred_respawn_spawn_failed",
+			"deferred_respawn_refusal_write_failed",
+			"event_refusal_write_failed",
 		))
 	})
 
@@ -161,6 +164,123 @@ var _ = Describe("Metrics", func() {
 				metrics.RedriveAbortReasonTransientExhausted,
 			),
 		)).To(Equal(transientBefore))
+	})
+
+	It("pre-initialises exactly the four view-divergence results at zero", func() {
+		mfs, err := prometheus.DefaultGatherer.Gather()
+		Expect(err).NotTo(HaveOccurred())
+
+		Expect(
+			gatherLabels(mfs, "executor_view_divergence_total", "result"),
+		).To(ConsistOf("ok", "mismatch", "absent", "read_error"))
+
+		// The series are pre-initialised, so ToFloat64 on the bare collector
+		// panics; read each child series instead.
+		for _, result := range []string{"ok", "mismatch", "absent", "read_error"} {
+			Expect(testutil.ToFloat64(
+				metrics.ViewDivergenceTotal.WithLabelValues(result),
+			)).To(Equal(float64(0)), "result=%s", result)
+		}
+	})
+
+	It("pre-initialises exactly the ten reconcile-refusal gates at zero", func() {
+		mfs, err := prometheus.DefaultGatherer.Gather()
+		Expect(err).NotTo(HaveOccurred())
+
+		Expect(
+			gatherLabels(mfs, "executor_reconcile_refused_total", "gate"),
+		).To(ConsistOf(
+			"foreign_cluster",
+			"unresolved_config",
+			"terminal_status",
+			"status_not_triggered",
+			"phase_not_triggered",
+			"terminal_phase",
+			"stage_mismatch",
+			"no_routing",
+			"index_terminal",
+			"type_mismatch",
+		))
+
+		// The series are pre-initialised, so ToFloat64 on the bare collector
+		// panics; read each child series instead.
+		for _, gate := range []string{
+			metrics.ReconcileRefusedGateForeignCluster,
+			metrics.ReconcileRefusedGateUnresolvedConfig,
+			metrics.ReconcileRefusedGateTerminalStatus,
+			metrics.ReconcileRefusedGateStatusNotTriggered,
+			metrics.ReconcileRefusedGatePhaseNotTriggered,
+			metrics.ReconcileRefusedGateTerminalPhase,
+			metrics.ReconcileRefusedGateStageMismatch,
+			metrics.ReconcileRefusedGateNoRouting,
+			metrics.ReconcileRefusedGateIndexTerminal,
+			metrics.ReconcileRefusedGateTypeMismatch,
+		} {
+			Expect(testutil.ToFloat64(
+				metrics.ReconcileRefusedTotal.WithLabelValues(gate),
+			)).To(Equal(float64(0)), "gate=%s", gate)
+		}
+	})
+
+	It("registers executor_config_accepted with exactly the three join labels and value 1", func() {
+		// The family does not exist until a series is set, so seed one and
+		// remove it again — this spec owns the family shape, not the published
+		// tuples (the handler fixtures own those).
+		metrics.ConfigAccepted.WithLabelValues("execution", "github-update-go", "cfgtest").Set(1)
+		defer metrics.ConfigAccepted.DeleteLabelValues(
+			"execution", "github-update-go", "cfgtest",
+		)
+
+		mfs, err := prometheus.DefaultGatherer.Gather()
+		Expect(err).NotTo(HaveOccurred())
+
+		for _, mf := range mfs {
+			if mf.GetName() != "executor_config_accepted" {
+				continue
+			}
+			Expect(mf.GetHelp()).NotTo(BeEmpty())
+			Expect(mf.GetMetric()).To(HaveLen(1))
+
+			labelNames := make([]string, 0, len(mf.GetMetric()[0].GetLabel()))
+			for _, lp := range mf.GetMetric()[0].GetLabel() {
+				labelNames = append(labelNames, lp.GetName())
+			}
+			Expect(labelNames).To(ConsistOf("phase", "task_type", "vault"))
+			Expect(mf.GetMetric()[0].GetGauge().GetValue()).To(Equal(float64(1)))
+			return
+		}
+		Fail("executor_config_accepted not registered")
+	})
+
+	It("registers no total-suffixed variant of the accepted gauge", func() {
+		metrics.ConfigAccepted.WithLabelValues("execution", "github-update-go", "cfgtest").Set(1)
+		metrics.ConfigAccepted.DeleteLabelValues("execution", "github-update-go", "cfgtest")
+
+		mfs, err := prometheus.DefaultGatherer.Gather()
+		Expect(err).NotTo(HaveOccurred())
+
+		names := make(map[string]bool, len(mfs))
+		for _, mf := range mfs {
+			names[mf.GetName()] = true
+		}
+		// Built by concatenation: the absence assertion must not itself
+		// introduce the forbidden name into a grep of the tree.
+		Expect(names).NotTo(HaveKey("executor_config_accepted" + "_total"))
+	})
+
+	It("pre-initialises both accepted-refresh results at zero", func() {
+		mfs, err := prometheus.DefaultGatherer.Gather()
+		Expect(err).NotTo(HaveOccurred())
+
+		Expect(
+			gatherLabels(mfs, "executor_config_accepted_refresh_total", "result"),
+		).To(ConsistOf("ok", "read_error"))
+
+		for _, result := range []string{"ok", "read_error"} {
+			Expect(testutil.ToFloat64(
+				metrics.ConfigAcceptedRefreshTotal.WithLabelValues(result),
+			)).To(Equal(float64(0)), "result=%s", result)
+		}
 	})
 
 	It("labels the redrive-cap counter with task_type then phase", func() {

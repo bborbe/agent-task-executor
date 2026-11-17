@@ -10,6 +10,7 @@ import (
 	"github.com/bborbe/errors"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
+	corev1 "k8s.io/api/core/v1"
 
 	agentv1 "github.com/bborbe/agent-task-executor/k8s/apis/agent.benjamin-borbe.de/v1"
 	pkg "github.com/bborbe/agent-task-executor/pkg"
@@ -435,6 +436,120 @@ var _ = Describe("ConfigResolver", func() {
 				_, err := resolver.ResolveByTaskType(ctx, "shared-type", "c")
 				Expect(err).NotTo(BeNil())
 				Expect(errors.Is(err, pkg.ErrConfigAmbiguous)).To(BeTrue())
+			})
+		})
+
+		It(
+			"carries nodeSelector and tolerations from the Config CR into the resolved configuration",
+			func() {
+				toleration := corev1.Toleration{
+					Key:      "dedicated",
+					Operator: corev1.TolerationOpEqual,
+					Value:    "agent",
+					Effect:   corev1.TaintEffectNoSchedule,
+				}
+				provider.items = []agentv1.Config{{
+					Spec: agentv1.ConfigSpec{
+						Assignee:     "placed-agent",
+						Image:        "img",
+						TaskTypes:    []string{"placed-type"},
+						NodeSelector: map[string]string{"pool": "agent"},
+						Tolerations:  []corev1.Toleration{toleration},
+					},
+				}}
+				config, err := resolver.ResolveByTaskType(ctx, "placed-type", "")
+				Expect(err).To(BeNil())
+				Expect(config.NodeSelector).To(Equal(map[string]string{"pool": "agent"}))
+				Expect(config.Tolerations).To(Equal([]corev1.Toleration{toleration}))
+			},
+		)
+
+		Describe("designated default", func() {
+			// defaulted builds the same two-Config shared-type population as
+			// sharedTypeConfigs; designate marks one of them as the type's
+			// designated default. Image is per-config so a test can tell the two
+			// apart even when their assignees would be read from the same field.
+			defaulted := func(assignees ...string) []agentv1.Config {
+				items := make([]agentv1.Config, 0, len(assignees))
+				for _, assignee := range assignees {
+					items = append(items, agentv1.Config{
+						Spec: agentv1.ConfigSpec{
+							Assignee:  assignee,
+							Image:     "img",
+							TaskTypes: []string{"shared-type"},
+						},
+					})
+				}
+				return items
+			}
+			designate := func(items []agentv1.Config, index int) []agentv1.Config {
+				items[index].Spec.DefaultForTaskTypes = []string{"shared-type"}
+				return items
+			}
+
+			It("returns the designated default when preferAssignee names no claimant", func() {
+				provider.items = designate(defaulted("a-personal", "b-personal"), 0)
+				config, err := resolver.ResolveByTaskType(ctx, "shared-type", "c")
+				Expect(err).To(BeNil())
+				Expect(config.Assignee).To(Equal("a-personal"))
+				Expect(config.Image).To(Equal("img:dev"))
+				Expect(config.DefaultForTaskTypes).To(Equal([]string{"shared-type"}))
+			})
+
+			It("returns the designated default when preferAssignee is empty", func() {
+				provider.items = designate(defaulted("a-personal", "b-personal"), 1)
+				config, err := resolver.ResolveByTaskType(ctx, "shared-type", "")
+				Expect(err).To(BeNil())
+				Expect(config.Assignee).To(Equal("b-personal"))
+			})
+
+			It("stays ambiguous when no Config declares itself default", func() {
+				provider.items = defaulted("a-personal", "b-personal")
+				_, err := resolver.ResolveByTaskType(ctx, "shared-type", "")
+				Expect(err).NotTo(BeNil())
+				Expect(errors.Is(err, pkg.ErrConfigAmbiguous)).To(BeTrue())
+				Expect(err.Error()).To(ContainSubstring("matches 2 configs"))
+				Expect(err.Error()).NotTo(ContainSubstring("designated"))
+			})
+
+			It("stays ambiguous when two Configs declare themselves default", func() {
+				provider.items = designate(designate(defaulted("a-personal", "b-personal"), 0), 1)
+				_, err := resolver.ResolveByTaskType(ctx, "shared-type", "")
+				Expect(err).NotTo(BeNil())
+				Expect(errors.Is(err, pkg.ErrConfigAmbiguous)).To(BeTrue())
+				Expect(err.Error()).To(ContainSubstring("matches 2 configs"))
+			})
+
+			It(
+				"leaves the designated default inert for a type the Config does not declare",
+				func() {
+					items := defaulted("a-personal", "b-personal")
+					items[0].Spec.DefaultForTaskTypes = []string{"other-type"}
+					provider.items = items
+					_, err := resolver.ResolveByTaskType(ctx, "shared-type", "")
+					Expect(err).NotTo(BeNil())
+					Expect(errors.Is(err, pkg.ErrConfigAmbiguous)).To(BeTrue())
+				},
+			)
+
+			// The designated default is read from a field on the match itself, so the
+			// answer must not depend on where that match sits in the slice the store
+			// returned. The default is deliberately at index 1: a branch that fell back
+			// to matches[0] would return a-personal for the forward order and
+			// c-personal for the reversed one, so this test fails on that branch
+			// instead of merely agreeing with it.
+			It("returns the same Config whatever order the matches arrive in", func() {
+				provider.items = designate(defaulted("a-personal", "b-personal", "c-personal"), 1)
+				forward, err := resolver.ResolveByTaskType(ctx, "shared-type", "")
+				Expect(err).To(BeNil())
+
+				provider.items = designate(defaulted("c-personal", "b-personal", "a-personal"), 1)
+				reversed, err := resolver.ResolveByTaskType(ctx, "shared-type", "")
+				Expect(err).To(BeNil())
+
+				Expect(forward.Assignee).To(Equal("b-personal"))
+				Expect(reversed.Assignee).To(Equal(forward.Assignee))
+				Expect(reversed.DefaultForTaskTypes).To(Equal(forward.DefaultForTaskTypes))
 			})
 		})
 

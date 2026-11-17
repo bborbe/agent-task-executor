@@ -216,13 +216,13 @@ func TestAcquireSpawnClaimKeysCloneURLPRReviewPerPullRequest(t *testing.T) {
 	if !h.acquireSpawnClaim(ctx, task, redispatchConfig()) {
 		t.Fatal("expected the clone_url pr-review to claim")
 	}
-	if len(client.putCalls) != 1 {
-		t.Fatalf("expected one Put (per-PR only), got %d", len(client.putCalls))
+	if len(client.claimPuts()) != 1 {
+		t.Fatalf("expected one Put (per-PR only), got %d", len(client.claimPuts()))
 	}
-	if client.putCalls[0].key != "claims/pr/bborbe/nuke/658" {
+	if client.claimPuts()[0].key != "claims/pr/bborbe/nuke/658" {
 		t.Errorf(
 			"claim key = %q, want %q",
-			client.putCalls[0].key,
+			client.claimPuts()[0].key,
 			"claims/pr/bborbe/nuke/658",
 		)
 	}
@@ -292,14 +292,14 @@ func TestAcquireSpawnClaimFallsBackToTaskID(t *testing.T) {
 			if !ok {
 				t.Fatal("expected the fallback to let the spawn proceed")
 			}
-			if len(client.putCalls) != 1 {
-				t.Fatalf("expected one Put, got %d", len(client.putCalls))
+			if len(client.claimPuts()) != 1 {
+				t.Fatalf("expected one Put, got %d", len(client.claimPuts()))
 			}
 			// A pr-review with no usable URL is keyed by its task id. Keying it
 			// by the repository instead made every review of that repository
 			// contend for one key.
-			if want := "claims/task/" + id; client.putCalls[0].key != want {
-				t.Errorf("claim key = %q, want %q", client.putCalls[0].key, want)
+			if want := "claims/task/" + id; client.claimPuts()[0].key != want {
+				t.Errorf("claim key = %q, want %q", client.claimPuts()[0].key, want)
 			}
 			if delta := after - before; delta != 1 {
 				t.Errorf("fallback counter delta = %v, want 1", delta)

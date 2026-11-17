@@ -16,6 +16,7 @@ import (
 	"github.com/bborbe/cqrs/base"
 	libk8s "github.com/bborbe/k8s"
 	libtime "github.com/bborbe/time"
+	corev1 "k8s.io/api/core/v1"
 
 	pkg "github.com/bborbe/agent-task-executor/pkg"
 	"github.com/bborbe/agent-task-executor/pkg/claim"
@@ -33,7 +34,7 @@ type stubJobSpawner struct {
 }
 
 func (s *stubJobSpawner) SpawnJob(
-	context.Context, lib.Task, pkg.AgentConfiguration,
+	context.Context, lib.Task, pkg.AgentConfiguration, string,
 ) (string, error) {
 	s.spawned++
 	return "job-1", nil
@@ -64,12 +65,18 @@ func (s *stubJobSpawner) JobExists(context.Context, libk8s.Namespace, string) (b
 type stubResultPublisher struct{}
 
 func (stubResultPublisher) PublishSpawnNotification(
-	context.Context, lib.Task, string,
+	context.Context, lib.Task, string, string,
 ) error {
 	return nil
 }
 
 func (stubResultPublisher) PublishFailure(
+	context.Context, lib.Task, string, string, *corev1.Pod,
+) error {
+	return nil
+}
+
+func (stubResultPublisher) PublishStoreMissFailure(
 	context.Context, lib.Task, string, string,
 ) error {
 	return nil
@@ -97,6 +104,12 @@ func (stubResultPublisher) PublishSetTriggerScope(
 	return nil
 }
 
+func (stubResultPublisher) PublishTriggerBudgetRefusal(
+	context.Context, lib.Task, string, int, int,
+) error {
+	return nil
+}
+
 func (stubResultPublisher) PublishTypeMismatchFailure(
 	context.Context, lib.Task, string,
 ) error {
@@ -109,7 +122,17 @@ func (stubResultPublisher) PublishRestoreAssignee(
 	return nil
 }
 
-func (stubResultPublisher) PublishParkLostClaim(context.Context, lib.Task) error {
+func (stubResultPublisher) PublishParkLostClaim(
+	context.Context, lib.Task, string, string, string,
+) error {
+	return nil
+}
+
+func (stubResultPublisher) PublishParkSucceeded(context.Context, lib.Task) error {
+	return nil
+}
+
+func (stubResultPublisher) PublishParkRedriveCap(context.Context, lib.Task) error {
 	return nil
 }
 

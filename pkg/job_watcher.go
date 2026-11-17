@@ -14,6 +14,7 @@ import (
 	lib "github.com/bborbe/agent"
 	"github.com/bborbe/errors"
 	libk8s "github.com/bborbe/k8s"
+	libtime "github.com/bborbe/time"
 	"github.com/golang/glog"
 	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
@@ -25,6 +26,7 @@ import (
 	"k8s.io/client-go/tools/cache"
 
 	agentv1 "github.com/bborbe/agent-task-executor/k8s/apis/agent.benjamin-borbe.de/v1"
+	"github.com/bborbe/agent-task-executor/pkg/metrics"
 )
 
 //counterfeiter:generate -o ../mocks/job_watcher.go --fake-name FakeJobWatcher . JobWatcher
@@ -57,15 +59,18 @@ func NewJobWatcher(
 	taskStore *TaskStore,
 	publisher ResultPublisher,
 	claimReleaser ClaimReleaser,
+	currentDateTimeGetter libtime.CurrentDateTimeGetter,
 ) JobWatcher {
 	w := &jobWatcher{
-		kubeClient:           kubeClient,
-		namespace:            namespace,
-		configProvider:       configProvider,
-		taskStore:            taskStore,
-		publisher:            publisher,
-		claimReleaser:        claimReleaser,
-		newNamespaceInformer: newJobWatcherNamespaceInformer,
+		kubeClient:            kubeClient,
+		namespace:             namespace,
+		configProvider:        configProvider,
+		taskStore:             taskStore,
+		publisher:             publisher,
+		claimReleaser:         claimReleaser,
+		currentDateTimeGetter: currentDateTimeGetter,
+		startedAt:             currentDateTimeGetter.Now(),
+		newNamespaceInformer:  newJobWatcherNamespaceInformer,
 	}
 	w.watched = map[libk8s.Namespace]bool{namespace: true}
 	w.synced = map[libk8s.Namespace]bool{namespace: true}
@@ -74,17 +79,21 @@ func NewJobWatcher(
 }
 
 type jobWatcher struct {
-	kubeClient           kubernetes.Interface
-	namespace            libk8s.Namespace
-	configProvider       libk8s.Provider[agentv1.Config]
-	taskStore            *TaskStore
-	publisher            ResultPublisher
-	claimReleaser        ClaimReleaser
-	mu                   sync.Mutex
-	watched              map[libk8s.Namespace]bool
-	synced               map[libk8s.Namespace]bool
-	informers            map[libk8s.Namespace]jobWatcherNamespaceInformer
-	newNamespaceInformer func(kubernetes.Interface, libk8s.Namespace) (jobWatcherNamespaceInformer, error)
+	kubeClient     kubernetes.Interface
+	namespace      libk8s.Namespace
+	configProvider libk8s.Provider[agentv1.Config]
+	taskStore      *TaskStore
+	publisher      ResultPublisher
+	claimReleaser  ClaimReleaser
+	// currentDateTimeGetter and startedAt bound which failed Jobs may be
+	// published without a store entry: see publishStoreMissFailure.
+	currentDateTimeGetter libtime.CurrentDateTimeGetter
+	startedAt             libtime.DateTime
+	mu                    sync.Mutex
+	watched               map[libk8s.Namespace]bool
+	synced                map[libk8s.Namespace]bool
+	informers             map[libk8s.Namespace]jobWatcherNamespaceInformer
+	newNamespaceInformer  func(kubernetes.Interface, libk8s.Namespace) (jobWatcherNamespaceInformer, error)
 }
 
 const (
@@ -306,6 +315,16 @@ func (w *jobWatcher) startNamespaceInformer(
 	return nil
 }
 
+// namespaceWatched reports whether namespace is in the watched set, regardless
+// of whether its caches have synced. The succeeded-Job path uses it instead of
+// namespaceReady: it needs the namespace to be one the watcher is responsible
+// for, but not its pod cache (see handleSucceededJob).
+func (w *jobWatcher) namespaceWatched(namespace libk8s.Namespace) bool {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	return w.watched[namespace]
+}
+
 // namespaceReady reports whether the watcher may handle events for namespace.
 // A namespace no Config names is never ready. Before an informer is started
 // for a watched namespace, the pre-Run seed decides; once it is started, the
@@ -379,12 +398,13 @@ func (w *jobWatcher) releaseClaimAfterSuccess(
 	ctx context.Context,
 	taskID lib.TaskIdentifier,
 	jobName string,
+	phase string,
 	completedAt time.Time,
 ) {
 	if !w.claimReleaseAllowed(taskID, jobName) {
 		return
 	}
-	w.claimReleaser.ReleaseTaskClaimAfterSuccess(ctx, taskID, completedAt)
+	w.claimReleaser.ReleaseTaskClaimAfterSuccess(ctx, taskID, phase, completedAt)
 }
 
 // releaseSucceededJobClaim releases the claim of a succeeded Job, holding it for
@@ -406,7 +426,13 @@ func (w *jobWatcher) releaseSucceededJobClaim(
 		w.releaseClaim(ctx, taskID, job.Name)
 		return
 	}
-	w.releaseClaimAfterSuccess(ctx, taskID, job.Name, job.Status.CompletionTime.Time)
+	w.releaseClaimAfterSuccess(
+		ctx,
+		taskID,
+		job.Name,
+		job.Annotations[TaskPhaseAnnotationKey],
+		job.Status.CompletionTime.Time,
+	)
 }
 
 // claimReleaseAllowed reports whether this Job's terminal event may release the
@@ -429,7 +455,11 @@ func (w *jobWatcher) claimReleaseAllowed(
 }
 
 func (w *jobWatcher) HandleJob(ctx context.Context, job *batchv1.Job) {
-	if !w.namespaceReady(libk8s.Namespace(job.Namespace)) {
+	namespace := libk8s.Namespace(job.Namespace)
+	// Watched, not synced: a SUCCEEDED Job is handled ahead of the per-namespace
+	// cache barrier (see handleSucceededJob), while the failed path below stays
+	// behind it.
+	if !w.namespaceWatched(namespace) {
 		return
 	}
 	taskIDStr, ok := job.Labels["agent.benjamin-borbe.de/task-id"]
@@ -439,42 +469,95 @@ func (w *jobWatcher) HandleJob(ctx context.Context, job *batchv1.Job) {
 	taskID := lib.TaskIdentifier(taskIDStr)
 
 	if IsJobFailed(job) {
+		// A failed Job is classified against the pod cache — terminalPodDetail
+		// reads the namespace's PodLister — so it must not run before that
+		// namespace's caches have synced.
+		if !w.namespaceReady(namespace) {
+			return
+		}
 		reason := w.failureReason(job)
-		glog.V(2).Infof("job %s/%s failed (task %s): %s", job.Namespace, job.Name, taskID, reason)
+		// The raw JobFailed condition is logged alongside the published reason:
+		// the published value is what operators read, but the condition is what
+		// tells them which Kubernetes failure they are looking at, and it is not
+		// otherwise recoverable — failed Jobs are not retained, and the record
+		// store carries only the collapsed reason.
+		condition, _ := jobFailedCondition(job)
+		glog.V(2).Infof(
+			"job %s/%s failed (task %s): reason=%s condition=%s",
+			job.Namespace, job.Name, taskID, reason, condition,
+		)
 		w.releaseClaim(ctx, taskID, job.Name)
 		w.handleTerminal(ctx, taskID, job, reason, true)
 		return
 	}
 	if IsJobSucceeded(job) {
-		// Succeeded job (exit 0) means the agent's main.Run returned nil, which
-		// implies its result was published to Kafka successfully. Do NOT publish
-		// a synthetic failure — doing so races the real result and triggers an
-		// infinite respawn loop via the vault poll on the controller side.
-		// But the vault task still carries current_job/job_started_at from the
-		// spawn notification, and nobody clears them on the success path (the
-		// controller's result_writer writes phase/status/notes only). Without a
-		// clear here the task would sit terminal with a stale current_job that
-		// the zombie sweeper can never classify — evicting the task from the
-		// store on success makes it invisible to Snapshot(). Publish the clear
-		// (deduped per job) before eviction.
-		glog.V(2).
-			Infof("job %s/%s succeeded (task %s): trusting agent publish, no synthetic result",
-				job.Namespace, job.Name, taskID)
-		// Remembered before the store check: the task entry may already be
-		// evicted (or, after an executor restart, never stored), but the spawn
-		// path still needs to know a result is on its way to the vault.
-		// CompletionTime, not now, so a re-delivered old Job keeps its age.
-		if job.Status.CompletionTime != nil {
-			w.taskStore.MarkSucceeded(
-				taskID,
-				job.Annotations[TaskPhaseAnnotationKey],
-				job.Status.CompletionTime.Time,
-			)
-		}
-		w.releaseSucceededJobClaim(ctx, taskID, job)
-		if task, ok := w.taskStore.Load(taskID); ok {
-			w.handleSucceeded(ctx, taskID, task, job)
-		}
+		w.handleSucceededJob(ctx, namespace, taskID, job)
+	}
+}
+
+// handleSucceededJob records a succeeded Job and clears its task's current_job.
+//
+// It runs AHEAD of the per-namespace sync barrier on purpose. The barrier exists
+// so a terminal FAILED Job is not classified against a pod cache that has not
+// filled yet; a succeeded Job needs no pod cache at all — MarkSucceeded writes
+// memory, the claim hold writes the shared success store, and the current_job
+// clear reads the task store and the publisher. Waiting for the barrier
+// therefore buys nothing and costs the record: client-go invokes a handler for
+// every object of an initial LIST while that list is still draining, so
+// HasSynced() is false for all but the last of them, and a Job that completed
+// before this pod started — exactly what a restart creates — was dropped and not
+// seen again until the 5-minute resync.
+//
+// Measured 2026-10-28 on nuke dev: the trading-sandbox informer started
+// 19:50:47.510, a pre-existing terminal Job was first handled 19:56:15.335 (328 s
+// later, one resync), and the task re-spawned at 19:52:51 with no record in
+// either sink. Spec 014 recorded the drop as an accepted consequence of the
+// barrier (its Failure-Modes row "The Config provider returns an empty set at
+// boot"), which is why it was never read as a defect.
+//
+// The line below is the fix's own observable: a pre-fix binary cannot emit it,
+// because there this path never runs before the barrier.
+func (w *jobWatcher) handleSucceededJob(
+	ctx context.Context,
+	namespace libk8s.Namespace,
+	taskID lib.TaskIdentifier,
+	job *batchv1.Job,
+) {
+	if !w.namespaceReady(namespace) {
+		glog.V(2).Infof(
+			"event=success_before_cache_sync task=%s namespace=%s job=%s",
+			taskID, namespace, job.Name,
+		)
+		metrics.TaskEventsTotal.WithLabelValues("success_before_cache_sync").Inc()
+	}
+	// Succeeded job (exit 0) means the agent's main.Run returned nil, which
+	// implies its result was published to Kafka successfully. Do NOT publish
+	// a synthetic failure — doing so races the real result and triggers an
+	// infinite respawn loop via the vault poll on the controller side.
+	// But the vault task still carries current_job/job_started_at from the
+	// spawn notification, and nobody clears them on the success path (the
+	// controller's result_writer writes phase/status/notes only). Without a
+	// clear here the task would sit terminal with a stale current_job that
+	// the zombie sweeper can never classify — evicting the task from the
+	// store on success makes it invisible to Snapshot(). Publish the clear
+	// (deduped per job) before eviction.
+	glog.V(2).
+		Infof("job %s/%s succeeded (task %s): trusting agent publish, no synthetic result",
+			job.Namespace, job.Name, taskID)
+	// Remembered before the store check: the task entry may already be
+	// evicted (or, after an executor restart, never stored), but the spawn
+	// path still needs to know a result is on its way to the vault.
+	// CompletionTime, not now, so a re-delivered old Job keeps its age.
+	if job.Status.CompletionTime != nil {
+		w.taskStore.MarkSucceeded(
+			taskID,
+			job.Annotations[TaskPhaseAnnotationKey],
+			job.Status.CompletionTime.Time,
+		)
+	}
+	w.releaseSucceededJobClaim(ctx, taskID, job)
+	if task, ok := w.taskStore.Load(taskID); ok {
+		w.handleSucceeded(ctx, taskID, task, job)
 	}
 }
 
@@ -601,7 +684,125 @@ func (w *jobWatcher) handleTerminal(
 		w.publishSyntheticFailure(ctx, taskID, task, job, reason)
 		return
 	}
+	if alwaysPublish && w.publishStoreMissFailure(ctx, taskID, job, reason) {
+		return
+	}
 	w.logMissingTask(taskID, job, alwaysPublish)
+}
+
+// storeMissPublishWindow bounds how old a failure may be and still be published
+// without a store entry. It must stay below dedupeTTL: within the window every
+// informer re-delivery of an already-published Job lands inside PublishFailure's
+// per-job dedupe, and past the window the store-miss path stops publishing
+// before the dedupe entry can expire. It must exceed jobWatcherResyncPeriod so a
+// publish that failed is retried by the next re-delivery.
+const storeMissPublishWindow = 30 * time.Minute
+
+// publishStoreMissFailure publishes the failure of a Job whose task has already
+// left the TaskStore, and reports whether it handled the Job.
+//
+// The store entry is evicted by any terminal-status event for the task, by a
+// type mismatch, and by an executor restart, so a failed Job routinely outlives
+// it. Dropping the failure there made crashes silent: task ad12e9fb (2026-10-28,
+// pod_crash_no_stdout ContainerStatusUnknown/137) and task 9371a3d2 (2026-10-27)
+// kept a dead current_job and never got a ## Failure section.
+//
+// A store miss is also the normal state for a failure that was ALREADY
+// published — the store-hit path evicts after publishing, and the informer
+// re-delivers every terminal Job each resync and re-lists all of them after a
+// restart. Only a failure newer than this watcher's start and inside
+// storeMissPublishWindow is published: an older one was either handled by this
+// process (and is deduped) or belongs to a previous process, which keeps the
+// old log-and-drop behaviour rather than risk a second ## Failure and a second
+// trigger_count bump.
+//
+// A task with another Job still active is left alone: the failure clears
+// current_job, and clearing it under a running Job would make the task look idle.
+func (w *jobWatcher) publishStoreMissFailure(
+	ctx context.Context,
+	taskID lib.TaskIdentifier,
+	job *batchv1.Job,
+	reason string,
+) bool {
+	failedAt, ok := jobFailedAt(job)
+	if !ok || !w.freshStoreMissFailure(failedAt) {
+		return false
+	}
+	active, err := w.taskHasActiveJob(ctx, job.Namespace, taskID)
+	if err != nil {
+		glog.Errorf("check active job for task %s before store-miss failure: %v", taskID, err)
+		return false
+	}
+	if active {
+		glog.V(2).Infof(
+			"skip store-miss failure for task %s (job %s): another job is still active",
+			taskID, job.Name,
+		)
+		return true
+	}
+	if err := w.publisher.PublishStoreMissFailure(ctx, taskFromFailedJob(taskID, job), job.Name, reason); err != nil {
+		glog.Errorf(
+			"publish synthetic failure for task %s (job %s) — task not in store: %v",
+			taskID, job.Name, err,
+		)
+		return true
+	}
+	glog.V(2).Infof(
+		"published synthetic failure for task %s (job %s) — task not in store",
+		taskID, job.Name,
+	)
+	return true
+}
+
+// freshStoreMissFailure reports whether failedAt is after the watcher started
+// and inside storeMissPublishWindow.
+func (w *jobWatcher) freshStoreMissFailure(failedAt time.Time) bool {
+	if !failedAt.After(w.startedAt.Time()) {
+		return false
+	}
+	return w.currentDateTimeGetter.Now().Time().Sub(failedAt) < storeMissPublishWindow
+}
+
+// jobFailedAt returns when the Job failed: its JobFailed condition's
+// LastTransitionTime, else its CompletionTime. ok is false when neither is set;
+// an unknown failure time is treated as stale.
+func jobFailedAt(job *batchv1.Job) (time.Time, bool) {
+	for _, c := range job.Status.Conditions {
+		if c.Type == batchv1.JobFailed && c.Status == corev1.ConditionTrue &&
+			!c.LastTransitionTime.IsZero() {
+			return c.LastTransitionTime.Time, true
+		}
+	}
+	if job.Status.CompletionTime != nil && !job.Status.CompletionTime.IsZero() {
+		return job.Status.CompletionTime.Time, true
+	}
+	return time.Time{}, false
+}
+
+// taskFromFailedJob builds the minimal task PublishFailure needs when the
+// original task content is gone.
+//
+//   - TaskIdentifier comes from the Job's task-id label.
+//   - phase comes from the Job's phase annotation, so the re-drive streak and
+//     reason refs are keyed exactly as on the store-hit path. A Job spawned before
+//     the annotation existed carries none and records under the "none" phase.
+//   - target_vault is left unset. The Job does not carry it, and the executor
+//     serves every vault and has none of its own; an empty TargetVault is
+//     processed by every controller, and those without the task file skip it.
+//   - max_triggers is present with a nil value. crashFailureUpdates arms the
+//     cap only when the key is absent, and the controller applies Updates
+//     blindly, so an absent key here would overwrite an operator-set cap of 5 or
+//     6 with the default 3. The real value is unknown, so the cap is not armed on
+//     this path; the next failure seen with the task in the store arms it.
+func taskFromFailedJob(taskID lib.TaskIdentifier, job *batchv1.Job) lib.Task {
+	frontmatter := lib.TaskFrontmatter{"max_triggers": nil}
+	if phase := job.Annotations[TaskPhaseAnnotationKey]; phase != "" {
+		frontmatter["phase"] = phase
+	}
+	return lib.Task{
+		TaskIdentifier: taskID,
+		Frontmatter:    frontmatter,
+	}
 }
 
 func (w *jobWatcher) publishSyntheticFailure(
@@ -611,7 +812,13 @@ func (w *jobWatcher) publishSyntheticFailure(
 	job *batchv1.Job,
 	reason string,
 ) {
-	if err := w.publisher.PublishFailure(ctx, task, job.Name, reason); err != nil {
+	// The pod now feeds two consumers: the never-scheduled deadline arm gate and
+	// the captured log tail. It is resolved unconditionally because the log
+	// matters MOST for the crash class — the class the old deadline-only
+	// condition excluded — and a crash is exactly the failure whose cause is
+	// invisible without the pod's own output.
+	pod := w.jobPod(job)
+	if err := w.publisher.PublishFailure(ctx, task, job.Name, reason, pod); err != nil {
 		glog.Errorf("publish synthetic failure for task %s (job %s): %v", taskID, job.Name, err)
 	} else {
 		glog.V(2).Infof("published synthetic failure for task %s (job %s)", taskID, job.Name)
@@ -646,7 +853,8 @@ func (w *jobWatcher) logMissingTask(
 		// V(3), not Warning: the Job informer re-delivers an already-handled terminal
 		// Job every ~5 minutes, so a failed Job whose task was already deleted from the
 		// store re-enters this branch repeatedly and the old Warning read as a failure.
-		// The synthetic failure was already published on the first (real) observation.
+		// Only failures publishStoreMissFailure judged stale reach here: they predate
+		// this process or its publish window.
 		glog.V(3).Infof(
 			"task %s not in task store; job %s/%s failed but cannot publish synthetic failure (no original task content)",
 			taskID,
@@ -700,6 +908,18 @@ func isBackoffLimitExceeded(job *batchv1.Job) bool {
 	return false
 }
 
+const (
+	// jobFailedReasonless is published for a JobFailed condition whose Reason is
+	// empty, so the record names something instead of collapsing to a blank.
+	jobFailedReasonless = "JobFailed"
+	// backoffLimitExceededReason is the JobFailed condition that reaches
+	// backoffFailureReason.
+	backoffLimitExceededReason = "BackoffLimitExceeded"
+	// podUnresolvedMarker names the branch where the Job's pod is gone before
+	// the watcher can read its termination state.
+	podUnresolvedMarker = "pod-unresolved"
+)
+
 // JobFailureReason maps a failed Job's conditions to a ZombieReason. Returns
 // ZombieReasonDeadlineExceeded when a Failed condition has Reason
 // "DeadlineExceeded" (the kubelet killed the pod for running past
@@ -725,32 +945,74 @@ func JobFailureReason(job *batchv1.Job) ZombieReason {
 	return ZombieReasonPodCrashNoStdout
 }
 
-// failureReason returns the reason string to publish for a failed Job. A
-// BackoffLimitExceeded failure surfaces the pod's terminated reason + exit
-// code when the pod is still resolvable (see backoffFailureReason); every
-// other failure publishes the bare ZombieReason value.
+// failureReason returns the reason string to publish for a failed Job.
+//
+// A DeadlineExceeded failure publishes the vocabulary value unchanged. A
+// BackoffLimitExceeded failure surfaces the pod's terminated reason + exit code
+// when the pod is still resolvable, and names the condition plus an
+// unresolved-pod marker when it is not (see backoffFailureReason). Every other
+// failure publishes the Job's own JobFailed condition, with the pod's
+// terminated reason + exit code appended when the pod is still resolvable (see
+// fallthroughFailureReason) — the condition is what these records were
+// previously missing.
 func (w *jobWatcher) failureReason(job *batchv1.Job) string {
-	reason := JobFailureReason(job)
-	if reason == ZombieReasonDeadlineExceeded || !isBackoffLimitExceeded(job) {
-		return reason.String()
+	if JobFailureReason(job) == ZombieReasonDeadlineExceeded {
+		return ZombieReasonDeadlineExceeded.String()
 	}
-	return w.backoffFailureReason(job, reason)
+	if isBackoffLimitExceeded(job) {
+		return w.backoffFailureReason(job)
+	}
+	return w.fallthroughFailureReason(job)
 }
 
-// backoffFailureReason classifies a BackoffLimitExceeded Job using its
-// resolved pod's terminal state: the dedicated pod_oom_killed for an OOMKilled
-// pod, else the generic pod-failure reason, always appending the terminated
-// reason + exit code when a pod is resolvable so operators see the cause
-// without inspecting the pod.
-func (w *jobWatcher) backoffFailureReason(job *batchv1.Job, base ZombieReason) string {
+// backoffFailureReason classifies a BackoffLimitExceeded Job using its resolved
+// pod's terminal state: the dedicated pod_oom_killed for an OOMKilled pod, else
+// the generic pod-failure reason, always appending the terminated reason + exit
+// code when a pod is resolvable so operators see the cause without inspecting
+// the pod. When the pod is gone before the watcher reads it, the published
+// value names the condition and says so — a bare pod_crash_no_stdout diagnoses
+// nothing.
+func (w *jobWatcher) backoffFailureReason(job *batchv1.Job) string {
 	terminatedReason, exitCode, ok := w.terminalPodDetail(job)
 	if !ok {
-		return base.String()
+		return fmt.Sprintf("%s (%s)", backoffLimitExceededReason, podUnresolvedMarker)
 	}
 	if terminatedReason == "OOMKilled" {
 		return fmt.Sprintf("%s (%s/%d)", ZombieReasonPodOOMKilled, terminatedReason, exitCode)
 	}
-	return fmt.Sprintf("%s (%s/%d)", base.String(), terminatedReason, exitCode)
+	return fmt.Sprintf("%s (%s/%d)", ZombieReasonPodCrashNoStdout, terminatedReason, exitCode)
+}
+
+// fallthroughFailureReason names the Job's actual JobFailed condition,
+// appending the pod's terminated reason and exit code when the pod is still
+// resolvable. A condition whose Reason is empty publishes jobFailedReasonless
+// rather than a blank, so the record always names something.
+func (w *jobWatcher) fallthroughFailureReason(job *batchv1.Job) string {
+	condition, ok := jobFailedCondition(job)
+	if !ok {
+		return ZombieReasonPodCrashNoStdout.String()
+	}
+	terminatedReason, exitCode, podOK := w.terminalPodDetail(job)
+	if !podOK {
+		return condition
+	}
+	return fmt.Sprintf("%s (%s/%d)", condition, terminatedReason, exitCode)
+}
+
+// jobFailedCondition returns the reason of the Job's true JobFailed condition.
+// ok is false when the Job carries none. An empty Reason is reported as
+// jobFailedReasonless so the published value is never blank.
+func jobFailedCondition(job *batchv1.Job) (string, bool) {
+	for _, c := range job.Status.Conditions {
+		if c.Type != batchv1.JobFailed || c.Status != corev1.ConditionTrue {
+			continue
+		}
+		if c.Reason == "" {
+			return jobFailedReasonless, true
+		}
+		return c.Reason, true
+	}
+	return "", false
 }
 
 // HandlePod processes a Pod that has transitioned to a terminal failure state.
@@ -790,7 +1052,7 @@ func (w *jobWatcher) HandlePod(ctx context.Context, pod *corev1.Pod) {
 		return
 	}
 
-	if err := w.publisher.PublishFailure(ctx, task, jobName, reason.String()); err != nil {
+	if err := w.publisher.PublishFailure(ctx, task, jobName, reason.String(), pod); err != nil {
 		glog.Errorf(
 			"publish pod-state failure for task %s (pod %s reason %s): %v",
 			taskID, pod.Name, reason, err,
@@ -861,6 +1123,33 @@ func hasNonZeroTerminatedContainer(pod *corev1.Pod) bool {
 		}
 	}
 	return false
+}
+
+// jobPod returns the most recently created Pod owned by job, or nil when the
+// namespace's PodLister is not synced, the lookup fails, or the Job owns no
+// pod. Unlike terminalPodDetail it does not require a terminated container:
+// a never-scheduled pod has none, and that pod is exactly the one the deadline
+// arm gate needs.
+func (w *jobWatcher) jobPod(job *batchv1.Job) *corev1.Pod {
+	lister := w.PodLister(libk8s.Namespace(job.Namespace))
+	if lister == nil {
+		return nil
+	}
+	pods, err := lister.Pods(job.Namespace).List(labels.Everything())
+	if err != nil {
+		glog.Errorf("job watcher: list pods for job %s/%s: %v", job.Namespace, job.Name, err)
+		return nil
+	}
+	var best *corev1.Pod
+	for _, pod := range pods {
+		if ownerJobName(pod) != job.Name {
+			continue
+		}
+		if best == nil || pod.CreationTimestamp.After(best.CreationTimestamp.Time) {
+			best = pod
+		}
+	}
+	return best
 }
 
 // terminalPodDetail returns the terminated reason and exit code of the Job's

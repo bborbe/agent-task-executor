@@ -6,6 +6,7 @@ package factory
 
 import (
 	"context"
+	"fmt"
 	"time"
 
 	"github.com/IBM/sarama"
@@ -66,6 +67,7 @@ func CreateJobWatcher(
 	taskStore *pkg.TaskStore,
 	publisher pkg.ResultPublisher,
 	claimReleaser pkg.ClaimReleaser,
+	currentDateTimeGetter libtime.CurrentDateTimeGetter,
 ) pkg.JobWatcher {
 	return pkg.NewJobWatcher(
 		kubeClient,
@@ -74,6 +76,7 @@ func CreateJobWatcher(
 		taskStore,
 		publisher,
 		claimReleaser,
+		currentDateTimeGetter,
 	)
 }
 
@@ -190,21 +193,50 @@ func CreateClaimClientFactory(
 	}
 }
 
+// CreateJobSpawner returns the K8s Job spawner every consumer and reconcile
+// loop dispatches through. It carries no logic beyond construction.
+func CreateJobSpawner(
+	kubeClient kubernetes.Interface,
+	namespace libk8s.Namespace,
+	kafkaBrokers string,
+	branch base.Branch,
+	topicPrefix base.TopicPrefix,
+	currentDateTimeGetter libtime.CurrentDateTimeGetter,
+	jobTTLSecondsAfterFinished int32,
+	jobKafkaClientCertSecret string,
+	jobKafkaCaCertSecret string,
+	jobFsGroup int64,
+) spawner.JobSpawner {
+	return spawner.NewJobSpawner(
+		kubeClient,
+		namespace,
+		kafkaBrokers,
+		string(branch),
+		string(topicPrefix),
+		currentDateTimeGetter,
+		jobTTLSecondsAfterFinished,
+		jobKafkaClientCertSecret,
+		jobKafkaCaCertSecret,
+		jobFsGroup,
+	)
+}
+
 // CreateConsumer wires together all components and returns a Kafka Consumer that
 // reads task events and spawns K8s Jobs for qualifying tasks, along with the
 // TaskEventHandler so callers can wire RunDeferredRespawnLoop.
 func CreateConsumer(
 	saramaClient sarama.Client,
+	syncProducer libkafka.SyncProducer,
 	branch base.Branch,
 	cluster string,
-	stageFilter bool,
-	runUntagged bool,
+	stageFilter, runUntagged bool,
 	consumerGroup string,
 	topicPrefix base.TopicPrefix,
 	kubeClient kubernetes.Interface,
 	namespace libk8s.Namespace,
 	kafkaBrokers string,
 	resolver pkg.ConfigResolver,
+	configProvider libk8s.Provider[agentv1.Config],
 	logSamplerFactory log.SamplerFactory,
 	currentDateTimeGetter libtime.CurrentDateTimeGetter,
 	resultPublisher pkg.ResultPublisher,
@@ -218,16 +250,15 @@ func CreateConsumer(
 	vaultAliases []string,
 	reconcilePassTimeout time.Duration,
 	reconcileInterval time.Duration,
-	claimMode pkg.ClaimMode,
-	claimRefClientFactory pkg.ClaimRefClientFactory,
-	claimClientFactory pkg.ClaimClientFactory,
+	claimMode pkg.ClaimMode, claimRefClientFactory pkg.ClaimRefClientFactory,
+	claimClientFactory pkg.ClaimClientFactory, vaultIndexClient claim.VaultAPIIndexClient,
 ) (libkafka.Consumer, handler.ClaimLifecycleEventHandler) {
-	jobSpawner := spawner.NewJobSpawner(
+	jobSpawner := CreateJobSpawner(
 		kubeClient,
 		namespace,
 		kafkaBrokers,
-		string(branch),
-		string(topicPrefix),
+		branch,
+		topicPrefix,
 		currentDateTimeGetter,
 		jobTTLSecondsAfterFinished,
 		jobKafkaClientCertSecret,
@@ -252,19 +283,18 @@ func CreateConsumer(
 		claimMode,
 		claimRefClientFactory,
 		handler.WithClaimClientFactory(claimClientFactory),
+		handler.WithConfigProvider(configProvider),
+		handler.WithVaultAPIIndexClient(vaultIndexClient),
+		handler.WithTokenSpendReader(tokenSpendReaderFor(vaultIndexClient)),
 		handler.WithVaultAliases(vaultAliases),
 		handler.WithPodQuotaLimiter(spawner.NewPodQuotaLimiter(kubeClient, currentDateTimeGetter)),
 		handler.WithClaimJobControl(
 			handler.NewKubeJobControl(kubeClient, namespace, resolver, view),
 		),
+		handler.WithDeadLetterPublisher(newDeadLetterPublisher(syncProducer, topicPrefix)),
 	)
 	topic := lib.TaskV1SchemaID.EventTopic(topicPrefix)
-	offsetManager := libkafka.NewSaramaOffsetManager(
-		saramaClient,
-		libkafka.Group(consumerGroup),
-		libkafka.OffsetOldest,
-		libkafka.OffsetOldest,
-	)
+	offsetManager := newTaskOffsetManager(saramaClient, consumerGroup)
 	return libkafka.NewOffsetConsumerHighwaterMarks(
 		saramaClient,
 		topic,
@@ -275,15 +305,59 @@ func CreateConsumer(
 	), taskEventHandler
 }
 
+// newDeadLetterPublisher returns the durable sink a provably unprocessable task
+// event is recorded in, so skipping it does not also erase the evidence. It
+// lives here rather than inline in CreateConsumer to keep that constructor under
+// the function-length limit.
+func newDeadLetterPublisher(
+	syncProducer libkafka.SyncProducer,
+	topicPrefix base.TopicPrefix,
+) pkg.DeadLetterPublisher {
+	return pkg.NewKafkaDeadLetterPublisher(
+		syncProducer,
+		libkafka.Topic(fmt.Sprintf("%s-agent-task-v1-dead-letter", topicPrefix)),
+	)
+}
+
+// newTaskOffsetManager returns the offset manager the task event consumer marks
+// its progress through.
+func newTaskOffsetManager(
+	saramaClient sarama.Client,
+	consumerGroup string,
+) libkafka.OffsetManager {
+	return libkafka.NewSaramaOffsetManager(
+		saramaClient,
+		libkafka.Group(consumerGroup),
+		libkafka.OffsetOldest,
+		libkafka.OffsetOldest,
+	)
+}
+
 // CreateTaskView returns the in-memory task view and the run.Func that captures
 // the topic's high-water marks and then replays the compacted task event topic
 // from the oldest offset on every partition. The reader is a non-group simple
 // consumer: it never joins CONSUMER_GROUP and never commits offsets, so it cannot
 // steal partitions from, or move the offsets of, the live consumer.
+//
+// skipCorruptBatches is a deliberate opt-in escape hatch (SKIP_CRC_CORRUPTION,
+// default false): with it on, a CRC-decode failure is logged, counted in
+// kafka_consumer_corrupt_batch_skipped_total and stepped over to the next healthy
+// offset instead of killing the process. It stays off by default because a
+// skipped batch is lost data, and loud is the honest default for every other
+// topic.
+//
+// What this does NOT fix: the reader still replays from offset 0 on every
+// restart. A non-group simple consumer keeps no durable position, so each pod
+// start re-walks the whole compacted topic (retention.ms=-1 keeps the bad bytes
+// forever) and re-skips the same range. The skip stops the crash-loop; the
+// re-walk — and the broker reads and skipped-batch increments it costs on every
+// restart — stays. Giving this reader a durable position is a separate design
+// change.
 func CreateTaskView(
 	saramaClient sarama.Client,
 	topicPrefix base.TopicPrefix,
 	currentDateTimeGetter libtime.CurrentDateTimeGetter,
+	skipCorruptBatches bool,
 ) (handler.TaskView, run.Func) {
 	topic := lib.TaskV1SchemaID.EventTopic(topicPrefix)
 	view := handler.NewTaskView(
@@ -299,12 +373,23 @@ func CreateTaskView(
 		libkafka.OffsetOldest,
 		view,
 		log.DefaultSamplerFactory,
+		taskViewConsumerOptions(skipCorruptBatches)...,
 	)
 	return view, func(ctx context.Context) error {
 		if err := view.CaptureHighWaterMarks(ctx); err != nil {
 			return errors.Wrapf(ctx, err, "capture task view high-water marks")
 		}
 		return consumer.Consume(ctx)
+	}
+}
+
+// taskViewConsumerOptions is the option set the task-view reader is built with.
+// It is a named function so a test can assert the value reaches ConsumerOptions
+// without a live broker: NewSimpleConsumer applies the options internally and the
+// constructed Consumer exposes nothing to inspect.
+func taskViewConsumerOptions(skipCorruptBatches bool) []func(*libkafka.ConsumerOptions) {
+	return []func(*libkafka.ConsumerOptions){
+		libkafka.WithSkipCorruptBatches(skipCorruptBatches),
 	}
 }
 
@@ -316,10 +401,11 @@ func CreateHealthcheckRunner(
 	syncProducer libkafka.SyncProducer,
 	topicPrefix base.TopicPrefix,
 	branch base.Branch,
+	targetVault string,
 ) probe.HealthcheckRunner {
 	sender := cdb.NewCommandObjectSender(syncProducer, topicPrefix, log.DefaultSamplerFactory)
 	publisher := probe.NewCommandPublisher(sender)
-	return probe.NewHealthcheckRunner(configProvider, publisher, branch)
+	return probe.NewHealthcheckRunner(configProvider, publisher, branch, targetVault)
 }
 
 // CreateHealthcheckCron wraps the given runner in a cron scheduler. Pass the runner returned by
@@ -329,4 +415,15 @@ func CreateHealthcheckCron(
 	runner probe.HealthcheckRunner,
 ) pkg.CronScheduler {
 	return libcron.NewExpressionCron(expression, runner)
+}
+
+// tokenSpendReaderFor returns the token-spend reader a vault client also implements,
+// or nil when it does not. The widening sits behind a type assertion so the
+// divergence-only test doubles satisfy VaultAPIIndexClient without implementing the
+// document reads.
+func tokenSpendReaderFor(client claim.VaultAPIIndexClient) claim.TokenSpendReader {
+	if reader, ok := client.(claim.TokenSpendReader); ok {
+		return reader
+	}
+	return nil
 }

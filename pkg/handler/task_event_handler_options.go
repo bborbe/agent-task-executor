@@ -5,6 +5,9 @@
 package handler
 
 import (
+	libk8s "github.com/bborbe/k8s"
+
+	agentv1 "github.com/bborbe/agent-task-executor/k8s/apis/agent.benjamin-borbe.de/v1"
 	pkg "github.com/bborbe/agent-task-executor/pkg"
 	"github.com/bborbe/agent-task-executor/pkg/claim"
 	"github.com/bborbe/agent-task-executor/pkg/spawner"
@@ -33,6 +36,16 @@ func WithClaimClientFactory(factory pkg.ClaimClientFactory) HandlerOption {
 	}
 }
 
+// WithSuccessStore supplies the shared success record directly, bypassing the
+// claim-ref-client factory the handler would otherwise build it from. It exists
+// for tests that need a fake — the store's error path has no other way in, since
+// the factory is a boot-time constructor with no failure mode to provoke.
+func WithSuccessStore(store claim.SuccessStore) HandlerOption {
+	return func(h *taskEventHandler) {
+		h.successRecordStore = store
+	}
+}
+
 // WithVaultAliases replaces the accepted vault names for this executor. It is how
 // VAULT_ALIASES reaches the matcher without every call site carrying the value,
 // and it is per handler by construction: two executors built in one process each
@@ -43,10 +56,45 @@ func WithVaultAliases(aliases []string) HandlerOption {
 	}
 }
 
+// WithVaultAPIIndexClient supplies the vault-api task-index reader used by
+// the reconcile pass's view/vault divergence check. A nil client (the
+// default) skips the check, which is the no-URL deployment's shape.
+func WithVaultAPIIndexClient(client claim.VaultAPIIndexClient) HandlerOption {
+	return func(h *taskEventHandler) {
+		h.vaultIndexClient = client
+	}
+}
+
+// WithTokenSpendReader supplies the per-task token-history reader the window token
+// ceiling sums. A nil reader (the default) disables the ceiling, which is the
+// no-vault deployment's shape.
+func WithTokenSpendReader(reader claim.TokenSpendReader) HandlerOption {
+	return func(h *taskEventHandler) {
+		h.tokenSpendReader = reader
+	}
+}
+
+// WithConfigProvider supplies the Config store the accepted-set metric reads.
+// Nil (the default) skips the refresh.
+func WithConfigProvider(provider libk8s.Provider[agentv1.Config]) HandlerOption {
+	return func(h *taskEventHandler) {
+		h.configProvider = provider
+	}
+}
+
 // WithPodQuotaLimiter attaches the reader that bounds admission by the pod quota
 // of the agent's priority class. An absent limiter means no quota bound.
 func WithPodQuotaLimiter(limiter spawner.PodQuotaLimiter) HandlerOption {
 	return func(h *taskEventHandler) {
 		h.podQuotaLimiter = limiter
+	}
+}
+
+// WithDeadLetterPublisher attaches the durable sink for a message the consumer
+// can never process. Without it a permanent failure is surfaced rather than
+// skipped, because skipping with nowhere to record the message would lose it.
+func WithDeadLetterPublisher(publisher pkg.DeadLetterPublisher) HandlerOption {
+	return func(h *taskEventHandler) {
+		h.deadLetterPublisher = publisher
 	}
 }

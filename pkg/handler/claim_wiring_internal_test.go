@@ -17,6 +17,7 @@ import (
 	lib "github.com/bborbe/agent"
 	base "github.com/bborbe/cqrs/base"
 	libtime "github.com/bborbe/time"
+	corev1 "k8s.io/api/core/v1"
 
 	pkg "github.com/bborbe/agent-task-executor/pkg"
 	"github.com/bborbe/agent-task-executor/pkg/claim"
@@ -304,6 +305,15 @@ func unsetConfig() *pkg.AgentConfiguration {
 // internal test of handler cannot import it.
 type parkRecordingPublisher struct {
 	parked []lib.TaskIdentifier
+	// parkedSucceeded records the succeeded-Job parks, which write a different
+	// phase for a different cause and must not be conflated with the above.
+	parkedSucceeded []lib.Task
+	// parkedRedriveCap records the cap-exhausted parks, which stay open: the
+	// work did not finish, so they must never be recorded as succeeded.
+	parkedRedriveCap []lib.Task
+	// failParkSucceeded makes every succeeded-Job park fail, so a spec can pin
+	// the log-and-continue branch.
+	failParkSucceeded bool
 	// failFirst makes the next failFirst park calls fail, so a test can pin the
 	// retry and the final-failure path without a second fake.
 	failFirst int
@@ -312,6 +322,9 @@ type parkRecordingPublisher struct {
 func (s *parkRecordingPublisher) PublishParkLostClaim(
 	_ context.Context,
 	task lib.Task,
+	_ string,
+	_ string,
+	_ string,
 ) error {
 	if s.failFirst > 0 {
 		s.failFirst--
@@ -321,13 +334,44 @@ func (s *parkRecordingPublisher) PublishParkLostClaim(
 	return nil
 }
 
+// PublishParkSucceeded records a succeeded-Job park, so a spec can assert both
+// that it happened and what it published.
+func (s *parkRecordingPublisher) PublishParkSucceeded(
+	_ context.Context,
+	task lib.Task,
+) error {
+	if s.failParkSucceeded {
+		return stderrors.New("publish failed")
+	}
+	s.parkedSucceeded = append(s.parkedSucceeded, task)
+	return nil
+}
+
+// PublishParkRedriveCap records a cap-exhausted park, which must stay open.
+func (s *parkRecordingPublisher) PublishParkRedriveCap(
+	_ context.Context,
+	task lib.Task,
+) error {
+	if s.failParkSucceeded {
+		return stderrors.New("publish failed")
+	}
+	s.parkedRedriveCap = append(s.parkedRedriveCap, task)
+	return nil
+}
+
 func (s *parkRecordingPublisher) PublishSpawnNotification(
-	context.Context, lib.Task, string,
+	context.Context, lib.Task, string, string,
 ) error {
 	return nil
 }
 
 func (s *parkRecordingPublisher) PublishFailure(
+	context.Context, lib.Task, string, string, *corev1.Pod,
+) error {
+	return nil
+}
+
+func (s *parkRecordingPublisher) PublishStoreMissFailure(
 	context.Context, lib.Task, string, string,
 ) error {
 	return nil
@@ -347,6 +391,12 @@ func (s *parkRecordingPublisher) PublishIncrementTriggerCount(
 
 func (s *parkRecordingPublisher) PublishSetTriggerScope(
 	context.Context, lib.Task, string, int,
+) error {
+	return nil
+}
+
+func (s *parkRecordingPublisher) PublishTriggerBudgetRefusal(
+	context.Context, lib.Task, string, int, int,
 ) error {
 	return nil
 }
@@ -396,6 +446,15 @@ func parkOnLostClaimHandler() (*taskEventHandler, *parkRecordingPublisher) {
 
 const parkedLogLine = "event=parked_lost_claim key=claims/task/tid-gate-1 task=tid-gate-1"
 
+// ranGateTask builds gateTask plus the evidence that a Job was already created
+// for it. A rerun decision applies only to a task that has run, so every spec
+// pinning the park branch needs this shape.
+func ranGateTask() lib.Task {
+	task := gateTask("", "")
+	task.Frontmatter["current_job"] = "pr-reviewer-agent-tid-gate-1"
+	return task
+}
+
 // TestAcquireSpawnClaimParksOnLostClaimWhenRerunDisabled is SC1 for the
 // explicit false: a takeover parks the task at human_review and reports false,
 // which is the caller's "create no Job" signal.
@@ -405,7 +464,7 @@ func TestAcquireSpawnClaimParksOnLostClaimWhenRerunDisabled(t *testing.T) {
 
 	var ok bool
 	out := captureGlogStderr(t, func() {
-		ok = h.acquireSpawnClaim(ctx, gateTask("", ""), parkConfig())
+		ok = h.acquireSpawnClaim(ctx, ranGateTask(), parkConfig())
 	})
 
 	if ok {
@@ -431,11 +490,146 @@ func TestAcquireSpawnClaimParksOnLostClaimWhenRerunUnset(t *testing.T) {
 
 	var ok bool
 	out := captureGlogStderr(t, func() {
-		ok = h.acquireSpawnClaim(ctx, gateTask("", ""), unsetConfig())
+		ok = h.acquireSpawnClaim(ctx, ranGateTask(), unsetConfig())
 	})
 
 	if ok {
 		t.Fatal("expected no Job for an unset rerunOnLostClaim after a takeover")
+	}
+	if len(publisher.parked) != 1 {
+		t.Fatalf("park writes = %d, want 1", len(publisher.parked))
+	}
+	if !strings.Contains(out, parkedLogLine) {
+		t.Errorf("stderr = %q, want it to contain %q", out, parkedLogLine)
+	}
+}
+
+// TestAcquireSpawnClaimDoesNotParkATaskThatNeverRan pins the rule that a
+// takeover of a task this cluster never ran is not a second run.
+//
+// rerunOnLostClaim answers "may this agent run a task a previous owner already
+// ran". A task with no current_job and no job_started_at carries no evidence of
+// any run, so there is nothing to re-run and the guard does not apply: the
+// spawn must proceed. Parking it instead writes human_review onto a task that
+// no executor ever claimed, and the empty assignee that write leaves makes the
+// task permanently unspawnable — measured on a pr-review task parked 40 s after
+// creation with no Job, no current_job and no job_started_at.
+func TestAcquireSpawnClaimDoesNotParkATaskThatNeverRan(t *testing.T) {
+	ctx := context.Background()
+	h, publisher := parkOnLostClaimHandler()
+
+	var ok bool
+	out := captureGlogStderr(t, func() {
+		ok = h.acquireSpawnClaim(ctx, gateTask("", ""), parkConfig())
+	})
+
+	if !ok {
+		t.Fatal(
+			"expected the spawn to proceed: a task with no current_job and no job_started_at has never run here",
+		)
+	}
+	if len(publisher.parked) != 0 {
+		t.Fatalf("park writes = %d, want 0 for a task that never ran", len(publisher.parked))
+	}
+	if strings.Contains(out, "event=parked_lost_claim") {
+		t.Errorf("stderr = %q, want no parked_lost_claim line for a task that never ran", out)
+	}
+}
+
+// staleJobStartedTask builds the shape every observed lost-claim park carried:
+// a job_started_at left behind by a Job that is long gone, and no current_job.
+func staleJobStartedTask() lib.Task {
+	task := gateTask("", "")
+	task.Frontmatter["job_started_at"] = "2026-11-10T22:43:56Z"
+	return task
+}
+
+// unattributableTakeoverClient models the shape TakeoverPair reports as an empty
+// PreviousTaskID: the first ClaimPair read sees a held claim and conflicts, and
+// by the time TakeoverPair reads the same key it is free, so the takeover takes
+// its create path (pkg/claim/lease_manager.go:827) and displaces nobody.
+func unattributableTakeoverClient() *recordingClaimRefClient {
+	var keyReads int
+	return &recordingClaimRefClient{
+		put: func(
+			_ context.Context,
+			_ string,
+			_ string,
+			_ string,
+			_ string,
+			_ libtime.DateTime,
+		) (string, error) {
+			return "new-sha", nil
+		},
+		list: func(_ context.Context, prefix string) ([]claim.ClaimRef, error) {
+			if prefix != gateClaimKey {
+				return nil, nil
+			}
+			keyReads++
+			if keyReads > 1 {
+				return nil, nil
+			}
+			return []claim.ClaimRef{{
+				Ref:        "refs/" + gateClaimKey,
+				Sha:        "held-sha",
+				Cluster:    "other",
+				TaskID:     "previous-task",
+				LeaseUntil: stdtime.Now().UTC().Add(60 * stdtime.Second).Format(stdtime.RFC3339),
+			}}, nil
+		},
+	}
+}
+
+// TestAcquireSpawnClaimDoesNotParkATakeoverWithNoPreviousHolder pins the rule
+// that a takeover which displaced nobody is not a lost claim.
+//
+// TakeoverPair reports an empty PreviousTaskID only on its create path, where no
+// listed claim was replaced (pkg/claim/lease_manager.go:827,837) — so there is
+// no previous holder to have run the task. The task still carries a
+// job_started_at from an earlier dispatch, which is the shape all 9 measured
+// parked_lost_claim records had; the guard used to park on that alone, writing
+// human_review onto a task whose only claim had just been created here.
+func TestAcquireSpawnClaimDoesNotParkATakeoverWithNoPreviousHolder(t *testing.T) {
+	ctx := context.Background()
+	h := newGateHandler(pkg.ClaimModeOn, unattributableTakeoverClient())
+	publisher := &parkRecordingPublisher{}
+	h.resultPublisher = publisher
+
+	var ok bool
+	out := captureGlogStderr(t, func() {
+		ok = h.acquireSpawnClaim(ctx, staleJobStartedTask(), parkConfig())
+	})
+
+	if !ok {
+		t.Fatal(
+			"expected the spawn to proceed: a takeover that displaced no holder has no prior run to decide about",
+		)
+	}
+	if len(publisher.parked) != 0 {
+		t.Fatalf("park writes = %d, want 0 for an unattributable takeover", len(publisher.parked))
+	}
+	if strings.Contains(out, "event=parked_lost_claim") {
+		t.Errorf("stderr = %q, want no parked_lost_claim line for an unattributable takeover", out)
+	}
+	if !strings.Contains(out, "event=claim_acquired") {
+		t.Errorf("stderr = %q, want a claim_acquired line for the takeover create", out)
+	}
+}
+
+// TestAcquireSpawnClaimParksAnAttributableTakeover is the other arm: a takeover
+// that displaced a named holder still parks, so the narrowing does not capture
+// the case the guard exists for.
+func TestAcquireSpawnClaimParksAnAttributableTakeover(t *testing.T) {
+	ctx := context.Background()
+	h, publisher := parkOnLostClaimHandler()
+
+	var ok bool
+	out := captureGlogStderr(t, func() {
+		ok = h.acquireSpawnClaim(ctx, ranGateTask(), parkConfig())
+	})
+
+	if ok {
+		t.Fatal("expected no Job when the takeover displaced a named holder")
 	}
 	if len(publisher.parked) != 1 {
 		t.Fatalf("park writes = %d, want 1", len(publisher.parked))
@@ -504,7 +698,7 @@ func TestAcquireSpawnClaimRetriesTheParkWrite(t *testing.T) {
 
 	var ok bool
 	out := captureGlogStderr(t, func() {
-		ok = h.acquireSpawnClaim(ctx, gateTask("", ""), parkConfig())
+		ok = h.acquireSpawnClaim(ctx, ranGateTask(), parkConfig())
 	})
 
 	if ok {
@@ -528,7 +722,7 @@ func TestAcquireSpawnClaimReportsAFailedParkWrite(t *testing.T) {
 
 	var ok bool
 	out := captureGlogStderr(t, func() {
-		ok = h.acquireSpawnClaim(ctx, gateTask("", ""), parkConfig())
+		ok = h.acquireSpawnClaim(ctx, ranGateTask(), parkConfig())
 	})
 
 	if ok {
@@ -557,7 +751,7 @@ func TestAcquireSpawnClaimStopsTheParkWriteOnCancellation(t *testing.T) {
 
 	var ok bool
 	out := captureGlogStderr(t, func() {
-		ok = h.acquireSpawnClaim(ctx, gateTask("", ""), parkConfig())
+		ok = h.acquireSpawnClaim(ctx, ranGateTask(), parkConfig())
 	})
 
 	if ok {

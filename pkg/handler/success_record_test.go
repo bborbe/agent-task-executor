@@ -1,0 +1,524 @@
+// Copyright (c) 2026 Benjamin Borbe All rights reserved.
+// Use of this source code is governed by a BSD-style
+// license that can be found in the LICENSE file.
+
+package handler_test
+
+import (
+	"context"
+	stderrors "errors"
+	"strconv"
+	"strings"
+	"sync"
+	"time"
+
+	lib "github.com/bborbe/agent"
+	"github.com/bborbe/cqrs/base"
+	libtime "github.com/bborbe/time"
+	"github.com/bborbe/vault-cli/pkg/domain"
+	. "github.com/onsi/ginkgo/v2"
+	. "github.com/onsi/gomega"
+
+	"github.com/bborbe/agent-task-executor/mocks"
+	pkg "github.com/bborbe/agent-task-executor/pkg"
+	"github.com/bborbe/agent-task-executor/pkg/claim"
+	"github.com/bborbe/agent-task-executor/pkg/handler"
+)
+
+// memoryRefClient is a compare-and-swap ref store that outlives the handlers in
+// one spec, which is the point: the shared record only means something if a
+// second handler — the restarted pod — reads what the first one wrote.
+type memoryRefClient struct {
+	mu   sync.Mutex
+	refs map[string]memoryRef
+	seq  int
+}
+
+type memoryRef struct {
+	sha        string
+	leaseUntil string
+}
+
+func newMemoryRefClient() *memoryRefClient {
+	return &memoryRefClient{refs: map[string]memoryRef{}}
+}
+
+func (c *memoryRefClient) List(_ context.Context, prefix string) ([]claim.ClaimRef, error) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	out := make([]claim.ClaimRef, 0, len(c.refs))
+	for key, ref := range c.refs {
+		if !strings.HasPrefix(key, prefix) {
+			continue
+		}
+		out = append(out, claim.ClaimRef{
+			Ref:        "refs/" + key,
+			Sha:        ref.sha,
+			Cluster:    claim.SuccessRecordCluster,
+			LeaseUntil: ref.leaseUntil,
+		})
+	}
+	return out, nil
+}
+
+func (c *memoryRefClient) Put(
+	_ context.Context,
+	key string,
+	expectedSha string,
+	_ string,
+	_ string,
+	leaseUntil libtime.DateTime,
+) (string, error) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	current, exists := c.refs[key]
+	if expectedSha == "" && exists {
+		return "", claim.ErrLeaseConflict
+	}
+	if expectedSha != "" && (!exists || current.sha != expectedSha) {
+		return "", claim.ErrLeaseConflict
+	}
+	c.seq++
+	sha := "sha-" + strconv.Itoa(c.seq)
+	c.refs[key] = memoryRef{
+		sha:        sha,
+		leaseUntil: leaseUntil.Time().UTC().Format(time.RFC3339),
+	}
+	return sha, nil
+}
+
+func (c *memoryRefClient) Delete(_ context.Context, key string, expectedSha string) error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	current, exists := c.refs[key]
+	if !exists || current.sha != expectedSha {
+		return claim.ErrLeaseConflict
+	}
+	delete(c.refs, key)
+	return nil
+}
+
+var _ = Describe("the shared success record", func() {
+	var (
+		ctx                 context.Context
+		fakeSpawner         *mocks.FakeJobSpawner
+		fakeResolver        *mocks.FakeConfigResolver
+		fakeResultPublisher *mocks.FakeResultPublisher
+		fakeView            *mocks.FakeTaskView
+		currentDateTime     libtime.CurrentDateTime
+		now                 time.Time
+		refs                *memoryRefClient
+	)
+
+	// newHandler builds a handler over its OWN in-memory store, so two handlers
+	// over one refs client model a pod restart exactly: the memory is gone, the
+	// shared claim store is not.
+	newHandler := func(store *pkg.TaskStore) handler.ClaimLifecycleEventHandler {
+		return handler.NewTaskEventHandler(
+			fakeSpawner,
+			"dev",
+			base.Branch("prod"),
+			"",
+			true,
+			true,
+			fakeResolver,
+			fakeResultPublisher,
+			store,
+			currentDateTime,
+			fakeView,
+			testTaskVault,
+			handler.DefaultReconcilePassTimeout,
+			handler.DefaultReconcileInterval,
+			// Shadow, not off: the success record is built only in the modes that
+			// take a claim, and shadow takes one without ever blocking a dispatch,
+			// so the spawn path still runs when the claim machinery is absent.
+			pkg.ClaimModeShadow,
+			func() claim.ClaimRefClient { return refs },
+		)
+	}
+
+	// newHandlerWithBoth builds a handler over the supplied task store AND shared
+	// record, so a spec can seed both sides and see which one wins.
+	newHandlerWithBoth := func(
+		taskStore *pkg.TaskStore,
+		store claim.SuccessStore,
+	) handler.ClaimLifecycleEventHandler {
+		return handler.NewTaskEventHandler(
+			fakeSpawner,
+			"dev",
+			base.Branch("prod"),
+			"",
+			true,
+			true,
+			fakeResolver,
+			fakeResultPublisher,
+			taskStore,
+			currentDateTime,
+			fakeView,
+			testTaskVault,
+			handler.DefaultReconcilePassTimeout,
+			handler.DefaultReconcileInterval,
+			pkg.ClaimModeShadow,
+			func() claim.ClaimRefClient { return refs },
+			handler.WithSuccessStore(store),
+		)
+	}
+
+	// newHandlerWithStore builds a handler whose shared record is the supplied
+	// fake, so a spec can drive the store's error and hit paths directly.
+	newHandlerWithStore := func(store claim.SuccessStore) handler.ClaimLifecycleEventHandler {
+		return handler.NewTaskEventHandler(
+			fakeSpawner,
+			"dev",
+			base.Branch("prod"),
+			"",
+			true,
+			true,
+			fakeResolver,
+			fakeResultPublisher,
+			pkg.NewTaskStore(),
+			currentDateTime,
+			fakeView,
+			testTaskVault,
+			handler.DefaultReconcilePassTimeout,
+			handler.DefaultReconcileInterval,
+			pkg.ClaimModeShadow,
+			func() claim.ClaimRefClient { return refs },
+			handler.WithSuccessStore(store),
+		)
+	}
+
+	// eligibleTask mirrors the shape every other reconcile spec uses: status
+	// in_progress, a triggerable phase, an assignee, the executor's branch stage,
+	// no current_job, stamped with this executor's vault.
+	eligibleTask := func(phase domain.TaskPhase) lib.Task {
+		return lib.Task{
+			TaskIdentifier: "tid-a",
+			Vault:          testTaskVault,
+			Frontmatter: lib.TaskFrontmatter{
+				"status":   "in_progress",
+				"phase":    string(phase),
+				"assignee": "claude",
+				"stage":    "prod",
+			},
+		}
+	}
+
+	// ranTask is eligibleTask plus the Job evidence a park is about: the park
+	// answers "a Job ran here and did not move the phase", so a task with no
+	// current_job and no job_started_at has no park to make. It also carries a
+	// done result, the second half of that answer: a Job that exits 0 while
+	// reporting failure is re-driven, not parked.
+	ranTask := func(phase domain.TaskPhase) lib.Task {
+		task := eligibleTask(phase)
+		task.Frontmatter["current_job"] = "agent-tid-a"
+		task.Frontmatter["last_result_status"] = string(lib.AgentStatusDone)
+		return task
+	}
+
+	BeforeEach(func() {
+		ctx = context.Background()
+		now = time.Date(2026, 10, 28, 6, 0, 0, 0, time.UTC)
+		fakeSpawner = new(mocks.FakeJobSpawner)
+		fakeResolver = &mocks.FakeConfigResolver{}
+		fakeResolver.ResolveReturns(
+			pkg.AgentConfiguration{Assignee: "claude", Image: "my-image:latest"},
+			nil,
+		)
+		fakeResultPublisher = &mocks.FakeResultPublisher{}
+		fakeView = &mocks.FakeTaskView{}
+		fakeView.ReadyReturns(true)
+		fakeView.SnapshotReturns(nil)
+		fakeView.GetReturns(lib.Task{}, false)
+		currentDateTime = libtime.NewCurrentDateTime()
+		currentDateTime.SetNow(libtime.DateTime(now))
+		refs = newMemoryRefClient()
+	})
+
+	It("parks a re-spawn from a fresh store after a restart", func() {
+		// SC2's restart half. A per-pod map returns "never succeeded" on a new
+		// instance, so an in-memory-only record re-opens the duplicate on every
+		// deploy. The record is written by the pod that ran the Job and read by the
+		// pod that replaced it — and because the park is what fires past the grace,
+		// reaching it at all proves the read came from the shared store.
+		first := newHandler(pkg.NewTaskStore())
+		first.ReleaseTaskClaimAfterSuccess(
+			ctx, "tid-a", "execution", now.Add(-2*time.Hour),
+		)
+
+		restarted := newHandler(pkg.NewTaskStore())
+		fakeView.SnapshotReturns([]lib.Task{ranTask(domain.TaskPhaseExecution)})
+		fakeView.GetReturns(ranTask(domain.TaskPhaseExecution), true)
+		fakeSpawner.IsJobActiveReturns(false, nil)
+
+		Expect(restarted.ReconcileOnce(ctx)).To(BeNil())
+		Expect(fakeSpawner.SpawnJobCallCount()).To(Equal(0))
+		Expect(fakeResultPublisher.PublishParkSucceededCallCount()).To(Equal(1))
+	})
+
+	It("parks after the pod rewrites trigger_scope and job_started_at", func() {
+		// SC2's rewrite half. The agent pods rewrite the frontmatter from a
+		// snapshot taken at the start of their run, so trigger_scope and
+		// job_started_at come back at their pre-spawn values. A record that lived
+		// in either field would read as "not yet run" and spawn again.
+		first := newHandler(pkg.NewTaskStore())
+		first.ReleaseTaskClaimAfterSuccess(
+			ctx, "tid-a", "execution", now.Add(-2*time.Hour),
+		)
+
+		rewritten := eligibleTask(domain.TaskPhaseExecution)
+		rewritten.Frontmatter["trigger_scope"] = "planning:"
+		rewritten.Frontmatter["job_started_at"] = "2026-10-21T05:00:00Z"
+		// A done result is the second half of the park's answer; a Job that exits
+		// 0 while reporting failure is re-driven instead.
+		rewritten.Frontmatter["last_result_status"] = string(lib.AgentStatusDone)
+
+		restarted := newHandler(pkg.NewTaskStore())
+		fakeView.SnapshotReturns([]lib.Task{rewritten})
+		fakeView.GetReturns(rewritten, true)
+		fakeSpawner.IsJobActiveReturns(false, nil)
+
+		Expect(restarted.ReconcileOnce(ctx)).To(BeNil())
+		Expect(fakeSpawner.SpawnJobCallCount()).To(Equal(0))
+		Expect(fakeResultPublisher.PublishParkSucceededCallCount()).To(Equal(1))
+	})
+
+	It("does not suppress a restart's first pass when no record was written", func() {
+		// The control for both specs above: the same fresh-store handler spawns
+		// when the shared store holds nothing, so a pass cannot be green because
+		// the guard refuses everything.
+		restarted := newHandler(pkg.NewTaskStore())
+		fakeView.SnapshotReturns([]lib.Task{eligibleTask(domain.TaskPhaseExecution)})
+		fakeSpawner.IsJobActiveReturns(false, nil)
+
+		Expect(restarted.ReconcileOnce(ctx)).To(BeNil())
+		Expect(fakeSpawner.SpawnJobCallCount()).To(Equal(1))
+	})
+
+	It("releases the suppression when the phase changed since the success", func() {
+		// SC3's negative control through the shared record: a success at planning
+		// says nothing about execution, so the restarted pod must spawn.
+		first := newHandler(pkg.NewTaskStore())
+		first.ReleaseTaskClaimAfterSuccess(
+			ctx, "tid-a", "planning", now.Add(-2*time.Hour),
+		)
+
+		restarted := newHandler(pkg.NewTaskStore())
+		fakeView.SnapshotReturns([]lib.Task{eligibleTask(domain.TaskPhaseExecution)})
+		fakeSpawner.IsJobActiveReturns(false, nil)
+
+		Expect(restarted.ReconcileOnce(ctx)).To(BeNil())
+		Expect(fakeSpawner.SpawnJobCallCount()).To(Equal(1))
+	})
+
+	It("does not suppress a run whose agent published a failed result", func() {
+		// A failed run still exits 0, so the Job watcher records a success for it
+		// and the suppression path sees only the success. Suppressing there hides
+		// the failure for the whole grace and then hands the task to the re-drive
+		// path, so the executor's view of a failed run is a success at every step.
+		// last_result_status is the agent's own verdict, carried in the same write
+		// that carries the phase, and it outranks the success record.
+		store := new(mocks.FakeSuccessStore)
+		store.SnapshotReturns(
+			map[string]map[string]libtime.DateTime{
+				"tid-a": {"execution": libtime.DateTime(now.Add(-1 * time.Minute))},
+			},
+			nil,
+		)
+
+		failed := ranTask(domain.TaskPhaseExecution)
+		failed.Frontmatter["last_result_status"] = string(lib.AgentStatusFailed)
+		fakeView.SnapshotReturns([]lib.Task{failed})
+		fakeView.GetReturns(failed, true)
+		fakeSpawner.IsJobActiveReturns(false, nil)
+
+		Expect(newHandlerWithStore(store).ReconcileOnce(ctx)).To(BeNil())
+		Expect(fakeSpawner.SpawnJobCallCount()).To(Equal(1))
+	})
+
+	It("names an absent result status instead of deciding on it silently", func() {
+		// The field is not something an agent is obliged to write, and the
+		// executor itself clears it at spawn, so absence is ordinary — but it is
+		// not a verdict, and an operator reading a re-drive cannot tell "this
+		// agent never wrote the field" from "this agent reported a failure". The
+		// counter is the machine-readable half of that naming; the log line is
+		// the other.
+		store := new(mocks.FakeSuccessStore)
+		store.SnapshotReturns(
+			map[string]map[string]libtime.DateTime{
+				"tid-a": {"execution": libtime.DateTime(now.Add(-1 * time.Minute))},
+			},
+			nil,
+		)
+
+		absent := ranTask(domain.TaskPhaseExecution)
+		delete(absent.Frontmatter, "last_result_status")
+		fakeView.SnapshotReturns([]lib.Task{absent})
+		fakeView.GetReturns(absent, true)
+		fakeSpawner.IsJobActiveReturns(false, nil)
+
+		before := ghostTaskEvents("absent_result_status")
+		Expect(newHandlerWithStore(store).ReconcileOnce(ctx)).To(BeNil())
+		Expect(ghostTaskEvents("absent_result_status")).To(Equal(before + 1))
+	})
+
+	It("does not name an absent result status when the agent wrote a verdict", func() {
+		// The control for the spec above: a done result must not increment the
+		// counter, or the event fires on every successful run and stops meaning
+		// "this agent omitted the field".
+		store := new(mocks.FakeSuccessStore)
+		store.SnapshotReturns(
+			map[string]map[string]libtime.DateTime{
+				"tid-a": {"execution": libtime.DateTime(now.Add(-1 * time.Minute))},
+			},
+			nil,
+		)
+
+		done := ranTask(domain.TaskPhaseExecution)
+		fakeView.SnapshotReturns([]lib.Task{done})
+		fakeView.GetReturns(done, true)
+		fakeSpawner.IsJobActiveReturns(false, nil)
+
+		before := ghostTaskEvents("absent_result_status")
+		Expect(newHandlerWithStore(store).ReconcileOnce(ctx)).To(BeNil())
+		Expect(ghostTaskEvents("absent_result_status")).To(Equal(before))
+	})
+
+	It("still suppresses a done result inside the grace", func() {
+		// The control for the spec above: a done result at the same age and the
+		// same shared record must still be suppressed, so the bypass cannot be
+		// green because the guard refuses everything.
+		store := new(mocks.FakeSuccessStore)
+		store.SnapshotReturns(
+			map[string]map[string]libtime.DateTime{
+				"tid-a": {"execution": libtime.DateTime(now.Add(-1 * time.Minute))},
+			},
+			nil,
+		)
+
+		fakeView.SnapshotReturns([]lib.Task{ranTask(domain.TaskPhaseExecution)})
+		fakeView.GetReturns(ranTask(domain.TaskPhaseExecution), true)
+		fakeSpawner.IsJobActiveReturns(false, nil)
+
+		Expect(newHandlerWithStore(store).ReconcileOnce(ctx)).To(BeNil())
+		Expect(fakeSpawner.SpawnJobCallCount()).To(Equal(0))
+	})
+
+	It("parks from a shared record when the pod's memory is empty", func() {
+		// The read path itself, with no ref client in play: a store that answers
+		// with a completion at the task's phase suppresses the spawn — by parking,
+		// since a non-recurring record past the grace is a human's to look at.
+		store := new(mocks.FakeSuccessStore)
+		// Inside a reconcile pass the read is the pass snapshot, not Lookup.
+		store.SnapshotReturns(
+			map[string]map[string]libtime.DateTime{
+				"tid-a": {"execution": libtime.DateTime(now.Add(-2 * time.Hour))},
+			},
+			nil,
+		)
+
+		fakeView.SnapshotReturns([]lib.Task{ranTask(domain.TaskPhaseExecution)})
+		fakeView.GetReturns(ranTask(domain.TaskPhaseExecution), true)
+		fakeSpawner.IsJobActiveReturns(false, nil)
+
+		Expect(newHandlerWithStore(store).ReconcileOnce(ctx)).To(BeNil())
+		Expect(fakeSpawner.SpawnJobCallCount()).To(Equal(0))
+		Expect(fakeResultPublisher.PublishParkSucceededCallCount()).To(Equal(1))
+	})
+
+	It("falls back to memory when the shared read fails", func() {
+		// A store that cannot be read is not evidence either way. Suppressing on a
+		// failed read would strand a task behind an unreachable store, so the guard
+		// behaves exactly as it did before the record existed.
+		store := new(mocks.FakeSuccessStore)
+		store.SnapshotReturns(nil, stderrors.New("git-rest down"))
+
+		fakeView.SnapshotReturns([]lib.Task{eligibleTask(domain.TaskPhaseExecution)})
+		fakeSpawner.IsJobActiveReturns(false, nil)
+
+		Expect(newHandlerWithStore(store).ReconcileOnce(ctx)).To(BeNil())
+		Expect(fakeSpawner.SpawnJobCallCount()).To(Equal(1))
+	})
+
+	It("retries a failed pass snapshot so one timeout does not blind the guard", func() {
+		// The 2026-11-14 nuke-dev failure. A restarted pod has no memory of its
+		// own, so when the `claims/success/` prefix listing failed the guard read
+		// "never succeeded" for a task it had just run — and spawned it again,
+		// which is the duplicate the success record exists to prevent. One retry
+		// recovers the transient shape (a git-rest restart, a mirror rebuilding),
+		// so the record is found and the task is parked rather than re-run.
+		store := new(mocks.FakeSuccessStore)
+		calls := 0
+		store.SnapshotStub = func(_ context.Context) (map[string]map[string]libtime.DateTime, error) {
+			calls++
+			if calls == 1 {
+				return nil, stderrors.New("git-rest restarting")
+			}
+			return map[string]map[string]libtime.DateTime{
+				"tid-a": {"execution": libtime.DateTime(now.Add(-2 * time.Hour))},
+			}, nil
+		}
+
+		fakeView.SnapshotReturns([]lib.Task{ranTask(domain.TaskPhaseExecution)})
+		fakeView.GetReturns(ranTask(domain.TaskPhaseExecution), true)
+		fakeSpawner.IsJobActiveReturns(false, nil)
+
+		Expect(newHandlerWithStore(store).ReconcileOnce(ctx)).To(BeNil())
+		Expect(store.SnapshotCallCount()).To(Equal(2))
+		Expect(fakeSpawner.SpawnJobCallCount()).To(Equal(0))
+		Expect(fakeResultPublisher.PublishParkSucceededCallCount()).To(Equal(1))
+	})
+
+	It("uses a newer shared record over a stale memory one", func() {
+		// The multi-cluster case the shared record exists for. This pod cached the
+		// completion it saw; a peer recorded a newer success at the same phase. On a
+		// memory-only read the cached older completion is what the cadence is
+		// measured against, so a weekly task that succeeded a minute ago looks eight
+		// days stale and the peer's work is spawned a second time. The later
+		// completion has to win.
+		store := new(mocks.FakeSuccessStore)
+		store.SnapshotReturns(
+			map[string]map[string]libtime.DateTime{
+				"tid-a": {"execution": libtime.DateTime(now.Add(-1 * time.Minute))},
+			},
+			nil,
+		)
+
+		taskStore := pkg.NewTaskStore()
+		taskStore.MarkSucceeded("tid-a", "execution", now.Add(-8*24*time.Hour))
+
+		task := eligibleTask(domain.TaskPhaseExecution)
+		task.Frontmatter["recurring"] = "weekly"
+
+		fakeView.SnapshotReturns([]lib.Task{task})
+		fakeView.GetReturns(task, true)
+		fakeSpawner.IsJobActiveReturns(false, nil)
+
+		Expect(newHandlerWithBoth(taskStore, store).ReconcileOnce(ctx)).To(BeNil())
+		Expect(fakeSpawner.SpawnJobCallCount()).To(Equal(0))
+		Expect(fakeResultPublisher.PublishParkSucceededCallCount()).To(Equal(0))
+	})
+
+	It("releases a recurring task once its cadence elapsed, across a restart", func() {
+		// The cadence release must survive the restart too, or a recurring task
+		// whose record is shared is suppressed on every new pod for good. It is
+		// released, never parked: a recurring task's phase does not advance between
+		// occurrences, so a park would send a human to the same record every run.
+		first := newHandler(pkg.NewTaskStore())
+		first.ReleaseTaskClaimAfterSuccess(
+			ctx, "tid-a", "execution", now.Add(-8*24*time.Hour),
+		)
+
+		task := eligibleTask(domain.TaskPhaseExecution)
+		task.Frontmatter["recurring"] = "weekly"
+
+		restarted := newHandler(pkg.NewTaskStore())
+		fakeView.SnapshotReturns([]lib.Task{task})
+		fakeView.GetReturns(task, true)
+		fakeSpawner.IsJobActiveReturns(false, nil)
+
+		Expect(restarted.ReconcileOnce(ctx)).To(BeNil())
+		Expect(fakeSpawner.SpawnJobCallCount()).To(Equal(1))
+		Expect(fakeResultPublisher.PublishParkSucceededCallCount()).To(Equal(0))
+	})
+})

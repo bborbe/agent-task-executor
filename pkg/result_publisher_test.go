@@ -7,6 +7,8 @@ package pkg_test
 import (
 	"context"
 	"encoding/json"
+	stderrors "errors"
+	"strings"
 
 	"github.com/IBM/sarama"
 	lib "github.com/bborbe/agent"
@@ -17,9 +19,11 @@ import (
 	libtime "github.com/bborbe/time"
 	libtimetest "github.com/bborbe/time/test"
 	"github.com/bborbe/vault-cli/pkg/domain"
+	"github.com/google/uuid"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 	"github.com/prometheus/client_golang/prometheus/testutil"
+	corev1 "k8s.io/api/core/v1"
 
 	"github.com/bborbe/agent-task-executor/mocks"
 	"github.com/bborbe/agent-task-executor/pkg"
@@ -170,11 +174,12 @@ var _ = Describe("ResultPublisher", func() {
 			base.TopicPrefix("develop"),
 			currentDateTime,
 			nil,
+			nil,
 		)
 	})
 
 	Describe("PublishSpawnNotification", func() {
-		It("sends exactly three keys via UpdateFrontmatterCommand", func() {
+		It("sends exactly four keys via UpdateFrontmatterCommand", func() {
 			task := lib.Task{
 				TaskIdentifier: lib.TaskIdentifier("test-task-1"),
 				Frontmatter: lib.TaskFrontmatter{
@@ -185,18 +190,36 @@ var _ = Describe("ResultPublisher", func() {
 				},
 				Content: lib.TaskContent("do the work"),
 			}
-			err := publisher.PublishSpawnNotification(ctx, task, "claude-20260418120000")
+			err := publisher.PublishSpawnNotification(
+				ctx,
+				task,
+				"claude-20260418120000",
+				"11111111-2222-3333-4444-555555555555",
+			)
 			Expect(err).NotTo(HaveOccurred())
 
 			Expect(producer.messages).To(HaveLen(1))
 			operation, cmd := decodeUpdateFrontmatterCommand(producer.messages[0])
 
 			Expect(string(operation)).To(Equal(string(taskcmd.UpdateFrontmatterCommandOperation)))
-			Expect(cmd.Updates).To(HaveLen(3))
+			Expect(cmd.Updates).To(HaveLen(5))
 
 			Expect(cmd.Updates["spawn_notification"]).To(Equal(true))
 			Expect(cmd.Updates["current_job"]).To(Equal("claude-20260418120000"))
 			Expect(cmd.Updates["job_started_at"]).To(Equal("2026-04-18T12:00:00Z"))
+			// Cleared so the park gate reads THIS run's result, not the previous
+			// one's — an agent that fails with an empty Output publishes no
+			// frontmatter, and the controller's on-disk-first merge would keep a
+			// stale `done`.
+			Expect(cmd.Updates).To(HaveKey("last_result_status"))
+			Expect(cmd.Updates["last_result_status"]).To(Equal(""))
+			Expect(cmd.Updates["claude_session_id"]).To(
+				Equal("11111111-2222-3333-4444-555555555555"),
+			)
+			recordedSessionID, ok := cmd.Updates["claude_session_id"].(string)
+			Expect(ok).To(BeTrue())
+			_, parseErr := uuid.Parse(recordedSessionID)
+			Expect(parseErr).NotTo(HaveOccurred())
 
 			_, hasTriggerCount := cmd.Updates["trigger_count"]
 			Expect(hasTriggerCount).To(BeFalse(), "trigger_count must not be in spawn notification")
@@ -250,6 +273,7 @@ var _ = Describe("ResultPublisher", func() {
 					task,
 					"claude-20260418120000",
 					"pod OOM killed",
+					nil,
 				)
 				Expect(err).NotTo(HaveOccurred())
 
@@ -294,6 +318,110 @@ var _ = Describe("ResultPublisher", func() {
 		)
 	})
 
+	Describe("PublishStoreMissFailure", func() {
+		// A failure section under a terminal status reads as a status change that
+		// never happened, so this path states its own reason for existing. The
+		// four clauses are the ones a later reader needs, and each is asserted
+		// separately so dropping one fails here rather than in the field.
+		It("states why a record that was already terminal carries a failure", func() {
+			task := lib.Task{
+				TaskIdentifier: lib.TaskIdentifier("test-task-3"),
+				Frontmatter: lib.TaskFrontmatter{
+					"status":   "completed",
+					"phase":    "done",
+					"assignee": "github-update-go-agent",
+				},
+				Content: lib.TaskContent("update go"),
+			}
+			err := publisher.PublishStoreMissFailure(
+				ctx,
+				task,
+				"github-update-go-agent-ad12e9fb-20261028065801",
+				"pod_crash_no_stdout",
+			)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(producer.messages).To(HaveLen(2))
+
+			_, updateCmd := decodeUpdateFrontmatterCommand(producer.messages[0])
+			Expect(updateCmd.Body.Heading).To(Equal("## Failure"))
+			section := updateCmd.Body.Section
+			Expect(section).To(ContainSubstring("pod_crash_no_stdout"))
+			Expect(section).To(
+				ContainSubstring("had already reached its terminal status"),
+				"the entry must say the record was already terminal",
+			)
+			Expect(section).To(
+				ContainSubstring("The Job crashed before producing any output"),
+				"the entry must say the job crashed",
+			)
+			Expect(section).To(
+				ContainSubstring("would otherwise be silent"),
+				"the entry must say why it exists",
+			)
+			Expect(section).To(
+				ContainSubstring("The status above is unchanged"),
+				"the entry must say the status did not change",
+			)
+
+			// The note is scoped to this path: the store-hit failure must not
+			// claim the record was already terminal.
+			err = publisher.PublishFailure(
+				ctx,
+				task,
+				"github-update-go-agent-00000000000000",
+				"pod_crash_no_stdout",
+				nil,
+			)
+			Expect(err).NotTo(HaveOccurred())
+			_, hitCmd := decodeUpdateFrontmatterCommand(producer.messages[2])
+			Expect(hitCmd.Body.Section).NotTo(ContainSubstring("The status above is unchanged"))
+		})
+
+		// The full note is true only of the crash class. A deadline_exceeded or
+		// pod_oom_killed Job reaches this path too and may well have produced
+		// output, and a store evicted by a restart can leave the record still
+		// in_progress — so the note must not assert a crash or a terminal record
+		// for those reasons.
+		It("claims only what the path guarantees for a non-crash reason", func() {
+			task := lib.Task{
+				TaskIdentifier: lib.TaskIdentifier("test-task-4"),
+				Frontmatter: lib.TaskFrontmatter{
+					"status":   "in_progress",
+					"phase":    "planning",
+					"assignee": "github-update-go-agent",
+				},
+				Content: lib.TaskContent("update go"),
+			}
+			err := publisher.PublishStoreMissFailure(
+				ctx,
+				task,
+				"github-update-go-agent-e009d201-20261028140856",
+				"deadline_exceeded",
+			)
+			Expect(err).NotTo(HaveOccurred())
+
+			_, updateCmd := decodeUpdateFrontmatterCommand(producer.messages[0])
+			section := updateCmd.Body.Section
+			Expect(section).To(ContainSubstring("deadline_exceeded"))
+			Expect(section).To(
+				ContainSubstring("was not in the executor's in-memory store"),
+				"the entry must say why it exists",
+			)
+			Expect(section).To(
+				ContainSubstring("The status above is unchanged"),
+				"the entry must say the status did not change",
+			)
+			Expect(section).NotTo(
+				ContainSubstring("had already reached its terminal status"),
+				"a non-crash store miss must not claim the record was already terminal",
+			)
+			Expect(section).NotTo(
+				ContainSubstring("crashed before producing any output"),
+				"a non-crash store miss must not claim the Job produced no output",
+			)
+		})
+	})
+
 	Describe("PublishFailure trigger cap", func() {
 		// The cap is armed only for the crash class, and only when the key is
 		// absent. Both halves are load-bearing: arming it for every class would
@@ -316,6 +444,7 @@ var _ = Describe("ResultPublisher", func() {
 				task,
 				"claude-20260418120000",
 				"pod_crash_no_stdout",
+				nil,
 			)
 			Expect(err).NotTo(HaveOccurred())
 			Expect(producer.messages).To(HaveLen(2))
@@ -345,6 +474,7 @@ var _ = Describe("ResultPublisher", func() {
 					task,
 					"claude-20260418120000",
 					"pod_crash_no_stdout (Error/1)",
+					nil,
 				)
 				Expect(err).NotTo(HaveOccurred())
 
@@ -363,7 +493,9 @@ var _ = Describe("ResultPublisher", func() {
 					},
 					Content: lib.TaskContent("do the work"),
 				}
-				err := publisher.PublishFailure(ctx, task, "claude-20260418120000", reason)
+				err := publisher.PublishFailure(ctx, task, "claude-20260418120000", reason,
+					nil,
+				)
 				Expect(err).NotTo(HaveOccurred())
 
 				_, updateCmd := decodeUpdateFrontmatterCommand(producer.messages[0])
@@ -380,7 +512,98 @@ var _ = Describe("ResultPublisher", func() {
 			Entry("type_mismatch", "type_mismatch"),
 			Entry("unknown reason", "something nobody classified"),
 			Entry("empty reason", ""),
+			Entry("deadline_exceeded with no pod", "deadline_exceeded"),
 		)
+
+		It("arms the cap when the sweeper classified the pod as never scheduled", func() {
+			// pod_not_scheduled is the only signal that survives: the Job controller
+			// deletes the pod one second BEFORE it stamps DeadlineExceeded, so the
+			// deadline path can never read the pod state it would need.
+			task := lib.Task{
+				TaskIdentifier: lib.TaskIdentifier("test-task-pod-not-scheduled"),
+				Frontmatter: lib.TaskFrontmatter{
+					"status": "in_progress",
+				},
+				Content: lib.TaskContent("do the work"),
+			}
+			err := publisher.PublishFailure(
+				ctx, task, "claude-20260418120000", "pod_not_scheduled", nil)
+			Expect(err).NotTo(HaveOccurred())
+
+			_, updateCmd := decodeUpdateFrontmatterCommand(producer.messages[0])
+			Expect(updateCmd.Updates).To(HaveLen(2))
+			Expect(updateCmd.Updates["current_job"]).To(Equal(""))
+			Expect(updateCmd.Updates["max_triggers"]).To(BeNumerically("==", 3))
+		})
+
+		It("does not arm a deadline kill, whose pod is already gone", func() {
+			// Arming on the bare reason would cap every task that legitimately ran
+			// to its deadline, and the pod it would discriminate on is deleted before
+			// the condition is stamped.
+			task := lib.Task{
+				TaskIdentifier: lib.TaskIdentifier("test-task-deadline-ran"),
+				Frontmatter: lib.TaskFrontmatter{
+					"status": "in_progress",
+				},
+				Content: lib.TaskContent("do the work"),
+			}
+			pod := &corev1.Pod{
+				Status: corev1.PodStatus{
+					Phase: corev1.PodPending,
+					Conditions: []corev1.PodCondition{
+						{Type: corev1.PodScheduled, Status: corev1.ConditionFalse},
+					},
+				},
+			}
+			err := publisher.PublishFailure(
+				ctx, task, "claude-20260418120000", "deadline_exceeded", pod)
+			Expect(err).NotTo(HaveOccurred())
+
+			_, updateCmd := decodeUpdateFrontmatterCommand(producer.messages[0])
+			Expect(updateCmd.Updates).To(HaveLen(1))
+			Expect(updateCmd.Updates["current_job"]).To(Equal(""))
+			_, hasMax := updateCmd.Updates["max_triggers"]
+			Expect(hasMax).To(BeFalse(), "a deadline kill must not arm the cap")
+		})
+
+		It("preserves an operator-set max_triggers on the never-scheduled path", func() {
+			task := lib.Task{
+				TaskIdentifier: lib.TaskIdentifier("test-task-pod-not-scheduled-operator-cap"),
+				Frontmatter: lib.TaskFrontmatter{
+					"status":       "in_progress",
+					"max_triggers": 5,
+				},
+				Content: lib.TaskContent("do the work"),
+			}
+			err := publisher.PublishFailure(
+				ctx, task, "claude-20260418120000", "pod_not_scheduled", nil)
+			Expect(err).NotTo(HaveOccurred())
+
+			_, updateCmd := decodeUpdateFrontmatterCommand(producer.messages[0])
+			Expect(updateCmd.Updates).To(HaveLen(1))
+			_, hasMax := updateCmd.Updates["max_triggers"]
+			Expect(hasMax).To(BeFalse(), "an operator budget of 5 must not be lowered to 3")
+		})
+
+		It("logs the never-scheduled arm distinctly", func() {
+			task := lib.Task{
+				TaskIdentifier: lib.TaskIdentifier("test-task-pod-not-scheduled-log-arm"),
+				Frontmatter: lib.TaskFrontmatter{
+					"status": "in_progress",
+				},
+				Content: lib.TaskContent("do the work"),
+			}
+			out := captureGlogStderr(func() {
+				err := publisher.PublishFailure(
+					ctx, task, "claude-20260418120000", "pod_not_scheduled", nil)
+				Expect(err).NotTo(HaveOccurred())
+			})
+
+			Expect(out).To(ContainSubstring("event=crash_arm_decision "))
+			Expect(out).To(ContainSubstring(`parsed="pod_not_scheduled"`))
+			Expect(out).To(ContainSubstring("decision=arm"))
+			Expect(out).To(ContainSubstring("task=test-task-pod-not-scheduled-log-arm"))
+		})
 
 		It("preserves an operator-set max_triggers instead of clobbering it", func() {
 			task := lib.Task{
@@ -397,6 +620,7 @@ var _ = Describe("ResultPublisher", func() {
 				task,
 				"claude-20260418120000",
 				"pod_crash_no_stdout",
+				nil,
 			)
 			Expect(err).NotTo(HaveOccurred())
 
@@ -404,6 +628,121 @@ var _ = Describe("ResultPublisher", func() {
 			Expect(updateCmd.Updates).To(HaveLen(1))
 			_, hasMax := updateCmd.Updates["max_triggers"]
 			Expect(hasMax).To(BeFalse(), "a deliberate budget of 6 must not become 3")
+		})
+
+		It("leaves max_triggers alone when the key is present but unknown (nil)", func() {
+			// The job watcher publishes a failure for a task that has left its
+			// store with max_triggers present but nil: the real value is unknown,
+			// and writing the default could lower an operator-set cap.
+			task := lib.Task{
+				TaskIdentifier: lib.TaskIdentifier("test-task-store-miss"),
+				Frontmatter:    lib.TaskFrontmatter{"max_triggers": nil},
+			}
+			err := publisher.PublishFailure(
+				ctx,
+				task,
+				"claude-20260418120000",
+				"pod_crash_no_stdout (ContainerStatusUnknown/137)",
+				nil,
+			)
+			Expect(err).NotTo(HaveOccurred())
+
+			_, updateCmd := decodeUpdateFrontmatterCommand(producer.messages[0])
+			Expect(updateCmd.Updates).To(HaveLen(1))
+			Expect(updateCmd.Updates["current_job"]).To(Equal(""))
+		})
+
+		// A record that reaches the controller without max_triggers is
+		// indistinguishable from one whose class never matched, so the log line
+		// has to carry the inputs the decision tested rather than its verdict.
+		// These two specs are what pin that: the early return names the cached
+		// value it saw, and the arming path names the absence it acted on.
+		It("logs the values it tested when it returns early on an already-present max_triggers",
+			func() {
+				task := lib.Task{
+					TaskIdentifier: lib.TaskIdentifier("test-task-log-early-return"),
+					Frontmatter: lib.TaskFrontmatter{
+						"status":       "in_progress",
+						"max_triggers": 6,
+					},
+					Content: lib.TaskContent("do the work"),
+				}
+
+				out := captureGlogStderr(func() {
+					err := publisher.PublishFailure(
+						ctx, task, "pr-reviewer-agent-1234", "pod_crash_no_stdout",
+						nil,
+					)
+					Expect(err).NotTo(HaveOccurred())
+				})
+
+				Expect(out).To(ContainSubstring("event=crash_arm_decision task="))
+				Expect(out).To(ContainSubstring("decision=max_triggers_already_present"))
+				Expect(out).To(ContainSubstring("task=test-task-log-early-return"))
+				Expect(out).To(ContainSubstring("job=pr-reviewer-agent-1234"))
+				Expect(out).To(ContainSubstring(`reason="pod_crash_no_stdout"`))
+				Expect(out).To(ContainSubstring(`parsed="pod_crash_no_stdout"`))
+				Expect(out).To(ContainSubstring("parsed_ok=true"))
+				Expect(out).To(ContainSubstring("cached_max_triggers=6"))
+				// Exactly once, so a doubled log call or a second emitting path
+				// cannot pass on presence alone.
+				Expect(strings.Count(out, "event=crash_arm_decision ")).To(Equal(1))
+			},
+		)
+
+		It("logs the tested values on the arming path too", func() {
+			task := lib.Task{
+				TaskIdentifier: lib.TaskIdentifier("test-task-log-arm"),
+				Frontmatter: lib.TaskFrontmatter{
+					"status": "in_progress",
+				},
+				Content: lib.TaskContent("do the work"),
+			}
+
+			out := captureGlogStderr(func() {
+				err := publisher.PublishFailure(
+					ctx, task, "pr-reviewer-agent-5678", "pod_crash_no_stdout",
+					nil,
+				)
+				Expect(err).NotTo(HaveOccurred())
+			})
+
+			Expect(out).To(ContainSubstring("event=crash_arm_decision task="))
+			Expect(out).To(ContainSubstring("decision=arm cached_max_triggers=<absent>"))
+			Expect(out).To(ContainSubstring("task=test-task-log-arm"))
+			// Leading space anchors the field boundary: without it this is also a
+			// substring of "cached_max_triggers=3" and would silently start
+			// accepting the early-return branch if the line above were removed.
+			Expect(out).To(ContainSubstring(" max_triggers=3"))
+			Expect(strings.Count(out, "event=crash_arm_decision ")).To(Equal(1))
+		})
+
+		It("logs a rejected class with its parsed value so a miss is not silent", func() {
+			task := lib.Task{
+				TaskIdentifier: lib.TaskIdentifier("test-task-log-other-class"),
+				Frontmatter: lib.TaskFrontmatter{
+					"status": "in_progress",
+				},
+				Content: lib.TaskContent("do the work"),
+			}
+
+			out := captureGlogStderr(func() {
+				err := publisher.PublishFailure(
+					ctx, task, "pr-reviewer-agent-9999", "pod_oom_killed (OOMKilled/137)",
+					nil,
+				)
+				Expect(err).NotTo(HaveOccurred())
+			})
+
+			Expect(out).To(ContainSubstring("event=crash_arm_decision task="))
+			Expect(out).To(ContainSubstring("decision=not_crash_class"))
+			// Both the raw and the parsed form, which is the distinction this
+			// spec exists to pin: the suffixed reason must classify, and the line
+			// must still show what actually arrived.
+			Expect(out).To(ContainSubstring(`reason="pod_oom_killed (OOMKilled/137)"`))
+			Expect(out).To(ContainSubstring(`parsed="pod_oom_killed"`))
+			Expect(out).To(ContainSubstring("parsed_ok=true"))
+			Expect(strings.Count(out, "event=crash_arm_decision ")).To(Equal(1))
 		})
 	})
 
@@ -417,11 +756,15 @@ var _ = Describe("ResultPublisher", func() {
 				Content: lib.TaskContent("do the work"),
 			}
 
-			err := publisher.PublishFailure(ctx, task, "claude-20260418120000", "pod OOM killed")
+			err := publisher.PublishFailure(ctx, task, "claude-20260418120000", "pod OOM killed",
+				nil,
+			)
 			Expect(err).NotTo(HaveOccurred())
 			Expect(producer.messages).To(HaveLen(2))
 
-			err = publisher.PublishFailure(ctx, task, "claude-20260418120000", "pod OOM killed")
+			err = publisher.PublishFailure(ctx, task, "claude-20260418120000", "pod OOM killed",
+				nil,
+			)
 			Expect(err).NotTo(HaveOccurred())
 			Expect(producer.messages).To(HaveLen(2), "second call should be deduped")
 		})
@@ -437,6 +780,7 @@ var _ = Describe("ResultPublisher", func() {
 					partialProducer,
 					base.TopicPrefix("develop"),
 					currentDateTime,
+					nil,
 					nil,
 				)
 
@@ -454,6 +798,7 @@ var _ = Describe("ResultPublisher", func() {
 					task,
 					"claude-20260418120000",
 					"pod OOM killed",
+					nil,
 				)
 				Expect(err).To(HaveOccurred())
 				Expect(err.Error()).To(ContainSubstring("trigger_count increment"))
@@ -471,6 +816,7 @@ var _ = Describe("ResultPublisher", func() {
 					task,
 					"claude-20260418120000",
 					"pod OOM killed",
+					nil,
 				)
 				Expect(err).To(HaveOccurred())
 				Expect(
@@ -495,6 +841,7 @@ var _ = Describe("ResultPublisher", func() {
 					task,
 					"claude-20260418120000",
 					"pod OOM killed",
+					nil,
 				)
 				Expect(err).NotTo(HaveOccurred())
 				Expect(producer.messages).To(HaveLen(2))
@@ -507,6 +854,7 @@ var _ = Describe("ResultPublisher", func() {
 					task,
 					"claude-20260418120000",
 					"pod OOM killed",
+					nil,
 				)
 				Expect(err).NotTo(HaveOccurred())
 				Expect(
@@ -528,6 +876,7 @@ var _ = Describe("ResultPublisher", func() {
 					base.TopicPrefix("develop"),
 					currentDateTime,
 					nil,
+					nil,
 				)
 
 				task := lib.Task{
@@ -543,6 +892,7 @@ var _ = Describe("ResultPublisher", func() {
 					task,
 					"claude-20260418120000",
 					"pod OOM killed",
+					nil,
 				)
 				Expect(err).To(HaveOccurred())
 				Expect(err.Error()).To(ContainSubstring("zombie failure update"))
@@ -556,6 +906,7 @@ var _ = Describe("ResultPublisher", func() {
 					task,
 					"claude-20260418120000",
 					"pod OOM killed",
+					nil,
 				)
 				Expect(err).To(HaveOccurred())
 				Expect(
@@ -632,6 +983,7 @@ var _ = Describe("ResultPublisher", func() {
 				failingProducer,
 				base.TopicPrefix("develop"),
 				currentDateTime,
+				nil,
 				nil,
 			)
 			task := lib.Task{
@@ -739,6 +1091,64 @@ var _ = Describe("ResultPublisher", func() {
 		)
 	})
 
+	Describe("PublishParkSucceeded", func() {
+		It(
+			"closes the record with status completed and phase done, and a ## Parked section",
+			func() {
+				// The park's whole effect is the terminal pair: status completed is
+				// what every reader treats as finished, and phase done is what takes
+				// the record out of the executor's drive set. Writing human_review
+				// here instead left finished work in the open population — measured
+				// 2026-11-13, 35 of 55 open private-agent records were
+				// parked_succeeded sitting at human_review. Every watcher-side spec
+				// asserts only that the publisher was called, so this one is the only
+				// place a wrong key or value can be caught.
+				task := lib.Task{
+					TaskIdentifier: lib.TaskIdentifier("test-task-parked"),
+					Frontmatter: lib.TaskFrontmatter{
+						"status":       "in_progress",
+						"phase":        "execution",
+						"assignee":     "claude",
+						"current_job":  "job-1",
+						"target_vault": "work",
+					},
+				}
+				err := publisher.PublishParkSucceeded(ctx, task)
+				Expect(err).NotTo(HaveOccurred())
+
+				Expect(producer.messages).To(HaveLen(1))
+				operation, cmd := decodeUpdateFrontmatterCommand(producer.messages[0])
+
+				Expect(
+					string(operation),
+				).To(Equal(string(taskcmd.UpdateFrontmatterCommandOperation)))
+				Expect(cmd.TaskIdentifier).To(Equal(lib.TaskIdentifier("test-task-parked")))
+				Expect(cmd.TargetVault).To(Equal("work"))
+
+				Expect(cmd.Updates).To(HaveLen(2))
+				Expect(cmd.Updates["status"]).To(Equal("completed"))
+				Expect(cmd.Updates["phase"]).To(Equal("done"))
+
+				for _, key := range []string{
+					"assignee",
+					"current_job",
+				} {
+					_, hasKey := cmd.Updates[key]
+					Expect(hasKey).To(BeFalse(), key+" must not be in the park update")
+				}
+				// The section still records why the record closed, but with the
+				// reason line only: the succeeded path has no claim key and no
+				// holder, and writing either would misreport the park.
+				Expect(cmd.Body).NotTo(BeNil())
+				Expect(cmd.Body.Heading).To(Equal("## Parked"))
+				Expect(cmd.Body.Section).To(ContainSubstring("parked_succeeded"))
+				Expect(cmd.Body.Section).NotTo(ContainSubstring("**Claim:**"))
+				Expect(cmd.Body.Section).NotTo(ContainSubstring("unavailable"))
+				Expect(cmd.Validate(ctx)).To(Succeed())
+			},
+		)
+	})
+
 	Describe("PublishRestoreAssignee", func() {
 		It(
 			"writes exactly one assignee key and no counter key via UpdateFrontmatterCommand",
@@ -804,6 +1214,7 @@ var _ = Describe("ResultPublisher", func() {
 				base.TopicPrefix("develop"),
 				currentDateTime,
 				nil,
+				nil,
 			)
 
 			task := lib.Task{
@@ -851,6 +1262,7 @@ var _ = Describe("ResultPublisher", func() {
 				failingProducer,
 				base.TopicPrefix("develop"),
 				currentDateTime,
+				nil,
 				nil,
 			)
 
@@ -912,6 +1324,7 @@ var _ = Describe("ResultPublisher", func() {
 					task,
 					"claude-20260418120000",
 					"pod OOM killed",
+					nil,
 				)
 				Expect(err).NotTo(HaveOccurred())
 
@@ -930,7 +1343,9 @@ var _ = Describe("ResultPublisher", func() {
 					"status": "in_progress",
 				},
 			}
-			err := publisher.PublishFailure(ctx, task, "claude-20260418120000", "pod OOM killed")
+			err := publisher.PublishFailure(ctx, task, "claude-20260418120000", "pod OOM killed",
+				nil,
+			)
 			Expect(err).NotTo(HaveOccurred())
 
 			Expect(producer.messages).To(HaveLen(2))
@@ -961,7 +1376,12 @@ var _ = Describe("ResultPublisher", func() {
 					"target_vault": "personal",
 				},
 			}
-			err := publisher.PublishSpawnNotification(ctx, task, "claude-20260418120000")
+			err := publisher.PublishSpawnNotification(
+				ctx,
+				task,
+				"claude-20260418120000",
+				"11111111-2222-3333-4444-555555555555",
+			)
 			Expect(err).NotTo(HaveOccurred())
 
 			_, cmd := decodeUpdateFrontmatterCommand(producer.messages[0])
@@ -979,7 +1399,12 @@ var _ = Describe("ResultPublisher", func() {
 			}
 
 			// PublishSpawnNotification
-			err := publisher.PublishSpawnNotification(ctx, task, "claude-20260418120000")
+			err := publisher.PublishSpawnNotification(
+				ctx,
+				task,
+				"claude-20260418120000",
+				"11111111-2222-3333-4444-555555555555",
+			)
 			Expect(err).NotTo(HaveOccurred())
 			Expect(producer.messages).To(HaveLen(1))
 			_, spawnCmd := decodeUpdateFrontmatterCommand(producer.messages[0])
@@ -1019,7 +1444,12 @@ var _ = Describe("ResultPublisher", func() {
 					"target_vault": 42,
 				},
 			}
-			err := publisher.PublishSpawnNotification(ctx, task, "claude-20260418120000")
+			err := publisher.PublishSpawnNotification(
+				ctx,
+				task,
+				"claude-20260418120000",
+				"11111111-2222-3333-4444-555555555555",
+			)
 			Expect(err).NotTo(HaveOccurred())
 
 			Expect(producer.messages).To(HaveLen(1))
@@ -1114,6 +1544,7 @@ var _ = Describe("ResultPublisher", func() {
 				base.TopicPrefix("develop"),
 				currentDateTime,
 				nil,
+				nil,
 			)
 			task := abortTask()
 
@@ -1158,6 +1589,144 @@ var _ = Describe("ResultPublisher", func() {
 		})
 	})
 
+	Describe("PublishTriggerBudgetRefusal", func() {
+		refusalTask := func() lib.Task {
+			return lib.Task{
+				TaskIdentifier: lib.TaskIdentifier("test-task-refusal"),
+				Frontmatter: lib.TaskFrontmatter{
+					"status":       "in_progress",
+					"phase":        "planning",
+					"target_vault": "work",
+				},
+			}
+		}
+
+		It("writes the four trigger_refusal keys and no fifth", func() {
+			err := publisher.PublishTriggerBudgetRefusal(
+				ctx,
+				refusalTask(),
+				"planning:4963ffa6",
+				4,
+				3,
+			)
+			Expect(err).NotTo(HaveOccurred())
+
+			Expect(producer.messages).To(HaveLen(1))
+			operation, cmd := decodeUpdateFrontmatterCommand(producer.messages[0])
+			Expect(
+				string(operation),
+			).To(Equal(string(taskcmd.UpdateFrontmatterCommandOperation)))
+			// No frontmatter keys at all: vault-api's typedTaskFields allowlist
+			// refuses the WHOLE command when any named key is outside it, and it
+			// does not carry the trigger_refusal_* names — a command with them is
+			// discarded body section included. Pinned here so a future
+			// "helpfully" restored key cannot silently reintroduce that.
+			Expect(cmd.Updates).To(BeEmpty())
+			Expect(cmd.TargetVault).To(Equal("work"))
+		})
+
+		It("writes a Trigger Budget section, never a Failure section", func() {
+			err := publisher.PublishTriggerBudgetRefusal(
+				ctx,
+				refusalTask(),
+				"planning:4963ffa6",
+				4,
+				3,
+			)
+			Expect(err).NotTo(HaveOccurred())
+
+			_, cmd := decodeUpdateFrontmatterCommand(producer.messages[0])
+			Expect(cmd.Body).NotTo(BeNil())
+			Expect(cmd.Body.Heading).To(Equal("## Trigger Budget"))
+			Expect(cmd.Body.Heading).NotTo(Equal("## Failure"))
+			Expect(cmd.Body.Section).To(HavePrefix("## Trigger Budget"))
+			Expect(cmd.Body.Section).To(ContainSubstring("trigger_count 4 >= max_triggers 3"))
+			Expect(cmd.Body.Section).To(ContainSubstring("planning:4963ffa6"))
+			Expect(cmd.Body.Section).To(HaveSuffix("\n"))
+		})
+
+		It("does not touch the failure section or ownership keys", func() {
+			err := publisher.PublishTriggerBudgetRefusal(
+				ctx,
+				refusalTask(),
+				"planning:4963ffa6",
+				4,
+				3,
+			)
+			Expect(err).NotTo(HaveOccurred())
+
+			_, cmd := decodeUpdateFrontmatterCommand(producer.messages[0])
+			Expect(cmd.Body.Heading).NotTo(Equal("## Failure"))
+			for _, key := range []string{
+				"status",
+				"phase",
+				"assignee",
+				"current_job",
+				"trigger_count",
+				"trigger_scope",
+				"max_triggers",
+			} {
+				_, ok := cmd.Updates[key]
+				Expect(ok).To(BeFalse(), "key %q must not be written", key)
+			}
+		})
+
+		It("publishes once for an identical refusal triple", func() {
+			task := refusalTask()
+			Expect(
+				publisher.PublishTriggerBudgetRefusal(ctx, task, "planning:4963ffa6", 4, 3),
+			).To(Succeed())
+			Expect(
+				publisher.PublishTriggerBudgetRefusal(ctx, task, "planning:4963ffa6", 4, 3),
+			).To(Succeed())
+
+			Expect(producer.messages).To(HaveLen(1))
+		})
+
+		It("publishes again when the refusal triple changes", func() {
+			task := refusalTask()
+			Expect(
+				publisher.PublishTriggerBudgetRefusal(ctx, task, "planning:4963ffa6", 4, 3),
+			).To(Succeed())
+			Expect(
+				publisher.PublishTriggerBudgetRefusal(ctx, task, "execution:bbbbbbbb", 4, 3),
+			).To(Succeed())
+			Expect(
+				publisher.PublishTriggerBudgetRefusal(ctx, task, "execution:bbbbbbbb", 5, 3),
+			).To(Succeed())
+
+			Expect(producer.messages).To(HaveLen(3))
+		})
+
+		It("does not remember a failed publish, so the next tick retries", func() {
+			partialProducer := &partialFailingSyncProducer{
+				successCount: 0,
+				err:          errors.New(context.Background(), "kafka unavailable"),
+			}
+			failingPublisher := pkg.NewResultPublisher(
+				partialProducer,
+				base.TopicPrefix("develop"),
+				currentDateTime,
+				nil,
+				nil,
+			)
+			task := refusalTask()
+
+			Expect(
+				failingPublisher.PublishTriggerBudgetRefusal(
+					ctx, task, "planning:4963ffa6", 4, 3,
+				),
+			).NotTo(Succeed())
+			Expect(
+				failingPublisher.PublishTriggerBudgetRefusal(
+					ctx, task, "planning:4963ffa6", 4, 3,
+				),
+			).NotTo(Succeed())
+
+			Expect(partialProducer.messages).To(HaveLen(2))
+		})
+	})
+
 	Describe("PublishFailure reason recording", func() {
 		reasonPublisher := func(client claim.ClaimRefClient) pkg.ResultPublisher {
 			return pkg.NewResultPublisher(
@@ -1165,6 +1734,7 @@ var _ = Describe("ResultPublisher", func() {
 				base.TopicPrefix("develop"),
 				currentDateTime,
 				func() claim.ClaimRefClient { return client },
+				nil,
 			)
 		}
 
@@ -1179,10 +1749,15 @@ var _ = Describe("ResultPublisher", func() {
 				},
 			}
 
-			Expect(p.PublishFailure(ctx, task, "job-reason-1", "pod_oom_killed")).To(Succeed())
+			Expect(p.PublishFailure(ctx, task, "job-reason-1", "pod_oom_killed",
+				nil,
+			)).To(Succeed())
 
-			Expect(client.PutCallCount()).To(Equal(1))
-			_, key, _, cluster, taskID, _ := client.PutArgsForCall(0)
+			// Two writes: the streak ref (recordRedriveFailure) lands first, then
+			// the reason ref — the streak counts published failures, and the
+			// reason is the evidence that failure is classified from.
+			Expect(client.PutCallCount()).To(Equal(2))
+			_, key, _, cluster, taskID, _ := client.PutArgsForCall(1)
 			Expect(key).To(Equal(
 				"claims/redrive-reason/test-task-reason/execution/pod_oom_killed/1",
 			))
@@ -1202,10 +1777,12 @@ var _ = Describe("ResultPublisher", func() {
 			}
 
 			Expect(
-				p.PublishFailure(ctx, task, "job-reason-2", "pod_oom_killed (OOMKilled/137)"),
+				p.PublishFailure(ctx, task, "job-reason-2", "pod_oom_killed (OOMKilled/137)",
+					nil,
+				),
 			).To(Succeed())
 
-			_, key, _, _, _, _ := client.PutArgsForCall(0)
+			_, key, _, _, _, _ := client.PutArgsForCall(1)
 			Expect(key).To(Equal(
 				"claims/redrive-reason/test-task-formatted/execution/pod_oom_killed/1",
 			))
@@ -1222,9 +1799,11 @@ var _ = Describe("ResultPublisher", func() {
 				},
 			}
 
-			Expect(p.PublishFailure(ctx, task, "job-reason-3", "pod OOM killed")).To(Succeed())
+			Expect(p.PublishFailure(ctx, task, "job-reason-3", "pod OOM killed",
+				nil,
+			)).To(Succeed())
 
-			_, key, _, _, _, _ := client.PutArgsForCall(0)
+			_, key, _, _, _, _ := client.PutArgsForCall(1)
 			Expect(key).To(Equal(
 				"claims/redrive-reason/test-task-unparsed/execution/unknown/1",
 			))
@@ -1241,10 +1820,146 @@ var _ = Describe("ResultPublisher", func() {
 				},
 			}
 
-			Expect(p.PublishFailure(ctx, task, "job-reason-4", "pod_oom_killed")).To(Succeed())
-			Expect(p.PublishFailure(ctx, task, "job-reason-4", "pod_oom_killed")).To(Succeed())
+			Expect(p.PublishFailure(ctx, task, "job-reason-4", "pod_oom_killed",
+				nil,
+			)).To(Succeed())
+			Expect(p.PublishFailure(ctx, task, "job-reason-4", "pod_oom_killed",
+				nil,
+			)).To(Succeed())
 
-			Expect(client.PutCallCount()).To(Equal(1))
+			// One streak ref + one reason ref; the deduped repeat writes neither.
+			Expect(client.PutCallCount()).To(Equal(2))
+		})
+	})
+
+	// recordRedriveFailure is the ONLY writer of the re-drive streak, and it is
+	// unexported, so its branches are exercised through PublishFailure — the one
+	// call site. The streak ref is always the first Put: it is written before the
+	// reason, so the new streak's evidence starts empty and gains exactly the
+	// reason being published.
+	Describe("recordRedriveFailure", func() {
+		streakPublisher := func(client claim.ClaimRefClient) pkg.ResultPublisher {
+			return pkg.NewResultPublisher(
+				producer,
+				base.TopicPrefix("develop"),
+				currentDateTime,
+				func() claim.ClaimRefClient { return client },
+				nil,
+			)
+		}
+		failingTask := func(id string) lib.Task {
+			return lib.Task{
+				TaskIdentifier: lib.TaskIdentifier(id),
+				Frontmatter: lib.TaskFrontmatter{
+					"status": "in_progress",
+					"phase":  "execution",
+				},
+			}
+		}
+		// listByTaskPrefix serves refs per list prefix. The stores list
+		// "<prefix><taskID>" with no trailing separator, so the key is exact.
+		listByTaskPrefix := func(
+			byPrefix map[string][]claim.ClaimRef,
+		) func(context.Context, string) ([]claim.ClaimRef, error) {
+			return func(_ context.Context, prefix string) ([]claim.ClaimRef, error) {
+				return byPrefix[prefix], nil
+			}
+		}
+
+		It("records the streak even when the count cannot be read", func() {
+			client := new(mocks.FakeClaimRefClient)
+			client.ListReturns(nil, nil)
+			// The first List is Count's; a read failure must not skip the write.
+			client.ListReturnsOnCall(0, nil, stderrors.New("list boom"))
+			p := streakPublisher(client)
+
+			Expect(
+				p.PublishFailure(
+					ctx,
+					failingTask("test-task-streak-read-fail"),
+					"job-srf-1",
+					"pod_oom_killed",
+					nil,
+				),
+			).To(Succeed())
+
+			// The count is unknown, so the new-streak clear is skipped: no Delete.
+			// The streak and the reason are still recorded.
+			Expect(client.DeleteCallCount()).To(Equal(0))
+			Expect(client.PutCallCount()).To(Equal(2))
+			_, key, _, _, _, _ := client.PutArgsForCall(0)
+			Expect(key).To(Equal(
+				"claims/redrive/test-task-streak-read-fail/execution/1",
+			))
+		})
+
+		It("clears the previous streak's reasons when a new streak starts", func() {
+			client := new(mocks.FakeClaimRefClient)
+			client.ListCalls(listByTaskPrefix(map[string][]claim.ClaimRef{
+				"claims/redrive-reason/test-task-new-streak": {
+					{
+						Ref: "refs/claims/redrive-reason/test-task-new-streak" +
+							"/execution/pod_oom_killed/1",
+					},
+				},
+			}))
+			p := streakPublisher(client)
+
+			Expect(
+				p.PublishFailure(
+					ctx,
+					failingTask("test-task-new-streak"),
+					"job-ns-1",
+					"pod_oom_killed",
+					nil,
+				),
+			).To(Succeed())
+
+			// A reason set left by an earlier streak would otherwise satisfy the
+			// classifier's window on partial evidence and could close the record
+			// as broken.
+			Expect(client.DeleteCallCount()).To(Equal(1))
+			_, key, _ := client.DeleteArgsForCall(0)
+			Expect(key).To(Equal(
+				"claims/redrive-reason/test-task-new-streak/execution/pod_oom_killed/1",
+			))
+			_, streakKey, _, _, _, _ := client.PutArgsForCall(0)
+			Expect(streakKey).To(Equal(
+				"claims/redrive/test-task-new-streak/execution/1",
+			))
+		})
+
+		It("keeps the previous reasons when the streak is already running", func() {
+			client := new(mocks.FakeClaimRefClient)
+			client.ListCalls(listByTaskPrefix(map[string][]claim.ClaimRef{
+				"claims/redrive/test-task-running-streak": {
+					{Ref: "refs/claims/redrive/test-task-running-streak/execution/1"},
+				},
+				"claims/redrive-reason/test-task-running-streak": {
+					{
+						Ref: "refs/claims/redrive-reason/test-task-running-streak" +
+							"/execution/pod_oom_killed/1",
+					},
+				},
+			}))
+			p := streakPublisher(client)
+
+			Expect(
+				p.PublishFailure(
+					ctx,
+					failingTask("test-task-running-streak"),
+					"job-rs-1",
+					"pod_oom_killed",
+					nil,
+				),
+			).To(Succeed())
+
+			// Mid-streak the evidence must accumulate, so nothing is cleared.
+			Expect(client.DeleteCallCount()).To(Equal(0))
+			_, streakKey, _, _, _, _ := client.PutArgsForCall(0)
+			Expect(streakKey).To(Equal(
+				"claims/redrive/test-task-running-streak/execution/2",
+			))
 		})
 	})
 })

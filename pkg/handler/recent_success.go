@@ -5,30 +5,88 @@
 package handler
 
 import (
+	"context"
+	"strings"
+	"time"
+
 	lib "github.com/bborbe/agent"
 	"github.com/golang/glog"
 
+	pkg "github.com/bborbe/agent-task-executor/pkg"
 	"github.com/bborbe/agent-task-executor/pkg/metrics"
 )
 
 // recentlySucceeded reports whether a Job for the task, spawned for the phase
-// the task is still at, succeeded within the respawn grace window. Such a
-// task's result is still on its way to the vault: the file keeps reading the
-// phase the Job ran for until the controller's write-back syncs, and the spawn
-// notification carrying current_job may not have landed either, so
-// checkActiveCurrentJob's grace never engages. Without this the reconcile floor
-// re-spawned a finished task every tick until the write-back arrived (measured
-// nuke dev 2026-10-21: task a055d019 spawned 3x, ~60 s apart, each Job done in
-// ~20 s).
+// the task is still at, has already succeeded and this pass must not spawn it
+// again.
 //
-// Scoped by phase so a task the agent advanced (success at planning, file now
+// It answers for two windows, not one. A recurring task is suppressed until the
+// cadence it declares has elapsed, because its phase does not advance between
+// occurrences and anything shorter would stop it for good. Every other task is
+// suppressed only inside the write-back grace; past that window
+// parkSucceededWithoutPhaseMove takes over and publishes human_review, so the
+// record leaves the loop and reaches a human instead of being suppressed in
+// silence forever.
+//
+// The success record is the authority, and it is shared: a pod that replaced the
+// one which ran the Job reads the same record, which is what makes either
+// outcome survive a restart.
+//
+// Scoped by phase, so a task the agent advanced (success at planning, file now
 // at execution) is spawned for its next phase at once. A failed Job records
-// nothing, so it is still re-driven; a task still eligible after the window is
-// spawned as before.
-func (h *taskEventHandler) recentlySucceeded(task lib.Task) bool {
-	succeeded, ok := h.taskStore.LastSucceeded(task.TaskIdentifier)
-	if !ok || succeeded.Phase != taskPhase(task) {
+// nothing, so it is still re-driven.
+func (h *taskEventHandler) recentlySucceeded(ctx context.Context, task lib.Task) bool {
+	phase := taskPhase(task)
+	// A succeeded Job is not by itself evidence that the run succeeded: an agent
+	// that reports failure still exits 0, so the Job watcher records a success
+	// for it (pkg/job_watcher.go handleSucceededJob, MarkSucceeded). Suppressing
+	// on that record hides the failure for the whole write-back grace and then
+	// hands the task to the re-drive path, so the executor's view of a failed run
+	// is a success at every step.
+	//
+	// last_result_status is the agent's own verdict, stamped by its delivery in
+	// the same write that carries the phase, so an explicit `failed` outranks the
+	// success record: the run failed, and suppressing it would suppress work that
+	// did not happen. An absent or unrecognised value still suppresses — an older
+	// agent, or a write that has not landed, must not be read as a failure,
+	// because guessing wrong there re-spawns work that already ran.
+	if resultStatus, ok := task.Frontmatter.String("last_result_status"); ok &&
+		resultStatus == string(lib.AgentStatusFailed) {
+		glog.Infof(
+			"event=skip_recent_success_bypassed task=%s phase=%s last_result_status=%q",
+			task.TaskIdentifier, phase, resultStatus,
+		)
+		metrics.TaskEventsTotal.WithLabelValues("skip_recent_success_bypassed").Inc()
 		return false
+	}
+	succeeded, ok := h.lastSuccess(ctx, task, phase)
+	if !ok {
+		return false
+	}
+	// The success record exists, so this pass has to decide park-versus-re-drive,
+	// and that decision is read from last_result_status. Absence there is not a
+	// verdict: it is the value the executor itself writes at spawn
+	// (pkg/result_publisher.go PublishSpawnNotification clears the field so the
+	// gate reads THIS run), so it is the ordinary state of a task whose agent
+	// never delivered one. It must not be read as done or as failed — and it must
+	// not be silent either. An operator watching a task re-drive cannot otherwise
+	// tell "this agent never wrote the field" from "this agent reported a
+	// transient failure", and the first is a contract defect the fleet can only
+	// see if it is named. Logged on the first pass that has a success record to
+	// decide on, before either outcome is taken.
+	//
+	// Bare Infof, not V(n), and deliberately: this line is the operator's only
+	// signal that an agent omitted the field, and a verbosity gate makes it
+	// invisible on any stage that does not pass -v=2 — which is precisely the
+	// silence this change exists to remove. The sibling event above
+	// (skip_recent_success_bypassed) is bare for the same reason.
+	resultStatus, statusPresent := task.Frontmatter.String("last_result_status")
+	if !statusPresent || resultStatus == "" {
+		glog.Infof(
+			"event=absent_result_status task=%s phase=%s",
+			task.TaskIdentifier, phase,
+		)
+		metrics.TaskEventsTotal.WithLabelValues("absent_result_status").Inc()
 	}
 	elapsed := h.currentDateTime.Now().Time().Sub(succeeded.CompletedAt)
 	if elapsed < 0 {
@@ -37,7 +95,14 @@ func (h *taskEventHandler) recentlySucceeded(task lib.Task) bool {
 		// just completed, which keeps the guard engaged.
 		elapsed = 0
 	}
-	if elapsed >= defaultRespawnGracePeriod {
+	if next, recurring := recurringNextRun(task.Frontmatter, succeeded.CompletedAt); recurring {
+		if !h.currentDateTime.Now().Time().Before(next) {
+			return false
+		}
+	} else if elapsed >= defaultRespawnGracePeriod {
+		// Past the write-back window a non-recurring task is not suppressed here:
+		// the caller parks it, which suppresses the spawn just as firmly and
+		// leaves a record a human can see.
 		return false
 	}
 	glog.Infof(
@@ -46,6 +111,141 @@ func (h *taskEventHandler) recentlySucceeded(task lib.Task) bool {
 	)
 	metrics.TaskEventsTotal.WithLabelValues("skipped_recent_success").Inc()
 	return true
+}
+
+// lastSuccess returns the task's latest successful Job at phase.
+//
+// Both sources are consulted and the later completion wins. Memory alone is not
+// enough: a pod caches the completion it saw, so a peer cluster that recorded a
+// newer success at the same phase is invisible to it. On a recurring task that is
+// a duplicate, not a stale read — the peer's newer success is what should hold the
+// cadence, and evaluating on the cached older one makes the cadence look elapsed
+// and spawns a second Job for work already done. Comparing the two is what makes
+// the shared record the authority it was added to be.
+//
+// The read is cheap where it matters: inside a reconcile pass the shared side is
+// the pass snapshot (one list for every candidate), and on the event paths it is
+// one Lookup per event, cached back into memory on a hit so the next event on this
+// pod is free.
+//
+// A failed shared read falls back to memory rather than to "no record": a store
+// that cannot be read is not evidence the task has not succeeded, and treating it
+// as one would strand the task behind an unreachable store.
+func (h *taskEventHandler) lastSuccess(
+	ctx context.Context,
+	task lib.Task,
+	phase string,
+) (pkg.SucceededJob, bool) {
+	memory, hasMemory := h.taskStore.LastSucceeded(task.TaskIdentifier)
+	if hasMemory && memory.Phase != phase {
+		hasMemory = false
+	}
+	shared, hasShared := h.sharedSuccess(ctx, task.TaskIdentifier, phase)
+	switch {
+	case hasMemory && hasShared:
+		if shared.Time().After(memory.CompletedAt) {
+			h.taskStore.MarkSucceeded(task.TaskIdentifier, phase, shared.Time())
+			return pkg.SucceededJob{Phase: phase, CompletedAt: shared.Time()}, true
+		}
+		return memory, true
+	case hasShared:
+		h.taskStore.MarkSucceeded(task.TaskIdentifier, phase, shared.Time())
+		return pkg.SucceededJob{Phase: phase, CompletedAt: shared.Time()}, true
+	case hasMemory:
+		return memory, true
+	}
+	return pkg.SucceededJob{}, false
+}
+
+// recurringCadences maps the declared `recurring:` token to the period after
+// which a recurring task may run again at an unchanged phase. The token is the
+// operator-facing vocabulary task files already carry; the durations are the
+// fixed reading of each token, not tunables.
+var recurringCadences = map[string]time.Duration{
+	"daily":     24 * time.Hour,
+	"weekdays":  24 * time.Hour,
+	"weekly":    7 * 24 * time.Hour,
+	"monthly":   30 * 24 * time.Hour,
+	"quarterly": 90 * 24 * time.Hour,
+}
+
+// successRecordRetention is how long a success record is kept before the
+// reconcile pass prunes it. It must cover the longest declared cadence, not the
+// re-run window: the suppression is driven by the record, and a recurring task
+// is released only when its cadence elapses, so pruning at taskRerunWindow (1 h)
+// would forget the record long before any cadence could fire and make the
+// release unreachable. Derived from recurringCadences so the two cannot drift.
+var successRecordRetention = func() time.Duration {
+	longest := taskRerunWindow
+	for _, period := range recurringCadences {
+		if period > longest {
+			longest = period
+		}
+	}
+	return longest
+}()
+
+// recurringPeriod returns the cadence the task declares in its `recurring:`
+// frontmatter key, and whether the task is recurring at all.
+//
+// An absent or empty token means the task is not recurring. An unrecognised
+// token is treated the same way and logged, never defaulted to a period:
+// inventing a cadence for a token we do not understand would suppress that task
+// forever, which is the failure this release exists to prevent.
+func recurringPeriod(frontmatter lib.TaskFrontmatter) (time.Duration, bool) {
+	token, ok := recurringToken(frontmatter)
+	if !ok {
+		return 0, false
+	}
+	return recurringCadences[token], true
+}
+
+// recurringToken returns the task's declared cadence token, normalised, and
+// whether it declares a recognised one at all.
+func recurringToken(frontmatter lib.TaskFrontmatter) (string, bool) {
+	token, ok := frontmatter.String("recurring")
+	if !ok {
+		return "", false
+	}
+	trimmed := strings.ToLower(strings.TrimSpace(token))
+	if trimmed == "" || trimmed == "<nil>" {
+		return "", false
+	}
+	if _, known := recurringCadences[trimmed]; !known {
+		glog.Warningf(
+			"event=unknown_recurring_token token=%q treating as not recurring",
+			token,
+		)
+		return "", false
+	}
+	return trimmed, true
+}
+
+// recurringNextRun returns the earliest time a task that recorded success at
+// completedAt may run again, and whether the task is recurring at all.
+//
+// `weekdays` is the one token whose name is a schedule rather than a duration: a
+// flat 24 h would release a Friday completion on Saturday, and nothing downstream
+// re-imposes the weekday constraint — this is the only schedule control on the
+// suppression path. So the nominal day is advanced over the weekend. The other
+// tokens keep their fixed durations; `monthly` and `quarterly` drift a day or two
+// from calendar months, which is the approximation the declared token already
+// carries rather than the wrong day class.
+func recurringNextRun(
+	frontmatter lib.TaskFrontmatter,
+	completedAt time.Time,
+) (time.Time, bool) {
+	token, ok := recurringToken(frontmatter)
+	if !ok {
+		return time.Time{}, false
+	}
+	next := completedAt.Add(recurringCadences[token])
+	if token == "weekdays" {
+		for next.Weekday() == time.Saturday || next.Weekday() == time.Sunday {
+			next = next.AddDate(0, 0, 1)
+		}
+	}
+	return next, true
 }
 
 // recordTaskRerun counts a spawn whose task already succeeded at the phase it
@@ -61,6 +261,17 @@ func (h *taskEventHandler) recentlySucceeded(task lib.Task) bool {
 // WithLabelValues creates the child metric on miss. That is what lets the
 // absent-tier alert tell "no re-run yet" from "the metric stopped being
 // exported" — the second being the failure that alert exists to catch.
+//
+// Only a run that reported `done` can be re-run. A spawn after a run that
+// reported anything else — failed, needs_input, in_progress, an unrecognised
+// value, or an absent field — is a re-drive, not a re-run:
+// parkSucceededWithoutPhaseMove releases exactly those runs, up to
+// maxRedrivesWithoutAdvance spawns at the same phase:ref scope, on purpose. The
+// success record that lets this counter see them exists only because a Job that
+// exits 0 is marked succeeded even when the agent delivered nothing, so without
+// this guard the alert fires on the executor's own designed behaviour — the
+// fastest way to teach an operator to ignore it, and it buries the suppression
+// failure the alert exists to catch.
 func (h *taskEventHandler) recordTaskRerun(task lib.Task) {
 	taskType := string(task.Frontmatter.TaskType())
 	counter := metrics.TaskRerunsTotal.WithLabelValues(taskType)
@@ -70,6 +281,20 @@ func (h *taskEventHandler) recordTaskRerun(task lib.Task) {
 	}
 	elapsed := h.currentDateTime.Now().Time().Sub(succeeded.CompletedAt)
 	if elapsed < 0 || elapsed >= taskRerunWindow {
+		return
+	}
+	if resultStatus, _ := task.Frontmatter.String("last_result_status"); resultStatus != string(
+		lib.AgentStatusDone,
+	) {
+		glog.Infof(
+			"event=task_redrive_not_rerun task=%s task_type=%s phase=%s last_result_status=%q elapsed=%.0fs",
+			task.TaskIdentifier,
+			taskType,
+			succeeded.Phase,
+			resultStatus,
+			elapsed.Seconds(),
+		)
+		metrics.TaskEventsTotal.WithLabelValues("redrive_not_rerun").Inc()
 		return
 	}
 	counter.Inc()

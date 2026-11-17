@@ -6,7 +6,10 @@ package spawner_test
 
 import (
 	"context"
+	stderrors "errors"
 	"fmt"
+	"strconv"
+	"strings"
 
 	lib "github.com/bborbe/agent"
 	libk8s "github.com/bborbe/k8s"
@@ -14,6 +17,7 @@ import (
 	libtimetest "github.com/bborbe/time/test"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
+	"github.com/prometheus/client_golang/prometheus/testutil"
 	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
 	k8serrors "k8s.io/apimachinery/pkg/api/errors"
@@ -26,6 +30,7 @@ import (
 
 	agentv1 "github.com/bborbe/agent-task-executor/k8s/apis/agent.benjamin-borbe.de/v1"
 	pkg "github.com/bborbe/agent-task-executor/pkg"
+	"github.com/bborbe/agent-task-executor/pkg/metrics"
 	"github.com/bborbe/agent-task-executor/pkg/spawner"
 )
 
@@ -71,7 +76,7 @@ var _ = Describe("JobSpawner", func() {
 				Image:    "my-image:latest",
 				Env:      map[string]string{"GEMINI_API_KEY": "test-gemini-key"},
 			}
-			_, err := jobSpawner.SpawnJob(ctx, task, config)
+			_, err := jobSpawner.SpawnJob(ctx, task, config, "session-id")
 			Expect(err).To(BeNil())
 
 			jobs, err := fakeClient.BatchV1().Jobs("test-ns").List(ctx, metav1.ListOptions{})
@@ -106,6 +111,7 @@ var _ = Describe("JobSpawner", func() {
 			Expect(envMap["TASK_CONTENT"]).To(ContainSubstring("phase: planning"))
 			Expect(envMap["TASK_CONTENT"]).To(HaveSuffix("\n---\ndo the work"))
 			Expect(envMap["TASK_ID"]).To(Equal("abc12345-rest-ignored"))
+			Expect(envMap["CLAUDE_SESSION_ID"]).To(Equal("session-id"))
 			Expect(envMap["KAFKA_BROKERS"]).To(Equal("kafka:9092"))
 			Expect(envMap["BRANCH"]).To(Equal("develop"))
 			Expect(envMap["TOPIC_PREFIX"]).To(Equal("test-prefix"))
@@ -139,7 +145,7 @@ var _ = Describe("JobSpawner", func() {
 				Image:    "my-image:latest",
 				Env:      map[string]string{},
 			}
-			_, err := jobSpawner.SpawnJob(ctx, task, config)
+			_, err := jobSpawner.SpawnJob(ctx, task, config, "session-id")
 			Expect(err).To(BeNil())
 
 			jobs, err := fakeClient.BatchV1().Jobs("test-ns").List(ctx, metav1.ListOptions{})
@@ -181,7 +187,7 @@ var _ = Describe("JobSpawner", func() {
 				Image:    "my-image:latest",
 				Env:      map[string]string{"GEMINI_API_KEY": "test-gemini-key"},
 			}
-			_, err := jobSpawner.SpawnJob(ctx, task, config)
+			_, err := jobSpawner.SpawnJob(ctx, task, config, "session-id")
 			Expect(err).To(BeNil())
 
 			jobs, err := fakeClient.BatchV1().Jobs("test-ns").List(ctx, metav1.ListOptions{})
@@ -210,7 +216,7 @@ var _ = Describe("JobSpawner", func() {
 					Image:    "pr-reviewer-agent:latest",
 					Env:      map[string]string{},
 				}
-				_, err := jobSpawner.SpawnJob(ctx, task, config)
+				_, err := jobSpawner.SpawnJob(ctx, task, config, "session-id")
 				Expect(err).To(BeNil())
 
 				jobs, err := fakeClient.BatchV1().Jobs("test-ns").List(ctx, metav1.ListOptions{})
@@ -252,7 +258,7 @@ var _ = Describe("JobSpawner", func() {
 					Content: lib.TaskContent("# Body\n"),
 				}
 				config := pkg.AgentConfiguration{Assignee: "pr-reviewer", Image: "x:y"}
-				_, err := jobSpawner.SpawnJob(ctx, task, config)
+				_, err := jobSpawner.SpawnJob(ctx, task, config, "session-id")
 				Expect(err).To(BeNil())
 
 				jobs, err := fakeClient.BatchV1().Jobs("test-ns").List(ctx, metav1.ListOptions{})
@@ -284,7 +290,7 @@ var _ = Describe("JobSpawner", func() {
 				Content:        lib.TaskContent("just a body"),
 			}
 			config := pkg.AgentConfiguration{Assignee: "claude", Image: "x:y"}
-			_, err := jobSpawner.SpawnJob(ctx, task, config)
+			_, err := jobSpawner.SpawnJob(ctx, task, config, "session-id")
 			Expect(err).To(BeNil())
 
 			jobs, err := fakeClient.BatchV1().Jobs("test-ns").List(ctx, metav1.ListOptions{})
@@ -297,6 +303,140 @@ var _ = Describe("JobSpawner", func() {
 			Expect(envMap["TASK_CONTENT"]).To(Equal("just a body"))
 			Expect(envMap["TASK_CONTENT"]).NotTo(ContainSubstring("---"))
 			Expect(envMap["TASK_CONTENT"]).NotTo(ContainSubstring("{}"))
+		})
+
+		Context("TASK_CONTENT env size guard", func() {
+			// maxArgStrlen is the kernel's MAX_ARG_STRLEN (32 pages). Restated here
+			// rather than imported because this is an external test package, and a
+			// test that reads the same constant the code does cannot catch the
+			// constant itself being wrong.
+			const maxArgStrlen = 32 * 4096
+			// The budget covers the whole "KEY=value" entry plus its NUL, so the
+			// largest body that still spawns is shorter than the limit by the
+			// prefix and the terminator.
+			const envPrefixLen = len("TASK_CONTENT=")
+			passBodyLen := maxArgStrlen - envPrefixLen - 1
+			failBodyLen := passBodyLen + 1
+
+			It("refuses a task whose TASK_CONTENT env entry exceeds MAX_ARG_STRLEN", func() {
+				task := lib.Task{
+					TaskIdentifier: lib.TaskIdentifier("oversize-task"),
+					Frontmatter:    lib.TaskFrontmatter{},
+					Content:        lib.TaskContent(strings.Repeat("x", failBodyLen)),
+				}
+				config := pkg.AgentConfiguration{Assignee: "claude", Image: "x:y"}
+				counterBefore := testutil.ToFloat64(metrics.TaskContentTooLargeTotal)
+
+				_, err := jobSpawner.SpawnJob(ctx, task, config, "session-id")
+
+				counterAfter := testutil.ToFloat64(metrics.TaskContentTooLargeTotal)
+				Expect(err).To(HaveOccurred())
+				Expect(err.Error()).To(ContainSubstring("task_content_too_large"))
+				Expect(err.Error()).To(ContainSubstring(strconv.Itoa(maxArgStrlen + 1)))
+				// A permanent spawn error is what makes the consumer dead-letter
+				// this instead of retrying; without it one oversized task restarts
+				// the executor on every redelivery.
+				Expect(stderrors.Is(err, spawner.ErrTaskContentTooLarge)).To(BeTrue())
+				// Counted exactly once, so a refusal that stops counting fails here.
+				Expect(counterAfter - counterBefore).To(Equal(float64(1)))
+				jobs, listErr := fakeClient.BatchV1().
+					Jobs("test-ns").
+					List(ctx, metav1.ListOptions{})
+				Expect(listErr).To(BeNil())
+				Expect(jobs.Items).To(BeEmpty())
+			})
+
+			It(
+				"still spawns a task whose TASK_CONTENT env entry is exactly at MAX_ARG_STRLEN",
+				func() {
+					task := lib.Task{
+						TaskIdentifier: lib.TaskIdentifier("boundary-task"),
+						Frontmatter:    lib.TaskFrontmatter{},
+						Content:        lib.TaskContent(strings.Repeat("x", passBodyLen)),
+					}
+					config := pkg.AgentConfiguration{Assignee: "claude", Image: "x:y"}
+					counterBefore := testutil.ToFloat64(metrics.TaskContentTooLargeTotal)
+
+					_, err := jobSpawner.SpawnJob(ctx, task, config, "session-id")
+
+					Expect(err).To(BeNil())
+					// A task exactly at the limit is not refused, so nothing counts.
+					Expect(
+						testutil.ToFloat64(metrics.TaskContentTooLargeTotal) - counterBefore,
+					).To(Equal(float64(0)))
+					jobs, listErr := fakeClient.BatchV1().
+						Jobs("test-ns").
+						List(ctx, metav1.ListOptions{})
+					Expect(listErr).To(BeNil())
+					Expect(jobs.Items).To(HaveLen(1))
+					envMap := make(map[string]string)
+					for _, e := range jobs.Items[0].Spec.Template.Spec.Containers[0].Env {
+						envMap[e.Name] = e.Value
+					}
+					Expect(envMap["TASK_CONTENT"]).To(HaveLen(passBodyLen))
+				},
+			)
+
+			// Pins the strip-then-measure ordering. The raw body here is over the
+			// limit, but 100 of its bytes are NULs that stripControlBytes removes,
+			// leaving an entry exactly at MAX_ARG_STRLEN. Measuring the raw string
+			// would refuse it, so a guard that checked before stripping fails here.
+			It("measures the entry after control bytes are stripped, not before", func() {
+				task := lib.Task{
+					TaskIdentifier: lib.TaskIdentifier("strip-order-task"),
+					Frontmatter:    lib.TaskFrontmatter{},
+					Content: lib.TaskContent(
+						strings.Repeat("x", passBodyLen) + strings.Repeat("\x00", 100),
+					),
+				}
+				config := pkg.AgentConfiguration{Assignee: "claude", Image: "x:y"}
+
+				_, err := jobSpawner.SpawnJob(ctx, task, config, "session-id")
+
+				Expect(err).To(BeNil())
+				jobs, listErr := fakeClient.BatchV1().
+					Jobs("test-ns").
+					List(ctx, metav1.ListOptions{})
+				Expect(listErr).To(BeNil())
+				Expect(jobs.Items).To(HaveLen(1))
+				envMap := make(map[string]string)
+				for _, e := range jobs.Items[0].Spec.Template.Spec.Containers[0].Env {
+					envMap[e.Name] = e.Value
+				}
+				// The NULs are gone, so the value the container receives is the
+				// stripped body, exactly at the budget.
+				Expect(envMap["TASK_CONTENT"]).To(HaveLen(passBodyLen))
+			})
+		})
+
+		It("strips NUL and other control bytes from TASK_CONTENT", func() {
+			task := lib.Task{
+				TaskIdentifier: lib.TaskIdentifier("nul-task"),
+				Frontmatter: lib.TaskFrontmatter{
+					"assignee": "claude",
+				},
+				Content: lib.TaskContent(
+					"billomat-client-v1~\x00\x00 failed\x01\x1b\x7f\n\tline two\r\n",
+				),
+			}
+			config := pkg.AgentConfiguration{Assignee: "claude", Image: "x:y"}
+			_, err := jobSpawner.SpawnJob(ctx, task, config, "session-id")
+			Expect(err).To(BeNil())
+
+			jobs, err := fakeClient.BatchV1().Jobs("test-ns").List(ctx, metav1.ListOptions{})
+			Expect(err).To(BeNil())
+			container := jobs.Items[0].Spec.Template.Spec.Containers[0]
+			envMap := make(map[string]string)
+			for _, e := range container.Env {
+				envMap[e.Name] = e.Value
+			}
+			got := envMap["TASK_CONTENT"]
+			Expect(got).NotTo(ContainSubstring("\x00"))
+			Expect(got).NotTo(ContainSubstring("\x01"))
+			Expect(got).NotTo(ContainSubstring("\x1b"))
+			Expect(got).NotTo(ContainSubstring("\x7f"))
+			Expect(got).To(ContainSubstring("assignee: claude"))
+			Expect(got).To(HaveSuffix("\n---\nbillomat-client-v1~ failed\n\tline two\r\n"))
 		})
 
 		It("injects empty PHASE when task frontmatter has no phase", func() {
@@ -312,7 +452,7 @@ var _ = Describe("JobSpawner", func() {
 				Image:    "my-image:latest",
 				Env:      map[string]string{},
 			}
-			_, err := jobSpawner.SpawnJob(ctx, task, config)
+			_, err := jobSpawner.SpawnJob(ctx, task, config, "session-id")
 			Expect(err).To(BeNil())
 
 			jobs, err := fakeClient.BatchV1().Jobs("test-ns").List(ctx, metav1.ListOptions{})
@@ -339,7 +479,7 @@ var _ = Describe("JobSpawner", func() {
 				Image:    "my-image:latest",
 				Env:      map[string]string{},
 			}
-			jobName, err := jobSpawner.SpawnJob(ctx, task, config)
+			jobName, err := jobSpawner.SpawnJob(ctx, task, config, "session-id")
 			Expect(err).NotTo(HaveOccurred())
 			Expect(jobName).NotTo(BeEmpty())
 
@@ -369,7 +509,7 @@ var _ = Describe("JobSpawner", func() {
 					"EXTRA_VAR":         "extra-value",
 				},
 			}
-			_, err := jobSpawner.SpawnJob(ctx, task, config)
+			_, err := jobSpawner.SpawnJob(ctx, task, config, "session-id")
 			Expect(err).To(BeNil())
 
 			jobs, err := fakeClient.BatchV1().Jobs("test-ns").List(ctx, metav1.ListOptions{})
@@ -396,6 +536,7 @@ var _ = Describe("JobSpawner", func() {
 				ctx,
 				task,
 				pkg.AgentConfiguration{Image: "img:latest", Env: map[string]string{}},
+				"session-id",
 			)
 			Expect(err).To(BeNil())
 
@@ -415,6 +556,7 @@ var _ = Describe("JobSpawner", func() {
 				ctx,
 				task,
 				pkg.AgentConfiguration{Image: "img:latest", Env: map[string]string{}},
+				"session-id",
 			)
 			Expect(err).To(BeNil())
 
@@ -436,6 +578,7 @@ var _ = Describe("JobSpawner", func() {
 				ctx,
 				task,
 				pkg.AgentConfiguration{Image: "img:latest", Env: map[string]string{}},
+				"session-id",
 			)
 			Expect(err).To(BeNil())
 
@@ -476,6 +619,7 @@ var _ = Describe("JobSpawner", func() {
 				ctx,
 				task,
 				pkg.AgentConfiguration{Image: "img:latest", Env: map[string]string{}},
+				"session-id",
 			)
 			Expect(err).To(BeNil())
 			Expect(jobName).To(Equal("claude-abc12345-20260403173500"))
@@ -495,7 +639,7 @@ var _ = Describe("JobSpawner", func() {
 				VolumeClaim:     "agent-claude-pvc",
 				VolumeMountPath: "/data",
 			}
-			_, err := jobSpawner.SpawnJob(ctx, task, config)
+			_, err := jobSpawner.SpawnJob(ctx, task, config, "session-id")
 			Expect(err).To(BeNil())
 
 			jobs, err := fakeClient.BatchV1().Jobs("test-ns").List(ctx, metav1.ListOptions{})
@@ -530,7 +674,7 @@ var _ = Describe("JobSpawner", func() {
 				ConfigMapName:      "easy-agent-goreleaser",
 				ConfigMapMountPath: "/agent",
 			}
-			_, err := jobSpawner.SpawnJob(ctx, task, config)
+			_, err := jobSpawner.SpawnJob(ctx, task, config, "session-id")
 			Expect(err).To(BeNil())
 
 			jobs, err := fakeClient.BatchV1().Jobs("test-ns").List(ctx, metav1.ListOptions{})
@@ -569,7 +713,7 @@ var _ = Describe("JobSpawner", func() {
 					{Key: "prompt.md", Path: "prompt.md"},
 				},
 			}
-			_, err := jobSpawner.SpawnJob(ctx, task, config)
+			_, err := jobSpawner.SpawnJob(ctx, task, config, "session-id")
 			Expect(err).To(BeNil())
 
 			jobs, err := fakeClient.BatchV1().Jobs("test-ns").List(ctx, metav1.ListOptions{})
@@ -601,7 +745,7 @@ var _ = Describe("JobSpawner", func() {
 				ConfigMapName:      "easy-agent-goreleaser",
 				ConfigMapMountPath: "/agent",
 			}
-			_, err := jobSpawner.SpawnJob(ctx, task, config)
+			_, err := jobSpawner.SpawnJob(ctx, task, config, "session-id")
 			Expect(err).To(BeNil())
 
 			jobs, err := fakeClient.BatchV1().Jobs("test-ns").List(ctx, metav1.ListOptions{})
@@ -633,7 +777,7 @@ var _ = Describe("JobSpawner", func() {
 				Env:           map[string]string{},
 				ConfigMapName: "easy-agent-goreleaser",
 			}
-			_, err := jobSpawner.SpawnJob(ctx, task, config)
+			_, err := jobSpawner.SpawnJob(ctx, task, config, "session-id")
 			Expect(err).NotTo(BeNil())
 		})
 
@@ -649,7 +793,7 @@ var _ = Describe("JobSpawner", func() {
 				Image:    "my-image:latest",
 				Env:      map[string]string{},
 			}
-			_, err := jobSpawner.SpawnJob(ctx, task, config)
+			_, err := jobSpawner.SpawnJob(ctx, task, config, "session-id")
 			Expect(err).To(BeNil())
 
 			jobs, err := fakeClient.BatchV1().Jobs("test-ns").List(ctx, metav1.ListOptions{})
@@ -674,7 +818,7 @@ var _ = Describe("JobSpawner", func() {
 				Env:         map[string]string{},
 				VolumeClaim: "agent-claude-pvc",
 			}
-			_, err := jobSpawner.SpawnJob(ctx, task, config)
+			_, err := jobSpawner.SpawnJob(ctx, task, config, "session-id")
 			Expect(err).NotTo(BeNil())
 			Expect(
 				err.Error(),
@@ -694,7 +838,7 @@ var _ = Describe("JobSpawner", func() {
 				Env:        map[string]string{},
 				SecretName: "agent-backtest",
 			}
-			_, err := jobSpawner.SpawnJob(ctx, task, config)
+			_, err := jobSpawner.SpawnJob(ctx, task, config, "session-id")
 			Expect(err).To(BeNil())
 
 			jobs, err := fakeClient.BatchV1().Jobs("test-ns").List(ctx, metav1.ListOptions{})
@@ -720,7 +864,7 @@ var _ = Describe("JobSpawner", func() {
 				Env:             map[string]string{},
 				ImagePullSecret: "my-custom-secret",
 			}
-			_, err := jobSpawner.SpawnJob(ctx, task, config)
+			_, err := jobSpawner.SpawnJob(ctx, task, config, "session-id")
 			Expect(err).To(BeNil())
 
 			jobs, err := fakeClient.BatchV1().Jobs("test-ns").List(ctx, metav1.ListOptions{})
@@ -746,7 +890,7 @@ var _ = Describe("JobSpawner", func() {
 				Env:             map[string]string{},
 				ImagePullSecret: "",
 			}
-			_, err := jobSpawner.SpawnJob(ctx, task, config)
+			_, err := jobSpawner.SpawnJob(ctx, task, config, "session-id")
 			Expect(err).To(BeNil())
 
 			jobs, err := fakeClient.BatchV1().Jobs("test-ns").List(ctx, metav1.ListOptions{})
@@ -769,7 +913,7 @@ var _ = Describe("JobSpawner", func() {
 				Image:    "my-image:latest",
 				Env:      map[string]string{},
 			}
-			_, err := jobSpawner.SpawnJob(ctx, task, config)
+			_, err := jobSpawner.SpawnJob(ctx, task, config, "session-id")
 			Expect(err).To(BeNil())
 
 			jobs, err := fakeClient.BatchV1().Jobs("test-ns").List(ctx, metav1.ListOptions{})
@@ -804,7 +948,7 @@ var _ = Describe("JobSpawner", func() {
 					},
 				},
 			}
-			_, err := jobSpawner.SpawnJob(ctx, task, config)
+			_, err := jobSpawner.SpawnJob(ctx, task, config, "session-id")
 			Expect(err).To(BeNil())
 
 			jobs, err := fakeClient.BatchV1().Jobs("test-ns").List(ctx, metav1.ListOptions{})
@@ -835,7 +979,7 @@ var _ = Describe("JobSpawner", func() {
 				Env:       map[string]string{},
 				Resources: nil,
 			}
-			_, err := jobSpawner.SpawnJob(ctx, task, config)
+			_, err := jobSpawner.SpawnJob(ctx, task, config, "session-id")
 			Expect(err).To(BeNil())
 
 			jobs, err := fakeClient.BatchV1().Jobs("test-ns").List(ctx, metav1.ListOptions{})
@@ -868,7 +1012,7 @@ var _ = Describe("JobSpawner", func() {
 					Requests: agentv1.AgentResourceList{CPU: "500m"},
 				},
 			}
-			_, err := jobSpawner.SpawnJob(ctx, task, config)
+			_, err := jobSpawner.SpawnJob(ctx, task, config, "session-id")
 			Expect(err).To(BeNil())
 
 			jobs, err := fakeClient.BatchV1().Jobs("test-ns").List(ctx, metav1.ListOptions{})
@@ -892,7 +1036,7 @@ var _ = Describe("JobSpawner", func() {
 				Image:             "example/image:latest",
 				PriorityClassName: "agent-claude",
 			}
-			jobName, err := jobSpawner.SpawnJob(ctx, task, config)
+			jobName, err := jobSpawner.SpawnJob(ctx, task, config, "session-id")
 			Expect(err).To(BeNil())
 			Expect(jobName).NotTo(BeEmpty())
 
@@ -913,7 +1057,7 @@ var _ = Describe("JobSpawner", func() {
 				Assignee: "claude-agent",
 				Image:    "example/image:latest",
 			}
-			jobName, err := jobSpawner.SpawnJob(ctx, task, config)
+			jobName, err := jobSpawner.SpawnJob(ctx, task, config, "session-id")
 			Expect(err).To(BeNil())
 			Expect(jobName).NotTo(BeEmpty())
 
@@ -921,6 +1065,61 @@ var _ = Describe("JobSpawner", func() {
 			Expect(err).To(BeNil())
 			Expect(jobs.Items).To(HaveLen(1))
 			Expect(jobs.Items[0].Spec.Template.Spec.PriorityClassName).To(BeEmpty())
+		})
+
+		It(
+			"stamps nodeSelector and tolerations on the spawned Job when config has them set",
+			func() {
+				task := lib.Task{
+					TaskIdentifier: lib.TaskIdentifier("test-task-uuid-node-1"),
+					Frontmatter: lib.TaskFrontmatter{
+						"assignee": "claude-agent",
+					},
+				}
+				toleration := corev1.Toleration{
+					Key:      "dedicated",
+					Operator: corev1.TolerationOpEqual,
+					Value:    "agent",
+					Effect:   corev1.TaintEffectNoSchedule,
+				}
+				config := pkg.AgentConfiguration{
+					Assignee:     "claude-agent",
+					Image:        "example/image:latest",
+					NodeSelector: map[string]string{"pool": "agent"},
+					Tolerations:  []corev1.Toleration{toleration},
+				}
+				_, err := jobSpawner.SpawnJob(ctx, task, config, "session-id")
+				Expect(err).To(BeNil())
+
+				jobs, err := fakeClient.BatchV1().Jobs("test-ns").List(ctx, metav1.ListOptions{})
+				Expect(err).To(BeNil())
+				Expect(jobs.Items).To(HaveLen(1))
+				podSpec := jobs.Items[0].Spec.Template.Spec
+				Expect(podSpec.NodeSelector).To(Equal(map[string]string{"pool": "agent"}))
+				Expect(podSpec.Tolerations).To(ContainElement(toleration))
+			},
+		)
+
+		It("leaves nodeSelector and tolerations unset when config has none", func() {
+			task := lib.Task{
+				TaskIdentifier: lib.TaskIdentifier("test-task-uuid-node-2"),
+				Frontmatter: lib.TaskFrontmatter{
+					"assignee": "claude-agent",
+				},
+			}
+			config := pkg.AgentConfiguration{
+				Assignee: "claude-agent",
+				Image:    "example/image:latest",
+			}
+			_, err := jobSpawner.SpawnJob(ctx, task, config, "session-id")
+			Expect(err).To(BeNil())
+
+			jobs, err := fakeClient.BatchV1().Jobs("test-ns").List(ctx, metav1.ListOptions{})
+			Expect(err).To(BeNil())
+			Expect(jobs.Items).To(HaveLen(1))
+			podSpec := jobs.Items[0].Spec.Template.Spec
+			Expect(podSpec.NodeSelector).To(BeEmpty())
+			Expect(podSpec.Tolerations).To(BeEmpty())
 		})
 
 		It("includes TASK_TYPE env var matching the frontmatter task_type value", func() {
@@ -938,7 +1137,7 @@ var _ = Describe("JobSpawner", func() {
 				Image:    "claude-agent:latest",
 				Env:      map[string]string{},
 			}
-			_, err := jobSpawner.SpawnJob(ctx, task, config)
+			_, err := jobSpawner.SpawnJob(ctx, task, config, "session-id")
 			Expect(err).To(BeNil())
 
 			jobs, err := fakeClient.BatchV1().Jobs("test-ns").List(ctx, metav1.ListOptions{})
@@ -966,7 +1165,7 @@ var _ = Describe("JobSpawner", func() {
 				Image:    "claude-agent:latest",
 				Env:      map[string]string{},
 			}
-			_, err := jobSpawner.SpawnJob(ctx, task, config)
+			_, err := jobSpawner.SpawnJob(ctx, task, config, "session-id")
 			Expect(err).To(BeNil())
 
 			jobs, err := fakeClient.BatchV1().Jobs("test-ns").List(ctx, metav1.ListOptions{})
@@ -995,6 +1194,7 @@ var _ = Describe("JobSpawner", func() {
 				ctx,
 				task,
 				pkg.AgentConfiguration{Image: "img:latest", Env: map[string]string{}},
+				"session-id",
 			)
 			Expect(err).NotTo(BeNil())
 		})
@@ -1030,7 +1230,7 @@ var _ = Describe("JobSpawner", func() {
 						caCertSecret,
 						fsGroup,
 					)
-					_, err := spawner.SpawnJob(ctx, makeTask(), makeConfig())
+					_, err := spawner.SpawnJob(ctx, makeTask(), makeConfig(), "session-id")
 					Expect(err).To(BeNil())
 
 					jobs, err := fakeClient.BatchV1().
@@ -1451,7 +1651,7 @@ var _ = Describe("JobSpawner", func() {
 			}
 			_, err := jobSpawner.SpawnJob(ctx, task, pkg.AgentConfiguration{
 				Assignee: "claude", Image: "my-image:latest",
-			})
+			}, "session-id")
 			Expect(err).To(BeNil())
 			Expect(capturedJob).NotTo(BeNil())
 			Expect(capturedJob.Labels).NotTo(BeNil())
@@ -1491,7 +1691,7 @@ var _ = Describe("JobSpawner", func() {
 			}
 			_, err := jobSpawner.SpawnJob(ctx, task, pkg.AgentConfiguration{
 				Assignee: "claude", Image: "my-image:latest",
-			})
+			}, "session-id")
 			Expect(err).To(BeNil())
 			Expect(capturedJob).NotTo(BeNil())
 			Expect(capturedJob.Annotations[pkg.TaskPhaseAnnotationKey]).To(Equal("execution"))
@@ -1504,7 +1704,7 @@ var _ = Describe("JobSpawner", func() {
 			}
 			_, err := jobSpawner.SpawnJob(ctx, task, pkg.AgentConfiguration{
 				Assignee: "claude", Image: "my-image:latest",
-			})
+			}, "session-id")
 			Expect(err).To(BeNil())
 			Expect(capturedJob).NotTo(BeNil())
 			Expect(capturedJob.Annotations).NotTo(HaveKey(pkg.TaskPhaseAnnotationKey))
@@ -1525,7 +1725,7 @@ var _ = Describe("JobSpawner", func() {
 				Image:                   "my-image:latest",
 				ZombieJobTimeoutSeconds: ptrInt32(900),
 			}
-			jobName, err := jobSpawner.SpawnJob(ctx, task, config)
+			jobName, err := jobSpawner.SpawnJob(ctx, task, config, "session-id")
 			Expect(err).To(BeNil())
 			Expect(jobName).NotTo(BeEmpty())
 
@@ -1545,7 +1745,7 @@ var _ = Describe("JobSpawner", func() {
 				Assignee: "claude",
 				Image:    "my-image:latest",
 			}
-			jobName, err := jobSpawner.SpawnJob(ctx, task, config)
+			jobName, err := jobSpawner.SpawnJob(ctx, task, config, "session-id")
 			Expect(err).To(BeNil())
 			Expect(jobName).NotTo(BeEmpty())
 
@@ -1572,7 +1772,7 @@ var _ = Describe("JobSpawner", func() {
 				Image:    "my-image:latest",
 			}
 
-			_, err := jobSpawner.SpawnJob(ctx, task, config)
+			_, err := jobSpawner.SpawnJob(ctx, task, config, "session-id")
 			Expect(err).To(BeNil())
 
 			active, err := jobSpawner.IsJobActive(ctx, libk8s.Namespace("test-ns"), taskID)
@@ -1590,7 +1790,7 @@ var _ = Describe("JobSpawner", func() {
 			}
 			_, err := jobSpawner.SpawnJob(ctx, task, pkg.AgentConfiguration{
 				Assignee: "claude", Image: "my-image:latest",
-			})
+			}, "session-id")
 			Expect(err).To(BeNil())
 
 			active, err := jobSpawner.IsJobActive(ctx, libk8s.Namespace("test-ns"), other)
@@ -1627,7 +1827,7 @@ var _ = Describe("JobSpawner", func() {
 			}
 			_, err := jobSpawner.SpawnJob(ctx, task, pkg.AgentConfiguration{
 				Assignee: "claude", Image: "my-image:latest",
-			})
+			}, "session-id")
 			Expect(err).To(BeNil())
 			Expect(capturedJob).NotTo(BeNil())
 			Expect(capturedJob.Labels).NotTo(BeNil())

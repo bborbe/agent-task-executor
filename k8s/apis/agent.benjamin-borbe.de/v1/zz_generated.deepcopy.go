@@ -10,6 +10,7 @@ package v1
 
 import (
 	domain "github.com/bborbe/vault-cli/pkg/domain"
+	corev1 "k8s.io/api/core/v1"
 	runtime "k8s.io/apimachinery/pkg/runtime"
 )
 
@@ -115,6 +116,15 @@ func (in *ConfigSpec) DeepCopyInto(out *ConfigSpec) {
 		*out = make([]string, len(*in))
 		copy(*out, *in)
 	}
+	// NOTE: hand-added 2026-10-26 — make generatek8s is still broken on master
+	// (see the ConfigMapItems block below), so this slice needs its own copy or
+	// it would share its backing array across DeepCopy calls. The codegen repair
+	// task must regenerate and confirm this block matches.
+	if in.DefaultForTaskTypes != nil {
+		in, out := &in.DefaultForTaskTypes, &out.DefaultForTaskTypes
+		*out = make([]string, len(*in))
+		copy(*out, *in)
+	}
 	if in.Resources != nil {
 		in, out := &in.Resources, &out.Resources
 		*out = new(AgentResources)
@@ -135,6 +145,24 @@ func (in *ConfigSpec) DeepCopyInto(out *ConfigSpec) {
 		in, out := &in.ConfigMapItems, &out.ConfigMapItems
 		*out = make([]ConfigMapItem, len(*in))
 		copy(*out, *in)
+	}
+	// NOTE: hand-added 2026-11-06 — make generatek8s is still broken on master
+	// (see the ConfigMapItems block above). These match what deepcopy-gen emits
+	// for a map[string]string and a []corev1.Toleration; the codegen repair task
+	// must regenerate and confirm.
+	if in.NodeSelector != nil {
+		in, out := &in.NodeSelector, &out.NodeSelector
+		*out = make(map[string]string, len(*in))
+		for key, val := range *in {
+			(*out)[key] = val
+		}
+	}
+	if in.Tolerations != nil {
+		in, out := &in.Tolerations, &out.Tolerations
+		*out = make([]corev1.Toleration, len(*in))
+		for i := range *in {
+			(*in)[i].DeepCopyInto(&(*out)[i])
+		}
 	}
 	if in.Trigger != nil {
 		in, out := &in.Trigger, &out.Trigger

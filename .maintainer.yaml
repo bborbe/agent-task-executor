@@ -6,3 +6,7 @@ autoMerge:
   trivial: true
 goUpdate:
   autoUpdate: true
+dockerBuild:
+  autoBuild: true
+  destinations:
+    - dockerhub

@@ -6,7 +6,10 @@ package spawner
 
 import (
 	"context"
+	stderrors "errors"
+	"maps"
 	"strings"
+	"time"
 
 	lib "github.com/bborbe/agent"
 	"github.com/bborbe/errors"
@@ -22,6 +25,7 @@ import (
 	"k8s.io/client-go/kubernetes"
 
 	pkg "github.com/bborbe/agent-task-executor/pkg"
+	"github.com/bborbe/agent-task-executor/pkg/metrics"
 )
 
 // taskIDLabelKey labels a spawned Job with the task UUID so IsJobActive
@@ -46,7 +50,14 @@ const volumeNameAgentConfig = "agent-config"
 type JobSpawner interface {
 	// SpawnJob creates a K8s Job for the task and returns the job name.
 	// Returns the job name even when the job already exists (idempotent).
-	SpawnJob(ctx context.Context, task lib.Task, config pkg.AgentConfiguration) (string, error)
+	// sessionID is stamped onto the Job as CLAUDE_SESSION_ID so the agent CLI
+	// runs under the same id the caller recorded in the task frontmatter.
+	SpawnJob(
+		ctx context.Context,
+		task lib.Task,
+		config pkg.AgentConfiguration,
+		sessionID string,
+	) (string, error)
 	// IsJobActive returns true if an active (not completed/failed) K8s Job exists
 	// for the given task identifier in namespace. Uses the
 	// agent.benjamin-borbe.de/task-id label set by SpawnJob.
@@ -133,6 +144,7 @@ func (s *jobSpawner) SpawnJob(
 	ctx context.Context,
 	task lib.Task,
 	config pkg.AgentConfiguration,
+	sessionID string,
 ) (string, error) {
 	jobNamespace, err := pkg.ResolveJobNamespace(ctx, s.namespace, config.JobNamespace)
 	if err != nil {
@@ -143,7 +155,7 @@ func (s *jobSpawner) SpawnJob(
 	now := s.currentDateTimeGetter.Now()
 	jobName := jobNameFromTask(assignee, task.TaskIdentifier, now)
 
-	envBuilder, err := s.buildJobEnvBuilder(ctx, task, config)
+	envBuilder, err := s.buildJobEnvBuilder(ctx, task, config, sessionID)
 	if err != nil {
 		return "", err
 	}
@@ -190,10 +202,14 @@ func (s *jobSpawner) SpawnJob(
 	applySecretEnvFrom(config, job)
 	applyEphemeralStorage(config, job)
 	s.applyKafkaCertVolumes(job)
-	if config.PriorityClassName != "" {
-		job.Spec.Template.Spec.PriorityClassName = config.PriorityClassName
-	}
-	applyActiveDeadlineSeconds(config, jobName, task.TaskIdentifier, job)
+	applyScheduling(config, job)
+	applyActiveDeadlineSeconds(
+		config,
+		jobName,
+		task.TaskIdentifier,
+		job,
+		s.currentDateTimeGetter.Now().Time(),
+	)
 
 	if err := s.createJob(ctx, jobNamespace, job, jobName, task.TaskIdentifier, config.Image); err != nil {
 		return "", err
@@ -554,6 +570,22 @@ func applyTaskPhaseAnnotation(phase string, job *batchv1.Job) {
 	job.Annotations[pkg.TaskPhaseAnnotationKey] = phase
 }
 
+// applyScheduling stamps the config's scheduling constraints — priorityClassName,
+// nodeSelector and tolerations — onto the Job PodTemplate. Unset fields leave the
+// PodTemplate untouched.
+func applyScheduling(config pkg.AgentConfiguration, job *batchv1.Job) {
+	podSpec := &job.Spec.Template.Spec
+	if config.PriorityClassName != "" {
+		podSpec.PriorityClassName = config.PriorityClassName
+	}
+	if len(config.NodeSelector) > 0 {
+		podSpec.NodeSelector = maps.Clone(config.NodeSelector)
+	}
+	if len(config.Tolerations) > 0 {
+		podSpec.Tolerations = append(podSpec.Tolerations, config.Tolerations...)
+	}
+}
+
 // applyActiveDeadlineSeconds stamps Job.Spec.ActiveDeadlineSeconds from the config's
 // effective zombie job timeout so Kubernetes enforces a hard deadline on every spawned Job.
 func applyActiveDeadlineSeconds(
@@ -561,8 +593,21 @@ func applyActiveDeadlineSeconds(
 	jobName string,
 	taskID lib.TaskIdentifier,
 	job *batchv1.Job,
+	now time.Time,
 ) {
-	deadline := int64(config.EffectiveZombieJobTimeoutSeconds())
+	deadline := int64(config.EffectiveRunDeadlineSeconds())
+	// A run admitted late in the window must not outlive it. Capping the deadline
+	// at the window's remaining time is what makes "stopped at window end" true
+	// for the whole run, not only for spawns that arrive after it — the budget
+	// alone would let a 05:50 start run two hours into business hours.
+	if remaining, ok := pkg.SecondsUntilRunWindowClose(now, config.RunWindow); ok &&
+		int64(remaining) < deadline {
+		deadline = int64(remaining)
+		glog.V(2).Infof(
+			"run window closes before the budget; deadline=%d on job %s for task %s",
+			deadline, jobName, taskID,
+		)
+	}
 	job.Spec.ActiveDeadlineSeconds = &deadline
 	glog.V(2).Infof("set activeDeadlineSeconds=%d on job %s for task %s", deadline, jobName, taskID)
 }
@@ -682,14 +727,35 @@ func (s *jobSpawner) buildJobEnvBuilder(
 	ctx context.Context,
 	task lib.Task,
 	config pkg.AgentConfiguration,
+	sessionID string,
 ) (k8s.EnvBuilder, error) {
 	taskContent, err := renderTaskContent(ctx, task)
 	if err != nil {
 		return nil, err
 	}
+	taskContentValue := stripControlBytes(taskContent)
+	// execve rejects any single argv/envp string over MAX_ARG_STRLEN, and the
+	// kernel counts the whole "KEY=value" entry including its NUL terminator —
+	// so the budget is not len(value) <= 131072. An oversized entry fails before
+	// the container's entrypoint runs, leaving a Job with no log line the agent
+	// ever wrote and a re-drive that fails identically, so refuse it here.
+	taskContentEntryBytes := len(taskContentEnvKey) + 1 + len(taskContentValue) + 1
+	if taskContentEntryBytes > maxEnvStringBytes {
+		metrics.TaskContentTooLargeTotal.Inc()
+		return nil, errors.Wrapf(
+			ctx,
+			ErrTaskContentTooLarge,
+			"task %s renders a %d-byte %s env entry, over the %d-byte MAX_ARG_STRLEN limit",
+			task.TaskIdentifier,
+			taskContentEntryBytes,
+			taskContentEnvKey,
+			maxEnvStringBytes,
+		)
+	}
 	envBuilder := k8s.NewEnvBuilder()
-	envBuilder.Add("TASK_CONTENT", taskContent)
+	envBuilder.Add(taskContentEnvKey, taskContentValue)
 	envBuilder.Add("TASK_ID", string(task.TaskIdentifier))
+	envBuilder.Add("CLAUDE_SESSION_ID", sessionID)
 	envBuilder.Add("KAFKA_BROKERS", s.kafkaBrokers)
 	envBuilder.Add("BRANCH", s.branch)
 	envBuilder.Add("TOPIC_PREFIX", s.topicPrefix)
@@ -700,6 +766,45 @@ func (s *jobSpawner) buildJobEnvBuilder(
 	}
 	return envBuilder, nil
 }
+
+// stripControlBytes removes ASCII control bytes (except \t, \n, \r) and DEL
+// from s. Kubernetes rejects env values containing NUL, so a single corrupt
+// task file would otherwise fail every Job at container init.
+func stripControlBytes(s string) string {
+	return strings.Map(func(r rune) rune {
+		if r == '\t' || r == '\n' || r == '\r' {
+			return r
+		}
+		if r < 0x20 || r == 0x7f {
+			return -1
+		}
+		return r
+	}, s)
+}
+
+// maxEnvStringBytes is the kernel's per-string limit for a single argv/envp
+// entry: MAX_ARG_STRLEN, which is 32 * PAGE_SIZE. execve fails with E2BIG —
+// surfaced as "argument list too long" — before the container's entrypoint runs,
+// so an oversized value kills the Job with no log line the agent ever wrote.
+//
+// Pinned to the 4 KiB page size, not derived from os.Getpagesize(): this is the
+// conservative floor. On a larger-page node the real limit is higher, so the
+// executor may refuse a body the kernel would have accepted, but it can never
+// pass one the kernel rejects. Deriving it locally would also be wrong, because
+// the executor pod's kernel need not be the kernel the Job schedules onto.
+const maxEnvStringBytes = 32 * 4096
+
+// taskContentEnvKey names the env var carrying the rendered task markdown.
+const taskContentEnvKey = "TASK_CONTENT"
+
+// ErrTaskContentTooLarge marks a task whose rendered TASK_CONTENT env entry
+// exceeds MAX_ARG_STRLEN. The condition is deterministic — no redelivery can
+// shrink the body — so the consumer must classify it as a permanent spawn error,
+// dead-letter the event and skip it once. Retrying instead would return the error
+// from the consume loop, restart the executor with the Kafka offset unmarked, and
+// redeliver the identical message forever: one oversized task would become an
+// executor-wide crash loop rather than a single failed task.
+var ErrTaskContentTooLarge = stderrors.New("task_content_too_large")
 
 // renderTaskContent serializes task into the markdown form an agent expects:
 // "---\n<yaml-frontmatter>---\n<body>". When task.Frontmatter is empty, the

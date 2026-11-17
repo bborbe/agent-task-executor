@@ -5,7 +5,11 @@
 package pkg
 
 import (
+	"maps"
+	"slices"
 	"strings"
+
+	corev1 "k8s.io/api/core/v1"
 
 	agentv1 "github.com/bborbe/agent-task-executor/k8s/apis/agent.benjamin-borbe.de/v1"
 )
@@ -39,6 +43,11 @@ type AgentConfiguration struct {
 	// TaskTypes is the list of task_type values from ConfigSpec.TaskTypes.
 	// Nil when the CRD only sets the singular TaskType field.
 	TaskTypes []string
+	// DefaultForTaskTypes is the list of task_type values from
+	// ConfigSpec.DefaultForTaskTypes: the types this Config declares itself the
+	// designated default for. Routing metadata, carried so a resolved
+	// configuration reports the declaration it was picked by.
+	DefaultForTaskTypes []string
 	// Image is the container image base name (without tag). Tag is appended at runtime from branch.
 	Image string
 	// Env holds per-agent environment variables (e.g. API keys, config).
@@ -71,6 +80,10 @@ type AgentConfiguration struct {
 	MaxConcurrentJobs int
 	// PriorityClassName is stamped on Job PodTemplates and on a service StatefulSet pod template.
 	PriorityClassName string
+	// NodeSelector is stamped on Job PodTemplates. Empty leaves scheduling unconstrained.
+	NodeSelector map[string]string
+	// Tolerations are stamped on Job PodTemplates. Empty adds none.
+	Tolerations []corev1.Toleration
 	// JobNamespace is the namespace this Config's Jobs must be created in, from
 	// ConfigSpec.JobNamespace. Empty means the executor's own namespace. Resolve
 	// it with ResolveJobNamespace before use.
@@ -94,6 +107,25 @@ type AgentConfiguration struct {
 	// uses it as the elapsed-time threshold. nil means "use the default
 	// DefaultZombieJobTimeoutSeconds from the CRD types package".
 	ZombieJobTimeoutSeconds *int32
+	// RunWindow mirrors ConfigSpec.RunWindow. nil means no window: spawns are
+	// admitted at any hour.
+	RunWindow *agentv1.RunWindow
+	// RunBudgetSeconds mirrors ConfigSpec.RunBudgetSeconds. 0 means no separate
+	// budget; the zombie timeout is the only deadline.
+	RunBudgetSeconds int32
+	// TokenCeiling mirrors ConfigSpec.TokenCeiling. nil or 0 means no ceiling.
+	TokenCeiling *int64
+}
+
+// EffectiveRunDeadlineSeconds returns the hard deadline stamped on a spawned
+// Job: the run budget when it is set and stricter than the zombie timeout,
+// otherwise the effective zombie timeout.
+func (a AgentConfiguration) EffectiveRunDeadlineSeconds() int32 {
+	deadline := a.EffectiveZombieJobTimeoutSeconds()
+	if a.RunBudgetSeconds > 0 && a.RunBudgetSeconds < deadline {
+		return a.RunBudgetSeconds
+	}
+	return deadline
 }
 
 // LostClaimAction maps RerunOnLostClaim to the action to take after another
@@ -148,6 +180,8 @@ func (a AgentConfigurations) TaggedConfigurations(branch string) AgentConfigurat
 			Resources:               c.Resources.DeepCopy(),
 			MaxConcurrentJobs:       c.MaxConcurrentJobs,
 			PriorityClassName:       c.PriorityClassName,
+			NodeSelector:            maps.Clone(c.NodeSelector),
+			Tolerations:             slices.Clone(c.Tolerations),
 			JobNamespace:            c.JobNamespace,
 			ServiceNamespace:        c.ServiceNamespace,
 			ImagePullSecret:         c.ImagePullSecret,

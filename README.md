@@ -12,6 +12,8 @@ pin, e.g. `…/agent-claude:v0.1.1`) is used as-is; an **untagged** image gets t
 running branch appended (`…/agent-backtest` → `…/agent-backtest:dev`). Deployed
 via the `agent` Helm chart; published image `docker.io/bborbe/agent-task-executor`.
 
+Runtime configuration (including `KAFKA_BROKERS`) and the Deployment itself live outside this repository; see [`docs/deployment-kafka-brokers.md`](docs/deployment-kafka-brokers.md) for the broker source of truth and the crash-loop remediation.
+
 ## Cluster routing
 
 A task can name the cluster that runs it with the optional `cluster:` frontmatter field. The canonical values are `nukedev`, `nukeprod` and `sun`.
@@ -25,7 +27,7 @@ A task can name the cluster that runs it with the optional `cluster:` frontmatte
 
 A cluster admits a task only when the assignee has a free slot, and the number of slots is the **smaller of** the Config's `maxConcurrentJobs` and the pod quota of the agent's priority class (`ResourceQuota` scoped `PriorityClass In [...]`, `status.hard.pods` falling back to `spec.hard`, cached for 30 s). A zero `maxConcurrentJobs` means no declared cap, not an uncapped executor — the quota still bounds it. A matching quota with `hard.pods: 0` is a hard zero (the class may run nothing) and defers every spawn; it is not treated as an absent quota. Because admission happens before the claim is taken, a task over the bound is **never claimed**: it is deferred and a peer cluster can take it immediately.
 
-A deferral is counted by `agent_executor_task_events_total{result="deferred_concurrency_cap"}` and `agent_executor_deferred_concurrency_cap_total{assignee=...}`. Both `event=concurrency_admit` and `event=concurrency_cap` carry `running=`, `cap=`, `max=` and `quota=`; `cap` is the effective bound and `quota` is 0 when no quota bound applies.
+A deferral is counted by `agent_executor_task_events_total{result="deferred_concurrency_cap"}` and `agent_executor_deferred_concurrency_cap_total{assignee=...}`. Both `event=concurrency_admit` and `event=concurrency_cap` carry `running=`, `cap=`, `max=` and `quota=`, plus `quota_bound=` naming why: `ok` (the read succeeded, so `quota` is authoritative — a genuine `hard.pods: 0` reads `quota=0 cap=0 quota_bound=ok`), `failed` (the read was refused or errored, so `cap` fell back to `max`), or `none` (no limiter, no priority class, or no quota scoping the class). `cap` is the effective bound. A `quota=0` therefore never has to be guessed at: `quota_bound=failed` is a broken read, `quota_bound=ok` with `quota=0` is a real hard zero.
 
 A denied quota read — for example before the executor's Role gains the `resourcequotas` grant — degrades to the declared cap and logs `event=pod_quota_read_failed`, so shipping the executor before the RBAC change is safe.
 

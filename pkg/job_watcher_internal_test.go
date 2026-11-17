@@ -11,6 +11,7 @@ import (
 	lib "github.com/bborbe/agent"
 	"github.com/bborbe/cqrs/base"
 	libk8s "github.com/bborbe/k8s"
+	libtime "github.com/bborbe/time"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 	batchv1 "k8s.io/api/batch/v1"
@@ -51,6 +52,7 @@ var _ = Describe("jobWatcher backoff-limit pod detail", func() {
 			taskStore,
 			fakePublisher,
 			nil,
+			libtime.NewCurrentDateTime(),
 		)
 	})
 
@@ -77,6 +79,36 @@ var _ = Describe("jobWatcher backoff-limit pod detail", func() {
 			Status:  corev1.ConditionTrue,
 			Reason:  "BackoffLimitExceeded",
 			Message: "Job has reached the specified backoff limit",
+		}
+	}
+
+	deadlineCondition := func() batchv1.JobCondition {
+		return batchv1.JobCondition{
+			Type:    batchv1.JobFailed,
+			Status:  corev1.ConditionTrue,
+			Reason:  "DeadlineExceeded",
+			Message: "Job was active longer than specified deadline",
+		}
+	}
+
+	// makeUnscheduledPod builds a pod the Job owns that was never placed on a
+	// node — the shape the deadline arm gate classifies as never-scheduled.
+	makeUnscheduledPod := func(name, jobName, taskID string) *corev1.Pod {
+		return &corev1.Pod{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      name,
+				Namespace: "test-ns",
+				Labels:    map[string]string{"agent.benjamin-borbe.de/task-id": taskID},
+				OwnerReferences: []metav1.OwnerReference{
+					{Kind: "Job", Name: jobName},
+				},
+			},
+			Status: corev1.PodStatus{
+				Phase: corev1.PodPending,
+				Conditions: []corev1.PodCondition{
+					{Type: corev1.PodScheduled, Status: corev1.ConditionFalse},
+				},
+			},
 		}
 	}
 
@@ -143,6 +175,29 @@ var _ = Describe("jobWatcher backoff-limit pod detail", func() {
 			Expect(calledReason).NotTo(ContainSubstring("deadline_exceeded"))
 		})
 
+		It("passes the owned pod to PublishFailure for a backoff-limit failure", func() {
+			taskStore.Store(testTaskID, testTask)
+			job := makeJob("job-backoff-pod", string(testTaskID), backoffCondition())
+			setPodLister(
+				watcher,
+				makeOwnedTerminatedPod(
+					"pod-backoff",
+					"job-backoff-pod",
+					string(testTaskID),
+					"Error",
+					1,
+					"2026-08-16T00:00:00Z",
+				),
+			)
+
+			watcher.HandleJob(ctx, job)
+
+			Expect(fakePublisher.PublishFailureCallCount()).To(Equal(1))
+			pod := fakePublisher.PublishFailurePodArgsForCall(0)
+			Expect(pod).NotTo(BeNil())
+			Expect(pod.Name).To(Equal("pod-backoff"))
+		})
+
 		It(
 			"publishes pod_crash_no_stdout with Error/1 detail for a non-OOM terminated pod",
 			func() {
@@ -203,7 +258,7 @@ var _ = Describe("jobWatcher backoff-limit pod detail", func() {
 			},
 		)
 
-		It("publishes the bare pod_crash_no_stdout when no pod is resolvable", func() {
+		It("publishes the condition plus the unresolved marker when no pod is resolvable", func() {
 			taskStore.Store(testTaskID, testTask)
 			job := makeJob("job-empty", string(testTaskID), backoffCondition())
 			setPodLister(watcher)
@@ -212,23 +267,54 @@ var _ = Describe("jobWatcher backoff-limit pod detail", func() {
 
 			Expect(fakePublisher.PublishFailureCallCount()).To(Equal(1))
 			_, _, _, calledReason := fakePublisher.PublishFailureArgsForCall(0)
-			Expect(calledReason).To(Equal("pod_crash_no_stdout"))
+			Expect(calledReason).To(Equal("BackoffLimitExceeded (pod-unresolved)"))
 		})
 
-		It("publishes the bare pod_crash_no_stdout when the pod lister lookup fails", func() {
+		It(
+			"publishes the condition plus the unresolved marker when the pod lister lookup fails",
+			func() {
+				taskStore.Store(testTaskID, testTask)
+				job := makeJob("job-listererr", string(testTaskID), backoffCondition())
+				setPodListerOverride(watcher, "test-ns", errorPodLister{})
+
+				watcher.HandleJob(ctx, job)
+
+				Expect(fakePublisher.PublishFailureCallCount()).To(Equal(1))
+				_, _, _, calledReason := fakePublisher.PublishFailureArgsForCall(0)
+				Expect(calledReason).To(Equal("BackoffLimitExceeded (pod-unresolved)"))
+			},
+		)
+
+		It("passes the never-scheduled pod to PublishFailure on a deadline kill", func() {
+			// Pins the Job-informer plumbing: without this the arm gate could be
+			// fed nil from every production call site and the whole suite would
+			// stay green while the never-scheduled fix silently no-ops.
 			taskStore.Store(testTaskID, testTask)
-			job := makeJob("job-listererr", string(testTaskID), backoffCondition())
-			setPodListerOverride(watcher, "test-ns", errorPodLister{})
+			job := makeJob("job-deadline-unscheduled", string(testTaskID), deadlineCondition())
+			pod := makeUnscheduledPod("pod-deadline-unscheduled", job.Name, string(testTaskID))
+			setPodLister(watcher, pod)
 
 			watcher.HandleJob(ctx, job)
 
 			Expect(fakePublisher.PublishFailureCallCount()).To(Equal(1))
 			_, _, _, calledReason := fakePublisher.PublishFailureArgsForCall(0)
-			Expect(calledReason).To(Equal("pod_crash_no_stdout"))
+			Expect(calledReason).To(Equal("deadline_exceeded"))
+			Expect(fakePublisher.PublishFailurePodArgsForCall(0)).To(Equal(pod))
+		})
+
+		It("passes a nil pod to PublishFailure when the Job owns no pod", func() {
+			taskStore.Store(testTaskID, testTask)
+			job := makeJob("job-deadline-nopod", string(testTaskID), deadlineCondition())
+			setPodLister(watcher)
+
+			watcher.HandleJob(ctx, job)
+
+			Expect(fakePublisher.PublishFailureCallCount()).To(Equal(1))
+			Expect(fakePublisher.PublishFailurePodArgsForCall(0)).To(BeNil())
 		})
 
 		It(
-			"publishes the bare pod_crash_no_stdout when the owned pod has no non-zero terminated container",
+			"publishes the condition plus the unresolved marker when the owned pod has no non-zero terminated container",
 			func() {
 				taskStore.Store(testTaskID, testTask)
 				job := makeJob("job-running", string(testTaskID), backoffCondition())
@@ -256,9 +342,20 @@ var _ = Describe("jobWatcher backoff-limit pod detail", func() {
 
 				Expect(fakePublisher.PublishFailureCallCount()).To(Equal(1))
 				_, _, _, calledReason := fakePublisher.PublishFailureArgsForCall(0)
-				Expect(calledReason).To(Equal("pod_crash_no_stdout"))
+				Expect(calledReason).To(Equal("BackoffLimitExceeded (pod-unresolved)"))
 			},
 		)
+	})
+})
+
+var _ = Describe("storeMissPublishWindow", func() {
+	It("stays inside the publisher dedupe TTL and spans a resync", func() {
+		// Inside dedupeTTL, every re-delivery of an already-published failed Job
+		// is deduped; past the window the store-miss path no longer publishes, so
+		// an expired dedupe entry cannot produce a second ## Failure.
+		Expect(storeMissPublishWindow).To(BeNumerically("<", dedupeTTL))
+		// Longer than a resync, so a failed publish is retried by a re-delivery.
+		Expect(storeMissPublishWindow).To(BeNumerically(">", jobWatcherResyncPeriod))
 	})
 })
 
@@ -329,8 +426,9 @@ func (errorPodNamespaceLister) Get(_ string) (*corev1.Pod, error) {
 // import cycle. It exposes the same PublishFailure call-recording API the
 // counterfeiter fake does, so the spec assertions are unchanged.
 type fakeResultPublisher struct {
-	publishFailureCalls  []resultPublisherCall
-	clearCurrentJobCalls []clearCurrentJobCall
+	publishFailureCalls       []resultPublisherCall
+	publishStoreMissFailCalls []resultPublisherCall
+	clearCurrentJobCalls      []clearCurrentJobCall
 }
 
 type clearCurrentJobCall struct {
@@ -344,12 +442,14 @@ type resultPublisherCall struct {
 	task    lib.Task
 	jobName string
 	reason  string
+	pod     *corev1.Pod
 }
 
 func (f *fakeResultPublisher) PublishSpawnNotification(
 	ctx context.Context,
 	task lib.Task,
 	jobName string,
+	sessionID string,
 ) error {
 	return nil
 }
@@ -359,14 +459,45 @@ func (f *fakeResultPublisher) PublishFailure(
 	task lib.Task,
 	jobName string,
 	reason string,
+	pod *corev1.Pod,
 ) error {
 	f.publishFailureCalls = append(f.publishFailureCalls, resultPublisherCall{
 		ctx:     ctx,
 		task:    task,
 		jobName: jobName,
 		reason:  reason,
+		pod:     pod,
 	})
 	return nil
+}
+
+// PublishStoreMissFailure records into its own slice so a spec can tell the two
+// failure paths apart: the store-hit path must not be used for a store miss,
+// and vice versa.
+func (f *fakeResultPublisher) PublishStoreMissFailure(
+	ctx context.Context,
+	task lib.Task,
+	jobName string,
+	reason string,
+) error {
+	f.publishStoreMissFailCalls = append(f.publishStoreMissFailCalls, resultPublisherCall{
+		ctx:     ctx,
+		task:    task,
+		jobName: jobName,
+		reason:  reason,
+	})
+	return nil
+}
+
+func (f *fakeResultPublisher) PublishStoreMissFailureCallCount() int {
+	return len(f.publishStoreMissFailCalls)
+}
+
+func (f *fakeResultPublisher) PublishStoreMissFailureArgsForCall(
+	i int,
+) (context.Context, lib.Task, string, string) {
+	call := f.publishStoreMissFailCalls[i]
+	return call.ctx, call.task, call.jobName, call.reason
 }
 
 func (f *fakeResultPublisher) PublishClearCurrentJob(
@@ -398,6 +529,16 @@ func (f *fakeResultPublisher) PublishSetTriggerScope(
 	return nil
 }
 
+func (f *fakeResultPublisher) PublishTriggerBudgetRefusal(
+	ctx context.Context,
+	task lib.Task,
+	scope string,
+	count int,
+	maxTriggers int,
+) error {
+	return nil
+}
+
 func (f *fakeResultPublisher) PublishTypeMismatchFailure(
 	ctx context.Context,
 	task lib.Task,
@@ -415,6 +556,23 @@ func (f *fakeResultPublisher) PublishRestoreAssignee(
 }
 
 func (f *fakeResultPublisher) PublishParkLostClaim(
+	ctx context.Context,
+	task lib.Task,
+	reason string,
+	claimKey string,
+	previousHolder string,
+) error {
+	return nil
+}
+
+func (f *fakeResultPublisher) PublishParkSucceeded(
+	ctx context.Context,
+	task lib.Task,
+) error {
+	return nil
+}
+
+func (f *fakeResultPublisher) PublishParkRedriveCap(
 	ctx context.Context,
 	task lib.Task,
 ) error {
@@ -457,6 +615,10 @@ func (f *fakeResultPublisher) PublishFailureArgsForCall(
 	return c.ctx, c.task, c.jobName, c.reason
 }
 
+func (f *fakeResultPublisher) PublishFailurePodArgsForCall(i int) *corev1.Pod {
+	return f.publishFailureCalls[i].pod
+}
+
 func (f *fakeResultPublisher) PublishClearCurrentJobCallCount() int {
 	return len(f.clearCurrentJobCalls)
 }
@@ -467,3 +629,192 @@ func (f *fakeResultPublisher) PublishClearCurrentJobArgsForCall(
 	c := f.clearCurrentJobCalls[i]
 	return c.ctx, c.task, c.jobName
 }
+
+// SC2's fixture: one failed-Job case per value in the closed batch/v1 JobFailed
+// reason set, each pinning the published failure_reason. Every case is RED on
+// the pre-change build (62c5380), which published pod_crash_no_stdout for all of
+// them — that is what makes this fixture discriminating rather than a
+// restatement of current behaviour.
+var _ = Describe("failureReason closed-set fixture", func() {
+	var (
+		ctx           context.Context
+		fakePublisher *fakeResultPublisher
+		taskStore     *TaskStore
+		watcher       JobWatcher
+		testTask      lib.Task
+		testTaskID    lib.TaskIdentifier
+	)
+
+	BeforeEach(func() {
+		ctx = context.Background()
+		fakePublisher = &fakeResultPublisher{}
+		taskStore = NewTaskStore()
+		testTaskID = lib.TaskIdentifier("test-task-uuid-1234")
+		testTask = lib.Task{
+			TaskIdentifier: testTaskID,
+			Frontmatter: lib.TaskFrontmatter{
+				"status":   "in_progress",
+				"assignee": "claude",
+			},
+			Content: lib.TaskContent("do the work"),
+		}
+		watcher = NewJobWatcher(
+			fake.NewSimpleClientset(),
+			"test-ns",
+			NewEventHandlerConfig(),
+			taskStore,
+			fakePublisher,
+			nil,
+			libtime.NewCurrentDateTime(),
+		)
+	})
+
+	failedJob := func(name, reason string) *batchv1.Job {
+		return &batchv1.Job{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      name,
+				Namespace: "test-ns",
+				Labels:    map[string]string{"agent.benjamin-borbe.de/task-id": string(testTaskID)},
+			},
+			Status: batchv1.JobStatus{
+				Conditions: []batchv1.JobCondition{{
+					Type:    batchv1.JobFailed,
+					Status:  corev1.ConditionTrue,
+					Reason:  reason,
+					Message: "failed",
+				}},
+			},
+		}
+	}
+
+	terminatedPod := func(name, jobName, terminatedReason string, exitCode int32) *corev1.Pod {
+		return &corev1.Pod{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      name,
+				Namespace: "test-ns",
+				Labels:    map[string]string{"agent.benjamin-borbe.de/task-id": string(testTaskID)},
+				OwnerReferences: []metav1.OwnerReference{
+					{Kind: "Job", Name: jobName},
+				},
+			},
+			Status: corev1.PodStatus{
+				Phase: corev1.PodFailed,
+				ContainerStatuses: []corev1.ContainerStatus{{
+					State: corev1.ContainerState{
+						Terminated: &corev1.ContainerStateTerminated{
+							Reason:   terminatedReason,
+							ExitCode: exitCode,
+						},
+					},
+				}},
+			},
+		}
+	}
+
+	publishedReason := func(job *batchv1.Job, pods ...*corev1.Pod) string {
+		taskStore.Store(testTaskID, testTask)
+		if pods == nil {
+			setPodLister(watcher)
+		} else {
+			setPodLister(watcher, pods...)
+		}
+		before := fakePublisher.PublishFailureCallCount()
+		watcher.HandleJob(ctx, job)
+		Expect(fakePublisher.PublishFailureCallCount()).To(Equal(before + 1))
+		_, _, _, calledReason := fakePublisher.PublishFailureArgsForCall(before)
+		return calledReason
+	}
+
+	It("names the JobFailed condition on every member of the closed set", func() {
+		type fixtureCase struct {
+			name      string
+			condition string
+			pod       *corev1.Pod
+			expected  string
+		}
+		cases := []fixtureCase{
+			{
+				name:      "BackoffLimitExceeded with a resolvable pod",
+				condition: "BackoffLimitExceeded",
+				pod:       terminatedPod("pod-a", "job-a", "Error", 137),
+				expected:  "pod_crash_no_stdout (Error/137)",
+			},
+			{
+				name:      "BackoffLimitExceeded with an unresolvable pod",
+				condition: "BackoffLimitExceeded",
+				pod:       nil,
+				expected:  "BackoffLimitExceeded (pod-unresolved)",
+			},
+			{
+				name:      "BackoffLimitExceeded with an OOMKilled pod",
+				condition: "BackoffLimitExceeded",
+				pod:       terminatedPod("pod-b", "job-b", "OOMKilled", 137),
+				expected:  "pod_oom_killed (OOMKilled/137)",
+			},
+			{
+				name:      "DeadlineExceeded",
+				condition: "DeadlineExceeded",
+				pod:       nil,
+				expected:  "deadline_exceeded",
+			},
+			{
+				name:      "PodFailurePolicy with a resolvable pod",
+				condition: "PodFailurePolicy",
+				pod:       terminatedPod("pod-c", "job-c", "Error", 137),
+				expected:  "PodFailurePolicy (Error/137)",
+			},
+			{
+				name:      "PodFailurePolicy with an unresolvable pod",
+				condition: "PodFailurePolicy",
+				pod:       nil,
+				expected:  "PodFailurePolicy",
+			},
+			{
+				name:      "reasonless JobFailed with a resolvable pod",
+				condition: "",
+				pod:       terminatedPod("pod-d", "job-d", "Error", 137),
+				expected:  "JobFailed (Error/137)",
+			},
+			{
+				name:      "reasonless JobFailed with an unresolvable pod",
+				condition: "",
+				pod:       nil,
+				expected:  "JobFailed",
+			},
+		}
+		for i, c := range cases {
+			name := "job-" + c.name
+			job := failedJob(name, c.condition)
+			var pods []*corev1.Pod
+			if c.pod != nil {
+				pod := c.pod.DeepCopy()
+				pod.Name = name + "-pod"
+				pod.OwnerReferences = []metav1.OwnerReference{{Kind: "Job", Name: name}}
+				pods = append(pods, pod)
+			}
+			Expect(publishedReason(job, pods...)).To(
+				Equal(c.expected),
+				"case %d (%s): published reason must name the condition", i, c.name,
+			)
+		}
+	})
+
+	It("classifies every published value back into the crash or deadline class", func() {
+		for _, reason := range []string{
+			"pod_crash_no_stdout (Error/137)",
+			"BackoffLimitExceeded (pod-unresolved)",
+			"PodFailurePolicy (Error/137)",
+			"PodFailurePolicy",
+			"JobFailed (Error/137)",
+			"JobFailed",
+		} {
+			parsed, ok := ParseZombieReason(reason)
+			Expect(ok).To(BeTrue(), "ParseZombieReason must recognise %q", reason)
+			Expect(parsed).To(Equal(ZombieReasonPodCrashNoStdout),
+				"%q must classify as the crash class, not not_crash_class", reason)
+		}
+		parsed, ok := ParseZombieReason("deadline_exceeded")
+		Expect(ok).To(BeTrue())
+		Expect(parsed).To(Equal(ZombieReasonDeadlineExceeded))
+	})
+})

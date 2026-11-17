@@ -34,6 +34,11 @@ type FakeTaskView struct {
 	consumeMessageReturnsOnCall map[int]struct {
 		result1 error
 	}
+	EvictStub        func(lib.TaskIdentifier)
+	evictMutex       sync.RWMutex
+	evictArgsForCall []struct {
+		arg1 lib.TaskIdentifier
+	}
 	GetStub        func(lib.TaskIdentifier) (lib.Task, bool)
 	getMutex       sync.RWMutex
 	getArgsForCall []struct {
@@ -192,6 +197,38 @@ func (fake *FakeTaskView) ConsumeMessageReturnsOnCall(i int, result1 error) {
 	fake.consumeMessageReturnsOnCall[i] = struct {
 		result1 error
 	}{result1}
+}
+
+func (fake *FakeTaskView) Evict(arg1 lib.TaskIdentifier) {
+	fake.evictMutex.Lock()
+	fake.evictArgsForCall = append(fake.evictArgsForCall, struct {
+		arg1 lib.TaskIdentifier
+	}{arg1})
+	stub := fake.EvictStub
+	fake.recordInvocation("Evict", []interface{}{arg1})
+	fake.evictMutex.Unlock()
+	if stub != nil {
+		fake.EvictStub(arg1)
+	}
+}
+
+func (fake *FakeTaskView) EvictCallCount() int {
+	fake.evictMutex.RLock()
+	defer fake.evictMutex.RUnlock()
+	return len(fake.evictArgsForCall)
+}
+
+func (fake *FakeTaskView) EvictCalls(stub func(lib.TaskIdentifier)) {
+	fake.evictMutex.Lock()
+	defer fake.evictMutex.Unlock()
+	fake.EvictStub = stub
+}
+
+func (fake *FakeTaskView) EvictArgsForCall(i int) lib.TaskIdentifier {
+	fake.evictMutex.RLock()
+	defer fake.evictMutex.RUnlock()
+	argsForCall := fake.evictArgsForCall[i]
+	return argsForCall.arg1
 }
 
 func (fake *FakeTaskView) Get(arg1 lib.TaskIdentifier) (lib.Task, bool) {

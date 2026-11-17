@@ -79,6 +79,7 @@ var _ = Describe("respawned-second-success race", func() {
 			taskStore,
 			fakeResultPublisher,
 			nil,
+			libtime.NewCurrentDateTime(),
 		)
 	})
 

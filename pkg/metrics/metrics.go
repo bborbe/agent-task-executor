@@ -36,6 +36,21 @@ var JobsSpawnedTotal = promauto.NewCounterVec(
 	[]string{"namespace"},
 )
 
+// TaskContentTooLargeTotal counts spawns the executor refused because the task's
+// TASK_CONTENT env entry would exceed the kernel's 128 KiB per-string limit
+// (MAX_ARG_STRLEN). Without this counter the refusal is silent: no Job is
+// created, so the fleet looks idle rather than blocked, and the task is
+// re-driven forever with no evidence of why.
+//
+// Carries no labels, so it is registered at 0 and needs no init() seeding —
+// unlike the CounterVecs there is no label combination to pre-initialise.
+var TaskContentTooLargeTotal = promauto.NewCounter(
+	prometheus.CounterOpts{
+		Name: "agent_executor_task_content_too_large_total",
+		Help: "Total number of spawns refused because the TASK_CONTENT env entry exceeded MAX_ARG_STRLEN.",
+	},
+)
+
 // ReconcileRedrivenTotal counts tasks re-driven by the reconcile loop after a
 // restart dropped their in-memory deferral state (spec 005).
 var ReconcileRedrivenTotal = promauto.NewCounter(
@@ -124,6 +139,120 @@ var ReconcilePassesTotal = promauto.NewCounterVec(
 	[]string{"result"},
 )
 
+// ConfigAccepted is the set of (phase, task_type) pairs this executor's agent
+// Config CRs currently accept, one series per pair with value 1, tagged with
+// the publishing executor's task vault.
+//
+// It is a gauge, not a counter: it describes current state. It is the
+// right-hand side of the cross-repo `unreachable-phase` join — the controller
+// publishes agent_controller_open_tasks on the same three labels and subtracts
+// this side with `unless on (phase, task_type)`. The label names are frozen by
+// that merged rule, and the metric name carries no `_total`.
+//
+// Never call Reset() on it. A reset-then-set refresh leaves a window in which
+// the family is empty, and under `unless` an empty right side returns every
+// open record — the exact false all-records alert this metric exists to
+// prevent. Removed pairs are deleted by label values instead.
+var ConfigAccepted = promauto.NewGaugeVec(
+	prometheus.GaugeOpts{
+		Name: "executor_config_accepted",
+		Help: "Accepted (phase, task_type) pairs per vault, value 1 per pair; the right-hand side of the unreachable-phase join.",
+	},
+	[]string{"phase", "task_type", "vault"},
+)
+
+// ConfigAcceptedRefreshTotal counts accepted-set refreshes by result. The
+// result set is closed at compile time — `ok` and `read_error` — so both
+// series are seeded in init(): without the seed a refresh that never ran is
+// indistinguishable from one that ran and found nothing changed, and only the
+// first of those is a fault. Deliberately carries no pair labels: this
+// counter answers "did the refresh run", not "what did it publish".
+var ConfigAcceptedRefreshTotal = promauto.NewCounterVec(
+	prometheus.CounterOpts{
+		Name: "executor_config_accepted_refresh_total",
+		Help: "Total number of accepted-set refreshes by result (ok, read_error).",
+	},
+	[]string{"result"},
+)
+
+// ViewDivergenceTotal counts reconcile-pass view/vault divergence checks by
+// result. The result set is closed at compile time: `ok` and `read_error`
+// increment once per pass that reaches the check, `mismatch` and `absent`
+// increment once per task id. An alert written against one reading is wrong
+// under the other, so the unit is part of the contract. Task ids are never
+// label values.
+//
+// A new name is required rather than reusing
+// executor_reconcile_passes_total{result="task_vault_mismatch"}: that label
+// describes vault-ownership classification over the in-memory snapshot, not
+// a per-id file comparison, and merging the two would let a dashboard read
+// one failure as the other.
+var ViewDivergenceTotal = promauto.NewCounterVec(
+	prometheus.CounterOpts{
+		Name: "executor_view_divergence_total",
+		Help: "Total number of view/vault divergence checks by result (ok, mismatch, absent, read_error).",
+	},
+	[]string{"result"},
+)
+
+// The eligibility gates that can refuse a spawn. The first eight are applied in
+// order by reconcileTask; index_terminal runs later, at the gather stage after
+// the filter has returned the task eligible, and again in the deferred-respawn
+// evaluation. The vocabulary is closed at compile time, which is what lets
+// ReconcileRefusedTotal be pre-initialised: every series exists before the first
+// refusal, so a gate that never fires is distinguishable from a counter that was
+// never wired up.
+const (
+	// ReconcileRefusedGateForeignCluster means the task names another cluster.
+	ReconcileRefusedGateForeignCluster = "foreign_cluster"
+	// ReconcileRefusedGateUnresolvedConfig means neither the assignee nor the
+	// declared task_type resolved to a Config.
+	ReconcileRefusedGateUnresolvedConfig = "unresolved_config"
+	// ReconcileRefusedGateTerminalStatus means the task's status is terminal.
+	ReconcileRefusedGateTerminalStatus = "terminal_status"
+	// ReconcileRefusedGateStatusNotTriggered means the Config's trigger.statuses
+	// does not list the task's status.
+	ReconcileRefusedGateStatusNotTriggered = "status_not_triggered"
+	// ReconcileRefusedGatePhaseNotTriggered means the Config's trigger.phases
+	// does not list the task's phase.
+	ReconcileRefusedGatePhaseNotTriggered = "phase_not_triggered"
+	// ReconcileRefusedGateTerminalPhase means the task's phase is terminal.
+	ReconcileRefusedGateTerminalPhase = "terminal_phase"
+	// ReconcileRefusedGateStageMismatch means the task's stage sits outside this
+	// executor's pool.
+	ReconcileRefusedGateStageMismatch = "stage_mismatch"
+	// ReconcileRefusedGateNoRouting means the task carries neither an assignee
+	// nor a declared task_type.
+	ReconcileRefusedGateNoRouting = "no_routing"
+	// ReconcileRefusedGateIndexTerminal means the vault index reports the task's
+	// state as terminal. It is the gather-stage gate: applied once the filter has
+	// returned the task eligible, and again in the deferred-respawn evaluation. It
+	// is not one of the gates reconcileTask applies.
+	ReconcileRefusedGateIndexTerminal = "index_terminal"
+	// ReconcileRefusedGateTypeMismatch means the task's task_type is absent or
+	// outside the resolved Config's effective type set. It mirrors
+	// parseAndFilter's type gate on the Kafka path, which the reconcile floor
+	// did not apply — so a record with no task_type was refused there and
+	// spawned here.
+	ReconcileRefusedGateTypeMismatch = "type_mismatch"
+)
+
+// ReconcileRefusedTotal counts spawn refusals by the eligibility gate that
+// refused them, covering both the reconcile floor and the deferred-respawn path.
+//
+// Before this counter six of the then-existing eight returned silently, so a
+// refused record was indistinguishable from one that was never in the candidate
+// set at all. The gate label is a closed compile-time domain — never a task id,
+// cluster, stage or assignee — so all ten series are pre-initialised at zero and
+// a `rate(...) == 0` read on any one gate is honest rather than empty.
+var ReconcileRefusedTotal = promauto.NewCounterVec(
+	prometheus.CounterOpts{
+		Name: "executor_reconcile_refused_total",
+		Help: "Total number of spawn refusals by the eligibility gate that refused them, on every spawn path that applies the gate.",
+	},
+	[]string{"gate"},
+)
+
 // SkippedUnknownAssigneeTotal counts tasks skipped because their assignee
 // matches no agent Config CR, labelled by the unknown assignee name. The bare
 // TaskEventsTotal{result="skipped_unknown_assignee"} counter says a skip
@@ -138,6 +267,18 @@ var SkippedUnknownAssigneeTotal = promauto.NewCounterVec(
 	[]string{"assignee"},
 )
 
+// DeadLetterTotal counts task events a provably unprocessable message caused to
+// be recorded durably and skipped, by the source topic. It is the alertable
+// half of the permanent-skip path: TaskEventsTotal{result="skipped_permanent"}
+// says a skip happened, this says on which topic the poison is arriving.
+var DeadLetterTotal = promauto.NewCounterVec(
+	prometheus.CounterOpts{
+		Name: "agent_executor_dead_letter_total",
+		Help: "Total number of task events recorded durably and skipped as unprocessable, by source topic.",
+	},
+	[]string{"topic"},
+)
+
 // ClaimTotal counts claim lease outcomes by result. The result set is closed;
 // keys and task ids are never label values.
 var ClaimTotal = promauto.NewCounterVec(
@@ -147,6 +288,98 @@ var ClaimTotal = promauto.NewCounterVec(
 	},
 	[]string{"result"},
 )
+
+// SpawnClaimTotal counts the spawn-claim decision, by outcome and by the stage
+// that produced it. It exists because executor_claim_total answers "what did
+// the lease manager do" but not "what did this spawn decide", and the two
+// cannot be separated from it: a claim that was never acquired and a claim that
+// was acquired and then not renewed both leave the same aggregate trace once
+// the window is over.
+//
+// The outcome set is closed and exhaustive over the spawn path, so
+// acquired + unclaimed + fail_open + mode_off equals the number of spawn
+// attempts, and lapsed is the orthogonal post-spawn class. "unclaimed" and
+// "fail_open" are the same failure decision under different modes: `on` blocks
+// the spawn, `shadow` lets it through. That split is the whole reason this
+// metric exists — without it, a fail-open spawn is indistinguishable from one
+// that held a claim.
+//
+// No task id, claim key, assignee or cluster is ever a label value. Cluster
+// arrives as the Prometheus external label.
+var SpawnClaimTotal = promauto.NewCounterVec(
+	prometheus.CounterOpts{
+		Name: "executor_spawn_claim_total",
+		Help: "Total number of spawn-claim decisions by outcome and failure stage.",
+	},
+	[]string{"result", "stage"},
+)
+
+// The closed spawn-claim outcome vocabulary. Each is the label value written by
+// exactly one production branch; see SpawnClaimPairs for the reachable
+// combinations.
+const (
+	// SpawnClaimResultAcquired — a claim is held and the spawn proceeds.
+	SpawnClaimResultAcquired = "acquired"
+	// SpawnClaimResultUnclaimed — no claim was obtained and the spawn is
+	// blocked (claim mode on).
+	SpawnClaimResultUnclaimed = "unclaimed"
+	// SpawnClaimResultFailOpen — no claim was obtained and the spawn proceeds
+	// anyway (claim mode shadow).
+	SpawnClaimResultFailOpen = "fail_open"
+	// SpawnClaimResultModeOff — the spawn proceeds without attempting a claim
+	// at all (claim mode off).
+	SpawnClaimResultModeOff = "mode_off"
+	// SpawnClaimResultLapsed — a held claim was lost or its renewal failed
+	// after the spawn. The "acquired and not renewed" class.
+	SpawnClaimResultLapsed = "lapsed"
+)
+
+// The closed spawn-claim stage vocabulary. It mirrors the stages
+// claimFailureDecision already logs, plus the two post-spawn renewal stages and
+// the none value the non-failure branches carry.
+const (
+	SpawnClaimStageNone         = "none"
+	SpawnClaimStageLeaseManager = "lease_manager"
+	SpawnClaimStageClaimScheme  = "claim_scheme"
+	SpawnClaimStageDeriveKey    = "derive_key"
+	SpawnClaimStageTakeover     = "takeover"
+	SpawnClaimStageClaim        = "claim"
+	SpawnClaimStageRenew        = "renew"
+	SpawnClaimStageLost         = "lost"
+)
+
+// SpawnClaimPairs is the closed, reachable (result, stage) enumeration. It is
+// the seeding list: every pair is published at 0, so an absent series means the
+// metric stopped being exported rather than "this has not happened yet".
+//
+// It is deliberately not the full cross product. acquired and mode_off can only
+// carry stage none, and lapsed can only carry renew or lost, so seeding those
+// combinations would publish permanently-zero series that no branch can ever
+// move — which is a worse lie than an absent series, because it reads as
+// evidence the branch exists.
+var SpawnClaimPairs = [][2]string{
+	{SpawnClaimResultAcquired, SpawnClaimStageNone},
+	{SpawnClaimResultModeOff, SpawnClaimStageNone},
+	{SpawnClaimResultUnclaimed, SpawnClaimStageLeaseManager},
+	{SpawnClaimResultUnclaimed, SpawnClaimStageClaimScheme},
+	{SpawnClaimResultUnclaimed, SpawnClaimStageDeriveKey},
+	{SpawnClaimResultUnclaimed, SpawnClaimStageTakeover},
+	{SpawnClaimResultUnclaimed, SpawnClaimStageClaim},
+	{SpawnClaimResultFailOpen, SpawnClaimStageLeaseManager},
+	{SpawnClaimResultFailOpen, SpawnClaimStageClaimScheme},
+	{SpawnClaimResultFailOpen, SpawnClaimStageDeriveKey},
+	{SpawnClaimResultFailOpen, SpawnClaimStageTakeover},
+	{SpawnClaimResultFailOpen, SpawnClaimStageClaim},
+	{SpawnClaimResultLapsed, SpawnClaimStageRenew},
+	{SpawnClaimResultLapsed, SpawnClaimStageLost},
+}
+
+// CountSpawnClaim increments the spawn-claim outcome counter. It is the single
+// write path, so the closed vocabulary above is the only way a series can be
+// created.
+func CountSpawnClaim(result string, stage string) {
+	SpawnClaimTotal.WithLabelValues(result, stage).Inc()
+}
 
 // ClaimMismatchTotal counts held-claim / running-Job mismatches, one per case.
 var ClaimMismatchTotal = promauto.NewCounter(
@@ -163,6 +396,20 @@ var ClaimKeyFallbackTotal = promauto.NewCounter(prometheus.CounterOpts{
 	Help: "Total number of pr-review claim keys that fell back to the task-id key.",
 })
 
+// ClaimSchemeTotal counts claim-key scheme guard outcomes by result. The result
+// set is closed: confirmed, bootstrapped, mismatch, unreadable. It is the
+// positive evidence that the guard ran at all — a fleet with no mismatch also
+// produces zero mismatches when the guard never executes, so the confirmed and
+// bootstrapped series are what distinguish "checked and agreed" from "not
+// checking".
+var ClaimSchemeTotal = promauto.NewCounterVec(
+	prometheus.CounterOpts{
+		Name: "executor_claim_scheme_total",
+		Help: "Total number of claim-key scheme guard outcomes by result.",
+	},
+	[]string{"result"},
+)
+
 // ParkedLostClaimTotal counts tasks parked at phase human_review after another
 // executor took over their claim, labelled by outcome. The unset default parks,
 // so an unexpected fleet-wide park must be alertable from a metric rather than
@@ -171,6 +418,16 @@ var ParkedLostClaimTotal = promauto.NewCounterVec(prometheus.CounterOpts{
 	Name: "executor_parked_lost_claim_total",
 	Help: "Total number of tasks parked at human_review after a lost claim, by outcome.",
 }, []string{"result"})
+
+// ClaimAbsentEvictedTotal counts view entries evicted because the vault
+// answered a non-retryable 404 to their claim across the whole grace window.
+// The record was in the executor's Kafka view but had no task file, so it could
+// never spawn, park or clear; eviction is the only terminal state available to
+// it without deleting the topic key by hand.
+var ClaimAbsentEvictedTotal = promauto.NewCounter(prometheus.CounterOpts{
+	Name: "executor_claim_absent_evicted_total",
+	Help: "Total number of view entries evicted after the vault answered 404 to their claim across the grace window.",
+})
 
 // TaskRerunsTotal counts spawns of a task whose previous Job succeeded inside
 // the re-run window. A re-run is a task that ran again after succeeding, which
@@ -252,6 +509,41 @@ var TaskViewSkippedTotal = promauto.NewCounter(prometheus.CounterOpts{
 	Help: "Total number of task event messages the task view could not decode.",
 })
 
+// seedDeferredAndRefusalOutcomes pre-initialises the closed set of deferred-respawn
+// and refusal-write outcomes. Same reason as the blocks in init: an absent series
+// makes a `rate(...) == 0` alert skip silently instead of firing on a fleet where
+// the outcome never happened. The two refusal-write labels are the same failure
+// surfaced on its two non-fatal paths — the deferred-respawn loop and the Kafka
+// consumer — and neither may be allowed to look like a healthy zero.
+func seedDeferredAndRefusalOutcomes() {
+	TaskEventsTotal.WithLabelValues("deferred_concurrency_cap").Add(0)
+	TaskEventsTotal.WithLabelValues("deferred_claim_invalidated").Add(0)
+	TaskEventsTotal.WithLabelValues("deferred_respawn_spawn_failed").Add(0)
+	TaskEventsTotal.WithLabelValues("deferred_respawn_refusal_write_failed").Add(0)
+	TaskEventsTotal.WithLabelValues("event_refusal_write_failed").Add(0)
+}
+
+// initReconcileRefusedGateSeries pre-initialises the closed reconcile-refusal
+// gate set: the gate vocabulary is fixed at compile time, so every gate can be
+// registered before the first refusal and an absent series never masquerades as
+// a healthy zero.
+func initReconcileRefusedGateSeries() {
+	for _, gate := range []string{
+		ReconcileRefusedGateForeignCluster,
+		ReconcileRefusedGateUnresolvedConfig,
+		ReconcileRefusedGateTerminalStatus,
+		ReconcileRefusedGateStatusNotTriggered,
+		ReconcileRefusedGatePhaseNotTriggered,
+		ReconcileRefusedGateTerminalPhase,
+		ReconcileRefusedGateStageMismatch,
+		ReconcileRefusedGateNoRouting,
+		ReconcileRefusedGateIndexTerminal,
+		ReconcileRefusedGateTypeMismatch,
+	} {
+		ReconcileRefusedTotal.WithLabelValues(gate).Add(0)
+	}
+}
+
 func init() {
 	// Only the fixed sentinel is seeded. The namespace vocabulary is unbounded, so
 	// seeding it is not possible — but a CounterVec with no series registers no
@@ -266,6 +558,8 @@ func init() {
 	TaskEventsTotal.WithLabelValues("skipped_unknown_assignee").Add(0)
 	TaskEventsTotal.WithLabelValues("skipped_active_job").Add(0)
 	TaskEventsTotal.WithLabelValues("skipped_recent_success").Add(0)
+	TaskEventsTotal.WithLabelValues("parked_succeeded").Add(0)
+	TaskEventsTotal.WithLabelValues("success_before_cache_sync").Add(0)
 	TaskEventsTotal.WithLabelValues("skipped_stage").Add(0)
 	TaskEventsTotal.WithLabelValues("pin_outside_pool").Add(0)
 	TaskEventsTotal.WithLabelValues("skipped_foreign_cluster").Add(0)
@@ -280,10 +574,14 @@ func init() {
 	TaskEventsTotal.WithLabelValues("unknown_phase").Add(0)
 	TaskEventsTotal.WithLabelValues("respawn_grace_window").Add(0)
 	TaskEventsTotal.WithLabelValues("skipped_foreign_job").Add(0)
+	// The claim probe's only failure value. Seeded for the reason the whole block
+	// exists: this series is the sole signal that a fleet is holding spawns
+	// because its claim store is unreadable, and an absent series makes a
+	// `rate(...) == 0` alert on it skip silently.
+	TaskEventsTotal.WithLabelValues("claim_probe_failed").Add(0)
 	TaskEventsTotal.WithLabelValues("respawn_after_grace_window").Add(0)
-	TaskEventsTotal.WithLabelValues("deferred_concurrency_cap").Add(0)
-	TaskEventsTotal.WithLabelValues("deferred_claim_invalidated").Add(0)
-	TaskEventsTotal.WithLabelValues("deferred_respawn_spawn_failed").Add(0)
+	TaskEventsTotal.WithLabelValues("skipped_permanent").Add(0)
+	seedDeferredAndRefusalOutcomes()
 	// Pre-initialise every reconcile outcome so rate() sees a 0 series rather
 	// than no data — an absent series makes `rate(...)==0` skip silently and the
 	// "backstop never succeeds" alert never fire.
@@ -296,6 +594,18 @@ func init() {
 	} {
 		ReconcilePassesTotal.WithLabelValues(result).Add(0)
 	}
+	// Pre-initialise the closed divergence result set: `rate(...) == 0` must be
+	// able to fire on a check that never ran, and an absent series would make
+	// the never-ran case indistinguishable from a healthy quiet fleet.
+	for _, result := range []string{"ok", "mismatch", "absent", "read_error"} {
+		ViewDivergenceTotal.WithLabelValues(result).Add(0)
+	}
+	initReconcileRefusedGateSeries()
+	// Pre-initialise the closed refresh result set so `rate(...) == 0` can fire on
+	// a refresh that never ran, rather than skipping silently on an absent series.
+	for _, result := range []string{"ok", "read_error"} {
+		ConfigAcceptedRefreshTotal.WithLabelValues(result).Add(0)
+	}
 	// Pre-initialise the closed abort vocabulary so both series are visible
 	// before any abort. Unlike RedriveCappedTotal, whose labels are unbounded.
 	for _, reason := range []string{
@@ -305,6 +615,7 @@ func init() {
 		RedriveAbortedTotal.WithLabelValues(reason).Add(0)
 	}
 	ClaimKeyFallbackTotal.Add(0)
+	initClaimSchemeSeries()
 	for _, result := range []string{"parked", "failed"} {
 		ParkedLostClaimTotal.WithLabelValues(result).Add(0)
 	}
@@ -327,5 +638,22 @@ func init() {
 		"jobless_released",
 	} {
 		ClaimTotal.WithLabelValues(result).Add(0)
+	}
+	// Pre-initialise the closed spawn-claim enumeration, so a zero is
+	// distinguishable from an absent series after a pod restart. Without this,
+	// "this cluster has recorded no spawn decision" and "this build no longer
+	// exports the metric" are the same reading.
+	for _, pair := range SpawnClaimPairs {
+		SpawnClaimTotal.WithLabelValues(pair[0], pair[1]).Add(0)
+	}
+}
+
+// initClaimSchemeSeries seeds the closed claim-scheme result set, including the
+// two results that mean "the guard ran and agreed". A CounterVec with no series
+// registers no metric family at all, so without this a guard that had not yet
+// checked would look identical to one that was never wired up.
+func initClaimSchemeSeries() {
+	for _, result := range []string{"confirmed", "bootstrapped", "mismatch", "unreadable"} {
+		ClaimSchemeTotal.WithLabelValues(result).Add(0)
 	}
 }

@@ -10,6 +10,7 @@ import (
 
 	taskcmd "github.com/bborbe/agent/command/task"
 	cqrsmocks "github.com/bborbe/cqrs/mocks"
+	"github.com/bborbe/vault-cli/pkg/domain"
 	"github.com/google/uuid"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
@@ -32,7 +33,7 @@ var _ = Describe("HealthcheckRunner", func() {
 		ctx = context.Background()
 		configProvider = new(mocks.FakeConfigProvider)
 		publisher = new(mocks.FakeCommandPublisher)
-		runner = probe.NewHealthcheckRunner(configProvider, publisher, "dev")
+		runner = probe.NewHealthcheckRunner(configProvider, publisher, "dev", "personal")
 	})
 
 	Context("N configs produce 2N commands in the expected order", func() {
@@ -96,6 +97,90 @@ var _ = Describe("HealthcheckRunner", func() {
 		It("returns no error", func() {
 			Expect(runner.Run(ctx)).To(Succeed())
 		})
+	})
+
+	Context("probe phase follows the Config trigger", func() {
+		DescribeTable("both published commands carry the selected phase",
+			func(trigger *agentv1.Trigger, want string) {
+				configProvider.GetReturns([]agentv1.Config{
+					{
+						ObjectMeta: metav1.ObjectMeta{Name: "agent-a"},
+						Spec:       agentv1.ConfigSpec{Assignee: "agent-a", Trigger: trigger},
+					},
+				}, nil)
+
+				Expect(runner.Run(ctx)).To(Succeed())
+
+				_, _, createPayload := publisher.PublishArgsForCall(0)
+				createCmd, ok := createPayload.(taskcmd.CreateCommand)
+				Expect(ok).To(BeTrue())
+				Expect(createCmd.Frontmatter).To(HaveKeyWithValue("phase", want))
+
+				_, _, updatePayload := publisher.PublishArgsForCall(1)
+				updateCmd, ok := updatePayload.(taskcmd.UpdateFrontmatterCommand)
+				Expect(ok).To(BeTrue())
+				Expect(updateCmd.Updates).To(HaveKeyWithValue("phase", want))
+			},
+			Entry("[planning]", &agentv1.Trigger{
+				Phases: domain.TaskPhases{domain.TaskPhasePlanning},
+			}, "planning"),
+			Entry("[execution]", &agentv1.Trigger{
+				Phases: domain.TaskPhases{domain.TaskPhaseExecution},
+			}, "execution"),
+			Entry("[execution, planning] prefers planning", &agentv1.Trigger{
+				Phases: domain.TaskPhases{domain.TaskPhaseExecution, domain.TaskPhasePlanning},
+			}, "planning"),
+			Entry("[todo, planning, execution, ai_review] prefers planning", &agentv1.Trigger{
+				Phases: domain.TaskPhases{
+					domain.TaskPhaseTodo,
+					domain.TaskPhasePlanning,
+					domain.TaskPhaseExecution,
+					domain.TaskPhaseAIReview,
+				},
+			}, "planning"),
+			Entry("[todo, execution] skips todo", &agentv1.Trigger{
+				Phases: domain.TaskPhases{domain.TaskPhaseTodo, domain.TaskPhaseExecution},
+			}, "execution"),
+			Entry("[ai_review]", &agentv1.Trigger{
+				Phases: domain.TaskPhases{domain.TaskPhaseAIReview},
+			}, "ai_review"),
+			Entry("[human_review, execution] skips the terminal phase", &agentv1.Trigger{
+				Phases: domain.TaskPhases{domain.TaskPhaseHumanReview, domain.TaskPhaseExecution},
+			}, "execution"),
+			Entry("nil trigger falls back to planning", nil, "planning"),
+			Entry("empty phases fall back to planning", &agentv1.Trigger{
+				Phases: domain.TaskPhases{},
+			}, "planning"),
+		)
+	})
+
+	Context("a Config with no spawnable trigger phase is not probed", func() {
+		DescribeTable("only the normal Config is probed",
+			func(trigger *agentv1.Trigger) {
+				configProvider.GetReturns([]agentv1.Config{
+					{
+						ObjectMeta: metav1.ObjectMeta{Name: "skip-agent"},
+						Spec:       agentv1.ConfigSpec{Assignee: "skip-agent", Trigger: trigger},
+					},
+					{
+						ObjectMeta: metav1.ObjectMeta{Name: "agent-a"},
+						Spec:       agentv1.ConfigSpec{Assignee: "agent-a"},
+					},
+				}, nil)
+
+				Expect(runner.Run(ctx)).To(Succeed())
+				Expect(publisher.PublishCallCount()).To(Equal(2))
+			},
+			Entry("[todo]", &agentv1.Trigger{
+				Phases: domain.TaskPhases{domain.TaskPhaseTodo},
+			}),
+			Entry("[human_review]", &agentv1.Trigger{
+				Phases: domain.TaskPhases{domain.TaskPhaseHumanReview},
+			}),
+			Entry("[done]", &agentv1.Trigger{
+				Phases: domain.TaskPhases{domain.TaskPhaseDone},
+			}),
+		)
 	})
 
 	Context("create-task publish fails", func() {
@@ -268,20 +353,20 @@ var _ = Describe("HealthcheckRunner", func() {
 			Expect(createCmd.Frontmatter).To(HaveKeyWithValue("stage", "dev"))
 		})
 
-		It("create-task frontmatter has phase in_progress", func() {
+		It("create-task frontmatter has the default phase planning", func() {
 			Expect(runner.Run(ctx)).To(Succeed())
 			_, _, payload := publisher.PublishArgsForCall(0)
 			createCmd, ok := payload.(taskcmd.CreateCommand)
 			Expect(ok).To(BeTrue())
-			Expect(createCmd.Frontmatter).To(HaveKeyWithValue("phase", "in_progress"))
+			Expect(createCmd.Frontmatter).To(HaveKeyWithValue("phase", "planning"))
 		})
 
-		It("update-frontmatter has phase in_progress", func() {
+		It("update-frontmatter has the default phase planning", func() {
 			Expect(runner.Run(ctx)).To(Succeed())
 			_, _, payload := publisher.PublishArgsForCall(1)
 			updateCmd, ok := payload.(taskcmd.UpdateFrontmatterCommand)
 			Expect(ok).To(BeTrue())
-			Expect(updateCmd.Updates).To(HaveKeyWithValue("phase", "in_progress"))
+			Expect(updateCmd.Updates).To(HaveKeyWithValue("phase", "planning"))
 		})
 
 		It("update-frontmatter resets status to in_progress (spec AC line 76)", func() {
@@ -306,8 +391,70 @@ var _ = Describe("HealthcheckRunner", func() {
 				Expect(updateCmd.Updates).To(HaveKeyWithValue("job_started_at", ""))
 				Expect(updateCmd.Updates).To(HaveKeyWithValue("spawn_notification", false))
 				Expect(updateCmd.Updates).To(HaveKeyWithValue("trigger_count", 0))
+				// retry_count is retired: the probe must not re-create it on every
+				// healthcheck re-trigger. This assertion fails if the key comes back.
+				Expect(updateCmd.Updates).NotTo(HaveKey("retry_count"))
 			},
 		)
+
+		It("update-frontmatter re-stamps the probe's own assignee on every re-trigger", func() {
+			// Regression (sun-k3s, 2026-11-15): seven Configs declare healthcheck and
+			// none declares defaultForTaskTypes, so a probe record whose assignee an
+			// agent cleared resolves to ErrConfigAmbiguous and is skipped before any
+			// Job exists. The create writes only when no file exists or the existing
+			// one is terminal; a non-terminal record returns ErrTaskAlreadyExists and
+			// is left untouched, so the update is the only write a re-trigger makes
+			// and it must carry the routing value.
+			Expect(runner.Run(ctx)).To(Succeed())
+			_, _, payload := publisher.PublishArgsForCall(1)
+			updateCmd, ok := payload.(taskcmd.UpdateFrontmatterCommand)
+			Expect(ok).To(BeTrue())
+			Expect(updateCmd.Updates).To(HaveKeyWithValue("assignee", "agent-a"))
+		})
+
+		It("reproduces the seven-claimant ambiguity and routes by the stamped assignee", func() {
+			// The exact Sun shape: seven Configs, every one declaring healthcheck,
+			// none declaring defaultForTaskTypes. ResolveByTaskType cannot narrow
+			// this set, so the record only routes if the probe names its Config.
+			claimants := make([]agentv1.Config, 0, 7)
+			for _, name := range []string{
+				"build-fix-agent",
+				"claude-headless",
+				"github-dark-factory-agent",
+				"github-pr-review-agent",
+				"github-releaser-agent",
+				"github-update-go-agent",
+				"pi-headless",
+			} {
+				claimants = append(claimants, agentv1.Config{
+					ObjectMeta: metav1.ObjectMeta{Name: name},
+					Spec: agentv1.ConfigSpec{
+						Assignee:  name,
+						TaskTypes: []string{"healthcheck"},
+					},
+				})
+			}
+			configProvider.GetReturns(claimants, nil)
+
+			Expect(runner.Run(ctx)).To(Succeed())
+			Expect(publisher.PublishCallCount()).To(Equal(len(claimants) * 2))
+
+			for i := range claimants {
+				_, _, createPayload := publisher.PublishArgsForCall(i * 2)
+				createCmd, ok := createPayload.(taskcmd.CreateCommand)
+				Expect(ok).To(BeTrue())
+				assignee, ok := createCmd.Frontmatter["assignee"].(string)
+				Expect(ok).To(BeTrue())
+
+				_, _, updatePayload := publisher.PublishArgsForCall(i*2 + 1)
+				updateCmd, ok := updatePayload.(taskcmd.UpdateFrontmatterCommand)
+				Expect(ok).To(BeTrue())
+				// The update must name the same Config the create does: that value is
+				// what Resolve matches on Spec.Assignee, which is the only input the
+				// seven-claimant set cannot defeat.
+				Expect(updateCmd.Updates).To(HaveKeyWithValue("assignee", assignee))
+			}
+		})
 
 		It("probeTaskID is a pure function of (agent, stage) — boundary contract", func() {
 			// Direct unit-level boundary test per spec AC line 75:
@@ -326,8 +473,8 @@ var _ = Describe("HealthcheckRunner", func() {
 
 			pubA := new(mocks.FakeCommandPublisher)
 			pubB := new(mocks.FakeCommandPublisher)
-			runnerA := probe.NewHealthcheckRunner(configProvider, pubA, "dev")
-			runnerB := probe.NewHealthcheckRunner(configProvider, pubB, "dev")
+			runnerA := probe.NewHealthcheckRunner(configProvider, pubA, "dev", "personal")
+			runnerB := probe.NewHealthcheckRunner(configProvider, pubB, "dev", "personal")
 			Expect(runnerA.Run(ctx)).To(Succeed())
 			Expect(runnerB.Run(ctx)).To(Succeed())
 
@@ -343,7 +490,7 @@ var _ = Describe("HealthcheckRunner", func() {
 		})
 
 		It("dev and prod runners produce different task IDs for the same agent", func() {
-			devRunner := probe.NewHealthcheckRunner(configProvider, publisher, "dev")
+			devRunner := probe.NewHealthcheckRunner(configProvider, publisher, "dev", "personal")
 			prodPublisher := new(mocks.FakeCommandPublisher)
 			configProvider.GetReturns([]agentv1.Config{
 				{
@@ -351,7 +498,12 @@ var _ = Describe("HealthcheckRunner", func() {
 					Spec:       agentv1.ConfigSpec{Assignee: "agent-a"},
 				},
 			}, nil)
-			prodRunner := probe.NewHealthcheckRunner(configProvider, prodPublisher, "prod")
+			prodRunner := probe.NewHealthcheckRunner(
+				configProvider,
+				prodPublisher,
+				"prod",
+				"personal",
+			)
 
 			Expect(devRunner.Run(ctx)).To(Succeed())
 			Expect(prodRunner.Run(ctx)).To(Succeed())
@@ -392,6 +544,186 @@ var _ = Describe("HealthcheckRunner", func() {
 			updateCmd, ok := payload.(taskcmd.UpdateFrontmatterCommand)
 			Expect(ok).To(BeTrue(), "payload at call 1 must be an UpdateFrontmatterCommand")
 			Expect(updateCmd.Validate(ctx)).To(Succeed())
+		})
+	})
+
+	// Regression: the create command carried no TargetVault, so the controller
+	// substituted routing.LegacyDefaultVault ("openclaw") and skipped every
+	// probe create on any other vault as a cross-vault write — silently, since
+	// the executor had already logged the publish as successful.
+	//
+	// Two distinct configured vaults are table-tested on purpose: a single
+	// vault cannot distinguish a value computed from the configured vault from
+	// a hard-coded literal that happens to equal it.
+	Context("both published commands stamp the executor's configured vault (regression)", func() {
+		BeforeEach(func() {
+			configProvider.GetReturns([]agentv1.Config{
+				{
+					ObjectMeta: metav1.ObjectMeta{Name: "agent-a"},
+					Spec:       agentv1.ConfigSpec{Assignee: "agent-a"},
+				},
+			}, nil)
+		})
+
+		DescribeTable(
+			"published CreateCommand and UpdateFrontmatterCommand TargetVault equal the configured vault",
+			func(configuredVault string) {
+				pub := new(mocks.FakeCommandPublisher)
+				vaultRunner := probe.NewHealthcheckRunner(
+					configProvider,
+					pub,
+					"dev",
+					configuredVault,
+				)
+
+				Expect(vaultRunner.Run(ctx)).To(Succeed())
+
+				_, op, payload := pub.PublishArgsForCall(0)
+				Expect(op).To(Equal("create-task"))
+				createCmd, ok := payload.(taskcmd.CreateCommand)
+				Expect(ok).To(BeTrue(), "payload at call 0 must be a CreateCommand")
+				Expect(createCmd.TargetVault).To(Equal(configuredVault))
+				Expect(createCmd.TargetVault).NotTo(BeEmpty(),
+					"an empty TargetVault makes the controller fall back to openclaw and skip the create")
+
+				// The paired update must carry the same vault. The controller treats
+				// a not-found on a STAMPED command as a failure and on an unstamped
+				// one as a skip, so leaving this command unstamped would keep the
+				// probe's reset silently droppable — the very failure the pair
+				// exists to avoid.
+				_, op, payload = pub.PublishArgsForCall(1)
+				Expect(op).To(Equal("update-frontmatter"))
+				updateCmd, ok := payload.(taskcmd.UpdateFrontmatterCommand)
+				Expect(ok).To(BeTrue(), "payload at call 1 must be an UpdateFrontmatterCommand")
+				Expect(updateCmd.TargetVault).To(Equal(configuredVault))
+				Expect(updateCmd.TargetVault).NotTo(BeEmpty(),
+					"an empty TargetVault makes a genuine miss indistinguishable from another vault's command")
+			},
+			Entry("non-default vault", "personal"),
+			Entry("the legacy default vault", "openclaw"),
+		)
+	})
+
+	// Every executor probes every Config, so stamping only the executor's own
+	// vault writes one logical probe record once per executor — each copy in a
+	// different vault and a different phase. A Config may name the vault its
+	// probe records belong in; the runner resolves it per Config.
+	Context("a Config's targetVault overrides the runner's own vault", func() {
+		DescribeTable("both published commands carry the Config's targetVault",
+			func(configVault string) {
+				configProvider.GetReturns([]agentv1.Config{
+					{
+						ObjectMeta: metav1.ObjectMeta{Name: "agent-a"},
+						Spec: agentv1.ConfigSpec{
+							Assignee:    "agent-a",
+							TargetVault: configVault,
+						},
+					},
+				}, nil)
+
+				Expect(runner.Run(ctx)).To(Succeed())
+
+				_, op, payload := publisher.PublishArgsForCall(0)
+				Expect(op).To(Equal("create-task"))
+				createCmd, ok := payload.(taskcmd.CreateCommand)
+				Expect(ok).To(BeTrue(), "payload at call 0 must be a CreateCommand")
+				Expect(createCmd.TargetVault).To(Equal(configVault))
+
+				_, op, payload = publisher.PublishArgsForCall(1)
+				Expect(op).To(Equal("update-frontmatter"))
+				updateCmd, ok := payload.(taskcmd.UpdateFrontmatterCommand)
+				Expect(ok).To(BeTrue(), "payload at call 1 must be an UpdateFrontmatterCommand")
+				Expect(updateCmd.TargetVault).To(Equal(configVault))
+
+				// A Config-derived vault is never exercised by the runner's own
+				// vault validation, so run it through the validator the consumer
+				// applies.
+				Expect(createCmd.Validate(ctx)).To(Succeed())
+				Expect(updateCmd.Validate(ctx)).To(Succeed())
+			},
+			// Non-default values on purpose: a single one cannot distinguish a
+			// value read from the Config from a literal that happens to equal it.
+			Entry("trading", "trading"),
+			Entry("openclaw", "openclaw"),
+			Entry("hyphenated vault", "private-trading"),
+		)
+
+		DescribeTable("an empty targetVault falls back to the runner's own vault",
+			func(configVault string) {
+				configProvider.GetReturns([]agentv1.Config{
+					{
+						ObjectMeta: metav1.ObjectMeta{Name: "agent-a"},
+						Spec: agentv1.ConfigSpec{
+							Assignee:    "agent-a",
+							TargetVault: configVault,
+						},
+					},
+				}, nil)
+
+				Expect(runner.Run(ctx)).To(Succeed())
+
+				_, op, payload := publisher.PublishArgsForCall(0)
+				Expect(op).To(Equal("create-task"))
+				createCmd, ok := payload.(taskcmd.CreateCommand)
+				Expect(ok).To(BeTrue(), "payload at call 0 must be a CreateCommand")
+				Expect(createCmd.TargetVault).To(Equal("personal"))
+				Expect(createCmd.TargetVault).NotTo(BeEmpty(),
+					"an empty TargetVault makes the controller fall back to openclaw and skip the create")
+
+				_, op, payload = publisher.PublishArgsForCall(1)
+				Expect(op).To(Equal("update-frontmatter"))
+				updateCmd, ok := payload.(taskcmd.UpdateFrontmatterCommand)
+				Expect(ok).To(BeTrue(), "payload at call 1 must be an UpdateFrontmatterCommand")
+				Expect(updateCmd.TargetVault).To(Equal("personal"))
+				Expect(updateCmd.TargetVault).NotTo(BeEmpty(),
+					"an empty TargetVault makes a genuine miss indistinguishable from another vault's command")
+			},
+			Entry("empty string", ""),
+		)
+
+		It("resolves the vault per Config, not per run", func() {
+			configProvider.GetReturns([]agentv1.Config{
+				{
+					ObjectMeta: metav1.ObjectMeta{Name: "agent-a"},
+					Spec: agentv1.ConfigSpec{
+						Assignee:    "agent-a",
+						TargetVault: "trading",
+					},
+				},
+				{
+					ObjectMeta: metav1.ObjectMeta{Name: "agent-b"},
+					Spec: agentv1.ConfigSpec{
+						Assignee: "agent-b",
+					},
+				},
+			}, nil)
+
+			Expect(runner.Run(ctx)).To(Succeed())
+			Expect(publisher.PublishCallCount()).To(Equal(4))
+
+			_, op, payload := publisher.PublishArgsForCall(0)
+			Expect(op).To(Equal("create-task"))
+			createA, ok := payload.(taskcmd.CreateCommand)
+			Expect(ok).To(BeTrue())
+			Expect(createA.TargetVault).To(Equal("trading"))
+
+			_, op, payload = publisher.PublishArgsForCall(1)
+			Expect(op).To(Equal("update-frontmatter"))
+			updateA, ok := payload.(taskcmd.UpdateFrontmatterCommand)
+			Expect(ok).To(BeTrue())
+			Expect(updateA.TargetVault).To(Equal("trading"))
+
+			_, op, payload = publisher.PublishArgsForCall(2)
+			Expect(op).To(Equal("create-task"))
+			createB, ok := payload.(taskcmd.CreateCommand)
+			Expect(ok).To(BeTrue())
+			Expect(createB.TargetVault).To(Equal("personal"))
+
+			_, op, payload = publisher.PublishArgsForCall(3)
+			Expect(op).To(Equal("update-frontmatter"))
+			updateB, ok := payload.(taskcmd.UpdateFrontmatterCommand)
+			Expect(ok).To(BeTrue())
+			Expect(updateB.TargetVault).To(Equal("personal"))
 		})
 	})
 })

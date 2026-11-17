@@ -44,11 +44,26 @@ var zombieReasonValues = []ZombieReason{
 	ZombieReasonPodOOMKilled,
 }
 
+// jobFailedConditionAliases maps the Kubernetes JobFailed condition reasons the
+// classifier publishes onto the vocabulary value they classify as. The published
+// failure_reason names the Job's own condition, so without these aliases every
+// such crash would parse to false and crashFailureUpdates would log
+// decision=not_crash_class — silently disarming the escalation this vocabulary
+// exists to drive. DeadlineExceeded is deliberately absent: it never reaches the
+// fallthrough and is published as its own vocabulary value.
+var jobFailedConditionAliases = map[string]ZombieReason{
+	"BackoffLimitExceeded": ZombieReasonPodCrashNoStdout,
+	"PodFailurePolicy":     ZombieReasonPodCrashNoStdout,
+	"JobFailed":            ZombieReasonPodCrashNoStdout,
+}
+
 // ParseZombieReason returns the vocabulary value s names, and false when it
 // names none. It matches up to the first space, so the formatted form produced
 // by backoffFailureReason — "pod_oom_killed (OOMKilled/137)" — parses to
-// ZombieReasonPodOOMKilled. Anything else, including the empty string, returns
-// false.
+// ZombieReasonPodOOMKilled. A Kubernetes JobFailed condition reason — published
+// as "BackoffLimitExceeded (pod-unresolved)" or "JobFailed (Error/137)" — parses
+// through jobFailedConditionAliases to the class it belongs to. Anything else,
+// including the empty string, returns false.
 //
 // The formatted string is never persisted: its spaces and parentheses are not
 // valid claim key segments. Callers store the parsed value, or "unknown" when
@@ -62,6 +77,9 @@ func ParseZombieReason(s string) (ZombieReason, bool) {
 		if reason.String() == value {
 			return reason, true
 		}
+	}
+	if reason, ok := jobFailedConditionAliases[value]; ok {
+		return reason, true
 	}
 	return "", false
 }

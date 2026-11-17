@@ -357,6 +357,37 @@ var _ = Describe("TaskEventHandler", func() {
 				Expect(after - before).To(Equal(float64(1)))
 			})
 
+			It("keeps a failed refusal write non-fatal instead of exiting the loop", func() {
+				// Park the task through the grace window first, so the refusal gate is
+				// not reached on this event and the publisher is still healthy.
+				currentDateTime.SetNow(libtimetest.ParseDateTime(insideGrace))
+				task := buildGraceTask(domain.TaskPhaseExecution, 4, 3)
+				Expect(h.ConsumeMessage(ctx, buildMsg(task))).To(Succeed())
+				Expect(fakeSpawner.SpawnJobCallCount()).To(Equal(0))
+
+				// Now the write fails. Without the typed carve-out this error would be
+				// returned as fatal and exit the process, starving every other entry.
+				fakeResultPublisher.PublishTriggerBudgetRefusalReturns(
+					errors.New(ctx, "kafka unavailable"),
+				)
+				before := testutil.ToFloat64(
+					metrics.TaskEventsTotal.WithLabelValues(
+						"deferred_respawn_refusal_write_failed",
+					),
+				)
+
+				currentDateTime.SetNow(libtimetest.ParseDateTime(graceExpiredR))
+				Expect(h.EvalDeferredRespawns(ctx)).To(Succeed())
+				Expect(fakeSpawner.SpawnJobCallCount()).To(Equal(0))
+				Expect(
+					testutil.ToFloat64(
+						metrics.TaskEventsTotal.WithLabelValues(
+							"deferred_respawn_refusal_write_failed",
+						),
+					) - before,
+				).To(Equal(float64(1)))
+			})
+
 			It("deferred re-eval bound: no spawn before grace+R, spawn at grace+60s", func() {
 				// Suppress inside grace window
 				currentDateTime.SetNow(libtimetest.ParseDateTime(insideGrace))
@@ -408,8 +439,8 @@ var _ = Describe("TaskEventHandler", func() {
 				Expect(err).To(BeNil())
 				Expect(fakeSpawner.SpawnJobCallCount()).To(Equal(2))
 
-				_, spawnedTask0, _ := fakeSpawner.SpawnJobArgsForCall(0)
-				_, spawnedTask1, _ := fakeSpawner.SpawnJobArgsForCall(1)
+				_, spawnedTask0, _, _ := fakeSpawner.SpawnJobArgsForCall(0)
+				_, spawnedTask1, _, _ := fakeSpawner.SpawnJobArgsForCall(1)
 				Expect([]lib.TaskIdentifier{
 					spawnedTask0.TaskIdentifier,
 					spawnedTask1.TaskIdentifier,
@@ -449,7 +480,7 @@ var _ = Describe("TaskEventHandler", func() {
 					return activeJobs(running), nil
 				}
 				fakeSpawner.SpawnJobStub = func(
-					context.Context, lib.Task, pkg.AgentConfiguration,
+					context.Context, lib.Task, pkg.AgentConfiguration, string,
 				) (string, error) {
 					running = 1
 					return "job-admitted", nil
@@ -468,7 +499,7 @@ var _ = Describe("TaskEventHandler", func() {
 				Expect(h.EvalDeferredRespawns(ctx)).To(Succeed())
 
 				Expect(fakeSpawner.SpawnJobCallCount()).To(Equal(1))
-				_, spawnedTask, _ := fakeSpawner.SpawnJobArgsForCall(0)
+				_, spawnedTask, _, _ := fakeSpawner.SpawnJobArgsForCall(0)
 				Expect(spawnedTask.TaskIdentifier).To(Equal(lib.TaskIdentifier("tid-fresh")))
 			})
 
@@ -525,7 +556,7 @@ var _ = Describe("TaskEventHandler", func() {
 					return activeJobs(running), nil
 				}
 				fakeSpawner.SpawnJobStub = func(
-					context.Context, lib.Task, pkg.AgentConfiguration,
+					context.Context, lib.Task, pkg.AgentConfiguration, string,
 				) (string, error) {
 					running = 1
 					return "job-routed", nil
@@ -606,7 +637,7 @@ var _ = Describe("TaskEventHandler", func() {
 				Expect(routingHandler.EvalDeferredRespawns(ctx)).To(Succeed())
 
 				Expect(fakeSpawner.SpawnJobCallCount()).To(Equal(1))
-				_, spawnedTask, _ := fakeSpawner.SpawnJobArgsForCall(0)
+				_, spawnedTask, _, _ := fakeSpawner.SpawnJobArgsForCall(0)
 				Expect(spawnedTask.TaskIdentifier).To(Equal(lib.TaskIdentifier("tid-not-retagged")))
 			})
 
@@ -772,7 +803,7 @@ var _ = Describe("TaskEventHandler", func() {
 					return activeJobs(*running), nil
 				}
 				fakeSpawner.SpawnJobStub = func(
-					context.Context, lib.Task, pkg.AgentConfiguration,
+					context.Context, lib.Task, pkg.AgentConfiguration, string,
 				) (string, error) {
 					*running = 1
 					return "job-claim", nil
@@ -940,7 +971,7 @@ var _ = Describe("TaskEventHandler", func() {
 
 				Expect(evictedOther).To(BeTrue())
 				Expect(fakeSpawner.SpawnJobCallCount()).To(Equal(1))
-				_, spawnedTask, _ := fakeSpawner.SpawnJobArgsForCall(0)
+				_, spawnedTask, _, _ := fakeSpawner.SpawnJobArgsForCall(0)
 				Expect(spawnedTask.TaskIdentifier).
 					To(Equal(lib.TaskIdentifier("tid-replay-control")))
 			})
@@ -1088,7 +1119,7 @@ var _ = Describe("TaskEventHandler", func() {
 					return activeJobs(running), nil
 				}
 				fakeSpawner.SpawnJobStub = func(
-					context.Context, lib.Task, pkg.AgentConfiguration,
+					context.Context, lib.Task, pkg.AgentConfiguration, string,
 				) (string, error) {
 					return "job-reconcile", nil
 				}
@@ -1126,7 +1157,7 @@ var _ = Describe("TaskEventHandler", func() {
 					return activeJobs(running), nil
 				}
 				fakeSpawner.SpawnJobStub = func(
-					context.Context, lib.Task, pkg.AgentConfiguration,
+					context.Context, lib.Task, pkg.AgentConfiguration, string,
 				) (string, error) {
 					return "job-reconcile", nil
 				}
@@ -1164,7 +1195,7 @@ var _ = Describe("TaskEventHandler", func() {
 					return activeJobs(running), nil
 				}
 				fakeSpawner.SpawnJobStub = func(
-					context.Context, lib.Task, pkg.AgentConfiguration,
+					context.Context, lib.Task, pkg.AgentConfiguration, string,
 				) (string, error) {
 					running = 1
 					return "job-admitted", nil
@@ -1184,7 +1215,7 @@ var _ = Describe("TaskEventHandler", func() {
 				Expect(h.EvalDeferredRespawns(ctx)).To(Succeed())
 
 				Expect(fakeSpawner.SpawnJobCallCount()).To(Equal(1))
-				_, spawnedTask, _ := fakeSpawner.SpawnJobArgsForCall(0)
+				_, spawnedTask, _, _ := fakeSpawner.SpawnJobArgsForCall(0)
 				Expect(spawnedTask.TaskIdentifier).To(Equal(lib.TaskIdentifier("tid-early")))
 			})
 

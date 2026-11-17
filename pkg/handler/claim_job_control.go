@@ -6,10 +6,12 @@ package handler
 
 import (
 	"context"
+	stderrors "errors"
 
 	lib "github.com/bborbe/agent"
 	"github.com/bborbe/errors"
 	libk8s "github.com/bborbe/k8s"
+	"github.com/golang/glog"
 	batchv1 "k8s.io/api/batch/v1"
 	k8serrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -67,6 +69,21 @@ func NewKubeJobControl(
 // falls back to the executor's namespace: the fence must never be the reason a
 // claim cannot be released, and before a Config sets jobNamespace that fallback
 // is also the correct answer.
+//
+// ⚠️ That fallback is fail-safe for releasing a claim and fail-open for
+// duplicate prevention: a Job the lookup cannot place is a Job IsJobRunning
+// reads as absent, so after JoblessGrace the lease manager releases a claim
+// whose Job is still running and a peer cluster can start the same task id. It
+// must therefore never fire for a task the executor can still route.
+//
+// The assignee is not a reliable routing key. A task whose assignee was cleared
+// resolves to no Config by assignee, and the executor's own restore loop keeps
+// re-publishing such a task until the vault accepts the assignee — measured
+// 2026-11-04, `bb0d817e` and `8e0eb923` both sat with an empty assignee while
+// their Jobs ran in development-sandbox, both were read as jobless, both had
+// their claim released, and both were started again by the peer cluster. The
+// task's own task_type survives a cleared assignee and still names exactly one
+// Config, which is the lookup startup recovery already uses for this shape.
 func (c *kubeJobControl) namespaceFor(ctx context.Context, taskID string) libk8s.Namespace {
 	if c.resolver == nil || c.view == nil {
 		return c.namespace
@@ -77,13 +94,68 @@ func (c *kubeJobControl) namespaceFor(ctx context.Context, taskID string) libk8s
 	}
 	config, err := c.resolver.Resolve(ctx, task.Frontmatter.Assignee().String())
 	if err != nil {
-		return c.namespace
+		// Only an absent Config routes by task_type. A provider failure or a
+		// cancelled context is not evidence that the assignee is unusable, and
+		// falling through on it would spend a second Config scan and log a
+		// fallback that did not happen — resolveConfigForReconcile draws the same
+		// line. ErrConfigNotFound covers the cleared-assignee shape too: an empty
+		// assignee composes to "-{vaultName}", which matches no Config.
+		if !stderrors.Is(err, pkg.ErrConfigNotFound) {
+			return c.namespace
+		}
+		// ResolveByTaskType is vault-agnostic (it scans every Config the informer
+		// holds), so the Config it returns may belong to another vault. That is
+		// bounded rather than dangerous here: the namespace only decides WHERE the
+		// lookup runs, while both the list and the delete are keyed on this task's
+		// own id label, so a foreign namespace can only answer "absent" — never act
+		// on another task's Job.
+		config, err = c.resolver.ResolveByTaskType(
+			ctx,
+			string(task.Frontmatter.TaskType()),
+			task.Frontmatter.Assignee().String(),
+		)
+		if err != nil {
+			glog.Warningf(
+				"event=claim_job_namespace_fallback task=%s assignee=%q task_type=%q "+
+					"namespace=%s reason=%s error=%v",
+				taskID,
+				task.Frontmatter.Assignee().String(),
+				task.Frontmatter.TaskType(),
+				c.namespace,
+				namespaceFallbackReason(err),
+				err,
+			)
+			return c.namespace
+		}
 	}
 	namespace, err := pkg.ResolveJobNamespace(ctx, c.namespace, config.JobNamespace)
 	if err != nil {
+		glog.Warningf(
+			"event=claim_job_namespace_fallback task=%s job_namespace=%q "+
+				"namespace=%s reason=invalid_job_namespace error=%v",
+			taskID,
+			config.JobNamespace,
+			c.namespace,
+			err,
+		)
 		return c.namespace
 	}
 	return namespace
+}
+
+// namespaceFallbackReason labels a namespace fallback with the cause an operator
+// needs. An ambiguous task_type and an absent Config are different fleet
+// problems — one needs the Configs narrowed, the other needs one added — so they
+// must not both read as "no_config".
+func namespaceFallbackReason(err error) string {
+	switch {
+	case stderrors.Is(err, pkg.ErrConfigAmbiguous):
+		return "ambiguous_config"
+	case stderrors.Is(err, pkg.ErrConfigNotFound):
+		return "no_config"
+	default:
+		return "resolve_error"
+	}
 }
 
 // IsJobRunning reports whether a non-terminal Job exists for taskID.

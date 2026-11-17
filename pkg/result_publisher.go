@@ -7,6 +7,7 @@ package pkg
 import (
 	"context"
 	"fmt"
+	"strings"
 	"sync"
 	"time"
 
@@ -21,6 +22,7 @@ import (
 	libtime "github.com/bborbe/time"
 	"github.com/bborbe/vault-cli/pkg/domain"
 	"github.com/golang/glog"
+	corev1 "k8s.io/api/core/v1"
 
 	"github.com/bborbe/agent-task-executor/pkg/claim"
 	"github.com/bborbe/agent-task-executor/pkg/metrics"
@@ -53,14 +55,39 @@ const (
 	AbortReasonTransientExhausted = metrics.RedriveAbortReasonTransientExhausted
 )
 
+// The reason tokens a park records in its "## Parked" section. No two park paths
+// may share one: an operator reading the section has to be able to tell a
+// lost-claim hand-off from a succeeded Job that never moved the phase, and both
+// of those from a run that spent its re-drive budget without finishing.
+const (
+	// ParkReasonLostClaim is the reason a task is parked after another executor
+	// took over its claim and its Config forbids a rerun.
+	ParkReasonLostClaim = "parked_lost_claim"
+	// ParkReasonSucceeded is the reason a task is parked after its Job succeeded
+	// without advancing the task's phase.
+	ParkReasonSucceeded = "parked_succeeded"
+	// ParkReasonRedriveCap is the reason a task is parked after its re-drive
+	// budget was spent on a result that never reported done. It is a distinct
+	// token from ParkReasonSucceeded on purpose: the two parks have opposite
+	// outcomes — one is finished work, the other is an escalation — and a shared
+	// token made a failed run's section byte-identical to a finished one's.
+	ParkReasonRedriveCap = "parked_redrive_cap"
+)
+
 //counterfeiter:generate -o ../mocks/result_publisher.go --fake-name FakeResultPublisher . ResultPublisher
 
 // ResultPublisher publishes agent-task-v1-request commands to Kafka so the
 // controller writes them to the vault task file.
 type ResultPublisher interface {
-	// PublishSpawnNotification publishes current_job, job_started_at, and
-	// spawn_notification without touching any other frontmatter keys.
-	PublishSpawnNotification(ctx context.Context, task lib.Task, jobName string) error
+	// PublishSpawnNotification publishes spawn_notification, current_job,
+	// job_started_at, and claude_session_id without touching any other
+	// frontmatter keys.
+	PublishSpawnNotification(
+		ctx context.Context,
+		task lib.Task,
+		jobName string,
+		sessionID string,
+	) error
 	// PublishFailure publishes a zombie failure: clears current_job and atomically
 	// bumps trigger_count by 1 via a paired IncrementFrontmatterCommand. Leaves
 	// phase, status, and assignee untouched — the escalation is the controller's
@@ -81,9 +108,30 @@ type ResultPublisher interface {
 	// runs on the result-merge path only, while these writes take the atomic
 	// frontmatter-command path (buildUpdateModifyFn), which never reaches it.
 	//
+	// pod is the failed Job's pod as observed by the caller, or nil when the
+	// caller has no pod (the zombie sweeper, or an unresolvable pod). It feeds
+	// two consumers: the never-scheduled deadline class at the arm gate, and the
+	// log tail. A nil pod never arms and yields no tail, and the pod itself is
+	// never written to the record.
+	//
 	// Idempotent per current_job via a TTL'd LRU; concurrent classifications for
 	// the same job emit one event.
-	PublishFailure(ctx context.Context, task lib.Task, jobName string, reason string) error
+	PublishFailure(
+		ctx context.Context,
+		task lib.Task,
+		jobName string,
+		reason string,
+		pod *corev1.Pod,
+	) error
+	// PublishStoreMissFailure is PublishFailure for a Job whose task has already
+	// left the executor's in-memory store, so the record carries no failure of
+	// its own and no other path can report one. It writes the same frontmatter
+	// and the same `trigger_count` increment, plus a note stating that the record
+	// was already terminal, that the Job crashed before producing output, that
+	// the entry exists because the crash would otherwise be silent, and that the
+	// status is unchanged — the last one because a failure section under a
+	// terminal status otherwise reads as a status change that never happened.
+	PublishStoreMissFailure(ctx context.Context, task lib.Task, jobName string, reason string) error
 	// PublishClearCurrentJob clears current_job in the vault task frontmatter
 	// (writes "" only — no body section, no trigger_count bump, no status/phase
 	// touch). Used on the job-success path, where the agent already published its
@@ -118,10 +166,31 @@ type ResultPublisher interface {
 	// Updates directly to the on-disk frontmatter — an explicit, intentional write
 	// rather than a stale spawn-time snapshot.
 	PublishSetTriggerScope(ctx context.Context, task lib.Task, scope string, count int) error
+	// PublishTriggerBudgetRefusal writes a scoped trigger-budget refusal onto the
+	// task record: the four trigger_refusal_* keys (count, max, scope, at) and a
+	// "## Trigger Budget" body section, and no other key. It never writes
+	// "## Failure", so the older cause a record may already carry stays visible;
+	// taskcmd.BodySection replaces a section with the same heading, which is why
+	// this path must not reuse that heading.
+	//
+	// The write is deduped per task AND refusal triple (scope, count, max) through
+	// the same TTL'd LRU as PublishAbort. Keying on the triple rather than the
+	// task alone is load-bearing: a changed scope is a changed refusal and must
+	// never be suppressed. The dedupe is needed because the handler reads an
+	// informer snapshot that does not yet show a write the controller has not
+	// applied, so without it the identical refusal would be re-published every
+	// tick.
+	PublishTriggerBudgetRefusal(
+		ctx context.Context,
+		task lib.Task,
+		scope string,
+		count int,
+		maxTriggers int,
+	) error
 	// PublishTypeMismatchFailure publishes a synthetic failure when the task's task_type
 	// is not in the agent's effective type set. Clears assignee and current_job so the
 	// task surfaces in the operator inbox via assignee=="" filter. Does not bump
-	// trigger_count or retry_count.
+	// trigger_count.
 	PublishTypeMismatchFailure(ctx context.Context, task lib.Task, reason string) error
 	// PublishRestoreAssignee writes the resolved configuration's assignee back
 	// onto a task whose routing value was cleared, so the controller applies the
@@ -130,11 +199,44 @@ type ResultPublisher interface {
 	// nothing else.
 	PublishRestoreAssignee(ctx context.Context, task lib.Task, assignee string) error
 	// PublishParkLostClaim writes phase "human_review" onto a task whose claim
-	// another executor took over and whose Config says not to re-run it. Writes
-	// the "phase" key and nothing else: status, assignee and the counters stay
-	// as they are. human_review is already in the executor's terminal-phase set,
-	// so a parked task is never re-spawned and needs no second guard.
-	PublishParkLostClaim(ctx context.Context, task lib.Task) error
+	// another executor took over and whose Config says not to re-run it. It
+	// writes the "phase" key in the frontmatter and, in one command, a "##
+	// Parked" body section naming the reason and the claim evidence. status,
+	// assignee and the counters stay as they are. human_review is already in the
+	// executor's terminal-phase set, so a parked task is never re-spawned and
+	// needs no second guard.
+	//
+	// reason is the path's token; claimKey and previousHolder are the lost-claim
+	// path's evidence and are empty on the succeeded path, whose section carries
+	// the reason line only.
+	PublishParkLostClaim(
+		ctx context.Context,
+		task lib.Task,
+		reason string,
+		claimKey string,
+		previousHolder string,
+	) error
+	// PublishParkSucceeded closes a task whose Job succeeded but whose phase
+	// never moved — the agent exited 0 without advancing it, so nothing will
+	// move it again. It writes status completed and phase done, plus a
+	// "## Parked" body section carrying the reason line only: the succeeded
+	// path has no claim key or previous holder. done is already in the
+	// executor's terminal-phase set, so the reconcile pass stops re-driving it.
+	// Without this write the task is eligible on every pass and re-spawned
+	// forever; with human_review instead, a finished record never terminalises
+	// and has to be closed by hand.
+	PublishParkSucceeded(ctx context.Context, task lib.Task) error
+	// PublishParkRedriveCap escalates a task whose Job succeeded but whose
+	// result never reported done, after its re-drive budget was spent. It writes
+	// status hold and phase planning plus a "## Parked" body section, and
+	// deliberately writes no terminal outcome: the work did not finish, so
+	// closing it would report failed work as completed. status hold is the
+	// escalation channel — it leaves the in_progress population while staying
+	// open for a human — and the phase moves to planning because vault-cli's
+	// lint flags hold alongside an active phase. The reason line names the
+	// non-done last_result_status, so the section is distinguishable from the
+	// succeeded park's bare token.
+	PublishParkRedriveCap(ctx context.Context, task lib.Task) error
 	// PublishAbort closes a record the consecutive-re-drive cap has decided to
 	// stop driving. It writes status aborted plus the close-out pair vault-cli
 	// requires (aborted_reason and gate_successor) and clears current_job. It
@@ -154,11 +256,15 @@ type ResultPublisher interface {
 // NewResultPublisher creates a ResultPublisher. claimRefClientFactory may be
 // nil — claim mode off, or a mode that never built a client — in which case no
 // failure reason is recorded and every publish behaves exactly as before.
+//
+// podLogReader may be nil, in which case no log tail is captured and every
+// failure section is composed exactly as it was before the tail feature.
 func NewResultPublisher(
 	syncProducer libkafka.SyncProducer,
 	topicPrefix base.TopicPrefix,
 	currentDateTime libtime.CurrentDateTimeGetter,
 	claimRefClientFactory ClaimRefClientFactory,
+	podLogReader PodLogReader,
 ) ResultPublisher {
 	return &resultPublisher{
 		commandObjectSender: cdb.NewCommandObjectSender(
@@ -168,6 +274,7 @@ func NewResultPublisher(
 		),
 		currentDateTime:       currentDateTime,
 		claimRefClientFactory: claimRefClientFactory,
+		podLogReader:          podLogReader,
 		dedupe:                newDedupe(dedupeCapacity, currentDateTime),
 	}
 }
@@ -233,12 +340,21 @@ type resultPublisher struct {
 	// claimRefClientFactory builds the client the reason store records through.
 	// Nil under claim mode off.
 	claimRefClientFactory ClaimRefClientFactory
+	// podLogReader reads the failed pod's log tail at publish time. Nil means
+	// log capture is off, and every publish then behaves exactly as before.
+	podLogReader PodLogReader
 	// reasonStoreOnce guards the lazy construction below. PublishFailure is
 	// called from more than one goroutine (the Job and Pod informers), and the
 	// precommit gate runs with -race=false, so an unguarded nil-check would ship
 	// as a silent data race.
 	reasonStoreOnce sync.Once
 	reasonStore     claim.RedriveReasonStore
+	// streakStoreOnce guards the lazily-built streak store. The publisher owns
+	// the streak because the streak counts PUBLISHED FAILURES: the write happens
+	// here, beside the reason write, so the count and the evidence it is
+	// classified from can never diverge.
+	streakStoreOnce sync.Once
+	streakStore     claim.RedriveStreakStore
 }
 
 // redriveReasonStore returns the lazily-built reason store, or nil when no
@@ -256,6 +372,112 @@ func (p *resultPublisher) redriveReasonStore() claim.RedriveReasonStore {
 		p.reasonStore = claim.NewRedriveReasonStore(refClient, p.currentDateTime)
 	})
 	return p.reasonStore
+}
+
+// redriveStreakStore returns the lazily-built streak store, or nil when no claim
+// ref client factory was injected. A nil store means the streak is not tracked
+// here at all, and the handler falls back to its in-memory floor.
+func (p *resultPublisher) redriveStreakStore() claim.RedriveStreakStore {
+	if p.claimRefClientFactory == nil {
+		return nil
+	}
+	p.streakStoreOnce.Do(func() {
+		refClient := p.claimRefClientFactory()
+		if refClient == nil {
+			return
+		}
+		p.streakStore = claim.NewRedriveStreakStore(refClient, p.currentDateTime)
+	})
+	return p.streakStore
+}
+
+// recordRedriveFailure advances the task's re-drive streak by one, at its
+// current phase. It is the ONLY writer of the streak, and it runs only from
+// PublishFailure.
+//
+// That placement is the whole fix. The streak used to advance on every
+// successful spawn, while a reason was recorded only here — so a spawn that
+// published no failure (an exit-0 human park, a successful run, a reconcile
+// re-drive whose Job vanished) advanced the streak with no evidence behind it.
+// At the cap the classifier then had no reasons to read, returned unknown, and
+// refused the record forever with no abort and no release: the permanent
+// class=unknown strand. Counting failures instead of spawns makes the count and
+// the evidence the same KIND of thing, and lets a task that keeps succeeding or
+// parks for a human leave the budget entirely rather than consume it.
+//
+// It does not make them the same WRITE. The streak and the reason are two
+// separate git-rest puts, so a reason write that fails after a successful streak
+// write leaves count > len(reasons). That is bounded, not silent: partial
+// evidence classifies as transient and terminates at
+// maxConsecutiveRedrives+transientRedriveBudget, and a count with no reasons
+// behind it degrades to class=unknown until RedriveStreakLeaseDuration (6 h)
+// releases it. The same non-atomicity already applied to the reason path.
+//
+// The dedupe that keeps one failed Job from counting twice is ttlDedupe, an
+// in-process map, so two executor replicas that both observe the same Job's
+// terminal failure can each Record it. That tightens the cap (a premature abort)
+// rather than bypassing it, and the duplicate publish already applied to the
+// reason write before this change; it is noted rather than fixed here.
+//
+// When the streak is still at 0 this failure starts a new streak, so the
+// task's reason refs are cleared first: a reason set left by an earlier streak
+// would otherwise satisfy the classifier's window on partial evidence and could
+// close the record as broken. The clear must precede the Record, and the caller
+// records the new reason after this call, so the new streak's evidence starts
+// empty and gains exactly the reason being published.
+//
+// A store failure is logged and swallowed, exactly as recordRedriveReason
+// swallows one: recording evidence must never fail a failure publish.
+func (p *resultPublisher) recordRedriveFailure(ctx context.Context, task lib.Task) {
+	store := p.redriveStreakStore()
+	if store == nil {
+		return
+	}
+	phase := taskPhase(task)
+	count, countErr := store.Count(ctx, string(task.TaskIdentifier), phase)
+	switch {
+	case countErr != nil:
+		glog.Warningf(
+			"event=redrive_streak_read_failed task=%s phase=%q error=%v",
+			task.TaskIdentifier,
+			phase,
+			countErr,
+		)
+	case count == 0:
+		p.clearReasonsForNewStreak(ctx, task, phase)
+	}
+	if err := store.Record(ctx, string(task.TaskIdentifier), phase); err != nil {
+		glog.Warningf(
+			"event=redrive_streak_write_failed task=%s phase=%q error=%v",
+			task.TaskIdentifier,
+			phase,
+			err,
+		)
+	}
+}
+
+// clearReasonsForNewStreak clears the task's reason refs when the streak is
+// still at 0, i.e. the failure about to be recorded starts a new streak. A
+// reason set left by an earlier streak would otherwise satisfy the classifier's
+// window on partial evidence and could close the record as broken. Both the
+// store lookup and the clear are logged and swallowed.
+func (p *resultPublisher) clearReasonsForNewStreak(
+	ctx context.Context,
+	task lib.Task,
+	phase string,
+) {
+	reasonStore := p.redriveReasonStore()
+	if reasonStore == nil {
+		return
+	}
+	if err := reasonStore.Clear(ctx, string(task.TaskIdentifier)); err != nil {
+		glog.Warningf(
+			"event=redrive_reason_write_failed task=%s phase=%q error=%v",
+			task.TaskIdentifier,
+			phase,
+			err,
+		)
+	}
 }
 
 // recordRedriveReason persists the failure reason of the task's current phase.
@@ -313,6 +535,7 @@ func (p *resultPublisher) PublishSpawnNotification(
 	ctx context.Context,
 	task lib.Task,
 	jobName string,
+	sessionID string,
 ) error {
 	cmd := taskcmd.UpdateFrontmatterCommand{
 		TaskIdentifier: task.TaskIdentifier,
@@ -321,6 +544,18 @@ func (p *resultPublisher) PublishSpawnNotification(
 			"spawn_notification": true,
 			"current_job":        jobName,
 			"job_started_at":     p.currentDateTime.Now().UTC().Format("2006-01-02T15:04:05Z07:00"),
+			"claude_session_id":  sessionID,
+			// Cleared at spawn so the value the park gate reads describes THIS
+			// run, not the last one that managed to deliver. Two cases need it.
+			// An agent that reports failure with an empty Output publishes no
+			// frontmatter at all — the passthrough generator stamps onto
+			// result.Output — so without this the controller's on-disk-first
+			// merge keeps the previous run's `done` and the park fires on a
+			// stale value. And a Job that exits 0 without delivering at all
+			// leaves the field empty rather than inheriting a success it never
+			// had. Empty is the safe direction: the park requires `done`, so an
+			// empty field re-drives instead of parking.
+			"last_result_status": "",
 		},
 	}
 	return p.publishRaw(ctx, taskcmd.UpdateFrontmatterCommandOperation, cmd)
@@ -333,6 +568,20 @@ func (p *resultPublisher) PublishSpawnNotification(
 // outcome is ever published for it, and without a cap the controller's
 // assignee-clear — the only operator-inbox signal this path has — never fires.
 //
+// The same cap is armed for the pod_not_scheduled class: the Job's pod could not
+// be placed on any node, so it can never run and would otherwise re-queue
+// forever. That classification is produced by the zombie sweeper, which is the
+// only component that can still observe the pod — see the note below.
+//
+// A deadline_exceeded failure does NOT arm, and the pod argument is not
+// consulted. The Job controller deletes the pod one second BEFORE it stamps the
+// Job's DeadlineExceeded condition (measured on nuke dev 2026-11-04), so a
+// failure-time pod lookup returns nothing for exactly the class that matters;
+// gating on it would leave every spec green while the runtime never armed. That
+// is what the first attempt at this fix did, and a live replay ran trigger_count
+// from 1 to 11 with no max_triggers ever written. The pod argument survives for
+// the log-tail capture, which has its own reason to want it.
+//
 // The gate is ParseZombieReason, not string equality. PublishFailure takes reason
 // as a raw string and is shared by all eight ZombieReason values, several of
 // which already carry their own escalation semantics; matching on the parsed
@@ -340,19 +589,65 @@ func (p *resultPublisher) PublishSpawnNotification(
 // correctly classified as its own class rather than falling through to a literal
 // comparison that cannot match it.
 //
-// An already-present max_triggers is left alone. The controller's write path is a
-// blind Updates apply, so writing here would clobber an operator's deliberate
-// budget — the store holds records at 5 and 6, and halving one of those is a
-// regression, not a repair.
-func crashFailureUpdates(task lib.Task, reason string) lib.TaskFrontmatter {
+// An already-present max_triggers is left alone, for both arming classes. The
+// controller's write path is a blind Updates apply, so writing here would
+// clobber an operator's deliberate budget — the store holds records at 5 and 6,
+// and halving one of those is a regression, not a repair. The presence check
+// sits after the class gate so it protects both classes.
+//
+// Every return is logged with the values the decision tested, not just its
+// verdict. This function is the only place the crash class arms a record, and a
+// record that arrives at the controller without the key is indistinguishable
+// from one whose class never matched — both leave the escalation inert with no
+// error anywhere. Printing the raw reason, its parsed form, the task and job
+// identity, and the presence flag with the cached value is what separates "the
+// in-memory task already carried a budget the vault file does not" (a divergence
+// between two views of one task) from "the class gate rejected it". The level is
+// V(2) because both dev and prod run the executor with -v=2; a higher level
+// would make the line invisible exactly where it is needed.
+//
+// Every line is named event=crash_arm_decision and carries a decision= field,
+// because this function only DECIDES: the UpdateFrontmatterCommand it feeds is
+// published by the caller, and a failed publish returns an error there without
+// the record ever receiving the key. A line reading "armed" would then assert an
+// outcome no code here has reached, and an operator grepping for it would be
+// told the cap was armed on a write that failed — the same false green this
+// instrumentation exists to remove. Publish failure is reported by the caller.
+func crashFailureUpdates(
+	task lib.Task,
+	jobName, reason string,
+) lib.TaskFrontmatter {
 	updates := lib.TaskFrontmatter{"current_job": ""}
-	parsed, ok := ParseZombieReason(reason)
-	if !ok || parsed != ZombieReasonPodCrashNoStdout {
+	parsed, parsedOK := ParseZombieReason(reason)
+	// The never-scheduled class is armed on the sweeper's classification, not on
+	// a pod read here: the Job controller deletes the pod one second BEFORE it
+	// stamps the Job's DeadlineExceeded condition, so a failure-time lookup
+	// returns nothing for exactly the class that matters (measured on nuke dev
+	// 2026-11-04). pod still feeds the log tail; it no longer gates the arm.
+	armClass := parsedOK && (parsed == ZombieReasonPodCrashNoStdout ||
+		parsed == ZombieReasonPodNotScheduled)
+	if !armClass {
+		glog.V(2).Infof(
+			"event=crash_arm_decision task=%s job=%s reason=%q parsed=%q parsed_ok=%t "+
+				"decision=not_crash_class",
+			task.TaskIdentifier, jobName, reason, parsed.String(), parsedOK,
+		)
 		return updates
 	}
-	if _, present := task.Frontmatter["max_triggers"]; present {
+	cachedMax, maxPresent := task.Frontmatter["max_triggers"]
+	if maxPresent {
+		glog.V(2).Infof(
+			"event=crash_arm_decision task=%s job=%s reason=%q parsed=%q parsed_ok=%t "+
+				"decision=max_triggers_already_present cached_max_triggers=%v",
+			task.TaskIdentifier, jobName, reason, parsed.String(), parsedOK, cachedMax,
+		)
 		return updates
 	}
+	glog.V(2).Infof(
+		"event=crash_arm_decision task=%s job=%s reason=%q parsed=%q parsed_ok=%t "+
+			"decision=arm cached_max_triggers=<absent> max_triggers=%d",
+		task.TaskIdentifier, jobName, reason, parsed.String(), parsedOK, defaultMaxTriggers,
+	)
 	updates["max_triggers"] = defaultMaxTriggers
 	return updates
 }
@@ -362,6 +657,147 @@ func (p *resultPublisher) PublishFailure(
 	task lib.Task,
 	jobName string,
 	reason string,
+	pod *corev1.Pod,
+) error {
+	return p.publishFailure(ctx, task, jobName, reason, "", pod)
+}
+
+// PublishStoreMissFailure publishes the same failure as PublishFailure, with a
+// note explaining why the record carries a failure at all.
+//
+// The reader of such a record could otherwise see a `## Failure` under a
+// `status: completed` or `status: aborted` line with nothing to reconcile the
+// two, and read the failure as having changed the status. It did not: this path
+// writes `current_job: ""`, a `trigger_count` increment and the section, exactly
+// as the store-hit path does. How much the note may claim depends on the reason
+// — see storeMissFailureNoteFor.
+func (p *resultPublisher) PublishStoreMissFailure(
+	ctx context.Context,
+	task lib.Task,
+	jobName string,
+	reason string,
+) error {
+	// The store-miss path carries no pod, so it writes no log tail either. Its
+	// taskFromFailedJob sentinel (max_triggers: nil) already suppresses arming,
+	// and passing a pod here would be the only way to break that guarantee: the
+	// never-scheduled deadline gate would then see a present max_triggers key and
+	// stay unarmed only by accident.
+	return p.publishFailure(ctx, task, jobName, reason, storeMissFailureNoteFor(reason), nil)
+}
+
+// storeMissFailureNoteFor returns the note written into the `## Failure` body when
+// the failure was recovered from a Job whose task had already left the executor's
+// store.
+//
+// A store miss on its own guarantees very little: it says the task was absent from
+// the in-memory store, which is also true of a deadline_exceeded or pod_oom_killed
+// Job, and of a store evicted by a type mismatch or a restart while the vault
+// record is still in_progress. Only the pod_crash_no_stdout class died before
+// writing stdout, and only for it is the record known to have reached a terminal
+// status, so only it gets the full explanation. Everything else gets a note that
+// claims just the two things this path actually does.
+//
+// The gate is ParseZombieReason, not string equality, for the same reason
+// crashFailureUpdates uses it: a suffixed form such as "pod_oom_killed
+// (OOMKilled/137)" must classify as its own class rather than fall through a
+// literal comparison that cannot match it.
+func storeMissFailureNoteFor(reason string) string {
+	if parsed, ok := ParseZombieReason(reason); ok && parsed == ZombieReasonPodCrashNoStdout {
+		return storeMissFailureNote
+	}
+	return storeMissFailureNoteOther
+}
+
+// storeMissFailureNote is written for the pod_crash_no_stdout class. It states the
+// four things a later reader needs: the record was already terminal, the Job
+// crashed before producing output, the entry exists because that crash would
+// otherwise be silent, and the status is unchanged.
+const storeMissFailureNote = "- **Note:** this record had already reached its terminal status before the Job " +
+	"above ran. The Job crashed before producing any output, so the run left no trace of " +
+	"its own on this record. This entry exists because that crash would otherwise be " +
+	"silent — the task had already left the executor's in-memory store, so no other path " +
+	"could report it. The status above is unchanged: only `current_job` was cleared and " +
+	"`trigger_count` incremented.\n"
+
+// storeMissFailureNoteOther is written for every other store miss. It claims only
+// what the path guarantees — the task was not in the store, and the write left the
+// status alone — because a deadline_exceeded or pod_oom_killed Job may well have
+// produced output, and a store evicted by a restart may leave the record still
+// in_progress.
+const storeMissFailureNoteOther = "- **Note:** this record was not in the executor's in-memory store when the Job " +
+	"above failed. The status above is unchanged: only `current_job` was cleared and " +
+	"`trigger_count` incremented.\n"
+
+// logTailBlock returns the fenced `- **Log tail:**` block for the failed pod's
+// log, or "" when there is no tail to write.
+//
+// The raw log is redacted HERE, before the section string is composed: an
+// unredacted value must never have a moment where it could be logged, returned
+// or written. A nil reader (log capture off) or a nil pod (a failure class that
+// carries none) yields no block. A read failure is logged at V(1) and
+// swallowed — the failure record is the point, and losing it to a logging
+// failure would be the worse outcome.
+func (p *resultPublisher) logTailBlock(
+	ctx context.Context,
+	task lib.Task,
+	jobName string,
+	pod *corev1.Pod,
+) string {
+	if p.podLogReader == nil || pod == nil {
+		return ""
+	}
+	tail, err := p.podLogReader.Tail(ctx, pod.Namespace, pod.Name)
+	if err != nil {
+		glog.V(1).Infof(
+			"event=log_tail_unavailable task=%s job=%s pod=%s/%s error=%v",
+			task.TaskIdentifier, jobName, pod.Namespace, pod.Name, err,
+		)
+		return ""
+	}
+	tail = strings.TrimRight(redactLog(tail), "\n")
+	if tail == "" {
+		return ""
+	}
+	fence := logFence(tail)
+	return "\n- **Log tail:**\n\n" + fence + "\n" + tail + "\n" + fence + "\n"
+}
+
+// logFence returns a backtick fence long enough to contain tail.
+//
+// A fixed three-backtick fence is not safe here: the tail is container output
+// written into a task body that an agent later reads, so a log line carrying
+// its own ``` would close the block early and let the rest of the log be read
+// as markdown — an injection into a record nobody reviews before it is pushed.
+// Markdown closes a fence only with a run at least as long as the opener, so
+// one backtick more than the longest run in the tail always contains it. An
+// ordinary tail still gets the usual three, which is what the composed-body
+// spec asserts.
+func logFence(tail string) string {
+	longest := 0
+	run := 0
+	for _, r := range tail {
+		if r == '`' {
+			run++
+			if run > longest {
+				longest = run
+			}
+			continue
+		}
+		run = 0
+	}
+	if longest < 2 {
+		longest = 2
+	}
+	return strings.Repeat("`", longest+1)
+}
+
+func (p *resultPublisher) publishFailure(
+	ctx context.Context,
+	task lib.Task,
+	jobName string,
+	reason string,
+	note string,
+	pod *corev1.Pod,
 ) error {
 	if p.dedupe.checkDedupe(jobName) {
 		glog.V(2).Infof("event=zombie_dedupe job=%s task=%s", jobName, task.TaskIdentifier)
@@ -370,15 +806,17 @@ func (p *resultPublisher) PublishFailure(
 
 	now := p.currentDateTime.Now().UTC().Format(time.RFC3339)
 	section := fmt.Sprintf(
-		"## Failure\n\n- **Timestamp:** %s\n- **Job:** %s\n- **Reason:** %s\n",
+		"## Failure\n\n- **Timestamp:** %s\n- **Job:** %s\n- **Reason:** %s\n%s%s",
 		now,
 		jobName,
 		reason,
+		note,
+		p.logTailBlock(ctx, task, jobName, pod),
 	)
 	updateCmd := taskcmd.UpdateFrontmatterCommand{
 		TaskIdentifier: task.TaskIdentifier,
 		TargetVault:    targetVaultFromTask(task),
-		Updates:        crashFailureUpdates(task, reason),
+		Updates:        crashFailureUpdates(task, jobName, reason),
 		Body: &taskcmd.BodySection{
 			Heading: "## Failure",
 			Section: section,
@@ -425,6 +863,12 @@ func (p *resultPublisher) PublishFailure(
 	// Recorded here, after the dedupe key, so a repeated informer delivery of
 	// the same job cannot double-record. The record is swallowed on failure:
 	// evidence gathering must never turn a delivered failure into an error.
+	//
+	// The streak advances BEFORE the reason, and only on this path: the streak
+	// counts published failures, so a spawn that publishes none — an exit-0
+	// human park, a successful run, a suppressed spawn — never consumes the
+	// re-drive budget. See recordRedriveFailure.
+	p.recordRedriveFailure(ctx, task)
 	p.recordRedriveReason(ctx, task, reason)
 
 	return nil
@@ -488,6 +932,84 @@ func (p *resultPublisher) PublishSetTriggerScope(
 			task.TaskIdentifier,
 		)
 	}
+	return nil
+}
+
+// triggerRefusalDedupeKey namespaces the refusal triple so a changed scope, count
+// or cap is a different key and therefore a different publish.
+func triggerRefusalDedupeKey(
+	id lib.TaskIdentifier,
+	scope string,
+	count int,
+	maxTriggers int,
+) string {
+	return fmt.Sprintf("trigger_refusal:%s:%s:%d:%d", id, scope, count, maxTriggers)
+}
+
+// PublishTriggerBudgetRefusal writes a "## Trigger Budget" section and nothing
+// else. The section heading deliberately differs from "## Failure":
+// Markdown.ReplaceSection replaces a section carrying the same heading, so
+// writing "## Failure" here would delete the older cause.
+//
+// ⚠️ It writes NO frontmatter keys. vault-api's typedTaskFields allowlist
+// (pkg/handler/task_content.go) refuses the WHOLE request when any named key is
+// outside the set, and it does not carry the trigger_refusal_* names — so a
+// command carrying them is discarded entirely, body section included, and the
+// record stays silent while publishRaw reports success. Measured on dev
+// 2026-10-28 against v0.48.0: 105 dedupe hits, one publish, and a controller
+// 400 `unknown_field: trigger_refusal_at`. The count, cap, scope and timestamp
+// therefore live in the body section only; the keys are owed to that allowlist
+// and a follow-up restores them once it carries them.
+//
+// The dedupe key covers the refusal triple, not just the task, so a changed
+// refusal is never suppressed. It is recorded only after publishRaw succeeds: a
+// failed send must be retried on the next tick, not remembered as done.
+func (p *resultPublisher) PublishTriggerBudgetRefusal(
+	ctx context.Context,
+	task lib.Task,
+	scope string,
+	count int,
+	maxTriggers int,
+) error {
+	dedupeKey := triggerRefusalDedupeKey(task.TaskIdentifier, scope, count, maxTriggers)
+	if p.dedupe.checkDedupe(dedupeKey) {
+		glog.V(2).Infof(
+			"event=trigger_refusal_dedupe task=%s scope=%q count=%d max=%d",
+			task.TaskIdentifier,
+			scope,
+			count,
+			maxTriggers,
+		)
+		return nil
+	}
+
+	now := p.currentDateTime.Now().UTC().Format(time.RFC3339)
+	section := fmt.Sprintf(
+		"## Trigger Budget\n\n- **Timestamp:** %s\n- **Refusal:** trigger_count %d >= max_triggers %d\n- **Scope:** %s\n",
+		now,
+		count,
+		maxTriggers,
+		scope,
+	)
+	// Updates stays empty on purpose — see the doc comment: any key outside
+	// vault-api's allowlist discards the whole command, body section included.
+	cmd := taskcmd.UpdateFrontmatterCommand{
+		TaskIdentifier: task.TaskIdentifier,
+		TargetVault:    targetVaultFromTask(task),
+		Body: &taskcmd.BodySection{
+			Heading: "## Trigger Budget",
+			Section: section,
+		},
+	}
+	if err := p.publishRaw(ctx, taskcmd.UpdateFrontmatterCommandOperation, cmd); err != nil {
+		return errors.Wrapf(
+			ctx,
+			err,
+			"publish trigger budget refusal for task %s",
+			task.TaskIdentifier,
+		)
+	}
+	p.dedupe.recordDedupe(dedupeKey)
 	return nil
 }
 
@@ -566,10 +1088,17 @@ func (p *resultPublisher) PublishRestoreAssignee(
 	return p.publishRaw(ctx, taskcmd.UpdateFrontmatterCommandOperation, cmd)
 }
 
-// PublishParkLostClaim writes phase "human_review" and nothing else.
+// PublishParkLostClaim writes phase "human_review" and a "## Parked" body
+// section in one UpdateFrontmatterCommand, so a record never shows the phase
+// without the reason it was parked. The section names the reason token and, on
+// the lost-claim path, the claim key and the previous holder (or "unavailable"
+// when the takeover created a fresh claim over an absent key).
 func (p *resultPublisher) PublishParkLostClaim(
 	ctx context.Context,
 	task lib.Task,
+	reason string,
+	claimKey string,
+	previousHolder string,
 ) error {
 	cmd := taskcmd.UpdateFrontmatterCommand{
 		TaskIdentifier: task.TaskIdentifier,
@@ -577,8 +1106,133 @@ func (p *resultPublisher) PublishParkLostClaim(
 		Updates: lib.TaskFrontmatter{
 			"phase": string(domain.TaskPhaseHumanReview),
 		},
+		Body: &taskcmd.BodySection{
+			Heading: "## Parked",
+			Section: parkSection(reason, claimKey, previousHolder),
+		},
 	}
 	return p.publishRaw(ctx, taskcmd.UpdateFrontmatterCommandOperation, cmd)
+}
+
+// parkSection renders the fixed "## Parked" section. The heading is the first
+// line and the section ends with a newline, as taskcmd.BodySection requires.
+// An empty claim key means a reason-only park — the succeeded and re-drive-cap
+// paths both take that shape: they carry the reason line and nothing else.
+// A lost-claim park with no previous holder writes "unavailable" rather than an
+// empty field, so the evidence is never a blank line an operator has to
+// interpret.
+func parkSection(reason, claimKey, previousHolder string) string {
+	if claimKey == "" {
+		return fmt.Sprintf("## Parked\n\n- **Reason:** %s\n", reason)
+	}
+	if previousHolder == "" {
+		previousHolder = "unavailable"
+	}
+	return fmt.Sprintf(
+		"## Parked\n\n- **Reason:** %s\n- **Claim:** %s\n- **Previous holder:** %s\n",
+		reason,
+		claimKey,
+		previousHolder,
+	)
+}
+
+// PublishParkSucceeded closes a task whose Job succeeded but whose phase never
+// moved, and writes a "## Parked" body section carrying the reason line only.
+//
+// It deliberately does NOT delegate to PublishParkLostClaim. The two parks share
+// a body but not an outcome: a lost claim needs a human to look at it, while a
+// succeeded park is finished work. Delegating wrote human_review for both, so a
+// finished record never reached a terminal state — measured 2026-11-13, 35 of 55
+// open private-agent records were parked_succeeded sitting at human_review and
+// every one had to be closed by hand.
+//
+// status completed is what makes the record terminal for every reader; phase
+// done is what the executor's terminal-phase set reads to stop re-driving it.
+// Both are written in the same command as the body, so a record never shows one
+// without the other.
+func (p *resultPublisher) PublishParkSucceeded(
+	ctx context.Context,
+	task lib.Task,
+) error {
+	cmd := taskcmd.UpdateFrontmatterCommand{
+		TaskIdentifier: task.TaskIdentifier,
+		TargetVault:    targetVaultFromTask(task),
+		Updates: lib.TaskFrontmatter{
+			"status": string(domain.TaskStatusCompleted),
+			"phase":  string(domain.TaskPhaseDone),
+		},
+		Body: &taskcmd.BodySection{
+			Heading: "## Parked",
+			Section: parkSection(ParkReasonSucceeded, "", ""),
+		},
+	}
+	return p.publishRaw(ctx, taskcmd.UpdateFrontmatterCommandOperation, cmd)
+}
+
+// PublishParkRedriveCap escalates a task whose Job succeeded but whose result
+// never reported done, after its re-drive budget was spent.
+//
+// It must never write a terminal outcome — the work did not finish, so closing
+// it as completed would report failed work as finished. It must equally not
+// leave the record in_progress: the earlier write reused PublishParkLostClaim,
+// which writes phase human_review and nothing else, and human_review is in the
+// executor's terminal-phase set. The record then read in_progress with no Job
+// and was never re-driven — invisible to the pipeline, indistinguishable from a
+// finished run, and a standing violation of "no task sits in_progress without a
+// job". Measured 2026-11-12: 53 github-update-go records at that triple.
+//
+// The landing is status hold, which is the escalation channel: the record stays
+// open for a human (hold is outside terminalStatuses, so nothing closes it) but
+// leaves the in_progress population, and an operator resumes it by setting the
+// status back to in_progress. The phase moves to planning in the same write
+// because vault-cli's lint flags hold alongside an active phase (execution,
+// in_progress, ai_review, human_review) — planning is the only phase that says
+// both "not finished" and "a human has to decide how to proceed". Resuming
+// therefore restarts at planning, which also re-scopes trigger_count, so a
+// re-armed run gets a fresh re-drive budget instead of inheriting the spent one.
+//
+// The reason line carries the evidence that separates this park from the
+// succeeded one: the reason token, the non-done last_result_status, the phase
+// the run never left, and the spawn count that spent the budget.
+func (p *resultPublisher) PublishParkRedriveCap(
+	ctx context.Context,
+	task lib.Task,
+) error {
+	cmd := taskcmd.UpdateFrontmatterCommand{
+		TaskIdentifier: task.TaskIdentifier,
+		TargetVault:    targetVaultFromTask(task),
+		Updates: lib.TaskFrontmatter{
+			"status": string(domain.TaskStatusHold),
+			"phase":  string(domain.TaskPhasePlanning),
+		},
+		Body: &taskcmd.BodySection{
+			Heading: "## Parked",
+			Section: parkSection(redriveCapReason(task), "", ""),
+		},
+	}
+	return p.publishRaw(ctx, taskcmd.UpdateFrontmatterCommandOperation, cmd)
+}
+
+// redriveCapReason renders the "## Parked" reason line for a cap-exhausted park.
+// The fields are the park's evidence, not decoration: an operator has to be able
+// to tell this escalation from the succeeded park by the section alone, which
+// writes the bare token and nothing else.
+func redriveCapReason(task lib.Task) string {
+	resultStatus, ok := task.Frontmatter.String("last_result_status")
+	if !ok || resultStatus == "" {
+		resultStatus = "absent"
+	}
+	phase, ok := task.Frontmatter.String("phase")
+	if !ok || phase == "" {
+		phase = "absent"
+	}
+	return fmt.Sprintf(
+		"%s last_result_status=%s phase=%s trigger_count=%d",
+		ParkReasonRedriveCap,
+		resultStatus,
+		phase,
+		task.Frontmatter.TriggerCount(),
+	)
 }
 
 // PublishAbort closes a record the consecutive-re-drive cap has stopped

@@ -21,7 +21,9 @@ import (
 	libtime "github.com/bborbe/time"
 	"github.com/bborbe/vault-cli/pkg/domain"
 	"github.com/golang/glog"
+	"github.com/google/uuid"
 
+	agentv1 "github.com/bborbe/agent-task-executor/k8s/apis/agent.benjamin-borbe.de/v1"
 	pkg "github.com/bborbe/agent-task-executor/pkg"
 	"github.com/bborbe/agent-task-executor/pkg/claim"
 	"github.com/bborbe/agent-task-executor/pkg/metrics"
@@ -29,11 +31,8 @@ import (
 )
 
 // defaultTriggerPhases is the fallback phase allow-list when the per-Config Trigger is absent or empty.
-var defaultTriggerPhases = domain.TaskPhases{
-	domain.TaskPhasePlanning,
-	domain.TaskPhaseExecution,
-	domain.TaskPhaseAIReview,
-}
+// It aliases pkg.DefaultTriggerPhases so the spawn gate and the liveness probe cannot drift apart.
+var defaultTriggerPhases = pkg.DefaultTriggerPhases
 
 // defaultTriggerStatuses is the fallback status allow-list when the per-Config Trigger is absent or empty.
 var defaultTriggerStatuses = domain.TaskStatuses{
@@ -43,11 +42,12 @@ var defaultTriggerStatuses = domain.TaskStatuses{
 // defaultRespawnGracePeriod is the window after job_started_at during which the executor
 // suppresses respawn when the K8s Job is inactive but no terminal phase has been observed.
 // The window gives the agent's terminal-phase write time to propagate through the vault pipeline.
-// defaultRespawnGracePeriod is the spawn path's half of the success window: it
-// refuses to re-spawn a task whose Job succeeded this recently. It aliases the
-// claim package's SuccessGracePeriod deliberately — the other half holds the
-// claim for the same length — so the two cannot drift apart and leave a gap
-// where the claim is gone but the spawn guard has also expired.
+// It aliases the claim package's SuccessGracePeriod deliberately, so the spawn-side
+// grace and the claim hold cannot drift apart and leave a gap where the claim is
+// gone but the spawn grace has also expired. It is NOT the success guard's window:
+// recentlySucceeded suppresses a task that already succeeded at its current phase
+// until that phase changes (or its declared cadence elapses), and no longer
+// expires on this constant.
 const defaultRespawnGracePeriod = claim.SuccessGracePeriod
 
 // taskRerunWindow is how far back a recorded success still identifies a spawn
@@ -81,7 +81,7 @@ const DefaultReconcileInterval = 60 * time.Second
 //
 // It is the bound for the case where neither of the other two engages. A task
 // with no `ref` and no `max_triggers` keeps the trigger budget disarmed by
-// design (see applyTriggerBudget — arming it would re-create the 2026-08-27
+// design (see checkTriggerBudget — arming it would re-create the 2026-08-27
 // Daily Sentry Triage incident), and a task whose scope reads as changed on
 // every spawn is handed a fresh budget of 1 each time (see triggerBudgetWrite).
 // Between them, a task that stops advancing is spawned forever.
@@ -111,6 +111,10 @@ const DefaultReconcileInterval = 60 * time.Second
 // `scopeChanged` true on every spawn and resets the persisted `trigger_count` to
 // 1, so any counter living in that file is reset by the very loop it must count.
 //
+// ⚠️ SUPERSEDED: the controller's controllerOwnedFields guard (v0.22.3) keeps
+// trigger_count, trigger_scope and max_triggers over an agent's snapshot, so they
+// are NOT clobbered — which is what makes trigger_count a usable bound.
+//
 // The in-memory map remains as a floor. A failed store read falls back to it, a
 // failed write still increments it, and a failed read never retires a task that
 // memory has not capped. Conversely, a task capped only by the shared store is
@@ -134,32 +138,6 @@ const maxConsecutiveRedrives = 3
 // 2026-10-21 a sun executor reading the 15k-file openclaw vault aborted every
 // pass at 45s with evaluated=0.
 const DefaultReconcilePassTimeout = 45 * time.Second
-
-// terminalPhases is the set of phases that must never trigger a new spawn.
-// Extending this set requires a follow-up spec if vault-cli adds new terminal phases.
-var terminalPhases = map[domain.TaskPhase]struct{}{
-	domain.TaskPhaseHumanReview: {},
-	domain.TaskPhaseDone:        {},
-}
-
-// knownPhases contains all phase constants exported by vault-cli v0.64.3.
-// Values outside this set trigger enum-drift logging (event=unknown_phase).
-var knownPhases = map[domain.TaskPhase]struct{}{
-	domain.TaskPhaseTodo:        {},
-	domain.TaskPhasePlanning:    {},
-	domain.TaskPhaseExecution:   {}, // canonical (was TaskPhaseInProgress)
-	domain.TaskPhaseInProgress:  {}, // legacy alias — still a known phase string
-	domain.TaskPhaseAIReview:    {},
-	domain.TaskPhaseHumanReview: {},
-	domain.TaskPhaseDone:        {},
-}
-
-// IsTerminal reports whether the given phase is in the terminal set.
-// Tasks at a terminal phase must not be re-spawned; operator intervention is required.
-func IsTerminal(phase domain.TaskPhase) bool {
-	_, ok := terminalPhases[phase]
-	return ok
-}
 
 // terminalStatuses is the status-side twin of terminalPhases: the two statuses a
 // task never leaves, because the work is finished or was cancelled.
@@ -255,10 +233,12 @@ func NewTaskEventHandler(
 		currentDateTime:         currentDateTime,
 		deferredRespawns:        make(map[lib.TaskIdentifier]deferredEntry),
 		deferredEpochs:          make(map[lib.TaskIdentifier]uint64),
+		refusedGates:            make(map[lib.TaskIdentifier]string),
 		queuedAtStamps:          make(map[lib.TaskIdentifier]string),
 		spawnLocks:              make(map[string]*sync.Mutex),
 		view:                    view,
 		vaultMatcher:            NewVaultMatcher(taskVault, nil),
+		configAcceptedPairs:     make(map[configAcceptedPair]struct{}),
 		reconcilePassTimeout:    reconcilePassTimeout,
 		reconcileInterval:       reconcileInterval,
 		claimMode:               claimMode,
@@ -273,18 +253,22 @@ func NewTaskEventHandler(
 }
 
 type taskEventHandler struct {
-	jobSpawner       spawner.JobSpawner
-	namespace        libk8s.Namespace
-	branch           base.Branch
-	cluster          string
-	stageFilter      bool
-	runUntagged      bool
-	resolver         pkg.ConfigResolver
-	resultPublisher  pkg.ResultPublisher
-	taskStore        *pkg.TaskStore
-	currentDateTime  libtime.CurrentDateTimeGetter
-	deferredMu       sync.Mutex
-	deferredRespawns map[lib.TaskIdentifier]deferredEntry
+	jobSpawner          spawner.JobSpawner
+	namespace           libk8s.Namespace
+	branch              base.Branch
+	cluster             string
+	stageFilter         bool
+	runUntagged         bool
+	resolver            pkg.ConfigResolver
+	resultPublisher     pkg.ResultPublisher
+	deadLetterPublisher pkg.DeadLetterPublisher
+	taskStore           *pkg.TaskStore
+	currentDateTime     libtime.CurrentDateTimeGetter
+	deferredMu          sync.Mutex
+	deferredRespawns    map[lib.TaskIdentifier]deferredEntry
+	// refusedMu guards refusedGates: the last reconcile gate that refused each task.
+	refusedMu    sync.Mutex
+	refusedGates map[lib.TaskIdentifier]string
 	// deferredEpochs counts removals per task, so a replay collected before an
 	// eviction can detect it. Entries are never deleted: resetting an epoch would
 	// re-validate a stale claim.
@@ -295,11 +279,20 @@ type taskEventHandler struct {
 	// SUCCESSFUL vault write can update; a task whose file is gone never updates
 	// either, so without this map it re-stamps on every deferral, forever.
 	// Guarded by deferredMu.
-	queuedAtStamps        map[lib.TaskIdentifier]string
-	spawnLocksMu          sync.Mutex
-	spawnLocks            map[string]*sync.Mutex
-	view                  TaskView
-	vaultMatcher          VaultMatcher
+	queuedAtStamps map[lib.TaskIdentifier]string
+	spawnLocksMu   sync.Mutex
+	spawnLocks     map[string]*sync.Mutex
+	view           TaskView
+	vaultMatcher   VaultMatcher
+	// configProvider is the Config store the accepted-set refresh reads. It is the
+	// same provider the resolver reads; nil skips the refresh, which is the shape
+	// of every test that does not assert the metric.
+	configProvider libk8s.Provider[agentv1.Config]
+	// configAcceptedMu guards configAcceptedPairs: the pairs published by the last
+	// successful refresh, so a pair no Config accepts any more is deleted by label
+	// values rather than by resetting the family.
+	configAcceptedMu      sync.Mutex
+	configAcceptedPairs   map[configAcceptedPair]struct{}
 	reconcilePassTimeout  time.Duration
 	reconcileInterval     time.Duration
 	claimMode             pkg.ClaimMode
@@ -311,10 +304,21 @@ type taskEventHandler struct {
 	// claimJobControl lets the lease manager's fence and restart recovery act on
 	// a Job. Nil falls back to the loud unmanaged control, so a mode that takes a
 	// claim cannot silently run without it.
-	claimJobControl  claim.JobControl
+	claimJobControl claim.JobControl
+	// vaultIndexClient nil means the deployment has no vault-api URL and the check is skipped.
+	vaultIndexClient claim.VaultAPIIndexClient
+	// tokenSpendReader nil means no token ceiling is enforced.
+	tokenSpendReader claim.TokenSpendReader
 	claimManagerOnce sync.Once
 	claimManager     claim.LeaseManager
 	claimManagerErr  error
+	// claimSchemeGuard refuses a spawn whose claim-key scheme differs from the
+	// fleet's git-rest declaration. Built alongside the lease manager and nil
+	// until then; a nil guard admits, as it does when the read fails.
+	claimSchemeGuard claim.SchemeGuard
+	// probeState is the read-only claim client the foreign-current_job probe
+	// uses, built lazily and separately from the lease manager.
+	probeState claimProbeState
 	// spawnPendingSet marks tasks whose spawn is between taking the claim and
 	// recording the new Job. A terminal event for the previous Job arriving in
 	// that window names the only Job the store knows, so without this marker it
@@ -329,15 +333,19 @@ type taskEventHandler struct {
 	claimLocks     map[lib.TaskIdentifier]*sync.Mutex
 	redriveMu      sync.Mutex
 	redriveStreaks map[lib.TaskIdentifier]redriveStreak
+	claimAbsent    *claimAbsentTracker
 	// redriveStore is the shared, persisted half of the redrive streak. It is
 	// built with the lease manager from the same claim-ref client and stays nil
 	// when claim mode takes no claim.
 	redriveStore claim.RedriveStreakStore
-	// redriveReasons is the persisted failure reason of each spawn attempt,
-	// built beside redriveStore from the same client and nil under the same
-	// conditions. The field is named redriveReasons because redriveReasonStore
-	// is the accessor that mirrors redriveStreakStore.
+	// redriveReasons is the persisted failure reason of each spawn attempt, built
+	// beside redriveStore from the same client and nil under the same conditions.
+	// It is named redriveReasons because redriveReasonStore is its accessor.
 	redriveReasons claim.RedriveReasonStore
+	// successRecordStore is the shared success record the suppression reads after
+	// a pod restart; nil leaves the guard on the in-memory record.
+	successRecordStore claim.SuccessStore
+	successStoreOnce   sync.Once
 	// spawnGens counts Jobs created by this executor per assignee, on any path.
 	// A pass cache entry read at an older generation is refetched, so a Job
 	// spawned by the Kafka consumer or the deferred loop mid-pass is never
@@ -349,8 +357,7 @@ type taskEventHandler struct {
 	podQuotaLimiter spawner.PodQuotaLimiter
 	// jobLookupDeniedLoggedAt records the last log line emitted per
 	// assignee/namespace for a denied active-job read, so a broken credential
-	// produces one line per interval rather than one per task per pass. The
-	// counter beside it is unthrottled; only the log is.
+	// produces one line per interval, not one per task per pass; only the log is throttled.
 	jobLookupDeniedMu       sync.Mutex
 	jobLookupDeniedLoggedAt map[string]time.Time
 }
@@ -488,16 +495,6 @@ func (h *taskEventHandler) staleEventForTask(task lib.Task) bool {
 	return storedJob != "" && storedJob != task.Frontmatter.CurrentJob()
 }
 
-// storedCurrentJob returns the store entry's current_job, or "" when the store
-// holds no entry for the task.
-func (h *taskEventHandler) storedCurrentJob(task lib.Task) string {
-	stored, ok := h.taskStore.Load(task.TaskIdentifier)
-	if !ok {
-		return ""
-	}
-	return stored.Frontmatter.CurrentJob()
-}
-
 // cleanupTerminalTask clears in-flight state when a task has reached a terminal
 // status (completed/aborted). taskStore.Delete stops the job informer from emitting
 // a spurious synthetic failure after the agent published success. removeDeferredEntry
@@ -569,7 +566,21 @@ func (h *taskEventHandler) ConsumeMessage(ctx context.Context, msg *sarama.Consu
 		return nil
 	}
 	_, err = h.spawnIfNeeded(ctx, task, config)
-	return err
+	// A refusal that could not be written must not tear the executor down. The
+	// consumer's error cancels every run func, so a transient publish failure
+	// would restart the process for every assignee at once. The spawn is already
+	// suppressed; the reconcile floor re-drives the task and retries the write,
+	// exactly as it does for a view that has not replayed yet.
+	var refusalErr *triggerRefusalWriteError
+	if stderrors.As(err, &refusalErr) {
+		glog.Warningf(
+			"event=event_refusal_write_failed task=%s err=%v: reconcile will retry",
+			task.TaskIdentifier, err,
+		)
+		metrics.TaskEventsTotal.WithLabelValues("event_refusal_write_failed").Inc()
+		return nil
+	}
+	return h.classifySpawnError(ctx, task, msg, err)
 }
 
 // parseAndFilter unmarshals the message and applies all pre-spawn filter checks.
@@ -601,6 +612,14 @@ func (h *taskEventHandler) parseAndFilter(
 		return lib.Task{}, nil, true, nil
 	}
 
+	// A terminal task is never driven, even when a Config lists its status in
+	// trigger.statuses — the status-side twin of the terminal-phase gate below.
+	// It sits ABOVE resolveConfig, which counts a skipped_unknown_assignee: a
+	// finished record with a retired assignee re-counted on every pass.
+	if IsTerminalStatus(task.Frontmatter.Status()) {
+		return h.skipAndEvict(task, "skipped_terminal_status")
+	}
+
 	// Resolve the per-agent Config before the status/phase checks so both filters
 	// can use the per-Config trigger. Skip lookup when assignee is empty.
 	config, skip, err := h.resolveConfig(ctx, task)
@@ -624,15 +643,6 @@ func (h *taskEventHandler) parseAndFilter(
 		}
 		glog.V(2).Infof("type mismatch: %s (task %s)", mismatch, task.TaskIdentifier)
 		return h.skipAndEvict(task, "type_mismatch")
-	}
-
-	// A terminal task is never driven, even when a Config lists its status in
-	// trigger.statuses — the status-side twin of the terminal-phase gate below,
-	// and unconditional for the same reason. cleanupTerminalTask above has already
-	// released the claim, dropped the store entry, cancelled any deferred respawn
-	// and cleared the streak for this event.
-	if IsTerminalStatus(task.Frontmatter.Status()) {
-		return h.skipAndEvict(task, "skipped_terminal_status")
 	}
 
 	if !effectiveTriggerStatuses(config).Contains(task.Frontmatter.Status()) {
@@ -702,7 +712,9 @@ func (h *taskEventHandler) resolveConfig(
 	resolved, err := h.resolver.Resolve(ctx, string(task.Frontmatter.Assignee()))
 	if err != nil {
 		if stderrors.Is(err, pkg.ErrConfigNotFound) {
-			glog.Warningf(
+			// Not a warning: this fires once per event addressed to any other assignee, and
+			// the metrics below carry the signal. V(4) so a V(3) session does not flood on it.
+			glog.V(4).Infof(
 				"skip task %s: unknown assignee %s",
 				task.TaskIdentifier,
 				task.Frontmatter.Assignee(),
@@ -755,8 +767,18 @@ func (h *taskEventHandler) resolveConfigForReconcile(
 		return nil, false, nil
 	}
 	// previous_assignee (written at escalation) only breaks a tie between several
-	// Configs declaring this task_type; it never routes a task on its own.
-	previousAssignee, _ := task.Frontmatter.String("previous_assignee")
+	// Configs declaring this task_type; it never routes a task on its own. It is
+	// passed on only when the Config it names actually declares this type — see
+	// inTypePreviousAssignee.
+	rawPreviousAssignee, _ := task.Frontmatter.String("previous_assignee")
+	previousAssignee, err := h.inTypePreviousAssignee(
+		ctx,
+		rawPreviousAssignee,
+		string(taskType),
+	)
+	if err != nil {
+		return nil, false, err
+	}
 	resolved, err := h.resolver.ResolveByTaskType(ctx, string(taskType), previousAssignee)
 	if err != nil {
 		if stderrors.Is(err, pkg.ErrConfigNotFound) {
@@ -803,10 +825,10 @@ func taskTypeMismatchReason(task lib.Task, cfg *pkg.AgentConfiguration) string {
 // effectiveTriggerPhases returns the phase allow-list from the Config trigger,
 // falling back to defaultTriggerPhases when Trigger is absent or the list is empty.
 func effectiveTriggerPhases(cfg *pkg.AgentConfiguration) domain.TaskPhases {
-	if cfg == nil || cfg.Trigger == nil || len(cfg.Trigger.Phases) == 0 {
+	if cfg == nil {
 		return defaultTriggerPhases
 	}
-	return cfg.Trigger.Phases
+	return pkg.EffectiveTriggerPhases(cfg.Trigger)
 }
 
 // effectiveTriggerStatuses returns the status allow-list from the Config trigger,
@@ -927,7 +949,8 @@ func (h *taskEventHandler) spawnIfNeededClaimed(
 		return spawnOutcomeSuppressed, nil
 	}
 
-	if h.recentlySucceeded(task) {
+	// Suppress inside the write-back grace, park past it — one clock, one call.
+	if h.suppressOrPark(ctx, task) {
 		return spawnOutcomeSuppressed, nil
 	}
 
@@ -937,7 +960,7 @@ func (h *taskEventHandler) spawnIfNeededClaimed(
 		return spawnOutcomeCapped, nil
 	}
 
-	capped, err := h.deferIfAtConcurrencyCap(ctx, task, config, claim)
+	capped, err := h.deferIfNotAdmitted(ctx, task, config, claim)
 	if err != nil {
 		if h.handleJobLookupDenied(err) {
 			return spawnOutcomeSuppressed, nil
@@ -951,17 +974,15 @@ func (h *taskEventHandler) spawnIfNeededClaimed(
 
 	// Scoped trigger budget: check only. The counter write is published by
 	// recordTriggerSpawn after SpawnJob succeeds, so an infrastructure failure
-	// cannot burn one of the task's attempts.
-	if h.checkTriggerBudget(task) {
-		return spawnOutcomeSuppressed, nil
+	// cannot burn one of the task's attempts. A refusal writes its own reason
+	// onto the record; a failed write still suppresses the spawn.
+	if suppress, err := h.triggerBudgetRefusesSpawn(ctx, task); suppress {
+		return spawnOutcomeSuppressed, err
 	}
 
-	// Claimed replays decide under deferredMu, released before SpawnJob; the
-	// lock order is assignee spawn lock → deferredMu. An eviction landing after
-	// this check and during SpawnJob does not stop the spawn — see
-	// spawnIfNeededClaimed. See claimStillValid.
-	if !h.claimStillValid(claim) {
-		h.recordClaimInvalidated(task)
+	// The last two refusals before the Job is created, together: the claim epoch
+	// and the vault index. See finalSpawnRefusals.
+	if h.finalSpawnRefusals(ctx, task, claim) {
 		return spawnOutcomeSuppressed, nil
 	}
 
@@ -1002,7 +1023,10 @@ func (h *taskEventHandler) spawnClaimedJob(
 	task lib.Task,
 	config *pkg.AgentConfiguration,
 ) (bool, error) {
-	jobName, err := h.jobSpawner.SpawnJob(ctx, task, *config)
+	// Generated once per spawn and threaded through both the Job env and the
+	// frontmatter notification, so a live session can be matched to its task.
+	sessionID := uuid.NewString()
+	jobName, err := h.jobSpawner.SpawnJob(ctx, task, *config, sessionID)
 	if err != nil {
 		metrics.TaskEventsTotal.WithLabelValues("error").Inc()
 		// A claim taken for a Job that was never created must not stay held.
@@ -1023,45 +1047,10 @@ func (h *taskEventHandler) spawnClaimedJob(
 		)
 	}
 
-	if err := h.finishSpawn(ctx, task, config, jobName); err != nil {
+	if err := h.finishSpawn(ctx, task, config, jobName, sessionID); err != nil {
 		return false, err
 	}
 	return true, nil
-}
-
-// finishSpawn records a Job that was just created. A counter write that cannot
-// be recorded is a real fault and still propagates, but it no longer prevents
-// the spawn: the Job exists. The Job is stored before the counter write, so if
-// the write fails the in-memory store still knows the Job exists.
-func (h *taskEventHandler) finishSpawn(
-	ctx context.Context,
-	task lib.Task,
-	config *pkg.AgentConfiguration,
-	jobName string,
-) error {
-	h.bumpSpawnGen(config.Assignee)
-	h.storeSpawnedJob(task, jobName)
-
-	if err := h.recordTriggerSpawn(ctx, task); err != nil {
-		metrics.TaskEventsTotal.WithLabelValues("error").Inc()
-		return err
-	}
-
-	if err := h.resultPublisher.PublishSpawnNotification(ctx, task, jobName); err != nil {
-		// Log but don't fail — job is already spawned, spawn notification is best-effort
-		glog.Warningf("publish spawn notification for task %s failed (job %s still running): %v",
-			task.TaskIdentifier, jobName, err)
-	}
-
-	glog.V(2).Infof(
-		"spawned job for task %s (assignee=%s image=%s)",
-		task.TaskIdentifier, task.Frontmatter.Assignee(), config.Image,
-	)
-	metrics.TaskEventsTotal.WithLabelValues("spawned").Inc()
-	metrics.JobsSpawnedTotal.WithLabelValues(h.spawnedNamespace(ctx, config)).Inc()
-	h.recordTaskRerun(task)
-	h.recordRedriveSpawn(ctx, task)
-	return nil
 }
 
 // storeSpawnedJob records the task under the job that was actually spawned. The
@@ -1242,6 +1231,14 @@ func (h *taskEventHandler) ReconcileOnce(ctx context.Context) error {
 	passCtx, cancel := context.WithTimeout(ctx, h.reconcilePassTimeout)
 	defer cancel()
 
+	// The accepted-pair set is published before every early return below. A view
+	// that is not ready, an unstamped snapshot or a mismatched vault are
+	// independent of which pairs the Configs accept, and the consumer needs the
+	// second fact regardless of the first.
+	if err := h.refreshConfigAccepted(passCtx); err != nil {
+		glog.Warningf("event=config_accepted_refresh_failed err=%v", err)
+	}
+
 	// One `list jobs` per assignee for the whole pass, instead of two per task.
 	// Scoped to passCtx so the event path never reads a frozen snapshot.
 	passCtx = withJobCache(passCtx)
@@ -1251,6 +1248,9 @@ func (h *taskEventHandler) ReconcileOnce(ctx context.Context) error {
 	// records a new one. Fetched lazily, so a pass with no candidates pays
 	// nothing. See redrive_streak_cache.go for the measurement.
 	passCtx = withRedriveStreakCache(passCtx)
+	// One `list refs` of the success prefix for the pass; see success_cache.go.
+	passCtx = withSuccessCache(passCtx)
+	passCtx = withVaultIndexCache(passCtx)
 
 	if !h.view.Ready() {
 		metrics.ReconcilePassesTotal.WithLabelValues("view_not_ready").Inc()
@@ -1273,11 +1273,14 @@ func (h *taskEventHandler) ReconcileOnce(ctx context.Context) error {
 		return nil
 	}
 
-	// Once per pass: forget successes older than the re-run window, so the
-	// record stays bounded to results that may still be in flight and still
-	// long enough for a later spawn to be recognised as a re-run.
+	// Once per pass: forget successes older than the retention horizon, so the
+	// record stays bounded. The horizon is the longest declared cadence, not the
+	// re-run window: recentlySucceeded suppresses on this record and releases a
+	// recurring task only when its cadence elapses, so pruning at the 1 h re-run
+	// window would drop the record before any cadence could fire. Re-run
+	// detection is unaffected — recordTaskRerun applies its own 1 h check.
 	h.taskStore.PruneSucceededBefore(
-		h.currentDateTime.Now().Time().Add(-taskRerunWindow),
+		h.currentDateTime.Now().Time().Add(-successRecordRetention),
 	)
 	owned := ownedTasks(snapshot, h.vaultMatcher)
 	c := reconcileCounters{}
@@ -1292,6 +1295,11 @@ func (h *taskEventHandler) ReconcileOnce(ctx context.Context) error {
 		return nil
 	}
 	sortCandidatesByAdmissionPriority(candidates)
+	// One vault-api index read per pass that reaches the drive loop. Advisory:
+	// a read failure is logged and the pass drives its candidates unchanged.
+	if !h.passDone(passCtx) {
+		h.checkViewDivergence(passCtx, owned)
+	}
 	for _, candidate := range candidates {
 		if h.passDone(passCtx) {
 			c.logAborted(len(candidates))
@@ -1299,6 +1307,8 @@ func (h *taskEventHandler) ReconcileOnce(ctx context.Context) error {
 		}
 		c.add(h.driveCandidate(passCtx, candidate))
 	}
+	// Ghost current_job step: see ghost_current_job.go.
+	h.clearGhostCurrentJobs(passCtx, owned)
 	// Counted on every pass that got past the vault classification, so
 	// rate(ok)==0 is a true "the backstop is not running" signal rather than an
 	// absence of errors.
@@ -1442,11 +1452,13 @@ func (h *taskEventHandler) gatherCandidates(
 	c *reconcileCounters,
 ) []reconcileCandidate {
 	candidates := make([]reconcileCandidate, 0, len(tasks))
+	suppressions := &indexTerminalSuppression{}
+	defer suppressions.report()
 	for _, task := range tasks {
 		if h.passDone(passCtx) {
 			return candidates
 		}
-		candidate, outcome := h.gatherCandidate(passCtx, task)
+		candidate, outcome := h.gatherCandidate(passCtx, task, suppressions)
 		if outcome == reconcileOutcomeCollected {
 			candidates = append(candidates, candidate)
 			continue
@@ -1509,6 +1521,7 @@ func sortCandidatesByAdmissionPriority(candidates []reconcileCandidate) {
 func (h *taskEventHandler) gatherCandidate(
 	ctx context.Context,
 	task lib.Task,
+	suppressions *indexTerminalSuppression,
 ) (reconcileCandidate, reconcileOutcome) {
 	task, config, ok, err := h.reconcileTask(ctx, task)
 	if err != nil {
@@ -1526,6 +1539,9 @@ func (h *taskEventHandler) gatherCandidate(
 		// to no Config). Nothing to clear here: the streak's phase key is what
 		// retires a task that genuinely moved on, and a task that left the filter
 		// is not spawned again either way.
+		return reconcileCandidate{}, reconcileOutcomeSkipped
+	}
+	if h.indexGateSuppresses(ctx, task, suppressions) {
 		return reconcileCandidate{}, reconcileOutcomeSkipped
 	}
 	// A parked task whose declared task_type resolved to a Config: restoring the
@@ -1648,33 +1664,54 @@ func (h *taskEventHandler) reconcileTask(
 		// Backstop for a reconcile-driven cap deferral that stored the pre-retag
 		// snapshot after the Kafka retag event was already consumed.
 		h.removeDeferredEntry(task.TaskIdentifier)
-		return task, nil, false, nil
+		return h.refuseReconcile(task, metrics.ReconcileRefusedGateForeignCluster)
 	}
+	// A terminal status is never a candidate, even when a Config lists it in
+	// trigger.statuses. This keeps a finished task out of the candidate set the
+	// re-drive cap is charged against, and sits ABOVE resolveConfigForReconcile
+	// because that call counts a skipped_unknown_assignee — the floor's half of
+	// the same defect.
+	if IsTerminalStatus(task.Frontmatter.Status()) {
+		return h.refuseReconcile(task, metrics.ReconcileRefusedGateTerminalStatus)
+	}
+
 	config, skip, err := h.resolveConfigForReconcile(ctx, task)
 	if err != nil {
 		return task, nil, false, err
 	}
 	if skip {
-		return task, nil, false, nil
+		return h.refuseReconcile(task, metrics.ReconcileRefusedGateUnresolvedConfig)
 	}
-	// A task whose status is terminal is never a candidate, even when a Config
-	// lists that status in trigger.statuses — the status-side twin of the
-	// terminal-phase gate below, and unconditional for the same reason.
+	// Type gate — the floor's twin of parseAndFilter's check. The Kafka path has
+	// always refused a record whose task_type is absent or outside the Config's
+	// effective set, and published the failure onto the record; this floor did
+	// not, so the same record was refused there and spawned here. The Job started
+	// with an empty TASK_TYPE, the agent rejected it at startup, the pod exited 1
+	// in one second, and the dead Job then held the assignee's only concurrency
+	// slot for the full ttlSecondsAfterFinished (1800 s by default).
 	//
-	// This is the rule that keeps a finished task out of the candidate set, and
-	// the candidate set is what the re-drive cap is charged against: a terminal
-	// task admitted here is capped on every pass, forever, because the terminal
-	// transition that clears a streak fires on the event path and this task's
-	// happened before the executor was listening for it.
-	if IsTerminalStatus(task.Frontmatter.Status()) {
-		return task, nil, false, nil
+	// The failure is published here for the same reason the Kafka path publishes
+	// it: that write clears the assignee and sets previous_assignee, which is what
+	// stops the record being re-candidated on every pass. Refusing without it
+	// would suppress the record forever with no record-level trace.
+	if mismatch := taskTypeMismatchReason(task, config); mismatch != "" {
+		if err := h.resultPublisher.PublishTypeMismatchFailure(ctx, task, mismatch); err != nil {
+			metrics.TaskEventsTotal.WithLabelValues("error").Inc()
+			return task, nil, false, errors.Wrapf(
+				ctx, err, "publish type mismatch failure for task %s", task.TaskIdentifier,
+			)
+		}
+		glog.V(2).Infof(
+			"event=reconcile_type_mismatch task=%s reason=%q", task.TaskIdentifier, mismatch,
+		)
+		return h.refuseReconcile(task, metrics.ReconcileRefusedGateTypeMismatch)
 	}
 	if !effectiveTriggerStatuses(config).Contains(task.Frontmatter.Status()) {
-		return task, nil, false, nil
+		return h.refuseReconcile(task, metrics.ReconcileRefusedGateStatusNotTriggered)
 	}
 	phase := task.Frontmatter.Phase()
 	if phase == nil || !effectiveTriggerPhases(config).Contains(*phase) {
-		return task, nil, false, nil
+		return h.refuseReconcile(task, metrics.ReconcileRefusedGatePhaseNotTriggered)
 	}
 	// A terminal task is never driven, even when a Config lists its phase in
 	// trigger.phases. The event path already refuses these in applyPhaseGate; this
@@ -1682,22 +1719,23 @@ func (h *taskEventHandler) reconcileTask(
 	// while it can still spawn, so driving a terminal task here would hand the
 	// agent an empty task file instead of the task text.
 	if IsTerminal(*phase) {
-		return task, nil, false, nil
+		return h.refuseReconcile(task, metrics.ReconcileRefusedGateTerminalPhase)
 	}
 	if h.stageFilter && task.Frontmatter.Stage() != string(h.branch) {
 		if h.pinOutsidePool(task, task.Frontmatter.Stage()) {
 			h.logPinOutsidePool(task, task.Frontmatter.Stage())
 			metrics.TaskEventsTotal.WithLabelValues("pin_outside_pool").Inc()
 		}
-		return task, nil, false, nil
+		return h.refuseReconcile(task, metrics.ReconcileRefusedGateStageMismatch)
 	}
 	// A parked task (empty routing value) is eligible when its declared
 	// task_type resolved to a Config on this floor-only path. resolveConfig
 	// returns no Config for an empty assignee, so a non-nil config here means
 	// the declared type resolved. A task with neither is still ineligible.
 	if task.Frontmatter.Assignee() == "" && config == nil {
-		return task, nil, false, nil
+		return h.refuseReconcile(task, metrics.ReconcileRefusedGateNoRouting)
 	}
+	h.clearReconcileRefusal(task.TaskIdentifier)
 	return task, config, true, nil
 }
 
@@ -1778,65 +1816,6 @@ func triggerScope(fm lib.TaskFrontmatter) string {
 		ref = ref[:triggerScopeRefLen]
 	}
 	return phase + ":" + ref
-}
-
-// applyTriggerBudget evaluates the scoped trigger cap for one spawn decision and,
-// when the spawn may proceed, publishes exactly one counter write recording it.
-// Returns capped=true when the cap is reached and the spawn must be skipped.
-//
-// The cap default-engages for repo-backed tasks: a task whose frontmatter
-// carries a ref (written by the agents that clone a repo, alongside clone_url
-// and base_ref) scopes its budget to phase+ref via triggerScope, and that scope
-// moves with the repo, so accrual against a constant scope cannot occur — the
-// safe default-on form. An explicit max_triggers engages the cap for any task,
-// with or without a ref. A task with neither ref nor max_triggers is a
-// recurring task: it is not repo-backed, sits at a stable phase, and its scope
-// is a constant, so a default cap would accrue across re-dispatches and fire at
-// 3, re-creating the 2026-08-27 Daily Sentry Triage incident (the v0.7.1
-// regression). That task stays uncapped by default.
-//
-// The cap value is always MaxTriggers(): the explicit max_triggers field, or
-// the lib default of 3 when it is absent — a repo-backed task with no
-// max_triggers is therefore capped at 3.
-//
-// Scoping also fixes the opt-in cap's correctness: a task that opts in no
-// longer burns its budget across unrelated attempts, so an operator can set a
-// tight max_triggers without it leaking into the next phase or the next commit.
-// checkTriggerBudget reports whether the task's scoped trigger budget is
-// exhausted. It writes nothing.
-//
-// The counter write is deliberately split out into recordTriggerSpawn and
-// published only AFTER a Job was actually created. Until 2026-10-19 the
-// increment was published here, before SpawnJob, so every infrastructure
-// failure — the `spawn_error ... context deadline exceeded` this change also
-// fixes — consumed one of the task's attempts without the agent ever running.
-// That is how github-update-go tasks reached trigger_count 5-7 while producing
-// no work, and why a trigger_count reset alone could not hold.
-func (h *taskEventHandler) checkTriggerBudget(task lib.Task) bool {
-	currentScope := triggerScope(task.Frontmatter)
-	storedScope, hasScope := task.Frontmatter.String("trigger_scope")
-
-	// An ABSENT scope is not a CHANGED scope. Every task in flight today predates
-	// this field, so treating absent as changed would hand each of them a free
-	// budget reset on the first event after deploy — including one already looping
-	// at cap, which would resume for another N. Absent means "adopt the current
-	// scope, keep the count".
-	scopeChanged := hasScope && storedScope != currentScope
-
-	_, optedIn := task.Frontmatter["max_triggers"]
-	_, hasRef := task.Frontmatter.String("ref")
-	if (optedIn || hasRef) && !scopeChanged &&
-		task.Frontmatter.TriggerCount() >= task.Frontmatter.MaxTriggers() {
-		glog.V(2).Infof("skip task %s: trigger_count %d >= max_triggers %d in scope %q",
-			task.TaskIdentifier,
-			task.Frontmatter.TriggerCount(),
-			task.Frontmatter.MaxTriggers(),
-			currentScope,
-		)
-		metrics.TaskEventsTotal.WithLabelValues("skipped_trigger_cap").Inc()
-		return true
-	}
-	return false
 }
 
 // recordTriggerSpawn publishes the counter write that charges one spawn against

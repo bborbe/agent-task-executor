@@ -8,12 +8,15 @@ import (
 	"context"
 	"reflect"
 	"regexp"
+	"strconv"
 	"strings"
+	"time"
 
 	"github.com/bborbe/errors"
 	libk8s "github.com/bborbe/k8s"
 	"github.com/bborbe/validation"
 	"github.com/bborbe/vault-cli/pkg/domain"
+	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
@@ -115,6 +118,15 @@ type ConfigSpec struct {
 	// TaskTypes is the list of task_type values in task frontmatter that route to this agent.
 	// Optional when taskType is set; at least one of taskType or taskTypes must be non-empty.
 	TaskTypes []string `json:"taskTypes,omitempty"`
+	// DefaultForTaskTypes names the task_type values this Config declares itself
+	// the designated default for. It is read only when ResolveByTaskType finds
+	// several Configs claiming the task_type and neither the assignee lookup nor
+	// previous_assignee narrows them to one: the single Config declaring itself
+	// default is then returned instead of refusing with ErrConfigAmbiguous. It is
+	// inert for a type the Config does not also claim in taskType/taskTypes, and
+	// exactly one Config per task_type may declare it — zero or several leave the
+	// refusal unchanged, so this is an explicit input, never a guess.
+	DefaultForTaskTypes []string `json:"defaultForTaskTypes,omitempty"`
 	// Resources holds optional resource requests for the agent container.
 	Resources *AgentResources `json:"resources,omitempty"`
 	// Env holds per-agent environment variables.
@@ -140,6 +152,12 @@ type ConfigSpec struct {
 	ConfigMapItems []ConfigMapItem `json:"configMapItems,omitempty"`
 	// PriorityClassName is stamped on Job PodTemplates and on a service StatefulSet pod template.
 	PriorityClassName string `json:"priorityClassName,omitempty"`
+	// NodeSelector is stamped on Job PodTemplates. Empty (the default) leaves
+	// scheduling unconstrained. Pair it with Tolerations to place Jobs on a
+	// dedicated, tainted node pool.
+	NodeSelector map[string]string `json:"nodeSelector,omitempty"`
+	// Tolerations are stamped on Job PodTemplates. Empty (the default) adds none.
+	Tolerations []corev1.Toleration `json:"tolerations,omitempty"`
 	// JobNamespace is the namespace the executor creates this Config's Jobs in.
 	// Empty (the default) means the executor's own namespace, so every Config that
 	// does not set it behaves exactly as before. A value equal to the executor's
@@ -171,6 +189,13 @@ type ConfigSpec struct {
 	RerunOnLostClaim *bool `json:"rerunOnLostClaim,omitempty"`
 	// Trigger declares the per-agent phase and status conditions under which the executor spawns a Job.
 	Trigger *Trigger `json:"trigger,omitempty"`
+	// TargetVault is the vault this Config's healthcheck probe records are
+	// written to. Empty (the default) means the probing executor's own
+	// TASK_VAULT, so every Config that does not set it behaves exactly as
+	// before. It exists because every executor probes every Config: without it,
+	// one logical probe record is written once per executor, each copy in a
+	// different vault and a different phase.
+	TargetVault string `json:"targetVault,omitempty"`
 	// ZombieSweeperIntervalSeconds is how often the executor's deadline sweeper
 	// walks the TaskStore looking for zombie jobs. Optional; when nil, the executor
 	// uses DefaultZombieSweeperIntervalSeconds (60). Values below
@@ -185,6 +210,36 @@ type ConfigSpec struct {
 	// pathological short-deadline kills. Pointer-typed so "unset" is
 	// distinguishable from "0".
 	ZombieJobTimeoutSeconds *int32 `json:"zombieJobTimeoutSeconds,omitempty"`
+	// RunWindow restricts the hours in which this agent's Jobs may be spawned.
+	// Nil means no window: spawns are admitted at any time. A spawn outside the
+	// window is deferred, never dropped, and re-driven once the window opens.
+	RunWindow *RunWindow `json:"runWindow,omitempty"`
+	// RunBudgetSeconds caps a single run's wall-clock time, measured from the
+	// spawned Job's start. 0 (the default) means no separate budget. When both
+	// this and ZombieJobTimeoutSeconds are set, the smaller deadline wins.
+	RunBudgetSeconds int32 `json:"runBudgetSeconds,omitempty"`
+	// TokenCeiling caps the total tokens (input + output + cache-read + cache-creation)
+	// the agent may spend across its runs within one run window. Nil or 0 means no
+	// ceiling. A spawn whose window spend already meets the ceiling is deferred, not
+	// dropped, and re-driven once the window rolls over. Pointer-typed so "unset" is
+	// distinguishable from "0".
+	TokenCeiling *int64 `json:"tokenCeiling,omitempty"`
+}
+
+// RunWindow declares the hours an agent may run in. The window is evaluated in
+// Timezone and may cross midnight (WeekdayStart later than WeekdayEnd), so a
+// Friday 20:00–06:00 window also admits Saturday morning.
+type RunWindow struct {
+	// Timezone is an IANA zone name (e.g. Europe/Berlin). Empty means UTC.
+	Timezone string `json:"timezone,omitempty"`
+	// WeekdayStart is the window's opening time on Monday–Friday, "HH:MM".
+	// Empty disables the weekday window entirely.
+	WeekdayStart string `json:"weekdayStart,omitempty"`
+	// WeekdayEnd is the window's closing time on Monday–Friday, "HH:MM".
+	// A value earlier than WeekdayStart means the window runs past midnight.
+	WeekdayEnd string `json:"weekdayEnd,omitempty"`
+	// WeekendAllDay admits Saturday and Sunday without time bounds.
+	WeekendAllDay bool `json:"weekendAllDay,omitempty"`
 }
 
 // AgentResources holds optional resource requests and limits for the agent container.
@@ -279,6 +334,7 @@ func (s ConfigSpec) Equal(o ConfigSpec) bool {
 		s.Type == o.Type &&
 		s.TaskType == o.TaskType &&
 		reflect.DeepEqual(s.TaskTypes, o.TaskTypes) &&
+		reflect.DeepEqual(s.DefaultForTaskTypes, o.DefaultForTaskTypes) &&
 		s.SecretName == o.SecretName &&
 		s.VolumeClaim == o.VolumeClaim &&
 		s.VolumeMountPath == o.VolumeMountPath &&
@@ -286,6 +342,8 @@ func (s ConfigSpec) Equal(o ConfigSpec) bool {
 		s.ConfigMapMountPath == o.ConfigMapMountPath &&
 		reflect.DeepEqual(s.ConfigMapItems, o.ConfigMapItems) &&
 		s.PriorityClassName == o.PriorityClassName &&
+		reflect.DeepEqual(s.NodeSelector, o.NodeSelector) &&
+		reflect.DeepEqual(s.Tolerations, o.Tolerations) &&
 		s.JobNamespace == o.JobNamespace &&
 		s.ServiceNamespace == o.ServiceNamespace &&
 		s.MaxConcurrentJobs == o.MaxConcurrentJobs &&
@@ -293,8 +351,11 @@ func (s ConfigSpec) Equal(o ConfigSpec) bool {
 		reflect.DeepEqual(s.Env, o.Env) &&
 		reflect.DeepEqual(s.Resources, o.Resources) &&
 		reflect.DeepEqual(s.Trigger, o.Trigger) &&
+		s.TargetVault == o.TargetVault &&
 		reflect.DeepEqual(s.ZombieSweeperIntervalSeconds, o.ZombieSweeperIntervalSeconds) &&
-		reflect.DeepEqual(s.ZombieJobTimeoutSeconds, o.ZombieJobTimeoutSeconds)
+		reflect.DeepEqual(s.ZombieJobTimeoutSeconds, o.ZombieJobTimeoutSeconds) &&
+		reflect.DeepEqual(s.RunWindow, o.RunWindow) &&
+		s.RunBudgetSeconds == o.RunBudgetSeconds
 }
 
 // Validate validates the ConfigSpec fields.
@@ -343,10 +404,72 @@ func (s ConfigSpec) Validate(ctx context.Context) error {
 	if err := validateTaskTypesList(ctx, s.TaskTypes); err != nil {
 		return err
 	}
+	if err := validateTaskTypesList(ctx, s.DefaultForTaskTypes); err != nil {
+		return err
+	}
 	if err := validateZombieSweeperInterval(ctx, s.ZombieSweeperIntervalSeconds); err != nil {
 		return err
 	}
-	return validateZombieJobTimeout(ctx, s.ZombieJobTimeoutSeconds)
+	if err := validateZombieJobTimeout(ctx, s.ZombieJobTimeoutSeconds); err != nil {
+		return err
+	}
+	return validateRunWindow(ctx, s.RunWindow)
+}
+
+// validateRunWindow rejects a window the executor would otherwise have to guess
+// at. The timezone is checked because an unresolvable zone falls back to UTC,
+// which shifts a Europe/Berlin window by one or two hours with no error — the
+// exact silent misconfiguration this field exists to prevent. The clock strings
+// are checked here too, not only by the CRD's regex, so a Config applied
+// through a path that bypasses schema validation still fails loudly.
+func validateRunWindow(ctx context.Context, w *RunWindow) error {
+	if w == nil {
+		return nil
+	}
+	if w.Timezone != "" {
+		if _, err := time.LoadLocation(w.Timezone); err != nil {
+			return errors.Wrapf(
+				ctx,
+				validation.Error,
+				"runWindow.timezone %q is not a valid IANA zone",
+				w.Timezone,
+			)
+		}
+	}
+	for _, clock := range []struct{ name, value string }{
+		{"weekdayStart", w.WeekdayStart},
+		{"weekdayEnd", w.WeekdayEnd},
+	} {
+		if clock.value == "" {
+			continue
+		}
+		if !validClock(clock.value) {
+			return errors.Wrapf(
+				ctx,
+				validation.Error,
+				"runWindow.%s %q is not HH:MM",
+				clock.name,
+				clock.value,
+			)
+		}
+	}
+	return nil
+}
+
+func validClock(value string) bool {
+	parts := strings.SplitN(value, ":", 2)
+	if len(parts) != 2 || len(parts[0]) != 2 || len(parts[1]) != 2 {
+		return false
+	}
+	hour, err := strconv.Atoi(parts[0])
+	if err != nil || hour < 0 || hour > 23 {
+		return false
+	}
+	minute, err := strconv.Atoi(parts[1])
+	if err != nil || minute < 0 || minute > 59 {
+		return false
+	}
+	return true
 }
 
 func validateZombieSweeperInterval(ctx context.Context, v *int32) error {

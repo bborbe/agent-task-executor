@@ -158,6 +158,63 @@ var _ = Describe("Pod quota admission", func() {
 		Expect(strings.Count(out, "event=pod_quota_read_failed")).To(Equal(0))
 	})
 
+	It("SC2: a failed read is distinguishable from a genuine zero in the admission line", func() {
+		// The defect this pins: both a refused read and a real pods: 0 used to
+		// reach the line as quota=0, so a queue behind a broken read looked
+		// exactly like a queue behind a cap that admits nothing.
+		failedLimiter := new(mocks.FakePodQuotaLimiter)
+		failedLimiter.PodQuotaReturns(0, false, stderrors.New("forbidden"))
+		failedOut := capturePinReportLog(func() {
+			Expect(
+				quotaHarness(failedLimiter, 5, quotaTestPriorityClass, 4).consume(
+					qualifyingClaimTask(),
+				),
+			).To(Succeed())
+		})
+
+		zeroLimiter := new(mocks.FakePodQuotaLimiter)
+		zeroLimiter.PodQuotaReturns(0, true, nil)
+		zeroOut := capturePinReportLog(func() {
+			Expect(
+				quotaHarness(zeroLimiter, 5, quotaTestPriorityClass, 0).consume(
+					qualifyingClaimTask(),
+				),
+			).To(Succeed())
+		})
+
+		Expect(failedOut).To(MatchRegexp("event=concurrency_admit .*quota=0 quota_bound=failed"))
+		Expect(zeroOut).To(MatchRegexp("event=concurrency_cap .*quota=0 quota_bound=ok"))
+		// The two must not be interchangeable: the failed read falls back to the
+		// declared cap, the genuine zero admits nothing.
+		Expect(failedOut).To(MatchRegexp("event=concurrency_admit .*cap=5 max=5"))
+		Expect(zeroOut).To(MatchRegexp("event=concurrency_cap .*cap=0 max=5"))
+	})
+
+	It("SC2: a bounded read reports quota_bound=ok, an unbounded one quota_bound=none", func() {
+		boundedLimiter := new(mocks.FakePodQuotaLimiter)
+		boundedLimiter.PodQuotaReturns(3, true, nil)
+		boundedOut := capturePinReportLog(func() {
+			Expect(
+				quotaHarness(boundedLimiter, 5, quotaTestPriorityClass, 1).consume(
+					qualifyingClaimTask(),
+				),
+			).To(Succeed())
+		})
+
+		unboundedLimiter := new(mocks.FakePodQuotaLimiter)
+		unboundedLimiter.PodQuotaReturns(0, false, nil)
+		unboundedOut := capturePinReportLog(func() {
+			Expect(
+				quotaHarness(unboundedLimiter, 5, quotaTestPriorityClass, 1).consume(
+					qualifyingClaimTask(),
+				),
+			).To(Succeed())
+		})
+
+		Expect(boundedOut).To(MatchRegexp("event=concurrency_admit .*quota=3 quota_bound=ok"))
+		Expect(unboundedOut).To(MatchRegexp("event=concurrency_admit .*quota=0 quota_bound=none"))
+	})
+
 	It("AC8: the deferral line names the running count, cap, max and quota", func() {
 		limiter := new(mocks.FakePodQuotaLimiter)
 		limiter.PodQuotaReturns(3, true, nil)

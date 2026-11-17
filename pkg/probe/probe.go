@@ -13,9 +13,12 @@ import (
 	cdb "github.com/bborbe/cqrs/cdb"
 	cqrsiam "github.com/bborbe/cqrs/iam"
 	"github.com/bborbe/errors"
+	"github.com/bborbe/vault-cli/pkg/domain"
+	"github.com/golang/glog"
 	"github.com/google/uuid"
 
 	agentv1 "github.com/bborbe/agent-task-executor/k8s/apis/agent.benjamin-borbe.de/v1"
+	pkg "github.com/bborbe/agent-task-executor/pkg"
 )
 
 //counterfeiter:generate -o mocks/fake_config_provider.go --fake-name FakeConfigProvider . ConfigProvider
@@ -79,18 +82,39 @@ type healthcheckRunner struct {
 	configProvider ConfigProvider
 	publisher      CommandPublisher
 	branch         base.Branch
+	targetVault    string
 }
 
 // NewHealthcheckRunner creates a HealthcheckRunner.
+//
+// targetVault is the fallback vault this executor owns (TASK_VAULT, defaulting
+// to VAULT_NAME). Each Config's spec.targetVault overrides it when set; the
+// resolved value is stamped onto BOTH commands one tick publishes — the
+// create-task and the update-frontmatter that follows it — and the two need it
+// for different reasons. The fallback is what every Config that does not set
+// spec.targetVault keeps. The override exists because every executor probes
+// every Config: stamping only the executor's own vault writes one logical probe
+// once per executor, each copy in a different vault and a different phase.
+//
+// On the create, the controller substitutes routing.LegacyDefaultVault
+// ("openclaw") when TargetVault is empty and skips the write as cross-vault, so
+// an unstamped probe is silently dropped on every vault but openclaw.
+//
+// On the update, the stamp is what lets the controller tell a genuine miss from
+// another vault's command: a stamped miss is the controller's to report as a
+// failure, an unstamped one has to stay a skip because every controller attempts
+// it.
 func NewHealthcheckRunner(
 	configProvider ConfigProvider,
 	publisher CommandPublisher,
 	branch base.Branch,
+	targetVault string,
 ) HealthcheckRunner {
 	return &healthcheckRunner{
 		configProvider: configProvider,
 		publisher:      publisher,
 		branch:         branch,
+		targetVault:    targetVault,
 	}
 }
 
@@ -105,6 +129,36 @@ func probeTaskID(agentName, stage string) lib.TaskIdentifier {
 	return lib.TaskIdentifier(uuid.NewSHA1(probeNamespace, []byte(agentName+"-"+stage)).String())
 }
 
+// probePhase picks the phase a probe task for one Config is written at: the
+// first phase in the Config's effective trigger list that the executor actually
+// runs, preferring planning. It returns false when the list holds no such phase
+// (only todo, human_review or done), so the Config is not probed at all: a probe
+// at todo would land in the operator approval inbox, and a probe at a terminal
+// phase would sit in the operator review inbox forever.
+func probePhase(trigger *agentv1.Trigger) (domain.TaskPhase, bool) {
+	phases := pkg.EffectiveTriggerPhases(trigger)
+	if phases.Contains(domain.TaskPhasePlanning) {
+		return domain.TaskPhasePlanning, true
+	}
+	for _, phase := range phases {
+		if pkg.DefaultTriggerPhases.Contains(phase) {
+			return phase, true
+		}
+	}
+	return "", false
+}
+
+// probeTargetVault returns the vault this Config's probe records belong in: the
+// Config's spec.targetVault when set, otherwise fallback. The empty case
+// preserves the pre-existing behaviour, where the probe goes to the probing
+// executor's own task vault.
+func probeTargetVault(config agentv1.Config, fallback string) string {
+	if config.Spec.TargetVault != "" {
+		return config.Spec.TargetVault
+	}
+	return fallback
+}
+
 // Run lists all Config CRs and publishes two commands per agent on each cron tick.
 func (r *healthcheckRunner) Run(ctx context.Context) error {
 	configs, err := r.configProvider.Get(ctx)
@@ -113,7 +167,16 @@ func (r *healthcheckRunner) Run(ctx context.Context) error {
 	}
 	for _, config := range configs {
 		agentName := config.Spec.Assignee
+		phase, ok := probePhase(config.Spec.Trigger)
+		if !ok {
+			glog.V(2).Infof(
+				"event=probe_skipped assignee=%s reason=no_spawnable_trigger_phase",
+				agentName,
+			)
+			continue
+		}
 		taskID := probeTaskID(agentName, string(r.branch))
+		targetVault := probeTargetVault(config, r.targetVault)
 
 		createCmd := taskcmd.CreateCommand{
 			TaskIdentifier: taskID,
@@ -121,11 +184,12 @@ func (r *healthcheckRunner) Run(ctx context.Context) error {
 			Frontmatter: lib.TaskFrontmatter{
 				"task_type": lib.TaskTypeHealthcheck.String(),
 				"status":    "in_progress",
-				"phase":     "in_progress",
+				"phase":     string(phase),
 				"assignee":  agentName,
 				"stage":     string(r.branch),
 			},
-			Body: "reply 'ok'",
+			Body:        "reply 'ok'",
+			TargetVault: targetVault,
 		}
 		if err := r.publisher.Publish(ctx, string(taskcmd.CreateCommandOperation), createCmd); err != nil {
 			return errors.Wrapf(ctx, err, "publish create-task for %s", agentName)
@@ -133,18 +197,43 @@ func (r *healthcheckRunner) Run(ctx context.Context) error {
 
 		updateCmd := taskcmd.UpdateFrontmatterCommand{
 			TaskIdentifier: taskID,
+			// Stamped for the same reason the create is, and it is load-bearing on
+			// the controller's side: a command addressed to a vault is supposed to
+			// find its task there, so its miss can be reported as a failure. Unstamped,
+			// every controller attempts the write and the non-owner's miss has to stay
+			// a skip — which swallows a genuine miss on the owner too. That split is
+			// the controller's to make (bborbe/agent-task-controller#135); this stamp
+			// is what makes it possible. The stamped value is the per-Config resolved
+			// vault (the Config's spec.targetVault when set, otherwise this executor's
+			// own), not unconditionally this executor's vault.
+			TargetVault: targetVault,
 			Updates: lib.TaskFrontmatter{
-				"status":        "in_progress",
-				"phase":         "in_progress",
+				"status": "in_progress",
+				"phase":  string(phase),
+				// Re-stamp the routing value on EVERY re-trigger, not only on the
+				// create. The create writes only when no file exists or the existing
+				// one is terminal; a non-terminal probe record — exactly the state a
+				// skipped probe sits in — returns ErrTaskAlreadyExists and is left
+				// untouched (agent-task-controller/pkg/command/task_create_task_executor.go).
+				// Probe files are reused per (agent, stage), and an agent clears its
+				// own assignee when it finishes or escalates, so for that record this
+				// update was the only write left. Without the assignee here the record
+				// kept the cleared value, resolveConfig's assignee fast path was
+				// skipped, and the reconcile fell to ResolveByTaskType — where a stage
+				// whose Configs all declare healthcheck and none declares
+				// defaultForTaskTypes answers `config ambiguous` and the probe is
+				// skipped before any Job exists. Sun is that stage; prod masks it
+				// with claude-headless's designated default, which routes the
+				// probe to the default agent instead of the one it names.
+				"assignee":      agentName,
 				"trigger_count": 0,
-				"retry_count":   0,
 				// Clear the executor-owned run-state from the PRIOR run. Probe files are
 				// reused per (agent, stage), so without this the re-trigger reopens the
 				// task while current_job / job_started_at still point at last week's job.
 				// The executor then reads a stale (hours/days old) current_job whose grace
 				// window has long elapsed and respawns 2-3 jobs for a single probe, and the
 				// zombie sweeper fires a phantom deadline_exceeded on the ancient job ref.
-				// Resetting these alongside the counters makes every re-trigger start clean.
+				// Resetting these alongside trigger_count makes every re-trigger start clean.
 				"current_job":        "",
 				"job_started_at":     "",
 				"spawn_notification": false,

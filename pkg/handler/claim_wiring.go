@@ -119,6 +119,10 @@ func (h *taskEventHandler) createLeaseManager(
 	// share refClient but keep separate ref namespaces.
 	h.redriveStore = claim.NewRedriveStreakStore(refClient, h.currentDateTime)
 	h.redriveReasons = claim.NewRedriveReasonStore(refClient, h.currentDateTime)
+	h.claimSchemeGuard = claim.NewSchemeGuard(refClient, h.cluster, h.currentDateTime)
+	// Built here, under the same sync.Once as the manager, so a handler that
+	// takes no claim never allocates it and every claim failure has one.
+	h.claimAbsent = newClaimAbsentTracker()
 	return manager, nil
 }
 
@@ -132,11 +136,29 @@ func (h *taskEventHandler) acquireSpawnClaim(
 	config *pkg.AgentConfiguration,
 ) bool {
 	if h.claimMode == pkg.ClaimModeOff {
+		// No claim is attempted at all, so this spawn proceeds without one and
+		// must be counted as such — otherwise acquired + unclaimed + fail_open
+		// silently under-counts the fleet's spawns by every mode-off instance.
+		metrics.CountSpawnClaim(metrics.SpawnClaimResultModeOff, metrics.SpawnClaimStageNone)
 		return true
 	}
 	manager, err := h.leaseManager(ctx)
 	if err != nil {
-		return h.claimFailureDecision(task, "lease_manager", err)
+		return h.claimFailureDecision(ctx, task, "lease_manager", err)
+	}
+	// The scheme guard runs before any ref is derived or written. A mismatch
+	// means this cluster derives different key strings from its peers, so a claim
+	// it takes would exclude nobody: the peer claims its own ref for the same
+	// task and both run. Refusing is the whole point — no claim is written, so a
+	// matching cluster is free to take the work.
+	//
+	// claimFailureDecision, not a bare false, is what keeps shadow honest: shadow
+	// takes claims without ever blocking a dispatch, so there the refusal skips
+	// the write and lets the spawn through, which is exactly its contract.
+	if guard := h.claimSchemeGuard; guard != nil {
+		if guardErr := guard.Check(ctx); guardErr != nil {
+			return h.claimFailureDecision(ctx, task, "claim_scheme", guardErr)
+		}
 	}
 	owner, repo := claimOwnerRepo(task)
 	primary, secondary, fallback, err := claim.DeriveClaimKeysWithBody(
@@ -148,7 +170,7 @@ func (h *taskEventHandler) acquireSpawnClaim(
 		string(task.Content),
 	)
 	if err != nil {
-		return h.claimFailureDecision(task, "derive_key", err)
+		return h.claimFailureDecision(ctx, task, "derive_key", err)
 	}
 	if fallback {
 		metrics.ClaimKeyFallbackTotal.Inc()
@@ -159,6 +181,7 @@ func (h *taskEventHandler) acquireSpawnClaim(
 	}
 	_, claimErr := manager.ClaimPair(ctx, primary, secondary, string(task.TaskIdentifier))
 	if claimErr == nil {
+		h.noteClaimSuccess(task.TaskIdentifier)
 		logClaimAcquired(primary, task.TaskIdentifier)
 		return true
 	}
@@ -167,7 +190,7 @@ func (h *taskEventHandler) acquireSpawnClaim(
 		// one inside the takeover grace) and a lost compare-and-swap race both
 		// leave the key with its current owner; the claim package has already
 		// counted conflict / takeover_too_early / taken_over / error.
-		_, takeoverErr := manager.TakeoverPair(
+		takeover, takeoverErr := manager.TakeoverPair(
 			ctx,
 			primary,
 			secondary,
@@ -183,17 +206,23 @@ func (h *taskEventHandler) acquireSpawnClaim(
 			// the claim, and the next pass's Takeover fails against its own live
 			// lease, so claimFailureDecision proceeds and a Job is created for the
 			// task that was just parked.
+			// A takeover of a task this cluster never ran is not a second run:
+			// rerunOnLostClaim answers "may this agent run a task a previous
+			// owner already ran", and a takeover that displaced no claim has no
+			// previous owner to ask about. attributablePriorRun owns that test.
 			if h.claimMode == pkg.ClaimModeOn &&
-				config.LostClaimAction() == agentv1.ParkAfterLostClaim {
-				h.parkAfterLostClaim(ctx, primary, task)
+				config.LostClaimAction() == agentv1.ParkAfterLostClaim &&
+				attributablePriorRun(takeover, task) {
+				h.parkAfterLostClaim(ctx, primary, takeoverPreviousHolder(takeover), task)
 				return false
 			}
+			h.noteClaimSuccess(task.TaskIdentifier)
 			logClaimAcquired(primary, task.TaskIdentifier)
 			return true
 		}
-		return h.claimFailureDecision(task, "takeover", takeoverErr)
+		return h.claimFailureDecision(ctx, task, "takeover", takeoverErr)
 	}
-	return h.claimFailureDecision(task, "claim", claimErr)
+	return h.claimFailureDecision(ctx, task, "claim", claimErr)
 }
 
 // claimOwnerRepo reads the task's single `repo` frontmatter key, which carries
@@ -259,6 +288,57 @@ func ownerRepoFromCloneURL(raw string) (string, string, bool) {
 	return splitOwnerRepo(path)
 }
 
+// attributablePriorRun reports whether a lost-claim park is justified: the
+// takeover displaced a claim that named a previous holder, and the task carries
+// evidence that a Job ran here.
+//
+// TakeoverResult.PreviousTaskID is non-empty only when TakeoverPair replaced a
+// listed claim (pkg/claim/lease_manager.go:859, :912). On its create path it is
+// "" because no claim existed to replace (:827, :837), so no previous holder
+// exists to have run the task and rerunOnLostClaim has nothing to decide.
+//
+// The two clauses catch different non-runs. PreviousTaskID catches the takeover
+// that displaced nobody — all 9 measured parked_lost_claim records had an empty
+// holder beside a stale job_started_at and an empty current_job, which is why the
+// guard parked work whose only claim had just been created here.
+// taskShowsPriorRun catches the mirror case the guard was originally written for:
+// a holder that took the claim and never spawned a Job.
+func attributablePriorRun(takeover *claim.TakeoverResult, task lib.Task) bool {
+	return takeoverPreviousHolder(takeover) != "" && taskShowsPriorRun(task)
+}
+
+// taskShowsPriorRun reports whether the task carries evidence that some
+// executor already ran it: a non-empty current_job or job_started_at.
+//
+// It exists because rerunOnLostClaim guards a *second* run. A claim conflict
+// proves only that another holder had the key, not that a Job was ever created
+// for this task — a non-owning cluster can acquire the claim and then skip the
+// spawn, which leaves the key held with nothing behind it. Parking on that
+// conflict alone writes human_review onto a task that never ran, and the
+// assignee clear the human_review chokepoint applies then makes the task
+// permanently unspawnable. Both fields are absent on a task that has never been
+// dispatched, so either one present is the evidence that a rerun decision
+// actually applies.
+func taskShowsPriorRun(task lib.Task) bool {
+	if currentJob, ok := task.Frontmatter.String("current_job"); ok && currentJob != "" {
+		return true
+	}
+	if startedAt, ok := task.Frontmatter.String("job_started_at"); ok && startedAt != "" {
+		return true
+	}
+	return false
+}
+
+// takeoverPreviousHolder reads the previous holder from a takeover result. A nil
+// result is impossible on a nil error today, but the park must never panic on a
+// manager that returns one; an unknown holder renders as "unavailable".
+func takeoverPreviousHolder(takeover *claim.TakeoverResult) string {
+	if takeover == nil {
+		return ""
+	}
+	return takeover.PreviousTaskID
+}
+
 // parkAfterLostClaim stops a task whose claim another executor took over, when
 // its Config says the agent must not run a second time. The caller returns false
 // either way, so no Job is created here.
@@ -273,11 +353,18 @@ func ownerRepoFromCloneURL(raw string) (string, string, bool) {
 func (h *taskEventHandler) parkAfterLostClaim(
 	ctx context.Context,
 	key string,
+	previousHolder string,
 	task lib.Task,
 ) {
 	var err error
 	for attempt := 1; attempt <= parkWriteAttempts; attempt++ {
-		if err = h.resultPublisher.PublishParkLostClaim(ctx, task); err == nil {
+		if err = h.resultPublisher.PublishParkLostClaim(
+			ctx,
+			task,
+			pkg.ParkReasonLostClaim,
+			key,
+			previousHolder,
+		); err == nil {
 			glog.Infof("event=parked_lost_claim key=%s task=%s", key, task.TaskIdentifier)
 			metrics.ParkedLostClaimTotal.WithLabelValues("parked").Inc()
 			return
@@ -307,16 +394,30 @@ func (h *taskEventHandler) parkAfterLostClaim(
 }
 
 // logClaimAcquired records one successful spawn claim, whether it was taken by
-// a fresh Claim or by a Takeover after a conflict.
+// a fresh Claim or by a Takeover after a conflict. The counter is the half that
+// makes the log line countable after the log has rotated away.
 func logClaimAcquired(key string, taskID lib.TaskIdentifier) {
+	metrics.CountSpawnClaim(metrics.SpawnClaimResultAcquired, metrics.SpawnClaimStageNone)
 	glog.Infof("event=claim_acquired key=%s task=%s", key, taskID)
 }
 
 // claimFailureDecision logs a claim failure and reports whether the spawn may
 // proceed: shadow proceeds, on fails closed. The claim package has already
 // incremented executor_claim_total for every request it made; this function
-// must not increment anything.
+// must not increment that, because a second increment would double-count a
+// single request.
+//
+// It does increment executor_spawn_claim_total, which is a different question:
+// whether this spawn proceeded holding a claim. The two outcomes are the same
+// decision under different modes and are deliberately split, because a
+// fail-open spawn is otherwise indistinguishable from one that held a claim.
+//
+// A repeated non-retryable 404 is the one failure that must not be retried
+// forever: the vault is saying the task does not exist, so no later pass will
+// change its answer. recordClaimFailure counts the streak and evicts the record
+// once the ambiguity of a fresh write has expired.
 func (h *taskEventHandler) claimFailureDecision(
+	ctx context.Context,
 	task lib.Task,
 	stage string,
 	err error,
@@ -325,5 +426,11 @@ func (h *taskEventHandler) claimFailureDecision(
 		"event=claim_failed stage=%s mode=%s task=%s error=%v",
 		stage, h.claimMode, task.TaskIdentifier, err,
 	)
-	return h.claimMode == pkg.ClaimModeShadow
+	h.recordClaimFailure(ctx, task, err)
+	if h.claimMode == pkg.ClaimModeShadow {
+		metrics.CountSpawnClaim(metrics.SpawnClaimResultFailOpen, stage)
+		return true
+	}
+	metrics.CountSpawnClaim(metrics.SpawnClaimResultUnclaimed, stage)
+	return false
 }

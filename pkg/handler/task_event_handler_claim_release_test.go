@@ -189,7 +189,7 @@ var _ = Describe("claim release at the Job-watcher end points", func() {
 			err := harness.consume(qualifyingClaimTask())
 			Expect(err).To(HaveOccurred())
 
-			Expect(harness.client.PutCallCount()).To(Equal(1))
+			Expect(claimPutCallCount(harness.client)).To(Equal(1))
 			Expect(harness.client.DeleteCallCount()).To(Equal(1))
 			_, key, sha := harness.client.DeleteArgsForCall(0)
 			Expect(key).To(Equal("claims/task/" + string(qualifyingClaimTask().TaskIdentifier)))

@@ -10,9 +10,9 @@ import (
 
 	"github.com/bborbe/errors"
 	libk8s "github.com/bborbe/k8s"
-	apiextensionsv1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
-	apiextensionsclient "k8s.io/apiextensions-apiserver/pkg/client/clientset/clientset"
-	apiextensionsv1client "k8s.io/apiextensions-apiserver/pkg/client/clientset/clientset/typed/apiextensions/v1"
+	apiextensionsv1 "k8s.io/apiextensions-api/pkg/apis/apiextensions/v1"
+	apiextensionsclient "k8s.io/apiextensions-api/pkg/client/clientset/clientset"
+	apiextensionsv1client "k8s.io/apiextensions-api/pkg/client/clientset/clientset/typed/apiextensions/v1"
 	"k8s.io/apimachinery/pkg/api/equality"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -78,6 +78,30 @@ const crdName = "configs.agent.benjamin-borbe.de"
 // unvalidated value would pass admission, resolve cleanly, and fail only at
 // Jobs(...).Create with a 422 the operator has to correlate by hand.
 const crdDNS1123Label = "^[a-z0-9]([-a-z0-9]*[a-z0-9])?$"
+
+// crdVaultSlug is the shape a vault slug must have: it is what bborbe/agent's
+// validateCreateTargetVault accepts, so a value this pattern admits can never be
+// rejected later by the command validator. Deliberately not crdDNS1123Label, which
+// allows a leading digit. main.go's vaultSlugRegexp states the same rule for the
+// executor's own VAULT_NAME/TASK_VAULT.
+const crdVaultSlug = "^[a-z][a-z0-9-]*$"
+
+// crdClock matches "HH:MM", the shape RunWindow's weekday bounds are parsed from.
+const crdClock = "^([01][0-9]|2[0-3]):[0-5][0-9]$"
+
+// runWindowSchema is the schema for a RunWindow, extracted so
+// configSpecProperties stays inside the funlen limit.
+func runWindowSchema() apiextensionsv1.JSONSchemaProps {
+	return apiextensionsv1.JSONSchemaProps{
+		Type: "object",
+		Properties: map[string]apiextensionsv1.JSONSchemaProps{
+			"timezone":      {Type: "string"},
+			"weekdayStart":  {Type: "string", Pattern: crdClock},
+			"weekdayEnd":    {Type: "string", Pattern: crdClock},
+			"weekendAllDay": {Type: "boolean"},
+		},
+	}
+}
 
 // crdMaxNameLen is the 63-character ceiling a DNS-1123 label carries. The
 // pattern alone does not bound the length, so an over-long jobNamespace would
@@ -295,6 +319,70 @@ func configMapItemsSchema() apiextensionsv1.JSONSchemaProps {
 	}
 }
 
+// stringMapSchema is the OpenAPI schema for a map[string]string field
+// (ConfigSpec.env, ConfigSpec.nodeSelector).
+func stringMapSchema() apiextensionsv1.JSONSchemaProps {
+	return apiextensionsv1.JSONSchemaProps{
+		Type: "object",
+		AdditionalProperties: &apiextensionsv1.JSONSchemaPropsOrBool{
+			Schema: &apiextensionsv1.JSONSchemaProps{Type: "string"},
+		},
+	}
+}
+
+// tolerationsSchema is the OpenAPI schema for ConfigSpec.tolerations — a list
+// of corev1.Toleration objects stamped onto Job PodTemplates.
+func tolerationsSchema() apiextensionsv1.JSONSchemaProps {
+	return apiextensionsv1.JSONSchemaProps{
+		Type: "array",
+		Items: &apiextensionsv1.JSONSchemaPropsOrArray{
+			Schema: &apiextensionsv1.JSONSchemaProps{
+				Type: "object",
+				Properties: map[string]apiextensionsv1.JSONSchemaProps{
+					"key":      {Type: "string"},
+					"operator": {Type: "string", Enum: jsonEnum("Exists", "Equal")},
+					"value":    {Type: "string"},
+					"effect": {
+						Type: "string",
+						Enum: jsonEnum("", "NoSchedule", "PreferNoSchedule", "NoExecute"),
+					},
+					"tolerationSeconds": {Type: "integer", Format: "int64"},
+				},
+			},
+		},
+	}
+}
+
+// jsonEnum converts string values into the JSON form a CRD enum expects.
+func jsonEnum(values ...string) []apiextensionsv1.JSON {
+	result := make([]apiextensionsv1.JSON, 0, len(values))
+	for _, v := range values {
+		result = append(result, apiextensionsv1.JSON{Raw: []byte(`"` + v + `"`)})
+	}
+	return result
+}
+
+// defaultForTaskTypesSchema is the OpenAPI schema for
+// ConfigSpec.defaultForTaskTypes. Extracted from configSpecProperties to keep
+// that function under the funlen limit, mirroring configMapItemsSchema.
+//
+// A Config may declare itself the designated default for a task_type it also
+// claims. The resolver reads it only when the type matches several Configs and
+// neither the assignee nor previous_assignee narrows them to one; zero or
+// several declarations keep the ambiguity refusal.
+func defaultForTaskTypesSchema(maxLength *int64) apiextensionsv1.JSONSchemaProps {
+	return apiextensionsv1.JSONSchemaProps{
+		Type: "array",
+		Items: &apiextensionsv1.JSONSchemaPropsOrArray{
+			Schema: &apiextensionsv1.JSONSchemaProps{
+				Type:      "string",
+				Pattern:   `^[a-z0-9-]+$`,
+				MaxLength: maxLength,
+			},
+		},
+	}
+}
+
 func configSpecProperties() map[string]apiextensionsv1.JSONSchemaProps {
 	minLen := int64(1)
 	maxLen63 := int64(63)
@@ -326,6 +414,7 @@ func configSpecProperties() map[string]apiextensionsv1.JSONSchemaProps {
 				},
 			},
 		},
+		"defaultForTaskTypes": defaultForTaskTypesSchema(&maxLen63),
 		"resources": {
 			Type: "object",
 			Properties: map[string]apiextensionsv1.JSONSchemaProps{
@@ -333,12 +422,7 @@ func configSpecProperties() map[string]apiextensionsv1.JSONSchemaProps {
 				"limits":   resourceList,
 			},
 		},
-		"env": {
-			Type: "object",
-			AdditionalProperties: &apiextensionsv1.JSONSchemaPropsOrBool{
-				Schema: &apiextensionsv1.JSONSchemaProps{Type: "string"},
-			},
-		},
+		"env":                stringMapSchema(),
 		"secretName":         {Type: "string"},
 		"volumeClaim":        {Type: "string"},
 		"volumeMountPath":    {Type: "string"},
@@ -346,13 +430,32 @@ func configSpecProperties() map[string]apiextensionsv1.JSONSchemaProps {
 		"configMapMountPath": {Type: "string"},
 		"configMapItems":     configMapItemsSchema(),
 		"priorityClassName":  {Type: "string", Pattern: crdDNS1123Label},
+		"nodeSelector":       stringMapSchema(),
+		"tolerations":        tolerationsSchema(),
 		"jobNamespace":       {Type: "string", Pattern: crdDNS1123Label, MaxLength: &crdMaxNameLen},
 		// Empty means the executor's own namespace; a value equal to the executor's
 		// own namespace is rejected at reconcile time.
 		"serviceNamespace": {Type: "string", Pattern: crdDNS1123Label, MaxLength: &crdMaxNameLen},
+		"targetVault":      {Type: "string", Pattern: crdVaultSlug},
 		"imagePullSecret":  {Type: "string"},
 		// 0 = unlimited (see AgentConfiguration.MaxConcurrentJobs).
 		"maxConcurrentJobs": {Type: "integer", Minimum: &crdMinZero},
+		// 0 = no separate budget. Stamped onto the Job's ActiveDeadlineSeconds
+		// when stricter than the zombie timeout.
+		"runBudgetSeconds": {Type: "integer", Minimum: &crdMinZero},
+		// Optional; unset or 0 means no token ceiling. Summed across the agent's
+		// runs in the current run window from each task's metrics_runs history.
+		"tokenCeiling": {Type: "integer", Minimum: &crdMinZero},
+		// Optional; unset means no window.
+		//
+		// Declared here AND in the Helm chart's crds/config-crd.yaml, because they
+		// are two separate copies of the same schema: the chart's is installed once
+		// on first helm install (helm never upgrades crds/), and this map is what
+		// the executor re-installs on every start. An undeclared field is pruned by
+		// the API server — the CRD sets preserveUnknownFields: false — so a field
+		// missing here silently does not exist, with no error at apply time. That
+		// is exactly how runWindow was lost on the first deploy.
+		"runWindow": runWindowSchema(),
 		// Optional; unset means false. true re-dispatches a taken-over task;
 		// false or unset parks it at human_review.
 		"rerunOnLostClaim": {Type: "boolean"},

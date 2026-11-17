@@ -6,6 +6,37 @@ of the task's claim. This document describes the protocol implemented by
 `pkg/claim`. The constants below are invariants, not configuration — there is
 no knob, flag or opt-out for any of them.
 
+## The spawn guard reads a claim, it never writes one
+
+A task's frontmatter carries a `current_job`, and it is shared through the
+vault, so it can name a Job another cluster created. `IsJobActive` lists only
+this cluster's Jobs, so "no active Job here" does not mean the Job is over.
+
+When this executor's own store has no entry for the task — a restart, or a task
+it never spawned — the guard reads the task's claim (`GET` on the claim route)
+and treats a live claim as proof that some cluster is still running the task:
+the spawn is suppressed and re-deferred. `claim_free` lets the respawn proceed,
+a claim past its lease **by the takeover grace** counts as free — not one merely
+past its lease, because inside that grace the protocol still treats the holder as
+possibly running — an unreadable lease counts as held, and a failed read
+suppresses and retries on the next pass. The read is
+one request per dispatch pass on a task whose store entry is empty, and none
+otherwise. Only claim mode `on` probes: `shadow` takes claims but never blocks a
+dispatch, so a held claim must not suppress a spawn there, and treating shadow as
+unavailable is what keeps the probe from quietly turning it into `on`.
+
+⚠️ **Two residuals, both real.** Claim mode `off` keeps no claim at all, so the
+guard falls back to local evidence and says so in
+`event=foreign_job_unprobeable`. And a claim's absence only proves that no
+*claim-taking* cluster holds the task: a peer running claim mode off, or an image
+older than `v0.26.2`, writes no claim, so a task it is running stays invisible
+here and the respawn can still duplicate it. That gap closes when every cluster
+takes claims, not by anything this side can read.
+
+This is why the success hold matters beyond the peer's `Claim` being refused:
+the held claim is also what stops a cold peer from respawning the task inside
+the success grace.
+
 ## Constants
 
 | Constant | Value | Meaning |
@@ -31,8 +62,15 @@ every key, and keys and task ids are never metric label values.
 | Key shape | Used by |
 |---|---|
 | `claims/task/<task id>` | task-id-keyed types, and `pr-review` with no usable PR link |
-| `claims/repo/<owner>-<repo>` | `update-go`, `release`, `build-fix` |
-| `claims/pr/<owner>-<repo>-<n>` | `pr-review` with a usable PR link |
+| `claims/repo/<owner>/<repo>` | `update-go`, `release`, `build-fix` |
+| `claims/pr/<owner>/<repo>/<n>` | `pr-review` with a usable PR link |
+
+Owner and repo are joined with `/`, never `-`. A hyphen is legal inside both
+components, so the earlier hyphen join was lossy: owner `a-b` with repo `c` and
+owner `a` with repo `b-c` both derived `claims/repo/a-b-c`, and two distinct
+repositories aliased one lock. `/` is rejected inside a component, so the slash
+join cannot collide. (Changed in `f3ac37a`, first released v0.41.0. This table
+carried the hyphen form for six releases after the code stopped producing it.)
 
 A `pr-review` key is per pull request when the task body carries a standalone
 pull-request URL: the first body line that, after trimming surrounding
@@ -104,6 +142,54 @@ writes. A pair still present in the store from an earlier release is recovered
 as a pair by `storeRecoveredPair`, which is the only path that handles one;
 `ClaimPair` and `TakeoverPair` keep their secondary parameter but every caller
 now passes it empty.
+
+### The fleet's declared scheme
+
+The two mixed-fleet windows above are what a *guard* exists to prevent, and the
+executor now carries one. `ClaimKeySchemeVersion` names the derivation this
+binary produces (`v2` today); the shared ref `claims/scheme` holds the
+derivation the fleet has declared. Before a spawn claims, the executor reads the
+declaration and does one of three things:
+
+| Declared | Action |
+|---|---|
+| equal to this binary's version | claim proceeds |
+| absent | this binary writes its own version, then claims — the bootstrap |
+| different | the spawn is **refused**; no claim ref is written |
+
+The declaration lives in git-rest, beside the claims, rather than in a per-cluster
+config. That placement is the whole design: a config would roll cluster by cluster
+and reproduce the very window it closes, while one shared ref flips atomically.
+Whichever cluster reaches an empty store first declares for everyone, and a lost
+compare-and-swap is not an error — the winner's value is read back and judged like
+any other, so two clusters bootstrapping at once converge instead of each believing
+it declared.
+
+**The failure direction is deliberate and asymmetric.** A read failure — git-rest
+unreachable, 5xx, a vanished declaration — **admits** the claim. An executor must
+not stop a fleet that claims fine without this guard, and failing closed there
+would trade one outage class for another. Only a positive mismatch refuses. In
+`shadow` mode the refusal skips the claim write and lets the spawn through, which
+is that mode's contract; in `on` it stops the spawn.
+
+**The guard binds only clusters that carry it.** An older image without a guard
+ignores `claims/scheme` entirely, so the release that introduces the guard cannot
+stop a guard-less peer. It protects every scheme change *after* the fleet is
+uniformly on a guard-aware build — that is its honest scope, and the reason it
+ships before the next derivation change rather than with it.
+
+**The cost during its own rollout.** The first upgraded cluster declares the new
+version and every not-yet-upgraded cluster refuses until it is upgraded. That is a
+short fleet-wide stall, chosen over the alternative because a stall is visible and
+recoverable while a silent duplicate run is neither.
+
+Observability is positive, not an absence: `executor_claim_scheme_total{result}`
+counts `confirmed`, `bootstrapped`, `mismatch` and `unreadable`, and the guard
+logs `event=claim_scheme_confirmed`, `event=claim_scheme_bootstrapped`,
+`event=claim_scheme_mismatch` (error level) or `event=claim_scheme_unreadable`
+(warning) — once each, then the counter carries the rate. A fleet with no
+mismatch and a guard that never runs look identical from a mismatch count alone,
+which is why the `confirmed` and `bootstrapped` series exist.
 
 Every key passes `validateClaimComponent`, so a hostile body cannot inject a
 path segment into a ref.
@@ -192,7 +278,13 @@ is actually running.
 The decision is visible in one line: `event=concurrency_admit` and
 `event=concurrency_cap` both carry `running=`, `cap=`, `max=` and `quota=`,
 where `cap` is the effective bound, `max` the declared value and `quota` the
-value read from the quota (0 when no quota bound applies).
+value read from the quota. `quota_bound=` names why the quota did or did not
+bound the decision — `ok` when the read succeeded (`quota` is then authoritative,
+including a genuine `hard.pods: 0`), `failed` when the read was refused or
+errored (`cap` fell back to `max`), or `none` when no limiter, no priority class,
+or no quota scoping the class applied. It exists because `quota=0` alone cannot
+distinguish those three, and the failed read is exactly the state an operator
+must be able to see without inferring it from `cap`.
 
 ## Fence
 
@@ -226,6 +318,55 @@ request. A takeover of an absent key falls back to a create with an empty
 A takeover must win the pair: a live secondary refuses the takeover before any
 write, and a secondary conflict after the primary was taken releases the primary
 again so the pair is never half-held.
+
+## Parking
+
+A park records why a task stopped being driven, in the same
+`UpdateFrontmatterCommand` as the keys it changes, so the record never shows the
+new state without its reason. There are three park paths, and each writes its
+own reason token:
+
+| Path | Reason token | Written keys | Evidence |
+|---|---|---|---|
+| Lost claim | `parked_lost_claim` | `phase: human_review` | The claim key and the previous holder. |
+| Succeeded Job without a phase move | `parked_succeeded` | `status: completed`, `phase: done` | The reason line only. |
+| Re-drive budget spent on a non-`done` result | `parked_redrive_cap` | `status: hold`, `phase: planning` | `last_result_status`, the phase the run never left, and `trigger_count`. |
+
+The first two paths differ in outcome, not just in wording: a lost claim needs a
+human to look at it, while a succeeded Job is finished work. The third is an
+escalation — the run did not finish — so it must leave the `in_progress`
+population without closing the record. `status: hold` is what does that: it is
+outside `terminalStatuses`, so nothing closes the record, and an operator resumes
+it by setting the status back to `in_progress`. The phase moves to `planning` in
+the same write because vault-cli's lint flags `hold` beside an active phase
+(`execution`, `in_progress`, `ai_review`, `human_review`); resuming at planning
+re-scopes `trigger_count`, so a re-armed run starts with a fresh re-drive budget
+rather than the spent one.
+
+The lost-claim park fires when this executor takes over an expired claim, the
+task's Config forbids a rerun (`rerunOnLostClaim: false`), and the task shows
+prior-run evidence (`current_job` or `job_started_at`). The claim key is the
+primary key derived for the task — `claims/pr/<owner>/<repo>/<n>`,
+`claims/task/<task id>`, or `claims/repo/<owner>/<repo>` — and the previous
+holder is the `TaskID` read from the expired claim. A takeover that creates a
+claim over an absent key has no previous holder, and the section writes
+`unavailable` rather than an empty field.
+
+The section is a fixed template, at most eight lines including the trailing
+newline, with no log tail and no echo of the task body:
+
+```markdown
+## Parked
+
+- **Reason:** parked_lost_claim
+- **Claim:** claims/task/<task id>
+- **Previous holder:** <task id or unavailable>
+```
+
+The succeeded path writes only the heading, a blank line and the reason line.
+Both paths share one publish helper, so the phase change and the reason are
+never split across two commands; a retried publish replaces the section rather
+than duplicating it, because a body section write is keyed by its heading.
 
 ## Restart recovery
 
@@ -266,8 +407,13 @@ no lease-manager path treats it as one.
   `none`.
 - `cluster` is always the sentinel `redrive-streak`. It must never equal a real
   executor cluster name.
-- `lease_until` is create time + 24 h. It is informational only: nothing renews
-  it and nothing expires a streak ref.
+- `lease_until` is create time + `RedriveStreakLeaseDuration` (6 h) and is a real
+  sliding window. Nothing renews a ref, so expiry is the only release path the
+  executor controls: a ref whose `lease_until` has passed is ignored by `Count`
+  and by `Snapshot` and pruned by `Record`, so a task capped by a past outage is
+  released once the window has passed. Three live refs still refuse a fourth
+  spawn inside one window, and a ref with an absent or unparseable `lease_until`
+  counts as live, so the cap never weakens.
 - No lease-manager path acts on a streak ref. Restart recovery is the only path
   that lists the whole `claims/` prefix, and it skips `claims/redrive/` keys
   explicitly; renew, fence, takeover, release and audit act only on the
