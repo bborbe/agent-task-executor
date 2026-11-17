@@ -2,7 +2,7 @@
 
 All notable changes to this project will be documented in this file.
 
-## Unreleased
+## v0.65.2
 
 - chore(deps): **bump `bborbe/kafka` to `v1.30.0`, so a consumer decode failure names the offset of the failing record.** A corrupted record batch on `develop-agent-task-v1-event/0` crashlooped the executor for five and a half hours, and the operator-facing error carried only the topic and partition — recovery meant binary-searching a log segment for the offset. The error context now carries the offset the partition consumer will read next (the last delivered offset plus one, or the creation offset when the error arrives before any message — the crashloop case), and it reaches Sentry as a tag rather than as message text, so the substrings other tooling greps stay byte-identical. `consumerErrorCounter` also gains an `error_class` label (`corruption` / `broker_side` / `other`), which is what lets `KafkaConsumerDecodeError` fire on corruption instead of a broker-side burst. Transitive moves carried by the bump: `bborbe/parse` v1.12.6→v1.12.7, `bborbe/time` v1.27.27→v1.27.28, `google/pprof` v0.0.0-20261110164715→v0.0.0-20261111065629. Change set: `go.mod`, `go.sum`, `CHANGELOG.md`.
 
