@@ -19,7 +19,9 @@ import (
 // defaultServiceReconcileInterval is how often the loop re-ensures service
 // StatefulSets. It matches the task reconcile floor: the loop is a backstop for
 // drift, not the primary mechanism — the StatefulSet controller owns pod
-// replacement, and the ownerRef owns garbage collection.
+// replacement, and the ownerRef owns garbage collection for same-namespace
+// copies. A cross-namespace copy carries no ownerRef (see ReapOrphanedCopies),
+// so this interval is also the orphan reap's only clock.
 const defaultServiceReconcileInterval = time.Minute
 
 //counterfeiter:generate -o ../../mocks/service_reconcile_loop.go --fake-name FakeServiceReconcileLoop . ServiceReconcileLoop
@@ -36,8 +38,10 @@ const defaultServiceReconcileInterval = time.Minute
 // It is deliberately a periodic pass rather than an informer hook: the Config
 // informer already exists to populate the resolver's store, and a loop keeps the
 // two concerns separate while giving the same convergence. A Config deleted
-// entirely is collected by the ownerRef, so only the "stopped being a service"
-// transition needs the explicit undeploy.
+// entirely is collected by the ownerRef only when its copy sits in the
+// executor's own namespace; a cross-namespace copy carries none, so the same
+// pass that reconciles also reaps it (see ReapOrphanedCopies), and the "stopped
+// being a service" transition needs the explicit undeploy.
 type ServiceReconcileLoop interface {
 	// ReconcileOnce runs one full pass over the known Configs.
 	ReconcileOnce(ctx context.Context) error

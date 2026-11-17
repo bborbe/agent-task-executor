@@ -334,7 +334,20 @@ func (r *serviceReconciler) ReapOrphanedCopies(
 	}
 	previous := r.reapCandidatesSnapshot()
 	current := make(map[string]struct{}, len(list.Items))
+reapLoop:
 	for i := range list.Items {
+		// Break rather than return: setReapCandidates below must still run, because a
+		// stale candidate set is the one unsafe value here. Leaving the previous set in
+		// place would make a copy that appears after this pass look like a second
+		// sighting on the next one, and the two-pass gate is this function's whole
+		// safety. A partially filled set only defers a reap, which is the safe direction.
+		// The label is load-bearing: a bare break would leave the select, not the loop.
+		select {
+		case <-ctx.Done():
+			glog.V(2).Infof("event=service_orphan_reap_cancelled")
+			break reapLoop
+		default:
+		}
 		existing := &list.Items[i]
 		// Checked in code as well as in the selector: the selector is the server's
 		// job, and a client that ignores it (or an apiserver that answers more
@@ -432,6 +445,13 @@ func (r *serviceReconciler) removePreviousNamespaceCopies(
 		return
 	}
 	for i := range list.Items {
+		// Each hit below deletes a StatefulSet, so a cancelled context must stop the
+		// sweep rather than run the list out.
+		select {
+		case <-ctx.Done():
+			return
+		default:
+		}
 		existing := &list.Items[i]
 		if existing.Name != config.Name {
 			continue
