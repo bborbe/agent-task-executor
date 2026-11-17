@@ -2,13 +2,13 @@
 
 All notable changes to this project will be documented in this file.
 
+## Unreleased
+
+- chore(deps): **bump `bborbe/kafka` to `v1.30.0`, so a consumer decode failure names the offset of the failing record.** A corrupted record batch on `develop-agent-task-v1-event/0` crashlooped the executor for five and a half hours, and the operator-facing error carried only the topic and partition — recovery meant binary-searching a log segment for the offset. The error context now carries the offset the partition consumer will read next (the last delivered offset plus one, or the creation offset when the error arrives before any message — the crashloop case), and it reaches Sentry as a tag rather than as message text, so the substrings other tooling greps stay byte-identical. `consumerErrorCounter` also gains an `error_class` label (`corruption` / `broker_side` / `other`), which is what lets `KafkaConsumerDecodeError` fire on corruption instead of a broker-side burst. Transitive moves carried by the bump: `bborbe/parse` v1.12.6→v1.12.7, `bborbe/time` v1.27.27→v1.27.28, `google/pprof` v0.0.0-20261110164715→v0.0.0-20261111065629. Change set: `go.mod`, `go.sum`, `CHANGELOG.md`.
+
 ## v0.65.1
 
 - chore: **demote the `previous_assignee` tie-break drop from `glog.V(2)` to `V(4)`, so the executor's `-v=2` log stops printing ~60 lines/hour of a drop that is not an error.** `inTypePreviousAssignee` logged `ignore previous_assignee %s: no config in this stage` at `V(2)` for every record whose `previous_assignee` names a retired agent, once per reconcile pass — measured 2026-11-17 on `agent-task-executor-personal` (prod), 180 lines in 3 h from one stale view key. The drop is the ordinary case: the path returns `""` and the record still resolves by `task_type`, so nothing is skipped — `agent_executor_skipped_unknown_assignee_total{assignee="easy-agent-goreleaser"}` has no series. This mirrors v0.64.2, which demoted the sibling unknown-assignee skip from a warning to `V(4)` for the same reason: the signal lives on the metrics, not the log. Change set: `pkg/handler/task_event_handler_previous_assignee.go`, `CHANGELOG.md`.
-
-## Unreleased
-
-- chore(deps): **bump `bborbe/kafka` to `v1.30.0`, so a consumer decode failure names the offset of the failing record.** A corrupted record batch on `develop-agent-task-v1-event/0` crashlooped the executor for five and a half hours, and the operator-facing error carried only the topic and partition — recovery meant binary-searching a log segment for the offset. The error context now carries the offset the partition consumer will read next (the last delivered offset plus one, or the creation offset when the error arrives before any message — the crashloop case), and it reaches Sentry as a tag rather than as message text, so the substrings other tooling greps stay byte-identical. `consumerErrorCounter` also gains an `error_class` label (`corruption` / `broker_side` / `other`), which is what lets `KafkaConsumerDecodeError` fire on corruption instead of a broker-side burst. Transitive moves carried by the bump: `bborbe/parse` v1.12.6→v1.12.7, `bborbe/time` v1.27.27→v1.27.28, `google/pprof`. Change set: `go.mod`, `go.sum`, `CHANGELOG.md`.
 
 ## v0.65.0
 
