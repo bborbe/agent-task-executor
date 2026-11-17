@@ -306,7 +306,13 @@ func (h *taskEventHandler) resolveConfigQuiet(
 		if stderrors.Is(err, pkg.ErrConfigNotFound) {
 			return nil, nil
 		}
-		return nil, err
+		return nil, errors.Wrapf(
+			ctx,
+			err,
+			"resolve agent config by task_type %s for task %s",
+			taskType,
+			task.TaskIdentifier,
+		)
 	}
 	return &resolved, nil
 }

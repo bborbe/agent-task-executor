@@ -464,6 +464,54 @@ var _ = Describe("ghost current_job config resolution", func() {
 		})
 	})
 
+	Context("the task_type lookup finds no Config either", func() {
+		BeforeEach(func() {
+			resolver.resolveErr = pkg.ErrConfigNotFound
+			resolver.typeErr = pkg.ErrConfigNotFound
+		})
+
+		It("refuses without clearing, having tried the type lookup", func() {
+			h = newGhostInternalHandlerWithResolver(
+				ghostView{tasks: []lib.Task{ghostInternalHumanAssignedTask()}},
+				publisher,
+				claimFree,
+				resolver,
+			)
+
+			out := ghostCaptureInternalLog(func() {
+				Expect(h.ReconcileOnce(ctx)).To(Succeed())
+			})
+
+			Expect(publisher.clearCalls()).To(BeEmpty())
+			Expect(out).To(ContainSubstring("guard=namespace_unresolved"))
+			Expect(resolver.typeCalls).To(Equal(1))
+		})
+	})
+
+	Context("the task_type lookup fails with an error other than ErrConfigNotFound", func() {
+		BeforeEach(func() {
+			resolver.resolveErr = pkg.ErrConfigNotFound
+			resolver.typeErr = stderrors.New("type lookup unavailable")
+		})
+
+		It("propagates the error and clears nothing", func() {
+			h = newGhostInternalHandlerWithResolver(
+				ghostView{tasks: []lib.Task{ghostInternalHumanAssignedTask()}},
+				publisher,
+				claimFree,
+				resolver,
+			)
+
+			out := ghostCaptureInternalLog(func() {
+				Expect(h.ReconcileOnce(ctx)).To(Succeed())
+			})
+
+			Expect(publisher.clearCalls()).To(BeEmpty())
+			Expect(out).To(ContainSubstring("guard=namespace_unresolved"))
+			Expect(out).To(ContainSubstring("type lookup unavailable"))
+		})
+	})
+
 	Context("the assignee resolves directly", func() {
 		BeforeEach(func() {
 			resolver.config = pkg.AgentConfiguration{Assignee: "claude", Image: "img"}
@@ -507,11 +555,6 @@ var _ = Describe("ghost current_job config resolution", func() {
 
 			Expect(publisher.clearCalls()).To(Equal([]string{"ghost-job-human"}))
 			Expect(resolver.resolveCalls).To(Equal(0))
-			// Not an exact count: an empty-assignee task also reaches the
-			// pass's own restore path, which resolves by task_type too. The
-			// claim here is that the ghost step still falls back, which the
-			// clear above already proves.
-			Expect(resolver.typeCalls).To(BeNumerically(">=", 1))
 		})
 	})
 })
