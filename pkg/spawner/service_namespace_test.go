@@ -16,6 +16,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
+	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/kubernetes/fake"
 	k8stesting "k8s.io/client-go/testing"
 
@@ -152,6 +153,32 @@ func seedLabelledCopy(
 		StatefulSets(namespace).
 		Create(context.Background(), seed, metav1.CreateOptions{})
 	Expect(err).NotTo(HaveOccurred(), "seed labelled copy failed")
+}
+
+// seedCopyWithObjectUID is seedLabelledCopy with the StatefulSet's own UID pinned,
+// so a spec can model the same name being replaced by a genuinely different object.
+func seedCopyWithObjectUID(
+	client *fake.Clientset,
+	config agentv1.Config,
+	namespace string,
+	objectUID string,
+) {
+	seed := &appsv1.StatefulSet{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      config.Name,
+			Namespace: namespace,
+			UID:       types.UID(objectUID),
+			Labels: map[string]string{
+				"agent.benjamin-borbe.de/config-name":        config.Name,
+				"agent.benjamin-borbe.de/config-uid":         string(config.UID),
+				"agent.benjamin-borbe.de/executor-namespace": "dev",
+			},
+		},
+	}
+	_, err := client.AppsV1().
+		StatefulSets(namespace).
+		Create(context.Background(), seed, metav1.CreateOptions{})
+	Expect(err).NotTo(HaveOccurred(), "seed copy with object UID failed")
 }
 
 // newServiceReconciler builds a reconciler over a fresh fake clientset, for the
@@ -407,6 +434,45 @@ var _ = Describe("service namespace", func() {
 			Get(ctx, gone.Name, metav1.GetOptions{})
 		Expect(err).NotTo(HaveOccurred(),
 			"a single pass deleted a copy on a possibly-partial Config view")
+	})
+
+	// ⚠️ A candidate key that is only namespace/name identifies a NAME, not a copy.
+	// A StatefulSet deleted and recreated between passes would inherit the previous
+	// pass's sighting, and in the partial-store window this gate exists for it would
+	// then be deleted on its first real sighting — taking its PVC, because
+	// WhenDeleted is Delete. The key therefore carries the copy's own UID.
+	It("does not let a recreated copy inherit the previous sighting", func() {
+		gone := serviceNamespaceConfig("claude-interactive", "dev", "dev-sandbox")
+		survivor := serviceNamespaceConfig("pi-interactive", "dev", "dev-sandbox")
+		survivor.UID = "aaaaaaaa-1111-2222-3333-444444444444"
+		client, loop, provider := newServiceNamespaceLoop(
+			"dev",
+			[]agentv1.Config{gone, survivor},
+		)
+
+		seedCopyWithObjectUID(client, gone, "dev-sandbox", "sts-uid-1")
+
+		// Pass 1: `gone` is absent from a partial store, so its copy is recorded as a
+		// candidate and nothing is deleted.
+		provider.configs = []agentv1.Config{survivor}
+		Expect(loop.ReconcileOnce(ctx)).To(Succeed(), "first pass")
+
+		// Between passes the copy is replaced by a fresh object with the same name and
+		// labels but a new UID.
+		Expect(client.AppsV1().StatefulSets("dev-sandbox").Delete(
+			ctx, gone.Name, metav1.DeleteOptions{},
+		)).To(Succeed())
+		seedCopyWithObjectUID(client, gone, "dev-sandbox", "sts-uid-2")
+
+		// Pass 2: still a partial store, and the new object's name is already in the
+		// previous candidate set — but its identity is not, so this is its FIRST
+		// sighting and it must survive.
+		Expect(loop.ReconcileOnce(ctx)).To(Succeed(), "second pass")
+
+		_, err := client.AppsV1().StatefulSets("dev-sandbox").
+			Get(ctx, gone.Name, metav1.GetOptions{})
+		Expect(err).NotTo(HaveOccurred(),
+			"a recreated copy was deleted on its first sighting, inheriting the old one's")
 	})
 
 	// The reaper must never touch a workload the garbage collector owns, must never

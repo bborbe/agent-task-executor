@@ -172,7 +172,10 @@ type ConfigSpec struct {
 	// own namespace is rejected at reconcile time: a Config may never opt out of
 	// isolation by naming the executor namespace. The namespace must already exist,
 	// must already permit StatefulSets for the executor's service account, and must
-	// already hold this Config's Secret before the field is set.
+	// already hold this Config's Secrets before the field is set — the env Secret and
+	// the image pull secret (the latter defaults to `docker` when
+	// spec.imagePullSecret is unset, and Kubernetes cannot reference either across
+	// namespaces, so a private image fails to pull until it exists there).
 	ServiceNamespace string `json:"serviceNamespace,omitempty"`
 	// MaxConcurrentJobs caps how many Jobs this agent may run at once. Spawns
 	// beyond the cap are deferred and retried, never dropped. 0 (the default)

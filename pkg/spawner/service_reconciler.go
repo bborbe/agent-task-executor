@@ -406,7 +406,12 @@ func (r *serviceReconciler) reapCandidate(
 	if _, alive := live[uid]; alive {
 		return "", "", false
 	}
-	return existing.Namespace + "/" + existing.Name, uid, true
+	// The key carries the StatefulSet's OWN uid, not just namespace/name. A copy
+	// deleted and recreated between two passes would otherwise inherit the previous
+	// pass's sighting — and, in the partial-store window this gate exists for, be
+	// deleted on its first real sighting, taking its PVC via WhenDeleted. Identity
+	// is what the two-pass rule is about; a name is not an identity.
+	return existing.Namespace + "/" + existing.Name + "/" + string(existing.UID), uid, true
 }
 
 // setReapCandidates replaces the remembered candidate set for the next pass.
