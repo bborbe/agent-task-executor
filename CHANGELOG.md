@@ -2,7 +2,7 @@
 
 All notable changes to this project will be documented in this file.
 
-## Unreleased
+## v0.65.1
 
 - chore: **demote the `previous_assignee` tie-break drop from `glog.V(2)` to `V(4)`, so the executor's `-v=2` log stops printing ~60 lines/hour of a drop that is not an error.** `inTypePreviousAssignee` logged `ignore previous_assignee %s: no config in this stage` at `V(2)` for every record whose `previous_assignee` names a retired agent, once per reconcile pass — measured 2026-11-17 on `agent-task-executor-personal` (prod), 180 lines in 3 h from one stale view key. The drop is the ordinary case: the path returns `""` and the record still resolves by `task_type`, so nothing is skipped — `agent_executor_skipped_unknown_assignee_total{assignee="easy-agent-goreleaser"}` has no series. This mirrors v0.64.2, which demoted the sibling unknown-assignee skip from a warning to `V(4)` for the same reason: the signal lives on the metrics, not the log. Change set: `pkg/handler/task_event_handler_previous_assignee.go`, `CHANGELOG.md`.
 
