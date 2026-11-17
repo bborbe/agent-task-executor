@@ -1,7 +1,7 @@
 ---
 spec: ["bug-bab89662fe73a8bf4a0014d6f78791b3"]
 status: draft
-created: "2026-11-15T12:30:00Z"
+created: "2026-11-17T12:45:00Z"
 ---
 
 # Pin the CRD conflict retry's re-Get contract
@@ -18,7 +18,7 @@ created: "2026-11-15T12:30:00Z"
 </summary>
 
 <objective>
-Harden the regression coverage around the already-shipped `ensureCRD` conflict fix so that the property the fix actually depends on — each retry attempt re-reads the CRD and therefore writes with a fresh `resourceVersion` — is pinned by a test, and so that "retry conflicts only" is pinned against a retry-everything regression. Production code is not to change. The bug is the cluster-scoped CRD Get→Update race that made a losing executor crash on startup with a 409 during a concurrent rollout; the fix already prevents that, but only a test can keep a later refactor from silently undoing it.
+Harden the regression coverage around the already-shipped `ensureCRD` conflict fix so that the property the fix actually depends on — each retry attempt re-reads the CRD and therefore writes with a fresh `resourceVersion` — is pinned by a test, and so that "retry conflicts only" is pinned against a retry-everything regression. Production code is not to change. The bug is the cluster-scoped CRD Get→Update race that made a losing executor crash on startup with a 409 during a concurrent rollout; the fix (commit `9c9b454`, already at repo HEAD) prevents that, but only a test can keep a later refactor from silently undoing it.
 </objective>
 
 <context>
@@ -35,7 +35,7 @@ Read `pkg/k8s_connector_internal_test.go` for the adjacent `crdSpecEqual` specs 
 
 Read `/home/node/.claude/plugins/marketplaces/coding/docs/go-testing-guide.md` for the external-test-package and Ginkgo conventions this repo follows, and `/home/node/.claude/plugins/marketplaces/coding/docs/changelog-guide.md` for the entry shape and conventional-prefix rule.
 
-The fix itself is already recorded in `CHANGELOG.md` under the released heading `## v0.18.12` (the bullet beginning "a concurrent rollout of the executors no longer kills the losers…"). This prompt adds test coverage only; it must not restate or re-implement that fix. The current changelog has no `## Unreleased` section — the top heading is `## v0.62.2` — so requirement 3 creates one.
+The fix itself is already recorded in `CHANGELOG.md` under the released heading `## v0.18.12` (the bullet beginning "a concurrent rollout of the executors no longer kills the losers…"). This prompt adds test coverage only; it must not restate or re-implement that fix. The current changelog has no `## Unreleased` section — the first `## v` heading is currently `## v0.65.1` — so requirement 3 creates one directly above it. Do not hardcode a version number in the edit: locate the first `## v` heading and insert above it.
 </context>
 
 <requirements>
@@ -86,7 +86,7 @@ The fix itself is already recorded in `CHANGELOG.md` under the released heading 
 
    `ctx` is set by the outer `Describe("K8sConnector")` `BeforeEach`. Every identifier used (`fake`, `rest`, `k8stesting`, `runtime`, `apierrors`, `stderrors`, `pkg`, `differingCRD`, `fakeBuilder`, `ctx`) is already imported or declared in this file — add no imports.
 
-3. Add a `## Unreleased` section to `CHANGELOG.md` directly above the first `## v` heading (the preamble is `# Changelog`, a blank line, then the "All notable changes…" line; the first version heading is `## v0.62.2`). It does not exist yet — do not create a second one, and do not touch any released heading. Put exactly one bullet in it, in the file's existing voice (`- <prefix>: **bold summary.** prose`), using the `test:` prefix from the changelog guide:
+3. Add a `## Unreleased` section to `CHANGELOG.md` directly above the first `## v` version heading (the preamble is `# Changelog`, a blank line, then the "All notable changes…" line; the first version heading is currently `## v0.65.1`, but do not rely on that literal — insert above whatever the first `## v` heading is). It does not exist yet — do not create a second one, and do not touch any released heading. Put exactly one bullet in it, in the file's existing voice (`- <prefix>: **bold summary.** prose`), using the `test:` prefix from the changelog guide:
 
    ```
    - test: **the CRD install path's conflict retry is pinned at the interleaving, not just the write count.** A retry only helps because each attempt re-reads `configs.agent.benjamin-borbe.de` and therefore writes a fresh `resourceVersion`; the previous assertion counted two `Update` actions, which a retry that replayed the object fetched before the loop would also satisfy. The spec now asserts `get, update, get, update`, and a second spec pins that an `Update` failing for a non-conflict reason surfaces as a wrapped `update CRD` error after exactly one attempt instead of being retried. No behaviour change.
@@ -96,11 +96,11 @@ The fix itself is already recorded in `CHANGELOG.md` under the released heading 
 </requirements>
 
 <constraints>
-- This prompt is test-and-changelog only. Do NOT modify `pkg/k8s_connector.go` or any other production file.
+- This prompt is test-and-changelog only. Do NOT modify `pkg/k8s_connector.go` or any other production file. (The mutation described in `<verification>` is a temporary probe that must be reverted; the final diff must not touch it.)
 - Do NOT add handling for a concurrent `Create` (an `AlreadyExists` on the create path) and do NOT broaden the retry to non-conflict errors. Those would be behaviour changes outside this prompt's scope.
 - Do NOT add a new test file and do NOT add another `RunSpecs`; the suite bootstrap is `pkg/suite_test.go`.
 - Do NOT duplicate the `crdSpecEqual` specs in `pkg/k8s_connector_internal_test.go`.
-- Do NOT attempt any cluster access or deployment. Nothing in this prompt is verifiable against a live cluster; deploying the already-shipped fix to a dev cluster is a separate operator action, not part of this change.
+- Do NOT attempt any cluster access or deployment. Nothing in this prompt is verifiable against a live cluster; deploying the already-shipped fix (commit `9c9b454`) to nuke-dev is a separate operator action, not part of this change.
 - Do NOT run `go mod vendor`, and never use `-mod=vendor`.
 - Do NOT commit — dark-factory handles git.
 - Existing tests must still pass.
@@ -113,10 +113,10 @@ Run from the repository root:
 go test -mod=mod -count=1 ./pkg/
 ROOTDIR=/workspace make precommit
 grep -c '^## Unreleased$' CHANGELOG.md
-awk '/^## /{sec=$0} /conflict retry is pinned at the interleaving/{print sec}' CHANGELOG.md
+awk '/^## /{sec=$0} /conflict retry is pinned at the interleaving/{print sec}' CHANGELOG.md | grep -qx '## Unreleased'
 ```
 
-`make precommit` must pass. `grep -c '^## Unreleased$' CHANGELOG.md` must print `1`, and the `awk` line must print `## Unreleased` — together these prove the bullet landed in the unreleased section rather than under a released version.
+`make precommit` must pass. `grep -c '^## Unreleased$' CHANGELOG.md` must print `1`. The final `awk | grep -qx` must exit 0 (it exits non-zero if the bullet is absent or landed under a released heading), which proves the bullet is in the unreleased section.
 
-Then confirm the pin is real: temporarily move the `crds.Get(...)` call in `ensureCRD` outside the `retry.RetryOnConflict` closure so the retried attempt reuses the first `existing` object, run `go test -mod=mod -count=1 ./pkg/`, and confirm the extended conflict spec fails. Revert the mutation and re-run `go test -mod=mod -count=1 ./pkg/` to green. The final `make precommit` must be run after the revert — a forgotten mutation makes the extended spec fail, so a green `make precommit` is itself the proof that the production file was restored.
+Then confirm the pin is real: temporarily move the `crds.Get(...)` call in `ensureCRD` outside the `retry.RetryOnConflict` closure so the retried attempt reuses the first `existing` object, run `go test -mod=mod -count=1 ./pkg/ -args -ginkgo.focus='SetupCustomResourceDefinition'`, and confirm the extended conflict spec fails (the `get`-count assertion reports 1, expected 2). Revert the mutation and re-run `go test -mod=mod -count=1 ./pkg/` to green. The final `make precommit` must be run after the revert — a forgotten mutation makes the extended spec fail, so a green `make precommit` is itself the proof that the production file was restored.
 </verification>
