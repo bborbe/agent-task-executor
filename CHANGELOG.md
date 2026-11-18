@@ -2,7 +2,7 @@
 
 All notable changes to this project will be documented in this file.
 
-## Unreleased
+## v0.66.2
 
 - fix: **`ghostCurrentJobGuard` clears a ghost on a record whose assignee matches no agent Config, instead of refusing it at `namespace_unresolved` on every cluster.** `resolveConfigQuiet` reached the `task_type` fallback only inside its empty-assignee branch, so a non-empty assignee that matched no Config returned `nil, nil` and the guard refused before any remote read — a record assigned to a human was permanently unclearable, on sun and nuke prod alike, because the refusal precedes every cluster read. The fallback now runs whenever the assignee resolves to no Config, which is the line `namespaceFor` already draws for the same `ErrConfigNotFound`; any other resolver error still propagates rather than being read as "no Config", and the guard's branch order and labels are unchanged, so a record with neither a matching Config nor a `task_type` still refuses with `namespace_unresolved`. Change set: `pkg/handler/ghost_current_job.go`, `pkg/handler/ghost_current_job_internal_test.go`, `CHANGELOG.md`.
 
