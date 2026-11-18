@@ -166,5 +166,19 @@ var _ = Describe("AgentConfigurations", func() {
 			Expect(*result[0].ZombieJobTimeoutSeconds).To(Equal(int32(900)))
 			Expect(result[1].ZombieJobTimeoutSeconds).To(BeNil())
 		})
+
+		// Pins the field's survival through TaggedConfigurations, which copies every
+		// field explicitly: an omitted field is silently dropped on that path.
+		It("preserves ServiceNamespace", func() {
+			withField := pkg.AgentConfigurations{
+				{Assignee: "claude", Image: "foo/bar", ServiceNamespace: "agent-sandbox"},
+				{Assignee: "unset", Image: "foo/bar"},
+			}
+
+			tagged := withField.TaggedConfigurations("dev")
+
+			Expect(tagged[0].ServiceNamespace).To(Equal("agent-sandbox"))
+			Expect(tagged[1].ServiceNamespace).To(BeEmpty())
+		})
 	})
 })

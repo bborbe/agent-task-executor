@@ -433,8 +433,11 @@ func configSpecProperties() map[string]apiextensionsv1.JSONSchemaProps {
 		"nodeSelector":       stringMapSchema(),
 		"tolerations":        tolerationsSchema(),
 		"jobNamespace":       {Type: "string", Pattern: crdDNS1123Label, MaxLength: &crdMaxNameLen},
-		"targetVault":        {Type: "string", Pattern: crdVaultSlug},
-		"imagePullSecret":    {Type: "string"},
+		// Empty means the executor's own namespace; a value equal to the executor's
+		// own namespace is rejected at reconcile time.
+		"serviceNamespace": {Type: "string", Pattern: crdDNS1123Label, MaxLength: &crdMaxNameLen},
+		"targetVault":      {Type: "string", Pattern: crdVaultSlug},
+		"imagePullSecret":  {Type: "string"},
 		// 0 = unlimited (see AgentConfiguration.MaxConcurrentJobs).
 		"maxConcurrentJobs": {Type: "integer", Minimum: &crdMinZero},
 		// 0 = no separate budget. Stamped onto the Job's ActiveDeadlineSeconds

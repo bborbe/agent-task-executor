@@ -292,6 +292,7 @@ func convert(ctx context.Context, obj agentv1.Config, branch string) (AgentConfi
 		NodeSelector:            maps.Clone(obj.Spec.NodeSelector),
 		Tolerations:             slices.Clone(obj.Spec.Tolerations),
 		JobNamespace:            obj.Spec.JobNamespace,
+		ServiceNamespace:        obj.Spec.ServiceNamespace,
 		Trigger:                 obj.Spec.Trigger,
 		RerunOnLostClaim:        obj.Spec.RerunOnLostClaim,
 		ZombieJobTimeoutSeconds: obj.Spec.ZombieJobTimeoutSeconds,
