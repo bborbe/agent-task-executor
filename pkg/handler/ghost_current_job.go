@@ -259,16 +259,24 @@ func (h *taskEventHandler) publishGhostClear(
 // resolveConfigQuiet mirrors resolveConfigForReconcile's lookup rules exactly
 // but increments no metric and emits no log line of its own. The ghost step must
 // not add to the gather's skipped_unknown_assignee accounting.
+//
+// The task_type fallback runs whenever the assignee resolves to no Config, not
+// only when the assignee is empty. A record assigned to a human — a non-empty
+// assignee matching no agent Config — is exactly the shape the ghost step must
+// still be able to clear, and refusing it here returns namespace_unresolved
+// before any remote read. namespaceFor draws the same line: assignee first,
+// task_type only on ErrConfigNotFound, and every other resolver error propagated
+// rather than read as "no Config".
 func (h *taskEventHandler) resolveConfigQuiet(
 	ctx context.Context,
 	task lib.Task,
 ) (*pkg.AgentConfiguration, error) {
-	if task.Frontmatter.Assignee() != "" {
-		resolved, err := h.resolver.Resolve(ctx, string(task.Frontmatter.Assignee()))
-		if err != nil {
-			if stderrors.Is(err, pkg.ErrConfigNotFound) {
-				return nil, nil
-			}
+	if assignee := string(task.Frontmatter.Assignee()); assignee != "" {
+		resolved, err := h.resolver.Resolve(ctx, assignee)
+		if err == nil {
+			return &resolved, nil
+		}
+		if !stderrors.Is(err, pkg.ErrConfigNotFound) {
 			return nil, errors.Wrapf(
 				ctx,
 				err,
@@ -276,7 +284,9 @@ func (h *taskEventHandler) resolveConfigQuiet(
 				task.TaskIdentifier,
 			)
 		}
-		return &resolved, nil
+		// The assignee matches no Config. Fall through: the task's own
+		// task_type is the remaining identifier, exactly as it is for a
+		// cleared assignee.
 	}
 	taskType := task.Frontmatter.TaskType()
 	if taskType == "" {
@@ -296,7 +306,13 @@ func (h *taskEventHandler) resolveConfigQuiet(
 		if stderrors.Is(err, pkg.ErrConfigNotFound) {
 			return nil, nil
 		}
-		return nil, err
+		return nil, errors.Wrapf(
+			ctx,
+			err,
+			"resolve agent config by task_type %s for task %s",
+			taskType,
+			task.TaskIdentifier,
+		)
 	}
 	return &resolved, nil
 }
