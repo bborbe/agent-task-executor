@@ -19,6 +19,20 @@ import "time"
 // a 409 and does not spawn; once the window has passed the vault carries the
 // result and the normal phase gate decides.
 //
-// It matches the spawn path's respawn grace window: the two bound one gap from
-// opposite ends — one refuses to spawn, the other refuses to hand the claim over.
-const SuccessGracePeriod = 300 * time.Second
+// It matches the spawn path's respawn grace window — defaultRespawnGracePeriod
+// aliases this constant — so the two bound one gap from opposite ends: one
+// refuses to spawn, the other refuses to hand the claim over.
+//
+// 300 s was measured to be shorter than the gap it guards. Across the
+// 2026-11-15 window, nine of the twelve cross-cluster duplicates re-spawned at
+// +343 to +355 s after the earlier run ended — 43 to 55 s *after* a 300 s grace
+// had already run out, with the vault still not carrying the result. A grace
+// that expires inside the gap it exists to cover turns every post-success
+// duplicate into an expected outcome instead of a bug.
+//
+// 900 s is the measured band plus roughly a 2.5x margin: wide enough to survive
+// a slower vault sync, narrow enough that it does not delay a retry. It cannot
+// delay a *failed* task at all — a failure releases its claim through the
+// release paths, never through this grace — so the only work this holds back is
+// a re-run of something that already succeeded.
+const SuccessGracePeriod = 900 * time.Second

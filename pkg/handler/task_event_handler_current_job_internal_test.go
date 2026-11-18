@@ -125,7 +125,10 @@ func newCurrentJobHandler() *taskEventHandler {
 // cluster, and its absence here says nothing about whether it is running.
 func TestJobProvablyFinishedRejectsAnotherClustersJob(t *testing.T) {
 	h := newCurrentJobHandler()
-	task := currentJobTask("pr-reviewer-agent-94c1801c-20261022205503", 7*time.Minute)
+	task := currentJobTask(
+		"pr-reviewer-agent-94c1801c-20261022205503",
+		claim.SuccessGracePeriod+time.Minute,
+	)
 	h.taskStore.Store(task.TaskIdentifier, lib.Task{
 		TaskIdentifier: task.TaskIdentifier,
 		Frontmatter: lib.TaskFrontmatter{
@@ -207,7 +210,10 @@ func TestJobProvablyFinishedDoesNotProbeInShadowMode(t *testing.T) {
 			},
 		}
 	}
-	task := currentJobTask("pr-reviewer-agent-94c1801c-20261022205503", 7*time.Minute)
+	task := currentJobTask(
+		"pr-reviewer-agent-94c1801c-20261022205503",
+		claim.SuccessGracePeriod+time.Minute,
+	)
 
 	finished, err := h.jobProvablyFinished(
 		context.Background(),
@@ -242,7 +248,10 @@ func TestJobProvablyFinishedSuppressesWhenTheClaimClientCannotBeBuilt(t *testing
 			h := newCurrentJobHandler()
 			h.claimMode = pkg.ClaimModeOn
 			h.claimClientFactory = factory
-			task := currentJobTask("pr-reviewer-agent-94c1801c-20261022205503", 7*time.Minute)
+			task := currentJobTask(
+				"pr-reviewer-agent-94c1801c-20261022205503",
+				claim.SuccessGracePeriod+time.Minute,
+			)
 			before := testutil.ToFloat64(
 				metrics.TaskEventsTotal.WithLabelValues("claim_probe_failed"),
 			)
@@ -280,7 +289,10 @@ func TestJobProvablyFinishedRejectsAClaimedForeignJobWithNoStoreEntry(t *testing
 			return liveClaim(), nil
 		},
 	)
-	task := currentJobTask("pr-reviewer-agent-94c1801c-20261022205503", 7*time.Minute)
+	task := currentJobTask(
+		"pr-reviewer-agent-94c1801c-20261022205503",
+		claim.SuccessGracePeriod+time.Minute,
+	)
 
 	finished, err := h.jobProvablyFinished(
 		context.Background(),
@@ -306,7 +318,10 @@ func TestJobProvablyFinishedAcceptsAnUnclaimedJobWithNoStoreEntry(t *testing.T) 
 			return nil, claim.ErrClaimFree
 		},
 	)
-	task := currentJobTask("pr-reviewer-agent-94c1801c-20261022205503", 7*time.Minute)
+	task := currentJobTask(
+		"pr-reviewer-agent-94c1801c-20261022205503",
+		claim.SuccessGracePeriod+time.Minute,
+	)
 
 	finished, err := h.jobProvablyFinished(
 		context.Background(),
@@ -334,7 +349,10 @@ func TestJobProvablyFinishedAsksForTheTasksOwnClaim(t *testing.T) {
 			return nil, claim.ErrClaimFree
 		},
 	)
-	task := currentJobTask("pr-reviewer-agent-94c1801c-20261022205503", 7*time.Minute)
+	task := currentJobTask(
+		"pr-reviewer-agent-94c1801c-20261022205503",
+		claim.SuccessGracePeriod+time.Minute,
+	)
 
 	if _, err := h.jobProvablyFinished(
 		context.Background(),
@@ -367,7 +385,10 @@ func TestJobProvablyFinishedTreatsAClaimInsideTheTakeoverGraceAsHeld(t *testing.
 			}, nil
 		},
 	)
-	task := currentJobTask("pr-reviewer-agent-94c1801c-20261022205503", 7*time.Minute)
+	task := currentJobTask(
+		"pr-reviewer-agent-94c1801c-20261022205503",
+		claim.SuccessGracePeriod+time.Minute,
+	)
 
 	finished, err := h.jobProvablyFinished(
 		context.Background(),
@@ -392,7 +413,10 @@ func TestJobProvablyFinishedTreatsAnUnreadableLeaseAsHeld(t *testing.T) {
 			return &claim.Claim{Holder: "sun", LeaseUnreadable: true}, nil
 		},
 	)
-	task := currentJobTask("pr-reviewer-agent-94c1801c-20261022205503", 7*time.Minute)
+	task := currentJobTask(
+		"pr-reviewer-agent-94c1801c-20261022205503",
+		claim.SuccessGracePeriod+time.Minute,
+	)
 
 	finished, err := h.jobProvablyFinished(
 		context.Background(),
@@ -463,7 +487,10 @@ func TestJobProvablyFinishedTreatsAnExpiredClaimAsFinished(t *testing.T) {
 			}, nil
 		},
 	)
-	task := currentJobTask("pr-reviewer-agent-94c1801c-20261022205503", 7*time.Minute)
+	task := currentJobTask(
+		"pr-reviewer-agent-94c1801c-20261022205503",
+		claim.SuccessGracePeriod+time.Minute,
+	)
 
 	finished, err := h.jobProvablyFinished(
 		context.Background(),
@@ -489,7 +516,10 @@ func TestJobProvablyFinishedTreatsAnUnreadableClaimAsUnfinished(t *testing.T) {
 			return nil, stderrors.New("vault-api unreachable")
 		},
 	)
-	task := currentJobTask("pr-reviewer-agent-94c1801c-20261022205503", 7*time.Minute)
+	task := currentJobTask(
+		"pr-reviewer-agent-94c1801c-20261022205503",
+		claim.SuccessGracePeriod+time.Minute,
+	)
 	before := testutil.ToFloat64(
 		metrics.TaskEventsTotal.WithLabelValues("claim_probe_failed"),
 	)
@@ -522,7 +552,10 @@ func TestJobProvablyFinishedTreatsAnUnreadableClaimAsUnfinished(t *testing.T) {
 // deferred-respawn contract does not allow.
 func TestJobProvablyFinishedWithoutAClaimStoreKeepsPriorBehaviour(t *testing.T) {
 	h := newCurrentJobHandler()
-	task := currentJobTask("pr-reviewer-agent-94c1801c-20261022205503", 7*time.Minute)
+	task := currentJobTask(
+		"pr-reviewer-agent-94c1801c-20261022205503",
+		claim.SuccessGracePeriod+time.Minute,
+	)
 
 	finished, err := h.jobProvablyFinished(
 		context.Background(),
@@ -557,7 +590,10 @@ func (goneSpawner) JobExists(context.Context, libk8s.Namespace, string) (bool, e
 func TestJobProvablyFinishedClearsALeakedStoreEntry(t *testing.T) {
 	h := newCurrentJobHandler()
 	h.jobSpawner = goneSpawner{}
-	task := currentJobTask("pr-reviewer-agent-94c1801c-20261022205503", 7*time.Minute)
+	task := currentJobTask(
+		"pr-reviewer-agent-94c1801c-20261022205503",
+		claim.SuccessGracePeriod+time.Minute,
+	)
 	h.taskStore.Store(task.TaskIdentifier, lib.Task{
 		TaskIdentifier: task.TaskIdentifier,
 		Frontmatter: lib.TaskFrontmatter{
@@ -590,7 +626,10 @@ func TestJobProvablyFinishedClearsALeakedStoreEntry(t *testing.T) {
 func TestCheckActiveCurrentJobSuppressesAForeignJob(t *testing.T) {
 	ctx := context.Background()
 	h := newCurrentJobHandler()
-	task := currentJobTask("pr-reviewer-agent-94c1801c-20261022205503", 7*time.Minute)
+	task := currentJobTask(
+		"pr-reviewer-agent-94c1801c-20261022205503",
+		claim.SuccessGracePeriod+time.Minute,
+	)
 	h.taskStore.Store(task.TaskIdentifier, lib.Task{
 		TaskIdentifier: task.TaskIdentifier,
 		Frontmatter: lib.TaskFrontmatter{
@@ -645,7 +684,10 @@ func TestCheckActiveCurrentJobSuppressesAClaimedForeignJobWithNoStoreEntry(t *te
 			return liveClaim(), nil
 		},
 	)
-	task := currentJobTask("pr-reviewer-agent-94c1801c-20261022205503", 7*time.Minute)
+	task := currentJobTask(
+		"pr-reviewer-agent-94c1801c-20261022205503",
+		claim.SuccessGracePeriod+time.Minute,
+	)
 	before := testutil.ToFloat64(
 		metrics.TaskEventsTotal.WithLabelValues("skipped_foreign_job"),
 	)

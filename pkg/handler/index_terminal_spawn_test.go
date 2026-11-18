@@ -7,6 +7,7 @@ package handler_test
 import (
 	"context"
 	"encoding/json"
+	"time"
 
 	"github.com/IBM/sarama"
 	lib "github.com/bborbe/agent"
@@ -54,7 +55,8 @@ func (s *spawnGateIndexStub) Read(context.Context) (*claim.TaskIndex, error) {
 // suppression line on either cluster, because nothing on this path asked the
 // index.
 var _ = Describe("spawn-path index-terminal gate", func() {
-	const pastGrace = "2026-05-17T09:40:00Z" // T+360s, outside SuccessGracePeriod
+	// Outside the claim grace, derived so the spec keeps meaning that.
+	pastGrace := graceOffset(claim.SuccessGracePeriod + 60*time.Second)
 
 	var (
 		ctx                 context.Context

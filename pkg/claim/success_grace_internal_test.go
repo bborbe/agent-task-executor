@@ -272,7 +272,8 @@ func TestReleaseAfterSuccessRetriesWhenTheJobCheckFails(t *testing.T) {
 
 	// Walk the clock in tick-sized steps so renewals keep the lease ahead of the
 	// fence; only the hold expiry is under test.
-	for step := 0; step < 32; step++ {
+	steps := int(claim.SuccessGracePeriod/(10*time.Second)) + 4
+	for step := 0; step < steps; step++ {
 		clock.set(clock.get().Add(10 * time.Second))
 		if tickErr := mgr.Tick(ctx); tickErr != nil {
 			t.Fatalf("tick returned %v; want nil", tickErr)
@@ -488,5 +489,26 @@ func TestStaleSuccessInsideTheHoldKeepsTheClaim(t *testing.T) {
 	held, err = mgrB.Claim(ctx, key, "task-4")
 	if err != nil || held == nil {
 		t.Fatalf("peer claim after the hold = (%v, %v); want a held claim", held, err)
+	}
+}
+
+// measuredRespawnBand is the latest observed cross-cluster re-spawn after the
+// earlier run ended: +343 to +355 s across the 2026-11-15 window, nine of the
+// twelve duplicates. The grace must outlast it, or it expires before the vault
+// has carried the result and the peer spawns the same task a second time.
+const measuredRespawnBand = 355 * time.Second
+
+// TestSuccessGracePeriodOutlastsMeasuredRespawnBand pins the constant above the
+// band it guards. A future edit that shortens the grace would silently
+// reintroduce the post-success duplicate class, and nothing else in the suite
+// would notice, so the lower bound is asserted rather than left to the comment.
+func TestSuccessGracePeriodOutlastsMeasuredRespawnBand(t *testing.T) {
+	if claim.SuccessGracePeriod <= measuredRespawnBand {
+		t.Fatalf(
+			"SuccessGracePeriod = %s, want more than the measured re-spawn band %s: "+
+				"a shorter grace expires before the vault carries the result",
+			claim.SuccessGracePeriod,
+			measuredRespawnBand,
+		)
 	}
 }
