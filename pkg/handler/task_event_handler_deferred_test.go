@@ -9,6 +9,7 @@ package handler_test
 import (
 	"context"
 	"encoding/json"
+	"time"
 
 	"github.com/IBM/sarama"
 	lib "github.com/bborbe/agent"
@@ -25,6 +26,7 @@ import (
 	agentv1 "github.com/bborbe/agent-task-executor/k8s/apis/agent.benjamin-borbe.de/v1"
 	"github.com/bborbe/agent-task-executor/mocks"
 	pkg "github.com/bborbe/agent-task-executor/pkg"
+	"github.com/bborbe/agent-task-executor/pkg/claim"
 	"github.com/bborbe/agent-task-executor/pkg/handler"
 	"github.com/bborbe/agent-task-executor/pkg/metrics"
 )
@@ -294,12 +296,24 @@ var _ = Describe("TaskEventHandler", func() {
 		})
 
 		Describe("EvalDeferredRespawns (spec 037)", func() {
-			const (
-				anchorTime      = "2026-05-17T09:34:00Z" // T+0 (pod 1 start)
-				insideGrace     = "2026-05-17T09:34:59Z" // T+59s (suppression event time)
-				graceExpiredM1  = "2026-05-17T09:38:59Z" // T+299s (1s before grace expiry)
-				graceExpiredR   = "2026-05-17T09:39:30Z" // T+330s (within R=60s)
-				graceExpiredMax = "2026-05-17T09:40:00Z" // T+360s (= grace + 60s)
+			// Derived from the claim grace so "past the grace" stays true when
+			// the constant moves; the previous literals asserted 300 s.
+			var (
+				anchorTime = graceOffset(
+					0,
+				) // T+0 (pod 1 start)
+				insideGrace = graceOffset(
+					59 * time.Second,
+				) // T+59s (suppression event time)
+				graceExpiredM1 = graceOffset(
+					claim.SuccessGracePeriod - time.Second,
+				) // 1s before grace expiry
+				graceExpiredR = graceOffset(
+					claim.SuccessGracePeriod + 30*time.Second,
+				) // within R=60s
+				graceExpiredMax = graceOffset(
+					claim.SuccessGracePeriod + 60*time.Second,
+				) // grace + R
 			)
 
 			buildGraceTask := func(phase domain.TaskPhase, triggerCount, maxTriggers int) lib.Task {
@@ -1713,13 +1727,20 @@ var _ = Describe("TaskEventHandler", func() {
 				},
 				Entry(
 					"current_job set, job inactive, within grace => suppress",
-					"pod-A", "2026-05-16T20:19:16Z", "2026-05-16T20:19:26Z", // T+10s
+					"pod-A", "2026-05-16T20:19:16Z",
+					graceOffsetFrom("2026-05-16T20:19:16Z", 10*time.Second), // T+10s
 					0, float64(1),
 				),
 				Entry(
 					"current_job set, job inactive, past grace => spawn",
-					"pod-A", "2026-05-16T20:19:16Z", "2026-05-16T20:24:26Z", // T+310s
-					1, float64(0),
+					"pod-A",
+					"2026-05-16T20:19:16Z",
+					graceOffsetFrom(
+						"2026-05-16T20:19:16Z",
+						claim.SuccessGracePeriod+10*time.Second,
+					),
+					1,
+					float64(0),
 				),
 				Entry(
 					"current_job empty, job inactive => spawn (no grace check)",

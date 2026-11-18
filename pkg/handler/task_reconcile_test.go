@@ -26,6 +26,7 @@ import (
 	agentv1 "github.com/bborbe/agent-task-executor/k8s/apis/agent.benjamin-borbe.de/v1"
 	"github.com/bborbe/agent-task-executor/mocks"
 	pkg "github.com/bborbe/agent-task-executor/pkg"
+	"github.com/bborbe/agent-task-executor/pkg/claim"
 	"github.com/bborbe/agent-task-executor/pkg/handler"
 	"github.com/bborbe/agent-task-executor/pkg/metrics"
 )
@@ -325,7 +326,13 @@ var _ = Describe("TaskEventHandler reconcile loop", func() {
 			// dispatches.
 			parkedTask.Frontmatter["last_result_status"] = string(lib.AgentStatusDone)
 			fakeView.GetReturns(parkedTask, true)
-			taskStore.MarkSucceeded("tid-a", "execution", now.Add(-10*time.Minute))
+			// Past the grace window, derived so the spec keeps testing "past it"
+			// rather than a literal that only matched a 300 s grace.
+			taskStore.MarkSucceeded(
+				"tid-a",
+				"execution",
+				now.Add(-claim.SuccessGracePeriod-time.Minute),
+			)
 
 			Expect(h.ReconcileOnce(ctx)).To(BeNil())
 			Expect(fakeSpawner.SpawnJobCallCount()).To(Equal(0))

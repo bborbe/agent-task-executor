@@ -11,6 +11,7 @@ import (
 	"io"
 	"os"
 	"strings"
+	"time"
 
 	"github.com/IBM/sarama"
 	lib "github.com/bborbe/agent"
@@ -106,10 +107,12 @@ func deferredGateCaptureStderr(fn func()) string {
 }
 
 var _ = Describe("deferred index-terminal gate", func() {
-	const (
-		anchorTime  = "2026-05-17T09:34:00Z" // T+0
-		insideGrace = "2026-05-17T09:34:59Z" // T+59s
-		pastGrace   = "2026-05-17T09:40:00Z" // T+360s
+	// Derived from the claim grace: the previous literals asserted a 300 s value
+	// and would silently read as "inside the grace" once it moved.
+	var (
+		anchorTime  = graceOffset(0)                                         // T+0
+		insideGrace = graceOffset(59 * time.Second)                          // T+59s
+		pastGrace   = graceOffset(claim.SuccessGracePeriod + 60*time.Second) // grace + R
 	)
 
 	var (
