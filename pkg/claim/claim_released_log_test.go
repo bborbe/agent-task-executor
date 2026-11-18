@@ -177,11 +177,14 @@ var _ = Describe("LeaseManager claim release log", func() {
 		Expect(err).NotTo(HaveOccurred())
 		Expect(mgr.ReleaseAfterSuccess(ctx, key, clock.Now())).To(Succeed())
 
-		// The 10 s ticks renew the lease, so the fence never comes due.
-		tickAt(mgr, clock, leaseTestT0.Add(290*libtime.Second))
+		// The 10 s ticks renew the lease, so the fence never comes due. The
+		// boundary is derived from the constant rather than written as a
+		// literal, so the spec keeps testing the hold expiry at any grace.
+		grace := libtime.Duration(claim.SuccessGracePeriod)
+		tickAt(mgr, clock, leaseTestT0.Add(grace-10*libtime.Second))
 
 		out := captureGlogStderr(func() {
-			tickAt(mgr, clock, leaseTestT0.Add(310*libtime.Second))
+			tickAt(mgr, clock, leaseTestT0.Add(grace+10*libtime.Second))
 		})
 
 		Expect(out).To(ContainSubstring("result=released"))

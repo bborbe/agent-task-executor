@@ -106,11 +106,15 @@ var _ = Describe("LeaseManager jobless claim release edge cases", func() {
 		beforeJobless := claimCount("jobless_released")
 		beforeReleased := claimCount("released")
 
-		tickAt(mgr, clock, leaseTestT0.Add(490*libtime.Second))
+		// Derived from the constant: the release landed at t=200 s, so the hold
+		// ends one SuccessGracePeriod later. A literal here would only test the
+		// grace's current value, not the behaviour.
+		holdExpiry := 200*libtime.Second + libtime.Duration(claim.SuccessGracePeriod)
+		tickAt(mgr, clock, leaseTestT0.Add(holdExpiry-10*libtime.Second))
 		Expect(requestsMatching(fake.Requests(), http.MethodDelete, joblessKey)).To(BeEmpty())
 		Expect(claimCount("jobless_released") - beforeJobless).To(Equal(0.0))
 
-		tickAt(mgr, clock, leaseTestT0.Add(560*libtime.Second))
+		tickAt(mgr, clock, leaseTestT0.Add(holdExpiry+60*libtime.Second))
 		Expect(requestsMatching(fake.Requests(), http.MethodDelete, joblessKey)).To(HaveLen(1))
 		Expect(claimCount("released") - beforeReleased).To(Equal(1.0))
 	})
