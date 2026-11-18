@@ -46,7 +46,7 @@ func (readOnlyClaimClient) Acquire(
 }
 
 func (readOnlyClaimClient) Renew(
-	context.Context, claim.ClaimTarget, string, string, string, int,
+	context.Context, claim.ClaimTarget, string, string, string, string, int,
 ) (*claim.Claim, error) {
 	panic("the claim probe must not renew")
 }

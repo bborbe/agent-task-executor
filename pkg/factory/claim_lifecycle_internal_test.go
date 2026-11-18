@@ -62,6 +62,8 @@ func (s *stubLeaseManager) ClaimPair(
 
 func (s *stubLeaseManager) Release(context.Context, string) error { return nil }
 
+func (s *stubLeaseManager) MarkSpawned(context.Context, string) error { return nil }
+
 func (s *stubLeaseManager) ReleaseAfterSuccess(
 	context.Context, string, libtime.DateTime,
 ) error {

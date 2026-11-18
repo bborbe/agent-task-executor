@@ -211,6 +211,34 @@ These log lines make claims observable at runtime:
   `event=claim_released` line for the same removal follows from the release
   itself.
 
+## The spawn marker
+
+A claim carries an optional `spawned_at`: the instant its holder created the
+Job. It is written **after** the Job exists — never at acquisition — because its
+whole purpose is to distinguish "this holder ran the task" from "this holder
+only held the key". A marker written at acquisition asserts a Job that does not
+exist, which is the defect the field is meant to catch.
+
+- **Write.** `MarkSpawned` renews the held claim with the marker set, immediately
+  after `SpawnJob` succeeds. A failed write is logged as
+  `event=claim_marker_failed` and never fails the spawn: the Job is already
+  running, and losing the marker only leaves a peer with the evidence it had
+  before.
+- **Survives renew.** The holder keeps the marker on its held claim and sends it
+  on every renew; vault-api also preserves a stored marker when a renew omits
+  it. Either alone would keep it, and both together close the rolling-deploy
+  window where one side is older.
+- **Survives restart.** `Recover` re-adopts the marker from the listed claim, so
+  the first tick after a restart does not erase it.
+- **Cleared only by a new claim.** An acquire (including a takeover) starts with
+  no marker, which is correct: the new holder has not spawned yet.
+- **Absence is not an error.** Every claim written before the field existed, and
+  every holder that has not spawned, carries none. A reader treats absent as "no
+  Job was started", never as a read failure.
+- **Not part of the recovery identity.** Lost-response recovery still recognises
+  its own write by the `(cluster, task_id, lease_until)` triple; the marker
+  cannot destabilise that.
+
 ## Claim state machine
 
 A claim moves through these states:
@@ -344,8 +372,12 @@ re-scopes `trigger_count`, so a re-armed run starts with a fresh re-drive budget
 rather than the spent one.
 
 The lost-claim park fires when this executor takes over an expired claim, the
-task's Config forbids a rerun (`rerunOnLostClaim: false`), and the task shows
-prior-run evidence (`current_job` or `job_started_at`). The claim key is the
+task's Config forbids a rerun (`rerunOnLostClaim: false`), and the displaced
+claim proves a run — either its own `spawned_at` marker (below) or, for a claim
+written before the marker existed, the task's prior-run evidence (`current_job`
+or `job_started_at`). The marker is preferred because it travels on the claim,
+the one artefact both clusters share: the peer's vault copy lags the run, which
+made the guard fail open on two measured ids (`cd1cd68a`, `026edb30`). The claim key is the
 primary key derived for the task — `claims/pr/<owner>/<repo>/<n>`,
 `claims/task/<task id>`, or `claims/repo/<owner>/<repo>` — and the previous
 holder is the `TaskID` read from the expired claim. A takeover that creates a

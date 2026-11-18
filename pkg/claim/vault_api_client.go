@@ -226,6 +226,11 @@ type Claim struct {
 	LeaseUntil  libtime.DateTime
 	RenewBefore libtime.DateTime
 	LeaseToken  string
+	// SpawnedAt is the instant the holder recorded that it created this claim's
+	// Job, or empty when it has not — or when the claim predates the marker. It is
+	// the evidence a takeover uses to tell a holder that ran the task from one that
+	// only held the key, without reading the peer's own vault copy.
+	SpawnedAt string
 	// LeaseUnreadable reports that the stored lease_until was not RFC3339. It is
 	// not an error: a claim whose lease nobody can read must still be visible to
 	// a restarting executor so it can be fenced, and dropping it from the
@@ -289,12 +294,18 @@ type ClaimClient interface {
 	// writes the holder it is given, so a renew that omits it both erases the
 	// holder a recovery listing filters on and is refused outright — the server
 	// answers 400 invalid_holder to an empty one.
+	//
+	// spawnedAt carries the claim's spawn marker forward. Every renew passes the
+	// value the manager holds — empty before the Job exists, the spawn instant
+	// after — so the marker survives the renewal loop rather than being erased by
+	// the next tick.
 	Renew(
 		ctx context.Context,
 		target ClaimTarget,
 		holder string,
 		leaseToken string,
 		claimantTaskID string,
+		spawnedAt string,
 		ttlSeconds int,
 	) (*Claim, error)
 	// List returns every claim, optionally narrowed to one holder. This is what
@@ -343,6 +354,10 @@ type claimRequestBody struct {
 	// omits it: the server derives it from the address, and sending one would
 	// let a caller claim under a task other than the one it addressed.
 	TaskID string `json:"task_id,omitempty"`
+	// SpawnedAt marks the instant the holder created the claim's Job. It is sent
+	// on a renew only: the server drops it from an acquire, because a claim whose
+	// Job does not exist yet cannot carry the marker.
+	SpawnedAt string `json:"spawned_at,omitempty"`
 }
 
 // claimResponseBody is the server's claim representation.
@@ -354,6 +369,7 @@ type claimResponseBody struct {
 	LeaseUntil  string `json:"lease_until"`
 	RenewBefore string `json:"renew_before"`
 	LeaseToken  string `json:"lease_token"`
+	SpawnedAt   string `json:"spawned_at"`
 }
 
 // claimListResponseBody is GET /api/v1/claims. It carries no index_age_seconds:
@@ -422,6 +438,7 @@ func (c *vaultAPIClaimClient) Renew(
 	holder string,
 	leaseToken string,
 	claimantTaskID string,
+	spawnedAt string,
 	ttlSeconds int,
 ) (*Claim, error) {
 	if holder == "" {
@@ -437,6 +454,7 @@ func (c *vaultAPIClaimClient) Renew(
 		LeaseToken: leaseToken,
 		TTLSeconds: ttlSeconds,
 		TaskID:     claimantTaskID,
+		SpawnedAt:  spawnedAt,
 	}
 	status, raw, err := c.doPath(ctx, http.MethodPost, target.renewPath(), target, body)
 	if err != nil {
@@ -693,6 +711,7 @@ func claimFromResponse(
 		Holder:     parsed.Holder,
 		TaskID:     parsed.TaskID,
 		LeaseToken: parsed.LeaseToken,
+		SpawnedAt:  parsed.SpawnedAt,
 	}
 	until, err := libtime.ParseDateTime(ctx, parsed.LeaseUntil)
 	if err != nil {

@@ -54,6 +54,8 @@ func (s *recoverStub) ClaimPair(
 
 func (s *recoverStub) Release(context.Context, string) error { return nil }
 
+func (s *recoverStub) MarkSpawned(context.Context, string) error { return nil }
+
 func (s *recoverStub) ReleaseAfterSuccess(
 	context.Context, string, libtime.DateTime,
 ) error {

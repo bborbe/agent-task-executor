@@ -378,6 +378,7 @@ func (m *leaseManager) renewClaim(
 		m.cluster,
 		held.leaseToken,
 		claimantTaskID(held.target, held.taskID),
+		held.spawnedAt,
 		leaseSeconds(),
 	)
 	cancel()
@@ -408,6 +409,7 @@ func (m *leaseManager) renewClaim(
 		m.cluster,
 		held.secondToken,
 		claimantTaskID(held.secondTarget, held.taskID),
+		held.spawnedAt,
 		leaseSeconds(),
 	)
 	cancel()

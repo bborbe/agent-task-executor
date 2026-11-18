@@ -66,7 +66,7 @@ func (c *notFoundClaimClient) Acquire(
 }
 
 func (c *notFoundClaimClient) Renew(
-	context.Context, claim.ClaimTarget, string, string, string, int,
+	context.Context, claim.ClaimTarget, string, string, string, string, int,
 ) (*claim.Claim, error) {
 	return nil, &claim.StatusError{Action: "renew", Target: "task tid-absent", Status: 404}
 }
