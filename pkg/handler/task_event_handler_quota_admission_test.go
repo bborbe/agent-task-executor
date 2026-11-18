@@ -83,7 +83,8 @@ var _ = Describe("Pod quota admission", func() {
 		belowCap := quotaHarness(limiter, 5, quotaTestPriorityClass, 4)
 		Expect(belowCap.consume(qualifyingClaimTask())).To(Succeed())
 		Expect(belowCap.spawner.SpawnJobCallCount()).To(Equal(1))
-		Expect(dispatchPutCount(belowCap)).To(Equal(1))
+		// The acquire, then the spawn marker's renew once the Job exists.
+		Expect(dispatchPutCount(belowCap)).To(Equal(2))
 	})
 
 	It("AC3: a zero quota leaves the declared cap binding", func() {

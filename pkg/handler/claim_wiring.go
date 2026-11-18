@@ -160,20 +160,13 @@ func (h *taskEventHandler) acquireSpawnClaim(
 			return h.claimFailureDecision(ctx, task, "claim_scheme", guardErr)
 		}
 	}
-	owner, repo := claimOwnerRepo(task)
-	primary, secondary, fallback, err := claim.DeriveClaimKeysWithBody(
-		ctx,
-		string(task.Frontmatter.TaskType()),
-		string(task.TaskIdentifier),
-		owner,
-		repo,
-		string(task.Content),
-	)
+	primary, secondary, fallback, err := h.spawnClaimKey(ctx, task)
 	if err != nil {
 		return h.claimFailureDecision(ctx, task, "derive_key", err)
 	}
 	if fallback {
 		metrics.ClaimKeyFallbackTotal.Inc()
+		owner, repo := claimOwnerRepo(task)
 		glog.Warningf(
 			"event=claim_key_fallback task=%s repo=%s/%s",
 			task.TaskIdentifier, owner, repo,
@@ -223,6 +216,54 @@ func (h *taskEventHandler) acquireSpawnClaim(
 		return h.claimFailureDecision(ctx, task, "takeover", takeoverErr)
 	}
 	return h.claimFailureDecision(ctx, task, "claim", claimErr)
+}
+
+// spawnClaimKey derives the claim keys this task lives at. It is one function so
+// the claim write and the spawn marker can never disagree about which key the
+// task is held under.
+func (h *taskEventHandler) spawnClaimKey(
+	ctx context.Context,
+	task lib.Task,
+) (primary string, secondary string, fallback bool, err error) {
+	owner, repo := claimOwnerRepo(task)
+	return claim.DeriveClaimKeysWithBody(
+		ctx,
+		string(task.Frontmatter.TaskType()),
+		string(task.TaskIdentifier),
+		owner,
+		repo,
+		string(task.Content),
+	)
+}
+
+// markClaimSpawned records that this holder created the task's Job, so a peer
+// that takes the claim over can tell a real run from a holder that only held the
+// key — without reading its own vault copy, which may not have absorbed the run
+// yet.
+//
+// Every failure is logged and swallowed: the Job is already running, and losing
+// the marker only leaves the peer with the evidence it had before. Failing the
+// spawn over it would strand work that is in fact in flight.
+func (h *taskEventHandler) markClaimSpawned(ctx context.Context, task lib.Task) {
+	if h.claimMode == pkg.ClaimModeOff {
+		return
+	}
+	manager, err := h.leaseManager(ctx)
+	if err != nil {
+		return
+	}
+	primary, _, _, err := h.spawnClaimKey(ctx, task)
+	if err != nil {
+		glog.Warningf(
+			"event=claim_marker_failed task=%s error=%v", task.TaskIdentifier, err,
+		)
+		return
+	}
+	if err := manager.MarkSpawned(ctx, primary); err != nil {
+		glog.Warningf(
+			"event=claim_marker_failed key=%s task=%s error=%v", primary, task.TaskIdentifier, err,
+		)
+	}
 }
 
 // claimOwnerRepo reads the task's single `repo` frontmatter key, which carries
@@ -301,10 +342,27 @@ func ownerRepoFromCloneURL(raw string) (string, string, bool) {
 // that displaced nobody — all 9 measured parked_lost_claim records had an empty
 // holder beside a stale job_started_at and an empty current_job, which is why the
 // guard parked work whose only claim had just been created here.
-// taskShowsPriorRun catches the mirror case the guard was originally written for:
-// a holder that took the claim and never spawned a Job.
+//
+// The second clause prefers the displaced claim's own spawn marker, which the
+// previous holder wrote after creating its Job. That is the evidence a peer can
+// trust: it travels on the claim, the one artefact both clusters share, while
+// taskShowsPriorRun reads this cluster's vault copy — which lags the peer's run
+// and made the guard fail open on two measured ids (cd1cd68a, 026edb30).
+// taskShowsPriorRun stays as the fallback for claims written before the marker
+// existed, and for a marker write that failed.
 func attributablePriorRun(takeover *claim.TakeoverResult, task lib.Task) bool {
-	return takeoverPreviousHolder(takeover) != "" && taskShowsPriorRun(task)
+	return takeoverPreviousHolder(takeover) != "" &&
+		(takeoverPreviousSpawnedAt(takeover) != "" || taskShowsPriorRun(task))
+}
+
+// takeoverPreviousSpawnedAt reads the displaced claim's spawn marker. A non-empty
+// value proves the previous holder created a Job; empty proves nothing, which is
+// why it is combined with the task's own evidence rather than trusted alone.
+func takeoverPreviousSpawnedAt(takeover *claim.TakeoverResult) string {
+	if takeover == nil {
+		return ""
+	}
+	return takeover.PreviousSpawnedAt
 }
 
 // taskShowsPriorRun reports whether the task carries evidence that some

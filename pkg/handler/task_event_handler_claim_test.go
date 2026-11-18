@@ -484,9 +484,10 @@ var _ = Describe("claim gate", func() {
 			"conflict":   1,
 			"taken_over": 1,
 		})
-		// One write: the create reads first and never attempts a doomed write, so
-		// only the takeover's write is recorded.
-		Expect(dispatchPutCount(harness)).To(Equal(1))
+		// Two writes: the takeover's — the create reads first and never attempts a
+		// doomed write — and then the spawn marker's renew, which records that this
+		// holder created a Job.
+		Expect(dispatchPutCount(harness)).To(Equal(2))
 		putKey, expectedSha, cluster, _, _ := claimPutArgsForCall(harness.client, 0)
 		Expect(putKey).To(Equal(key))
 		Expect(expectedSha).To(Equal("expired-sha"))

@@ -77,12 +77,19 @@ type HeldClaim struct {
 // TakeoverResult is returned by Takeover. PreviousTaskID is the task id of the
 // expired claim that was replaced, or "" when the key was absent and a create
 // was used instead.
+//
+// PreviousSpawnedAt is the displaced claim's spawn marker, or "" when it carried
+// none. It is the evidence the park guard reads: a non-empty value proves the
+// previous holder created a Job, which the peer's own vault copy may not have
+// absorbed yet. Empty means the displaced claim proves nothing either way, so
+// the caller falls back to its other evidence.
 type TakeoverResult struct {
-	Key            string
-	TaskID         string
-	LeaseToken     string
-	LeaseUntil     libtime.DateTime
-	PreviousTaskID string
+	Key               string
+	TaskID            string
+	LeaseToken        string
+	LeaseUntil        libtime.DateTime
+	PreviousTaskID    string
+	PreviousSpawnedAt string
 }
 
 // LeaseManager owns this executor's claims for one cluster name.
@@ -100,6 +107,14 @@ type LeaseManager interface {
 		taskID string,
 	) (*HeldClaim, error)
 	Release(ctx context.Context, key string) error
+	// MarkSpawned records that this holder created the claim's Job, by renewing
+	// the held claim with a spawned_at marker. It is called after the Job exists,
+	// never at acquisition: the marker is what tells a later takeover that the
+	// previous holder actually ran the task. A key this manager does not hold is a
+	// no-op, so a mark racing a release is not an error; a failed write is
+	// returned and the caller may ignore it, because losing the marker degrades
+	// the peer's evidence but must never fail the spawn.
+	MarkSpawned(ctx context.Context, key string) error
 	// ReleaseAfterSuccess releases the claim like Release, but not before
 	// SuccessGracePeriod has elapsed since completedAt. Until then the claim
 	// stays held and keeps being renewed, so a peer cluster's Claim gets a 409
@@ -190,6 +205,10 @@ type heldClaim struct {
 	// lastJoblessCheckAt is the instant of the last IsJobRunning call made by the
 	// jobless pass; the zero value means "never checked".
 	lastJoblessCheckAt libtime.DateTime
+	// spawnedAt is the spawn marker this holder has recorded, sent on every renew
+	// so the renewal loop cannot erase it. It is empty until MarkSpawned runs, and
+	// it is re-adopted from a listed claim on restart recovery.
+	spawnedAt string
 }
 
 type leaseManager struct {
@@ -592,6 +611,9 @@ func (m *leaseManager) storeClaim(
 		secondKey:    secondaryKey,
 		secondTarget: secondaryTarget,
 		lastRenewAt:  now,
+		// An acquire answers no marker; carrying whatever it does answer keeps a
+		// re-adopted claim's marker from being dropped on the first tick.
+		spawnedAt: primaryClaim.SpawnedAt,
 	}
 	if secondaryClaim != nil {
 		held.secondToken = secondaryClaim.LeaseToken
@@ -699,6 +721,50 @@ func (m *leaseManager) ReleaseAfterSuccess(
 		return nil
 	}
 	return m.releaseLocked(ctx, held)
+}
+
+// MarkSpawned records that this holder created the claim's Job.
+//
+// It renews the held claim with a spawned_at marker rather than writing a second
+// ref: the claim is the one artefact both clusters read, so the marker has to
+// live on it, and a renew is the write the holder already owns. The marker is
+// kept on the held claim so every later renew carries it forward — the renewal
+// loop runs every 60 s and knows nothing about the spawn.
+//
+// A failed write is returned but is never fatal to the spawn: losing the marker
+// leaves a peer with the evidence it had before, while failing the spawn would
+// strand a task whose Job is already running.
+func (m *leaseManager) MarkSpawned(ctx context.Context, key string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	held, ok := m.findHeld(key)
+	if !ok {
+		// A mark racing a release has nothing to write to, and that is not a
+		// failure: the claim is gone, so no peer can take it over and read a stale
+		// "never spawned" answer from it.
+		return nil
+	}
+	spawnedAt := m.currentDateTime.Now().Time().UTC().Format(stdtime.RFC3339)
+	reqCtx, cancel := m.requestContext(ctx)
+	defer cancel()
+	renewed, err := m.claimClient.Renew(
+		reqCtx,
+		held.target,
+		m.cluster,
+		held.leaseToken,
+		claimantTaskID(held.target, held.taskID),
+		spawnedAt,
+		leaseSeconds(),
+	)
+	if err != nil {
+		return errors.Wrapf(ctx, err, "mark claim %s spawned", key)
+	}
+	held.leaseToken = renewed.LeaseToken
+	held.leaseUntil = renewed.LeaseUntil
+	held.lastRenewAt = m.currentDateTime.Now()
+	held.spawnedAt = spawnedAt
+	glog.V(2).Infof("event=claim_spawned key=%s task=%s spawned_at=%s", key, held.taskID, spawnedAt)
+	return nil
 }
 
 // releaseRef releases one ref and reports "released", or "already_released" when
@@ -866,11 +932,12 @@ func (m *leaseManager) TakeoverPair(
 			countClaim("taken_over")
 		}
 		return &TakeoverResult{
-			Key:            primary,
-			TaskID:         taskID,
-			LeaseToken:     primaryClaim.LeaseToken,
-			LeaseUntil:     primaryClaim.LeaseUntil,
-			PreviousTaskID: listed.TaskID,
+			Key:               primary,
+			TaskID:            taskID,
+			LeaseToken:        primaryClaim.LeaseToken,
+			LeaseUntil:        primaryClaim.LeaseUntil,
+			PreviousTaskID:    listed.TaskID,
+			PreviousSpawnedAt: listed.SpawnedAt,
 		}, nil
 	}
 	return m.finishTakeoverPair(
@@ -919,11 +986,12 @@ func (m *leaseManager) finishTakeoverPair(
 		countClaim("taken_over")
 	}
 	return &TakeoverResult{
-		Key:            primary,
-		TaskID:         taskID,
-		LeaseToken:     primaryClaim.LeaseToken,
-		LeaseUntil:     primaryClaim.LeaseUntil,
-		PreviousTaskID: listed.TaskID,
+		Key:               primary,
+		TaskID:            taskID,
+		LeaseToken:        primaryClaim.LeaseToken,
+		LeaseUntil:        primaryClaim.LeaseUntil,
+		PreviousTaskID:    listed.TaskID,
+		PreviousSpawnedAt: listed.SpawnedAt,
 	}, nil
 }
 
@@ -1296,6 +1364,9 @@ func (m *leaseManager) storeRecoveredPair(
 		lastRenewAt:       now,
 		renewNextTick:     true,
 		needsRunningCheck: needsRunningCheck,
+		// Re-adopted from the listing so the first tick's renew carries the marker
+		// forward instead of erasing the only record that this Job was started.
+		spawnedAt: primary.SpawnedAt,
 	}
 }
 
@@ -1320,6 +1391,8 @@ func (m *leaseManager) repairOrAdoptSingle(
 		lastRenewAt:       now,
 		renewNextTick:     true,
 		needsRunningCheck: needsRunningCheck,
+		// Re-adopted from the listing, so the first tick does not erase it.
+		spawnedAt: primary.SpawnedAt,
 	}
 	if !needsRunningCheck {
 		countClaim("adopted")

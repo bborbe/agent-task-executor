@@ -1047,6 +1047,13 @@ func (h *taskEventHandler) spawnClaimedJob(
 		)
 	}
 
+	// The Job exists from here on, so the claim may carry the marker that tells a
+	// peer taking it over that this holder actually ran the task. Deliberately
+	// after SpawnJob and before finishSpawn: a marker written at acquisition would
+	// claim a Job that does not exist, which is the defect the guard's own
+	// evidence rule exists to reject.
+	h.markClaimSpawned(ctx, task)
+
 	if err := h.finishSpawn(ctx, task, config, jobName, sessionID); err != nil {
 		return false, err
 	}

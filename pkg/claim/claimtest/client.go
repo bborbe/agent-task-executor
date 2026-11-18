@@ -83,6 +83,7 @@ func (c *Client) Renew(
 	holder string,
 	leaseToken string,
 	claimantTaskID string,
+	spawnedAt string,
 	ttlSeconds int,
 ) (*claim.Claim, error) {
 	key, ok := claim.KeyFor(target)

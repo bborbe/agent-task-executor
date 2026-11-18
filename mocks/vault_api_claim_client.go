@@ -67,7 +67,7 @@ type FakeVaultAPIClaimClient struct {
 	releaseReturnsOnCall map[int]struct {
 		result1 error
 	}
-	RenewStub        func(context.Context, claim.ClaimTarget, string, string, string, int) (*claim.Claim, error)
+	RenewStub        func(context.Context, claim.ClaimTarget, string, string, string, string, int) (*claim.Claim, error)
 	renewMutex       sync.RWMutex
 	renewArgsForCall []struct {
 		arg1 context.Context
@@ -75,7 +75,8 @@ type FakeVaultAPIClaimClient struct {
 		arg3 string
 		arg4 string
 		arg5 string
-		arg6 int
+		arg6 string
+		arg7 int
 	}
 	renewReturns struct {
 		result1 *claim.Claim
@@ -350,7 +351,7 @@ func (fake *FakeVaultAPIClaimClient) ReleaseReturnsOnCall(i int, result1 error) 
 	}{result1}
 }
 
-func (fake *FakeVaultAPIClaimClient) Renew(arg1 context.Context, arg2 claim.ClaimTarget, arg3 string, arg4 string, arg5 string, arg6 int) (*claim.Claim, error) {
+func (fake *FakeVaultAPIClaimClient) Renew(arg1 context.Context, arg2 claim.ClaimTarget, arg3 string, arg4 string, arg5 string, arg6 string, arg7 int) (*claim.Claim, error) {
 	fake.renewMutex.Lock()
 	ret, specificReturn := fake.renewReturnsOnCall[len(fake.renewArgsForCall)]
 	fake.renewArgsForCall = append(fake.renewArgsForCall, struct {
@@ -359,14 +360,15 @@ func (fake *FakeVaultAPIClaimClient) Renew(arg1 context.Context, arg2 claim.Clai
 		arg3 string
 		arg4 string
 		arg5 string
-		arg6 int
-	}{arg1, arg2, arg3, arg4, arg5, arg6})
+		arg6 string
+		arg7 int
+	}{arg1, arg2, arg3, arg4, arg5, arg6, arg7})
 	stub := fake.RenewStub
 	fakeReturns := fake.renewReturns
-	fake.recordInvocation("Renew", []interface{}{arg1, arg2, arg3, arg4, arg5, arg6})
+	fake.recordInvocation("Renew", []interface{}{arg1, arg2, arg3, arg4, arg5, arg6, arg7})
 	fake.renewMutex.Unlock()
 	if stub != nil {
-		return stub(arg1, arg2, arg3, arg4, arg5, arg6)
+		return stub(arg1, arg2, arg3, arg4, arg5, arg6, arg7)
 	}
 	if specificReturn {
 		return ret.result1, ret.result2
@@ -380,17 +382,17 @@ func (fake *FakeVaultAPIClaimClient) RenewCallCount() int {
 	return len(fake.renewArgsForCall)
 }
 
-func (fake *FakeVaultAPIClaimClient) RenewCalls(stub func(context.Context, claim.ClaimTarget, string, string, string, int) (*claim.Claim, error)) {
+func (fake *FakeVaultAPIClaimClient) RenewCalls(stub func(context.Context, claim.ClaimTarget, string, string, string, string, int) (*claim.Claim, error)) {
 	fake.renewMutex.Lock()
 	defer fake.renewMutex.Unlock()
 	fake.RenewStub = stub
 }
 
-func (fake *FakeVaultAPIClaimClient) RenewArgsForCall(i int) (context.Context, claim.ClaimTarget, string, string, string, int) {
+func (fake *FakeVaultAPIClaimClient) RenewArgsForCall(i int) (context.Context, claim.ClaimTarget, string, string, string, string, int) {
 	fake.renewMutex.RLock()
 	defer fake.renewMutex.RUnlock()
 	argsForCall := fake.renewArgsForCall[i]
-	return argsForCall.arg1, argsForCall.arg2, argsForCall.arg3, argsForCall.arg4, argsForCall.arg5, argsForCall.arg6
+	return argsForCall.arg1, argsForCall.arg2, argsForCall.arg3, argsForCall.arg4, argsForCall.arg5, argsForCall.arg6, argsForCall.arg7
 }
 
 func (fake *FakeVaultAPIClaimClient) RenewReturns(result1 *claim.Claim, result2 error) {
