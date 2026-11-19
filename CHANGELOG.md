@@ -2,7 +2,7 @@
 
 All notable changes to this project will be documented in this file.
 
-## Unreleased
+## v0.68.0
 
 - feat: **refuse a second spawn while a task carries a live `run_claim`.** The strategy-prototype per-idea cap was armed only at publish, so an idea stayed uncapped for the whole run — measured 21 m 47 s with two Jobs admitted on one idea. `spawnIfNeededClaimed` now folds a read-only `run_claim` liveness gate behind the existing `current_job` gate via `suppressForActiveRun` in `pkg/handler/run_claim_gate.go`, so the funnel's gocognit stays at its limit. A claim younger than the new `DefaultRunClaimTTL` (`2 * time.Hour`, matching `runBudgetSeconds: 7200`) suppresses the spawn as a deferral: no Job, no frontmatter write, no park, no result publish, and no redrive-budget charge. It logs `event=spawn_suppressed_run_claim` at info with the task id, claim timestamp and age, and increments `agent_executor_task_events_total{result="skipped_run_claim"}`. A missing, at-or-beyond-TTL, or non-RFC3339 claim leaves today's behaviour unchanged; `current_job` still runs first and still wins when both are present. The reconcile floor re-drives the task once the claim expires. Change set: `pkg/handler/run_claim_gate.go`, `pkg/handler/run_claim_gate_test.go`, `pkg/handler/run_claim_gate_internal_test.go`, `pkg/handler/task_event_handler.go`, `CHANGELOG.md`.
 
