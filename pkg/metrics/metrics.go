@@ -134,7 +134,7 @@ var RedriveAbortedTotal = promauto.NewCounterVec(
 var ReconcilePassesTotal = promauto.NewCounterVec(
 	prometheus.CounterOpts{
 		Name: "executor_reconcile_passes_total",
-		Help: "Total number of reconcile passes by outcome (ok, aborted, view_not_ready, task_vault_mismatch, task_vault_unstamped).",
+		Help: "Total number of reconcile passes by outcome (ok, aborted, view_not_ready, view_not_ready_stuck, task_vault_mismatch, task_vault_unstamped).",
 	},
 	[]string{"result"},
 )
