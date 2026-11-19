@@ -1,5 +1,7 @@
 ---
-status: draft
+status: approved
+approved: "2026-11-19T08:57:31Z"
+branch: dark-factory/run-claim-spawn-gate
 ---
 
 ## Summary
