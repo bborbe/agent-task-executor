@@ -924,10 +924,10 @@ func (h *taskEventHandler) spawnIfNeededClaimed(
 		return spawnOutcomeSuppressed, nil
 	}
 
-	// If current_job is set in frontmatter, a prior spawn notification was written
-	// to the task file. Verify the job is still active; if not, proceed to spawn.
-	if suppress, err := h.suppressForActiveCurrentJob(ctx, task, config, claim); err != nil ||
-		suppress {
+	// The two frontmatter liveness gates, in order: current_job first (a prior
+	// spawn notification was written to the task file), then the trading run's
+	// run_claim (the run has started but not yet published). See run_claim_gate.go.
+	if suppress, err := h.suppressForActiveRun(ctx, task, config, claim); err != nil || suppress {
 		return spawnOutcomeSuppressed, err
 	}
 
