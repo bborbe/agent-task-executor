@@ -589,6 +589,7 @@ func init() {
 		"ok",
 		"aborted",
 		"view_not_ready",
+		"view_not_ready_stuck",
 		"task_vault_mismatch",
 		"task_vault_unstamped",
 	} {
