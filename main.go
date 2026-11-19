@@ -250,6 +250,21 @@ func (a *application) validateClaimTransport(
 	return nil
 }
 
+// kafkaStartupError wraps a Kafka startup failure so the error names the
+// configured broker list and points at the deployment runbook. Broker
+// addresses are not secret — the Kafka client certificates are configured
+// separately — so naming them is safe, and a crash-looping pod's Sentry event
+// then shows which address was tried instead of repeating the stage alone.
+func kafkaStartupError(ctx context.Context, err error, stage string, brokers string) error {
+	return errors.Wrapf(
+		ctx,
+		err,
+		"%s: kafka brokers %q (see docs/deployment-kafka-brokers.md)",
+		stage,
+		brokers,
+	)
+}
+
 //nolint:funlen // Initialization sequence; wiring is linear with no branching.
 func (a *application) Run(ctx context.Context, sentryClient libsentry.Client) error {
 	// Apply the container's memory ceiling before anything meaningful allocates,
@@ -308,13 +323,13 @@ func (a *application) Run(ctx context.Context, sentryClient libsentry.Client) er
 		libkafka.ParseBrokersFromString(a.KafkaBrokers),
 	)
 	if err != nil {
-		return errors.Wrapf(ctx, err, "create sarama client")
+		return kafkaStartupError(ctx, err, "create sarama client", a.KafkaBrokers)
 	}
 	defer saramaClient.Close()
 	currentDateTimeGetter := libtime.NewCurrentDateTime()
 	syncProducer, err := libkafka.NewSyncProducerFromSaramaClient(ctx, saramaClient)
 	if err != nil {
-		return errors.Wrapf(ctx, err, "create kafka sync producer")
+		return kafkaStartupError(ctx, err, "create kafka sync producer", a.KafkaBrokers)
 	}
 	defer syncProducer.Close()
 

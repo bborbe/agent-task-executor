@@ -2,6 +2,10 @@
 
 All notable changes to this project will be documented in this file.
 
+## Unreleased
+
+- fix: **name the configured Kafka brokers in the startup error, so an unreachable broker set is self-diagnosing.** A pod that crash-looped on Sarama `ErrOutOfBrokers` used to report only `create sarama client` / `create kafka sync producer`, so the Sentry issue did not say which address was tried. The error now appends the configured `KAFKA_BROKERS` value — not secret, the client certificates are separate — and points at `docs/deployment-kafka-brokers.md`. No behaviour change beyond the error text.
+
 ## v0.67.0
 
 - feat: **record a `spawned_at` marker on the claim after the Job is created, and make the lost-claim park guard read it.** The guard was keyed on peer-local evidence (`taskShowsPriorRun` reads this cluster's vault copy, which lags the peer's run), so a peer that had just taken over a lapsed lease parked nothing and ran the task a second time — two measured ids in the 2026-11-15 window (`cd1cd68a`, `026edb30`) plus one with an absent key (`635cfd1e`). The marker travels on the claim, the one artefact both clusters share: `MarkSpawned` renews the held claim with it immediately after `SpawnJob` succeeds, the held claim carries it through every later renew and through restart recovery, and a failed write is logged (`event=claim_marker_failed`) without failing the spawn. `attributablePriorRun` now parks when the displaced claim carries a marker, and keeps `taskShowsPriorRun` as the fallback for claims written before the field existed. `claim.TakeoverResult` gains `PreviousSpawnedAt`. A spawn now performs one extra claim write (the marker renew). Additive on the wire: `spawned_at` is omitted when unset.
