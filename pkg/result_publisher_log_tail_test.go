@@ -59,6 +59,17 @@ func newLogTailFixture() *logTailFixture {
 	return f
 }
 
+// withTerminatedContainer sets the fixture pod's first container status to a
+// terminated state carrying msg, the shape the executor reads the termination
+// message from.
+func withTerminatedContainer(pod *corev1.Pod, msg string) {
+	pod.Status.ContainerStatuses = []corev1.ContainerStatus{
+		{State: corev1.ContainerState{Terminated: &corev1.ContainerStateTerminated{
+			ExitCode: 1, Reason: "Error", Message: msg,
+		}}},
+	}
+}
+
 var _ = Describe("PublishFailure redaction in the composed body", func() {
 	var f *logTailFixture
 
@@ -143,6 +154,101 @@ var _ = Describe("PublishFailure redaction in the composed body", func() {
 		// A fixed three-backtick fence would close on the log's own ``` and let
 		// the rest of the tail be read as markdown. Four backticks contain it.
 		Expect(section).To(ContainSubstring("- **Log tail:**\n\n````\nbefore\n```\nafter\n````\n"))
+	})
+})
+
+var _ = Describe("PublishFailure termination message", func() {
+	var f *logTailFixture
+
+	BeforeEach(func() {
+		f = newLogTailFixture()
+		// The tail is not the subject here; an empty read keeps the section
+		// free of unrelated text.
+		f.reader.TailReturns("", nil)
+	})
+
+	It("writes the message after the reason line", func() {
+		withTerminatedContainer(f.pod, "container stopped unexpectedly")
+
+		Expect(
+			f.pub.PublishFailure(
+				context.Background(), f.task, "job-1", "pod_crash_no_stdout", f.pod,
+			),
+		).To(Succeed())
+
+		_, updateCmd := decodeUpdateFrontmatterCommand(f.producer.messages[0])
+		section := updateCmd.Body.Section
+		Expect(section).To(ContainSubstring("- **Message:** container stopped unexpectedly"))
+		reasonIdx := strings.Index(section, "- **Reason:**")
+		messageIdx := strings.Index(section, "- **Message:**")
+		Expect(reasonIdx).To(BeNumerically(">=", 0))
+		Expect(messageIdx).To(BeNumerically(">", reasonIdx))
+	})
+
+	It("redacts every credential shape in the message", func() {
+		withTerminatedContainer(
+			f.pod,
+			"pushed with ghp_0123456789abcdefghijABCDEFGHIJ012345 "+
+				"ANTHROPIC_AUTH_TOKEN=zz99887766554 "+
+				"clone https://user:password@git.example.com/repo.git",
+		)
+
+		Expect(
+			f.pub.PublishFailure(
+				context.Background(), f.task, "job-1", "pod_crash_no_stdout", f.pod,
+			),
+		).To(Succeed())
+
+		_, updateCmd := decodeUpdateFrontmatterCommand(f.producer.messages[0])
+		section := updateCmd.Body.Section
+		for _, literal := range []string{
+			"ghp_0123456789abcdefghijABCDEFGHIJ012345",
+			"zz99887766554",
+			"user:password",
+		} {
+			Expect(section).NotTo(ContainSubstring(literal))
+		}
+		Expect(section).To(ContainSubstring("<redacted>"))
+	})
+
+	It("collapses a multi-line message to one line and cannot inject a heading", func() {
+		withTerminatedContainer(f.pod, "line one\n## Parked\nline two\n")
+
+		Expect(
+			f.pub.PublishFailure(
+				context.Background(), f.task, "job-1", "pod_crash_no_stdout", f.pod,
+			),
+		).To(Succeed())
+
+		_, updateCmd := decodeUpdateFrontmatterCommand(f.producer.messages[0])
+		section := updateCmd.Body.Section
+		Expect(section).To(ContainSubstring("- **Message:** line one ## Parked line two\n"))
+		// The injected heading is inline now, not a heading of its own.
+		Expect(section).NotTo(ContainSubstring("\n## Parked"))
+	})
+
+	It("writes no message line when the terminated message is empty", func() {
+		withTerminatedContainer(f.pod, "")
+
+		Expect(
+			f.pub.PublishFailure(
+				context.Background(), f.task, "job-1", "pod_crash_no_stdout", f.pod,
+			),
+		).To(Succeed())
+
+		_, updateCmd := decodeUpdateFrontmatterCommand(f.producer.messages[0])
+		Expect(updateCmd.Body.Section).NotTo(ContainSubstring("- **Message:**"))
+	})
+
+	It("writes no message line when the failure carries no pod", func() {
+		Expect(
+			f.pub.PublishFailure(
+				context.Background(), f.task, "job-nopod", "deadline_exceeded", nil,
+			),
+		).To(Succeed())
+
+		_, updateCmd := decodeUpdateFrontmatterCommand(f.producer.messages[0])
+		Expect(updateCmd.Body.Section).NotTo(ContainSubstring("- **Message:**"))
 	})
 })
 
