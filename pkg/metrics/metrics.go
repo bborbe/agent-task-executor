@@ -567,6 +567,7 @@ func init() {
 	TaskEventsTotal.WithLabelValues("skipped_view_not_ready").Add(0)
 	TaskEventsTotal.WithLabelValues("skipped_untagged").Add(0)
 	TaskEventsTotal.WithLabelValues("skipped_trigger_cap").Add(0)
+	TaskEventsTotal.WithLabelValues("skipped_missing_plan").Add(0)
 	TaskEventsTotal.WithLabelValues("error").Add(0)
 	TaskEventsTotal.WithLabelValues("type_mismatch").Add(0)
 	TaskEventsTotal.WithLabelValues("spawn_suppressed_terminal_phase").Add(0)
