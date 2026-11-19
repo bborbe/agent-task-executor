@@ -13,6 +13,7 @@ import (
 
 	lib "github.com/bborbe/agent"
 	taskcmd "github.com/bborbe/agent/command/task"
+	"github.com/bborbe/agent/delivery"
 	"github.com/bborbe/cqrs/base"
 	cdb "github.com/bborbe/cqrs/cdb"
 	cqrsiam "github.com/bborbe/cqrs/iam"
@@ -72,6 +73,12 @@ const (
 	// outcomes — one is finished work, the other is an escalation — and a shared
 	// token made a failed run's section byte-identical to a finished one's.
 	ParkReasonRedriveCap = "parked_redrive_cap"
+	// parkReasonSupersededAtSpawn is not a park outcome and must never be
+	// produced by a park path. It is the reason line a spawn writes into an
+	// existing "## Parked" section so a re-armed record stops advertising the
+	// previous run's park. The next real park replaces the section with its own
+	// token, so this value is only ever visible between a spawn and that park.
+	parkReasonSupersededAtSpawn = "superseded at spawn — a previous run's park no longer describes this record"
 )
 
 //counterfeiter:generate -o ../mocks/result_publisher.go --fake-name FakeResultPublisher . ResultPublisher
@@ -557,6 +564,26 @@ func (p *resultPublisher) PublishSpawnNotification(
 			// empty field re-drives instead of parking.
 			"last_result_status": "",
 		},
+	}
+	// A re-armed task can still carry the park a PREVIOUS run wrote. The
+	// frontmatter above is cleared for the same reason, but the body section is
+	// what a reader greps: a record re-armed out of a park kept
+	// "## Parked / Reason: parked_succeeded" while the new run was failing, so
+	// the file read as finished work beside its own fresh "## Failure" —
+	// measured 2026-11-18 on Prototype US500 EmaPullback M15. Superseding here
+	// makes the body describe THIS run: the next real park replaces the section
+	// with its own reason, and a run that never parks leaves an explicit
+	// supersede marker rather than a stale success.
+	//
+	// Guarded on the section being present: ReplaceOrAppendSection APPENDS when
+	// the heading is absent, so writing unconditionally would stamp a
+	// "## Parked" onto every task the fleet spawns. task.Content carries the
+	// body from the controller's event; an empty one simply skips the write.
+	if delivery.HasSection(string(task.Content), "## Parked") {
+		cmd.Body = &taskcmd.BodySection{
+			Heading: "## Parked",
+			Section: "## Parked\n\n- **Reason:** " + parkReasonSupersededAtSpawn + "\n",
+		}
 	}
 	return p.publishRaw(ctx, taskcmd.UpdateFrontmatterCommandOperation, cmd)
 }

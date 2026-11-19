@@ -227,6 +227,39 @@ var _ = Describe("ResultPublisher", func() {
 			Expect(hasStatus).To(BeFalse(), "status must not be in spawn notification")
 			_, hasPhase := cmd.Updates["phase"]
 			Expect(hasPhase).To(BeFalse(), "phase must not be in spawn notification")
+			// A body with no park is left alone: writing unconditionally would
+			// append a "## Parked" to every task the fleet spawns.
+			Expect(cmd.Body).To(BeNil())
+		})
+
+		It("supersedes a stale ## Parked at spawn", func() {
+			task := lib.Task{
+				TaskIdentifier: lib.TaskIdentifier("test-task-rearmed"),
+				Frontmatter: lib.TaskFrontmatter{
+					"status": "in_progress",
+					"phase":  "execution",
+				},
+				Content: lib.TaskContent(
+					"# Task\n\n# Body\n\nrun it\n\n" +
+						"## Parked\n\n- **Reason:** parked_succeeded\n",
+				),
+			}
+			err := publisher.PublishSpawnNotification(
+				ctx,
+				task,
+				"claude-20260418120000",
+				"11111111-2222-3333-4444-555555555555",
+			)
+			Expect(err).NotTo(HaveOccurred())
+
+			Expect(producer.messages).To(HaveLen(1))
+			_, cmd := decodeUpdateFrontmatterCommand(producer.messages[0])
+
+			Expect(cmd.Updates).To(HaveLen(5))
+			Expect(cmd.Body).NotTo(BeNil())
+			Expect(cmd.Body.Heading).To(Equal("## Parked"))
+			Expect(cmd.Body.Section).To(ContainSubstring("superseded at spawn"))
+			Expect(cmd.Body.Section).NotTo(ContainSubstring("parked_succeeded"))
 		})
 	})
 
