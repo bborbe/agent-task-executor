@@ -6,6 +6,7 @@ package main
 
 import (
 	"context"
+	stderrors "errors"
 	"os"
 	"reflect"
 	"strings"
@@ -301,3 +302,30 @@ var _ = Describe("application.Run startup validation", func() {
 		})
 	})
 })
+
+// TestKafkaStartupErrorNamesBrokersAndRunbook pins the crash-loop diagnostic:
+// an unreachable broker set fails startup with an error that names the
+// configured brokers and points at the runbook, so the next Sentry issue is
+// self-diagnosing instead of repeating "create kafka sync producer" alone.
+func TestKafkaStartupErrorNamesBrokersAndRunbook(t *testing.T) {
+	cause := stderrors.New("kafka: client has run out of available brokers")
+	for _, stage := range []string{"create sarama client", "create kafka sync producer"} {
+		err := kafkaStartupError(context.Background(), cause, stage, "10.43.21.228:9092")
+		if err == nil {
+			t.Fatalf("%s: expected an error", stage)
+		}
+		for _, want := range []string{
+			stage,
+			"10.43.21.228:9092",
+			"docs/deployment-kafka-brokers.md",
+			"out of available brokers",
+		} {
+			if !strings.Contains(err.Error(), want) {
+				t.Fatalf("%s: expected error to contain %q, got %q", stage, want, err.Error())
+			}
+		}
+	}
+	if err := kafkaStartupError(context.Background(), nil, "create sarama client", "x"); err != nil {
+		t.Fatalf("a nil cause must stay nil, got %v", err)
+	}
+}
