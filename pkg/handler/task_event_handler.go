@@ -39,23 +39,6 @@ var defaultTriggerStatuses = domain.TaskStatuses{
 	domain.TaskStatusInProgress,
 }
 
-// viewNotReadyStuckAfter is how long the task view may stay not ready before the
-// gate stops reporting a cold start and reports a fault.
-//
-// A cold start on the measured dev vault replays 37,720 compacted records in
-// 4m41s-9m17s (v0.65.2, 2026-11-17/18), so the bound sits clear of the slowest
-// observed cold start. Past it the once-a-minute WARN line is the only signal
-// that an entire vault is undriven, and it reads exactly like a healthy quiet
-// fleet — the shape that let the 2026-11-14 records sit untouched for hours.
-const viewNotReadyStuckAfter = 15 * time.Minute
-
-// viewNotReadyPendingCap bounds the events remembered across a not-ready window.
-// The reconcile floor is the real backstop for everything the event path drops;
-// this set only spares the exact dropped events a wait for the next pass. A
-// window that exceeds the cap is already a stuck view, which the stuck event
-// reports.
-const viewNotReadyPendingCap = 512
-
 // defaultRespawnGracePeriod is the window after job_started_at during which the executor
 // suppresses respawn when the K8s Job is inactive but no terminal phase has been observed.
 // The window gives the agent's terminal-phase write time to propagate through the vault pipeline.
@@ -301,19 +284,12 @@ type taskEventHandler struct {
 	spawnLocks     map[string]*sync.Mutex
 	view           TaskView
 	vaultMatcher   VaultMatcher
-	// viewNotReadyMu guards the two fields below. They exist because the
-	// readiness gate is the one condition that silences BOTH drivers at once:
-	// the event path drops the event and the reconcile floor refuses the pass.
-	viewNotReadyMu sync.Mutex
-	// viewNotReadyPending holds the events the readiness gate dropped, in the
-	// post-filter (task, config) form the event path would have spawned. Replaying
-	// them is not acting on a stale snapshot — it is acting on the very event that
-	// was refused, which is the freshest input the executor has.
-	viewNotReadyPending map[lib.TaskIdentifier]viewNotReadyEntry
-	// viewNotReadySince is when the gate first refused; the zero value means the
-	// view is ready. It is what separates a cold start from a view that will never
-	// be ready.
-	viewNotReadySince libtime.DateTime
+	// viewNotReady is the readiness gate's bookkeeping — the events it dropped and
+	// when it first refused. It lives in view_not_ready_pending.go beside the
+	// helpers that read it, and it exists because the readiness gate is the one
+	// condition that silences BOTH drivers at once: the event path drops the event
+	// and the reconcile floor refuses the pass.
+	viewNotReady viewNotReadyState
 	// configProvider is the Config store the accepted-set refresh reads. It is the
 	// same provider the resolver reads; nil skips the refresh, which is the shape
 	// of every test that does not assert the metric.
