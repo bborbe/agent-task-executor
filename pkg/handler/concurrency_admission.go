@@ -16,17 +16,26 @@ import (
 )
 
 // deferIfNotAdmitted applies every admission bound this executor enforces: the
-// agent's run window first, then the concurrency cap. Both defer rather than
-// skip — task publication is edge-triggered on vault file changes, so a skipped
-// spawn would never be re-driven and the task would sit at in_progress forever,
-// indistinguishable from work in flight. The window runs first so an agent
-// outside its hours does not hold a slot it could not use.
+// plan-section gate first, then the agent's run window, then the concurrency
+// cap. The window and the cap defer rather than skip — task publication is
+// edge-triggered on vault file changes, so a skipped spawn would never be
+// re-driven and the task would sit at in_progress forever, indistinguishable
+// from work in flight. The window runs before the cap so an agent outside its
+// hours does not hold a slot it could not use.
+//
+// The plan-section gate is the one bound that refuses outright instead of
+// deferring: a task at execution with no "## Plan" would fail in seconds, so
+// re-driving it changes nothing until the section exists. It is checked first
+// because it is the cheapest and the most definitive — see plan_admission.go.
 func (h *taskEventHandler) deferIfNotAdmitted(
 	ctx context.Context,
 	task lib.Task,
 	config *pkg.AgentConfiguration,
 	claim *deferredClaim,
 ) (bool, error) {
+	if planSectionRefusesSpawn(ctx, task) {
+		return true, nil
+	}
 	if h.deferIfOutsideRunWindow(task, config) {
 		return true, nil
 	}
