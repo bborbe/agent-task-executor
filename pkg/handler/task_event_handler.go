@@ -284,6 +284,12 @@ type taskEventHandler struct {
 	spawnLocks     map[string]*sync.Mutex
 	view           TaskView
 	vaultMatcher   VaultMatcher
+	// viewNotReady is the readiness gate's bookkeeping — the events it dropped and
+	// when it first refused. It lives in view_not_ready_pending.go beside the
+	// helpers that read it, and it exists because the readiness gate is the one
+	// condition that silences BOTH drivers at once: the event path drops the event
+	// and the reconcile floor refuses the pass.
+	viewNotReady viewNotReadyState
 	// configProvider is the Config store the accepted-set refresh reads. It is the
 	// same provider the resolver reads; nil skips the refresh, which is the shape
 	// of every test that does not assert the metric.
@@ -553,14 +559,22 @@ func (h *taskEventHandler) ConsumeMessage(ctx context.Context, msg *sarama.Consu
 	//
 	// The view is the durable half — it replays the compacted topic from the
 	// oldest offset — so waiting for it to be ready is waiting for the picture
-	// that makes those guards meaningful. Reconcile already refuses to run before
-	// then (event=reconcile_view_not_ready), and it is the source-of-truth floor:
-	// every task skipped here is driven by the next reconcile pass once the view
-	// is ready, so nothing is dropped, only deferred.
+	// that makes those guards meaningful. The event is held rather than dropped
+	// (see view_not_ready_pending.go) and the first reconcile pass on a ready view
+	// drives it through this same spawn path. The reconcile floor alone could not
+	// close this: it refuses on the very condition that drops the event, so while
+	// the view is not ready there is no floor at all — and a view that never
+	// becomes ready left the record undriven for good.
 	if h.view != nil && !h.view.Ready() {
 		metrics.TaskEventsTotal.WithLabelValues("skipped_view_not_ready").Inc()
+		// Remember the event so a ready view drives it without waiting for the
+		// next reconcile pass. The floor would reach it too — the replay carries
+		// it — but only once the replay finishes, and a view that never finishes
+		// has no floor at all. Keeping the post-filter pair means the drain
+		// replays exactly what this path would have spawned.
+		h.rememberViewNotReady(task, config)
 		glog.Infof(
-			"event=event_view_not_ready task=%s: task view has not replayed yet; reconcile will drive it",
+			"event=event_view_not_ready task=%s: task view has not replayed yet; held until readiness",
 			task.TaskIdentifier,
 		)
 		return nil
@@ -1260,10 +1274,13 @@ func (h *taskEventHandler) ReconcileOnce(ctx context.Context) error {
 	passCtx = withVaultIndexCache(passCtx)
 
 	if !h.view.Ready() {
-		metrics.ReconcilePassesTotal.WithLabelValues("view_not_ready").Inc()
-		glog.Warningf("event=reconcile_view_not_ready task_vault=%s", h.vaultMatcher.Vault())
+		h.noteViewNotReady()
 		return nil
 	}
+	// Readiness just arrived (or was already there): drive the events the gate
+	// dropped before the snapshot pass, so a record whose event was refused is
+	// spawned on its own event rather than waiting for the floor to reach it.
+	h.driveViewNotReadyPending(passCtx)
 	snapshot := h.view.Snapshot()
 	outcome, seen := classifyVaults(snapshot, h.vaultMatcher)
 	switch outcome {
