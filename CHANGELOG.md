@@ -2,7 +2,7 @@
 
 All notable changes to this project will be documented in this file.
 
-## Unreleased
+## v0.67.1
 
 - fix: **a spawn supersedes a previous run's `## Parked` body section, so a re-armed task cannot keep advertising `parked_succeeded`.** `PublishSpawnNotification` already cleared `last_result_status` so the park gate read THIS run's result, but the body section was left in place: a task re-armed out of a park kept `## Parked / Reason: parked_succeeded` beside its own fresh `## Failure`, and the file read as finished work. The spawn now writes a `## Parked` `BodySection` whose reason is `superseded at spawn — a previous run's park no longer describes this record` whenever the task body already carries the section; the next real park replaces it with its own token. The write is guarded on the section being present because the controller's `ReplaceOrAppendSection` appends when the heading is absent — an unguarded write would stamp `## Parked` onto every task the fleet spawns. Measured 2026-11-18 on `Prototype US500 EmaPullback M15` (`status: completed` / `phase: done` / `parked_succeeded` beside `last_result_status: needs_input`).
 
