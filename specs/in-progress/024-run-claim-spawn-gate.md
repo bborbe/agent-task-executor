@@ -1,6 +1,8 @@
 ---
-status: approved
+status: prompted
 approved: "2026-11-19T08:57:31Z"
+generating: "2026-11-19T09:03:53Z"
+prompted: "2026-11-19T09:14:29Z"
 branch: dark-factory/run-claim-spawn-gate
 ---
 
