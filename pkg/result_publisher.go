@@ -762,6 +762,41 @@ func (p *resultPublisher) logTailBlock(
 	return "\n- **Log tail:**\n\n" + fence + "\n" + tail + "\n" + fence + "\n"
 }
 
+// terminationMessage returns the failed pod's container termination message,
+// redacted and collapsed to one line, or "" when the pod carries none.
+//
+// The message is the run's own account of why it stopped, so it is kept — but
+// only in the body, never in the reason string: the reason vocabulary is a
+// closed contract parsed by ParseZombieReason, and this value is free-form.
+//
+// Redaction happens HERE, before the message can reach the section, for the
+// same reason logTailBlock redacts its tail: a credential in a termination
+// message must never have a moment where it could be written unredacted. The
+// value is then collapsed to one line so it cannot inject a heading or a
+// fenced block into the record. A nil pod, or a first terminated status with
+// no message, yields "". Later statuses are not consulted: the first
+// terminated container is the run whose state the failure describes.
+func terminationMessage(pod *corev1.Pod) string {
+	if pod == nil {
+		return ""
+	}
+	for _, cs := range pod.Status.ContainerStatuses {
+		if cs.State.Terminated == nil {
+			continue
+		}
+		message := strings.TrimRight(redactLog(cs.State.Terminated.Message), "\n")
+		if message == "" {
+			return ""
+		}
+		message = strings.NewReplacer("\r\n", " ", "\r", " ", "\n", " ").Replace(message)
+		if message == "" {
+			return ""
+		}
+		return message
+	}
+	return ""
+}
+
 // logFence returns a backtick fence long enough to contain tail.
 //
 // A fixed three-backtick fence is not safe here: the tail is container output
@@ -805,11 +840,19 @@ func (p *resultPublisher) publishFailure(
 	}
 
 	now := p.currentDateTime.Now().UTC().Format(time.RFC3339)
+	// The message is optional body text: when the pod carries none this is "",
+	// so the composed section stays byte-identical to the pre-message output.
+	message := terminationMessage(pod)
+	messageLine := ""
+	if message != "" {
+		messageLine = fmt.Sprintf("- **Message:** %s\n", message)
+	}
 	section := fmt.Sprintf(
-		"## Failure\n\n- **Timestamp:** %s\n- **Job:** %s\n- **Reason:** %s\n%s%s",
+		"## Failure\n\n- **Timestamp:** %s\n- **Job:** %s\n- **Reason:** %s\n%s%s%s",
 		now,
 		jobName,
 		reason,
+		messageLine,
 		note,
 		p.logTailBlock(ctx, task, jobName, pod),
 	)

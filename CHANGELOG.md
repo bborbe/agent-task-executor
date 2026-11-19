@@ -2,6 +2,10 @@
 
 All notable changes to this project will be documented in this file.
 
+## Unreleased
+
+- fix: **a failed Job's container termination message is now written into the `## Failure` section, redacted and single-lined, so distinct crashed runs no longer collapse into one opaque `pod_crash_no_stdout` record.** The executor already read the pod's exit code and terminated reason to build the published reason, but dropped `ContainerStateTerminated.Message` — the run's own account of why it stopped. The message is now rendered as an optional `- **Message:**` line after `- **Reason:**`, passed through the same `redactLog` scrubber as the log tail and collapsed to one line so it cannot inject a heading or a fenced block. The reason vocabulary and its parsers are unchanged, and a pod with no termination message produces byte-identical output. Change set: `pkg/result_publisher.go`, `pkg/result_publisher_log_tail_test.go`, `CHANGELOG.md`.
+
 ## v0.67.0
 
 - feat: **record a `spawned_at` marker on the claim after the Job is created, and make the lost-claim park guard read it.** The guard was keyed on peer-local evidence (`taskShowsPriorRun` reads this cluster's vault copy, which lags the peer's run), so a peer that had just taken over a lapsed lease parked nothing and ran the task a second time — two measured ids in the 2026-11-15 window (`cd1cd68a`, `026edb30`) plus one with an absent key (`635cfd1e`). The marker travels on the claim, the one artefact both clusters share: `MarkSpawned` renews the held claim with it immediately after `SpawnJob` succeeds, the held claim carries it through every later renew and through restart recovery, and a failed write is logged (`event=claim_marker_failed`) without failing the spawn. `attributablePriorRun` now parks when the displaced claim carries a marker, and keeps `taskShowsPriorRun` as the fallback for claims written before the field existed. `claim.TakeoverResult` gains `PreviousSpawnedAt`. A spawn now performs one extra claim write (the marker renew). Additive on the wire: `spawned_at` is omitted when unset.
