@@ -2,7 +2,7 @@
 
 All notable changes to this project will be documented in this file.
 
-## Unreleased
+## v0.69.1
 
 - test: **the re-drive abort path is proven end to end at step level, joining the handler's abort decision to the publisher's close-out write.** `TestRedriveAbortedPathEmitsAbortedRecordAndCounter` (`pkg/handler/redrive_aborted_step_internal_test.go`) seeds three identical broken signatures at the cap, drives the handler's entry point `redriveStreakCapped` through `driveCandidate`, and runs the **real** `ResultPublisher` instead of a fake, so one spec covers the seam the two existing ones each stop short of: the handler specs assert a `PublishAbort` call on a fake, the publisher specs assert the emitted command, and nothing proved the two are wired together. It asserts exactly one `UpdateFrontmatterCommand` carrying `status: aborted`, `aborted_reason: capped:broken-signature`, `gate_successor: none` and `current_job: ""`, `executor_redrive_aborted_total{reason="capped:broken-signature"}` advancing by one with the transient series untouched, and `executor_redrive_capped_total` counting the refusal — the two emissions the `RedriveAborted` alert rule reads. Falsified first: with the `abortRedrive` call removed the spec fails on `emitted messages = 0; want 1`.
 
