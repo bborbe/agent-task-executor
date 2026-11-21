@@ -6,15 +6,29 @@ package handler
 
 import (
 	"context"
+	stderrors "errors"
 	"strconv"
 	"time"
 
 	lib "github.com/bborbe/agent"
+	"github.com/bborbe/errors"
 	"github.com/golang/glog"
 
 	pkg "github.com/bborbe/agent-task-executor/pkg"
 	"github.com/bborbe/agent-task-executor/pkg/metrics"
 )
+
+// vaultReadError marks a failed vault-api read in the token-ceiling gate. The
+// gate is best-effort: a read failure fails open (the spawn proceeds) rather
+// than failing the run, and the deferred-respawn loop treats a surfaced
+// vaultReadError like spawnJobError instead of exiting the process.
+type vaultReadError struct {
+	err error
+}
+
+func (e *vaultReadError) Error() string { return e.err.Error() }
+
+func (e *vaultReadError) Unwrap() error { return e.err }
 
 // deferIfOverTokenCeiling reports whether the agent's token spend in the current run
 // window already meets its configured ceiling, and if so defers the respawn. It runs
@@ -40,7 +54,22 @@ func (h *taskEventHandler) deferIfOverTokenCeiling(
 	}
 	spent, err := h.tokenSpendSince(ctx, config.Assignee, since)
 	if err != nil {
-		return false, err
+		// Only a vault-api read failure is best-effort. Anything else stays fatal.
+		var vaultErr *vaultReadError
+		if !stderrors.As(err, &vaultErr) {
+			return false, err
+		}
+		// Fail open: a transient vault-api read failure must not defer the spawn
+		// nor fail the run. Returning the error here reaches the deferred-respawn
+		// loop as a fatal run.Func error and terminates the process (Sentry
+		// NUKE-DEV-H2). Treat an unreadable spend as "not over budget" so the
+		// spawn proceeds, exactly as a failed index read does.
+		glog.Warningf(
+			"event=token_ceiling_read_error task=%s assignee=%s err=%v",
+			task.TaskIdentifier, config.Assignee, err,
+		)
+		metrics.TaskEventsTotal.WithLabelValues("token_ceiling_read_error").Inc()
+		return false, nil
 	}
 	if spent < *config.TokenCeiling {
 		return false, nil
@@ -68,6 +97,8 @@ func (h *taskEventHandler) deferIfOverTokenCeiling(
 }
 
 // tokenSpendSince sums the window token spend of every task assigned to assignee.
+// A failed vault-api read is returned as a *vaultReadError so the caller can fail
+// open and the deferred-respawn loop can treat it as non-fatal.
 func (h *taskEventHandler) tokenSpendSince(
 	ctx context.Context,
 	assignee string,
@@ -75,13 +106,17 @@ func (h *taskEventHandler) tokenSpendSince(
 ) (int64, error) {
 	items, err := h.tokenSpendReader.ReadForAssignee(ctx, assignee)
 	if err != nil {
-		return 0, err
+		return 0, &vaultReadError{
+			err: errors.Wrapf(ctx, err, "read token spend for assignee %s", assignee),
+		}
 	}
 	var total int64
 	for _, item := range items {
 		doc, err := h.tokenSpendReader.ReadDocument(ctx, item.ID)
 		if err != nil {
-			return 0, err
+			return 0, &vaultReadError{
+				err: errors.Wrapf(ctx, err, "read token spend document %s", item.ID),
+			}
 		}
 		total += sumRunTokensSince(doc.Frontmatter, since)
 	}
