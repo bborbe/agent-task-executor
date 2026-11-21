@@ -2,7 +2,7 @@
 
 All notable changes to this project will be documented in this file.
 
-## Unreleased
+## v0.70.0
 
 - feat: **`tokenSpendSince` emits a V(2) diagnostic that names which of five branches makes a window token sum read zero, so a silent `spent=0` is no longer indistinguishable from a genuine one.** The ceiling gate refuses only when `spent >= ceiling`, so a reader that returns 0 never refuses at any ceiling — measured 2026-11-21 on `agent-task-executor-personal`: a real run at ceiling `1` against an in-window sum of `185518` was admitted, which is only possible with `spent = 0`. The new line carries nine values: the computed `spent`, the `items` count `ReadForAssignee` returned, the item `ids` it returned (the population is reproducible, not asserted), `runs_after_since` — the count of entries that cleared the `>= since` filter aggregated across every document, not just the first — the Go type of the first document's `metrics_runs` (or `<absent>`), its first entry's `completed_at` as `runCompletedAt` parsed it (or `<unparsed:…>`), the token keys `runTokenTotal` looks up with their Go types, their four raw values, and the computed `since`. That set separates an empty assignee list from a document without in-window runs, a parse-shape fault, a renamed or non-numeric token key, and a wrongly computed window boundary — five branches that all read as `spent=0`. Both halves of a token fault are needed: `intFromAny` returns 0 for a missing key and for a value it cannot parse, so a key set alone cannot separate the two. `sumRunTokensSince` now delegates to `sumRunTokensSinceWithCount`, which returns the post-filter entry count alongside the sum. Change set: `pkg/handler/token_ceiling.go`, `pkg/handler/token_ceiling_internal_test.go`, `CHANGELOG.md`.
 
