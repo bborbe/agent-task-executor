@@ -6,7 +6,9 @@ package handler
 
 import (
 	"context"
+	"fmt"
 	"strconv"
+	"strings"
 	"time"
 
 	lib "github.com/bborbe/agent"
@@ -68,6 +70,15 @@ func (h *taskEventHandler) deferIfOverTokenCeiling(
 }
 
 // tokenSpendSince sums the window token spend of every task assigned to assignee.
+//
+// At V(2) it also emits the diagnostic that tells a genuine zero apart from a
+// fault: the population vault-api returned (count and ids), how many entries
+// cleared the >= since filter across every document, and the first document's
+// metrics_runs shape — its Go type, its first entry's completed_at as the parser
+// produced it, the token keys runTokenTotal looks up, and their raw values. A
+// bare spent=0 cannot separate an empty assignee list from a document without
+// in-window runs from a present-but-unparseable token value, and each of those
+// needs a different fix.
 func (h *taskEventHandler) tokenSpendSince(
 	ctx context.Context,
 	assignee string,
@@ -77,14 +88,38 @@ func (h *taskEventHandler) tokenSpendSince(
 	if err != nil {
 		return 0, err
 	}
+	ids := make([]string, 0, len(items))
 	var total int64
-	for _, item := range items {
+	var counted int
+	diag := absentRunDiagnostics()
+	for i, item := range items {
+		ids = append(ids, item.ID)
 		doc, err := h.tokenSpendReader.ReadDocument(ctx, item.ID)
 		if err != nil {
 			return 0, err
 		}
-		total += sumRunTokensSince(doc.Frontmatter, since)
+		sum, runs := sumRunTokensSinceWithCount(doc.Frontmatter, since)
+		total += sum
+		counted += runs
+		if i == 0 {
+			diag = describeFirstRun(doc.Frontmatter)
+		}
 	}
+	glog.V(2).Infof(
+		"event=token_spend_diagnostic assignee=%s spent=%d items=%d ids=%v "+
+			"runs_after_since=%d first_metrics_runs_type=%s first_completed_at=%s "+
+			"first_token_keys=%s first_token_values=%s since=%s",
+		assignee,
+		total,
+		len(items),
+		ids,
+		counted,
+		diag.listType,
+		diag.completedAt,
+		diag.tokenKeys,
+		diag.tokenValues,
+		since.Format(time.RFC3339),
+	)
 	return total, nil
 }
 
@@ -92,8 +127,19 @@ func (h *taskEventHandler) tokenSpendSince(
 // completed_at is at or after since. A missing or malformed list is 0; an entry with
 // an unparseable timestamp is skipped rather than failing the whole sum.
 func sumRunTokensSince(frontmatter map[string]any, since time.Time) int64 {
+	total, _ := sumRunTokensSinceWithCount(frontmatter, since)
+	return total
+}
+
+// sumRunTokensSinceWithCount is sumRunTokensSince plus the number of entries that
+// cleared the >= since filter. The count is what separates a wrongly computed
+// window boundary from a genuinely empty one, so it is returned rather than
+// inferred from the total: a boundary that excludes every entry and a document
+// that carries none both sum to 0, but only the first has entries below it.
+func sumRunTokensSinceWithCount(frontmatter map[string]any, since time.Time) (int64, int) {
 	runs, _ := frontmatter["metrics_runs"].([]any)
 	var total int64
+	var counted int
 	for _, raw := range runs {
 		entry, ok := raw.(map[string]any)
 		if !ok {
@@ -103,9 +149,101 @@ func sumRunTokensSince(frontmatter map[string]any, since time.Time) int64 {
 		if !ok || at.Before(since) {
 			continue
 		}
+		counted++
 		total += runTokenTotal(entry)
 	}
-	return total
+	return total, counted
+}
+
+// runDiagnostics is the shape report for a task document's first metrics_runs
+// entry. Each field names the state that would otherwise be indistinguishable
+// from a healthy zero.
+type runDiagnostics struct {
+	listType    string
+	completedAt string
+	tokenKeys   string
+	tokenValues string
+}
+
+// runTokenKeys is the exact key list runTokenTotal reads, in its order. The
+// diagnostic reports presence and type per key so a renamed key is visible.
+var runTokenKeys = []string{
+	"input_tokens",
+	"output_tokens",
+	"cache_read_tokens",
+	"cache_creation_tokens",
+}
+
+// absentRunDiagnostics is the report for a document carrying no metrics_runs. It is
+// also the starting value when ReadForAssignee returned no documents at all, so an
+// empty population reads `<absent>` rather than a blank that looks like a missing
+// field in the log line.
+func absentRunDiagnostics() runDiagnostics {
+	return runDiagnostics{
+		listType:    "<absent>",
+		completedAt: "<absent>",
+		tokenKeys:   "<absent>",
+		tokenValues: "<absent>",
+	}
+}
+
+// describeFirstRun reports the Go type of metrics_runs, the first entry's
+// completed_at as runCompletedAt parsed it, and the token keys and raw values
+// runTokenTotal would convert. An absent list, an empty list, a non-map entry
+// and an unparseable timestamp each read distinctly, so no fault can present as
+// a well-formed zero.
+func describeFirstRun(frontmatter map[string]any) runDiagnostics {
+	raw, ok := frontmatter["metrics_runs"]
+	if !ok {
+		return absentRunDiagnostics()
+	}
+	diag := runDiagnostics{listType: fmt.Sprintf("%T", raw)}
+	runs, ok := raw.([]any)
+	if !ok || len(runs) == 0 {
+		diag.completedAt = "<no-entries>"
+		diag.tokenKeys = "<no-entries>"
+		diag.tokenValues = "<no-entries>"
+		return diag
+	}
+	entry, ok := runs[0].(map[string]any)
+	if !ok {
+		diag.completedAt = fmt.Sprintf("<not-a-map:%T>", runs[0])
+		diag.tokenKeys = "<not-a-map>"
+		diag.tokenValues = "<not-a-map>"
+		return diag
+	}
+	diag.completedAt = describeCompletedAt(entry["completed_at"])
+	diag.tokenKeys, diag.tokenValues = describeRunTokens(entry)
+	return diag
+}
+
+// describeCompletedAt prints the first entry's timestamp the way runCompletedAt
+// parsed it. A value that fails RFC3339 parsing is marked as such rather than
+// echoed, so an entry outside the window cannot read as merely out of range.
+func describeCompletedAt(v any) string {
+	if at, ok := runCompletedAt(v); ok {
+		return at.Format(time.RFC3339)
+	}
+	return fmt.Sprintf("<unparsed:%T:%v>", v, v)
+}
+
+// describeRunTokens reports, for each key runTokenTotal reads, its Go type and its
+// raw value. Both are needed: intFromAny returns 0 for a missing key and for a
+// value it cannot parse, so a type or a value alone cannot separate the two.
+func describeRunTokens(entry map[string]any) (keys, values string) {
+	keyParts := make([]string, 0, len(runTokenKeys))
+	valueParts := make([]string, 0, len(runTokenKeys))
+	for _, key := range runTokenKeys {
+		v, ok := entry[key]
+		if !ok {
+			keyParts = append(keyParts, key+"=<absent>")
+			valueParts = append(valueParts, key+"=<absent>")
+			continue
+		}
+		keyParts = append(keyParts, fmt.Sprintf("%s=%T", key, v))
+		valueParts = append(valueParts, fmt.Sprintf("%s=%v", key, v))
+	}
+	return strings.Join(keyParts, ","), strings.Join(valueParts, ",")
 }
 
 func runCompletedAt(v any) (time.Time, bool) {
