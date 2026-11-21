@@ -520,6 +520,7 @@ func seedDeferredAndRefusalOutcomes() {
 	TaskEventsTotal.WithLabelValues("deferred_claim_invalidated").Add(0)
 	TaskEventsTotal.WithLabelValues("deferred_respawn_spawn_failed").Add(0)
 	TaskEventsTotal.WithLabelValues("deferred_respawn_refusal_write_failed").Add(0)
+	TaskEventsTotal.WithLabelValues("deferred_respawn_vault_read_failed").Add(0)
 	TaskEventsTotal.WithLabelValues("event_refusal_write_failed").Add(0)
 }
 
@@ -582,6 +583,7 @@ func init() {
 	TaskEventsTotal.WithLabelValues("claim_probe_failed").Add(0)
 	TaskEventsTotal.WithLabelValues("respawn_after_grace_window").Add(0)
 	TaskEventsTotal.WithLabelValues("skipped_permanent").Add(0)
+	TaskEventsTotal.WithLabelValues("token_ceiling_read_error").Add(0)
 	seedDeferredAndRefusalOutcomes()
 	// Pre-initialise every reconcile outcome so rate() sees a 0 series rather
 	// than no data — an absent series makes `rate(...)==0` skip silently and the

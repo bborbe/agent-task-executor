@@ -112,31 +112,11 @@ func (h *taskEventHandler) evalDeferredRespawns(ctx context.Context) error {
 		outcome, err := h.spawnIfNeededClaimed(ctx, entry.task, &entry.config, &replay.claim)
 		spawned := outcome.spawned()
 		if err != nil {
-			// A single failed Job create (e.g. a Job the API server rejects) must
-			// not exit the process and starve every other due entry. The entry is
-			// not re-parked; the reconcile floor re-drives the task. Every other
-			// error stays fatal.
-			var refusalErr *triggerRefusalWriteError
-			if stderrors.As(err, &refusalErr) {
-				glog.Warningf(
-					"event=deferred_respawn_refusal_write_failed task=%s err=%v",
-					entry.task.TaskIdentifier, err,
-				)
-				metrics.TaskEventsTotal.WithLabelValues("deferred_respawn_refusal_write_failed").
-					Inc()
-				h.clearQueuedAtStampIfNotDeferred(entry.task.TaskIdentifier)
-				continue
-			}
-			var spawnErr *spawnJobError
-			if stderrors.As(err, &spawnErr) {
-				glog.Warningf(
-					"event=deferred_respawn_spawn_failed task=%s err=%v",
-					entry.task.TaskIdentifier, err,
-				)
-				metrics.TaskEventsTotal.WithLabelValues("deferred_respawn_spawn_failed").Inc()
-				// The entry was removed during collection and no spawn replaced
-				// it, so the queued_at record must not outlive the deferral.
-				h.clearQueuedAtStampIfNotDeferred(entry.task.TaskIdentifier)
+			// A single failed Job create (e.g. a Job the API server rejects), a
+			// refusal write, or a surfaced vault-api read must not exit the process
+			// and starve every other due entry. The entry is not re-parked; the
+			// reconcile floor re-drives the task. Every other error stays fatal.
+			if h.handleDeferredSpawnError(entry, err) {
 				continue
 			}
 			return errors.Wrapf(
@@ -164,6 +144,51 @@ func (h *taskEventHandler) evalDeferredRespawns(ctx context.Context) error {
 		metrics.TaskEventsTotal.WithLabelValues("respawn_after_grace_window").Inc()
 	}
 	return nil
+}
+
+// handleDeferredSpawnError classifies a spawn-funnel error from one deferred
+// replay. It reports true when the error is one of the non-fatal classes the loop
+// must skip rather than return: a refusal write failure, a failed Job create, or
+// a surfaced vault-api read. Each is logged, counted and leaves the entry
+// un-parked so the reconcile floor re-drives the task. Every other error stays
+// fatal (the caller returns it).
+func (h *taskEventHandler) handleDeferredSpawnError(entry deferredEntry, err error) bool {
+	var refusalErr *triggerRefusalWriteError
+	if stderrors.As(err, &refusalErr) {
+		glog.Warningf(
+			"event=deferred_respawn_refusal_write_failed task=%s err=%v",
+			entry.task.TaskIdentifier, err,
+		)
+		metrics.TaskEventsTotal.WithLabelValues("deferred_respawn_refusal_write_failed").Inc()
+		h.clearQueuedAtStampIfNotDeferred(entry.task.TaskIdentifier)
+		return true
+	}
+	var spawnErr *spawnJobError
+	if stderrors.As(err, &spawnErr) {
+		glog.Warningf(
+			"event=deferred_respawn_spawn_failed task=%s err=%v",
+			entry.task.TaskIdentifier, err,
+		)
+		metrics.TaskEventsTotal.WithLabelValues("deferred_respawn_spawn_failed").Inc()
+		// The entry was removed during collection and no spawn replaced it, so
+		// the queued_at record must not outlive the deferral.
+		h.clearQueuedAtStampIfNotDeferred(entry.task.TaskIdentifier)
+		return true
+	}
+	var vaultErr *vaultReadError
+	if stderrors.As(err, &vaultErr) {
+		glog.Warningf(
+			"event=deferred_respawn_vault_read_failed task=%s err=%v",
+			entry.task.TaskIdentifier, err,
+		)
+		metrics.TaskEventsTotal.WithLabelValues("deferred_respawn_vault_read_failed").Inc()
+		// The entry was removed during collection and no spawn replaced it; the
+		// reconcile floor re-drives the task. Mirror spawnJobError: skip, do not
+		// re-park.
+		h.clearQueuedAtStampIfNotDeferred(entry.task.TaskIdentifier)
+		return true
+	}
+	return false
 }
 
 // removeDeferredEntry removes any pending deferred-respawn entry for the given

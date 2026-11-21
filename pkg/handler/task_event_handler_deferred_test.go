@@ -47,6 +47,28 @@ func buildQueueTask(id lib.TaskIdentifier, jobStartedAt string) lib.Task {
 	return lib.Task{TaskIdentifier: id, Vault: testTaskVault, Frontmatter: fm}
 }
 
+// stubTokenSpendReader doubles claim.TokenSpendReader for the fail-open spec.
+// The claim read interfaces carry no counterfeiter directive (their only consumer
+// is pkg/handler), so the tests double them by hand.
+type stubTokenSpendReader struct {
+	forAssignee    []claim.TaskIndexItem
+	forAssigneeErr error
+	doc            *claim.TaskDocumentItem
+	docErr         error
+}
+
+func (s *stubTokenSpendReader) ReadForAssignee(
+	context.Context, string,
+) ([]claim.TaskIndexItem, error) {
+	return s.forAssignee, s.forAssigneeErr
+}
+
+func (s *stubTokenSpendReader) ReadDocument(
+	context.Context, string,
+) (*claim.TaskDocumentItem, error) {
+	return s.doc, s.docErr
+}
+
 var _ = Describe("TaskEventHandler", func() {
 	var (
 		ctx                 context.Context
@@ -401,6 +423,68 @@ var _ = Describe("TaskEventHandler", func() {
 					) - before,
 				).To(Equal(float64(1)))
 			})
+
+			It(
+				"keeps a transient vault-read error in the token ceiling non-fatal (fail open)",
+				func() {
+					reader := &stubTokenSpendReader{}
+					h = handler.NewTaskEventHandler(
+						fakeSpawner,
+						"dev",
+						base.Branch("prod"),
+						"",
+						true,
+						true,
+						fakeResolver,
+						fakeResultPublisher,
+						taskStore,
+						currentDateTime,
+						fakeView,
+						testTaskVault,
+						handler.DefaultReconcilePassTimeout,
+						handler.DefaultReconcileInterval,
+						pkg.ClaimModeOff,
+						nil,
+						handler.WithTokenSpendReader(reader),
+					)
+					ceiling := int64(100)
+					fakeResolver.ResolveReturns(pkg.AgentConfiguration{
+						Assignee:     "claude",
+						Image:        "my-image:latest",
+						TokenCeiling: &ceiling,
+						RunWindow: &agentv1.RunWindow{
+							Timezone:      "UTC",
+							WeekdayStart:  "09:00",
+							WeekdayEnd:    "17:00",
+							WeekendAllDay: true,
+						},
+					}, nil)
+
+					// Park the task inside the grace window so it enters deferredRespawns.
+					currentDateTime.SetNow(libtimetest.ParseDateTime(insideGrace))
+					task := buildGraceTask(domain.TaskPhaseExecution, 0, 3)
+					Expect(h.ConsumeMessage(ctx, buildMsg(task))).To(Succeed())
+					Expect(fakeSpawner.SpawnJobCallCount()).To(Equal(0))
+
+					// The vault-api read now fails (dial failure).
+					reader.forAssigneeErr = errors.New(ctx, "dial tcp: connection refused")
+					before := testutil.ToFloat64(
+						metrics.TaskEventsTotal.WithLabelValues("token_ceiling_read_error"),
+					)
+
+					// Without the fail-open this returns an error and exits the loop.
+					currentDateTime.SetNow(libtimetest.ParseDateTime(graceExpiredR))
+					Expect(h.EvalDeferredRespawns(ctx)).To(Succeed())
+
+					// Fail open: the spawn proceeds despite the unreadable spend.
+					Expect(fakeSpawner.SpawnJobCallCount()).To(Equal(1))
+					Expect(
+						testutil.ToFloat64(
+							metrics.TaskEventsTotal.WithLabelValues("token_ceiling_read_error"),
+						) - before,
+					).To(Equal(float64(1)))
+				},
+			)
 
 			It("deferred re-eval bound: no spawn before grace+R, spawn at grace+60s", func() {
 				// Suppress inside grace window
