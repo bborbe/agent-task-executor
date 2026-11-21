@@ -2,7 +2,7 @@
 
 All notable changes to this project will be documented in this file.
 
-## Unreleased
+## v0.70.1
 
 - fix: **`ConfigSpec.Equal` compares `TokenCeiling`, so a `tokenCeiling`-only Config patch is no longer dropped as a no-op.** The informer's `OnUpdate` skips the store write when `oldObj.Equal(newObj)`, and `Equal` did not include `TokenCeiling`, so patching only `spec.tokenCeiling` compared equal to the stored Config and the executor kept the previous ceiling indefinitely — the token cap could not be changed at runtime. Measured 2026-11-21 on `agent-task-executor-personal`: with `tokenCeiling` patched to `100000` and an in-window sum of `171311`, a run was admitted and no `event=token_ceiling` was logged; the same patch never took effect on the 2026-11-20 probe at ceiling `1`. Adds `reflect.DeepEqual(s.TokenCeiling, o.TokenCeiling)` and a regression test. Change set: `k8s/apis/agent.benjamin-borbe.de/v1/types.go`, `k8s/apis/agent.benjamin-borbe.de/v1/types_test.go`, `CHANGELOG.md`.
 
