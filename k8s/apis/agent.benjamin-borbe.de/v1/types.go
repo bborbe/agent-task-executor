@@ -358,7 +358,8 @@ func (s ConfigSpec) Equal(o ConfigSpec) bool {
 		reflect.DeepEqual(s.ZombieSweeperIntervalSeconds, o.ZombieSweeperIntervalSeconds) &&
 		reflect.DeepEqual(s.ZombieJobTimeoutSeconds, o.ZombieJobTimeoutSeconds) &&
 		reflect.DeepEqual(s.RunWindow, o.RunWindow) &&
-		s.RunBudgetSeconds == o.RunBudgetSeconds
+		s.RunBudgetSeconds == o.RunBudgetSeconds &&
+		reflect.DeepEqual(s.TokenCeiling, o.TokenCeiling)
 }
 
 // Validate validates the ConfigSpec fields.

@@ -85,6 +85,28 @@ var _ = Describe("Config", func() {
 			Expect(a.Equal(b)).To(BeFalse())
 		})
 
+		It("returns false when TokenCeiling differs", func() {
+			ceiling := int64(100000)
+			other := int64(2000000)
+			a := agentv1.Config{
+				Spec: agentv1.ConfigSpec{
+					Assignee:     "claude",
+					Image:        "registry/agent-claude",
+					Heartbeat:    "30m",
+					TokenCeiling: &ceiling,
+				},
+			}
+			b := agentv1.Config{
+				Spec: agentv1.ConfigSpec{
+					Assignee:     "claude",
+					Image:        "registry/agent-claude",
+					Heartbeat:    "30m",
+					TokenCeiling: &other,
+				},
+			}
+			Expect(a.Equal(b)).To(BeFalse())
+		})
+
 		It("returns true when compared with pointer type", func() {
 			a := agentv1.Config{
 				Spec: agentv1.ConfigSpec{
