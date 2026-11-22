@@ -1698,8 +1698,12 @@ func (h *taskEventHandler) reconcileTask(
 	// A terminal VIEW status is refused unless the vault index reports the same
 	// task non-terminal: the vault is the authority (the view is a projection),
 	// so a re-armed task whose view has not replayed yet must be evaluated, not
-	// refused. See terminal_gate_divergence.go.
-	if h.terminalStatusRefuses(ctx, task) {
+	// refused. The gate returns the task carrying the vault's status and phase,
+	// so every gate below it — and the Job's phase annotation — reads the
+	// authoritative pair rather than the stale view. See
+	// terminal_gate_divergence.go.
+	task, terminalRefused := h.applyTerminalStatusGate(ctx, task)
+	if terminalRefused {
 		return h.refuseReconcile(task, metrics.ReconcileRefusedGateTerminalStatus)
 	}
 

@@ -132,6 +132,9 @@ var _ = Describe("terminal gate divergence", func() {
 		}
 	}
 
+	// terminalGateConfig lists only the statuses a live re-arm produces. Listing
+	// completed/aborted here would let a stale view pass the trigger-status gate
+	// on its own terminal status and mask an override that never took effect.
 	terminalGateConfig := func(phases ...domain.TaskPhase) pkg.AgentConfiguration {
 		return pkg.AgentConfiguration{
 			Assignee: "claude",
@@ -139,8 +142,6 @@ var _ = Describe("terminal gate divergence", func() {
 			Trigger: &agentv1.Trigger{
 				Statuses: domain.TaskStatuses{
 					domain.TaskStatusInProgress,
-					domain.TaskStatusCompleted,
-					domain.TaskStatusAborted,
 				},
 				Phases: domain.TaskPhases(phases),
 			},
@@ -157,8 +158,12 @@ var _ = Describe("terminal gate divergence", func() {
 	}
 
 	It("evaluates a terminal view over a non-terminal vault (AC 6)", func() {
+		// The incident's exact shape: the view is completed/done and the vault
+		// has been re-armed to in_progress/execution. Both pairs must reach the
+		// spawn — a gate-only override would be refused one line later on the
+		// stale phase.
 		fakeView.SnapshotReturns([]lib.Task{
-			terminalGateTask("tid-a", "completed", "execution"),
+			terminalGateTask("tid-a", "completed", "done"),
 		})
 		fakeResolver.ResolveReturns(terminalGateConfig(domain.TaskPhaseExecution), nil)
 		stub := &terminalGateIndexStub{items: []claim.TaskIndexItem{
@@ -175,6 +180,10 @@ var _ = Describe("terminal gate divergence", func() {
 			fakeSpawner.SpawnJobCallCount(),
 		).To(Equal(1), "spawned ids: %v", terminalGateSpawnedIDs())
 		Expect(terminalGateSpawnedIDs()).To(Equal([]string{"tid-a"}))
+		_, spawned, _, _ := fakeSpawner.SpawnJobArgsForCall(0)
+		Expect(spawned.Frontmatter.Status()).To(Equal(domain.TaskStatusInProgress))
+		Expect(spawned.Frontmatter.Phase()).NotTo(BeNil())
+		Expect(*spawned.Frontmatter.Phase()).To(Equal(domain.TaskPhaseExecution))
 		Expect(strings.Count(out, "event=terminal_gate_divergence")).To(Equal(1))
 		Expect(out).To(ContainSubstring("view_status=completed"))
 		Expect(out).To(ContainSubstring("vault_status=in_progress"))
@@ -260,7 +269,7 @@ var _ = Describe("terminal gate divergence", func() {
 
 	It("shares one index read across the gate, the index gate and the divergence check", func() {
 		fakeView.SnapshotReturns([]lib.Task{
-			terminalGateTask("tid-a", "completed", "execution"),
+			terminalGateTask("tid-a", "completed", "done"),
 		})
 		fakeResolver.ResolveReturns(terminalGateConfig(domain.TaskPhaseExecution), nil)
 		stub := &terminalGateIndexStub{items: []claim.TaskIndexItem{
@@ -275,5 +284,48 @@ var _ = Describe("terminal gate divergence", func() {
 		Expect(out).To(ContainSubstring("event=view_divergence_summary"))
 		Expect(stub.reads).To(Equal(1))
 		Expect(fakeSpawner.SpawnJobCallCount()).To(Equal(1))
+	})
+
+	It("refuses when the vault phase is terminal even though its status is not", func() {
+		// indexTerminalIDs treats status OR phase as terminal; the override must
+		// apply the same rule or it would release a task the candidate gate
+		// suppressed for the same state.
+		fakeView.SnapshotReturns([]lib.Task{
+			terminalGateTask("tid-a", "completed", "done"),
+		})
+		fakeResolver.ResolveReturns(terminalGateConfig(domain.TaskPhaseExecution), nil)
+		stub := &terminalGateIndexStub{items: []claim.TaskIndexItem{
+			{ID: "tid-a", Status: "in_progress", Phase: "done"},
+		}}
+		h := terminalGateBuild(fakeView, stub)
+
+		out := deferredGateCaptureStderr(func() {
+			Expect(h.ReconcileOnce(ctx)).To(Succeed())
+		})
+
+		Expect(strings.Count(out, "event=reconcile_refused")).To(Equal(1))
+		Expect(out).To(ContainSubstring("gate=terminal_status"))
+		Expect(strings.Count(out, "event=terminal_gate_divergence")).To(Equal(0))
+		Expect(fakeSpawner.SpawnJobCallCount()).To(Equal(0))
+	})
+
+	It("logs the index-unavailable line once per pass, not once per task", func() {
+		fakeView.SnapshotReturns([]lib.Task{
+			terminalGateTask("tid-a", "completed", "done"),
+			terminalGateTask("tid-b", "completed", "done"),
+			terminalGateTask("tid-c", "completed", "done"),
+		})
+		fakeResolver.ResolveReturns(terminalGateConfig(domain.TaskPhaseExecution), nil)
+		stub := &terminalGateIndexStub{err: stderrors.New("index read failed")}
+		h := terminalGateBuild(fakeView, stub)
+
+		out := deferredGateCaptureStderr(func() {
+			Expect(h.ReconcileOnce(ctx)).To(Succeed())
+		})
+
+		Expect(
+			strings.Count(out, "event=terminal_gate_index_unavailable gate=terminal_status"),
+		).To(Equal(1))
+		Expect(fakeSpawner.SpawnJobCallCount()).To(Equal(0))
 	})
 })

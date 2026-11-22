@@ -14,74 +14,118 @@ import (
 	"github.com/bborbe/agent-task-executor/pkg/claim"
 )
 
-// vaultStatusFor returns the status the vault index records for id and whether
-// the index carries the id at all.
+// vaultItemFor returns the index item recorded for id and whether the index
+// carries the id at all.
 //
 // Items are visited in order so a duplicate id keeps the last item, matching
 // indexTerminalIDs and compareViewToIndex: a later item wins.
-func vaultStatusFor(index *claim.TaskIndex, id string) (string, bool) {
+func vaultItemFor(index *claim.TaskIndex, id string) (claim.TaskIndexItem, bool) {
 	if index == nil {
-		return "", false
+		return claim.TaskIndexItem{}, false
 	}
-	var status string
+	var item claim.TaskIndexItem
 	found := false
-	for _, item := range index.Items {
-		if item.ID == id {
-			status = item.Status
+	for _, candidate := range index.Items {
+		if candidate.ID == id {
+			item = candidate
 			found = true
 		}
 	}
-	return status, found
+	return item, found
 }
 
-// terminalGateAllowsEvaluation reports whether the terminal-status gate should
-// let the task through because the vault index disagrees with the view.
+// vaultNonTerminalState returns the status and phase the vault index records for
+// id when that state is non-terminal.
 //
-// The view is a projection and the vault is the authority, so a task whose view
+// "Terminal" is the same rule indexTerminalIDs applies: the status OR the phase
+// is in the fixed terminal sets. Sharing the rule is what keeps this override
+// from releasing a task the candidate gate suppressed for the same reason.
+func vaultNonTerminalState(
+	index *claim.TaskIndex,
+	id string,
+) (domain.TaskStatus, domain.TaskPhase, bool) {
+	item, ok := vaultItemFor(index, id)
+	if !ok {
+		return "", "", false
+	}
+	status := domain.TaskStatus(item.Status)
+	phase := domain.TaskPhase(item.Phase)
+	if IsTerminalStatus(status) || IsTerminal(phase) {
+		return "", "", false
+	}
+	return status, phase, true
+}
+
+// applyTerminalStatusGate decides whether the view's terminal status refuses the
+// task and, when the vault disagrees, returns the task carrying the vault's
+// status and phase.
+//
+// The view is a projection and the vault is the authority. A task whose view
 // still reports a terminal status while the vault reports it non-terminal is
-// re-armed work that has not replayed yet: it must be evaluated, not refused.
+// re-armed work that has not replayed yet: it must be evaluated on the vault's
+// pair, not refused. Returning the rewritten task matters as much as the
+// decision — every gate below this one (trigger status, trigger phase, terminal
+// phase) and the Job's phase annotation read the task's frontmatter, so an
+// override that only cleared the gate would be refused one line later on the
+// same stale pair.
+//
 // The override is deliberately narrow. A nil client, a failed read, an id the
-// index does not carry, or an index status that is itself terminal all keep
+// index does not carry, or an index state that is itself terminal all keep
 // today's view-only refusal. The read reuses the pass cache, so it adds no
 // request to the pass.
-func (h *taskEventHandler) terminalGateAllowsEvaluation(
+func (h *taskEventHandler) applyTerminalStatusGate(
 	ctx context.Context,
 	task lib.Task,
-) bool {
+) (lib.Task, bool) {
+	if !IsTerminalStatus(task.Frontmatter.Status()) {
+		return task, false
+	}
 	if h.vaultIndexClient == nil {
-		return false
+		return task, true
 	}
 	index, _, err := h.vaultIndexFor(ctx)
 	if err != nil || index == nil {
-		glog.V(2).Infof(
-			"event=terminal_gate_index_unavailable gate=terminal_status task=%s",
-			task.TaskIdentifier,
-		)
-		return false
+		h.logTerminalGateIndexUnavailable(ctx)
+		return task, true
 	}
-	vaultStatus, ok := vaultStatusFor(index, string(task.TaskIdentifier))
+	status, phase, ok := vaultNonTerminalState(index, string(task.TaskIdentifier))
 	if !ok {
-		return false
-	}
-	if IsTerminalStatus(domain.TaskStatus(vaultStatus)) {
-		return false
+		return task, true
 	}
 	glog.V(2).Infof(
 		"event=terminal_gate_divergence task=%s view_status=%s vault_status=%s decision_source=vault",
 		task.TaskIdentifier,
 		task.Frontmatter.Status(),
-		vaultStatus,
+		status,
 	)
-	return true
+	return taskWithStatusPhase(task, status, phase), false
 }
 
-// terminalStatusRefuses reports whether the terminal-status gate refuses the
-// task. It keeps the gate's view-only rule for every non-terminal view and
-// delegates the override to terminalGateAllowsEvaluation, so reconcileTask's
-// call site gains no branch.
-func (h *taskEventHandler) terminalStatusRefuses(ctx context.Context, task lib.Task) bool {
-	if !IsTerminalStatus(task.Frontmatter.Status()) {
-		return false
+// logTerminalGateIndexUnavailable emits the index-unavailable line at most once
+// per pass. An unreadable index fails the override for every task at once;
+// naming each one once a minute is a worse fault than the fallback it reports.
+func (h *taskEventHandler) logTerminalGateIndexUnavailable(ctx context.Context) {
+	if cache := vaultIndexCacheFrom(ctx); cache != nil {
+		cache.logUnavailableOnce()
+		return
 	}
-	return !h.terminalGateAllowsEvaluation(ctx, task)
+	glog.V(2).Infof("event=terminal_gate_index_unavailable gate=terminal_status")
+}
+
+// taskWithStatusPhase returns a copy of task whose frontmatter carries status
+// and phase. The frontmatter map is copied, never written in place: snapshot
+// tasks share it with the view.
+func taskWithStatusPhase(
+	task lib.Task,
+	status domain.TaskStatus,
+	phase domain.TaskPhase,
+) lib.Task {
+	frontmatter := make(lib.TaskFrontmatter, len(task.Frontmatter)+2)
+	for key, value := range task.Frontmatter {
+		frontmatter[key] = value
+	}
+	frontmatter["status"] = string(status)
+	frontmatter["phase"] = string(phase)
+	task.Frontmatter = frontmatter
+	return task
 }
