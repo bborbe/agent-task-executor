@@ -233,10 +233,7 @@ func (h *taskEventHandler) parkSucceededWithoutPhaseMove(
 	// inside it the controller has not applied the park yet, so suppress; past it
 	// the park landed and an operator re-armed the task — the documented way out
 	// of human_review — so let it spawn.
-	if publishedAt, ok := h.taskStore.ParkPublishedAt(
-		task.TaskIdentifier,
-		succeeded.CompletedAt,
-	); ok {
+	if publishedAt, ok := h.parkPublishedAt(ctx, task.TaskIdentifier, succeeded.CompletedAt); ok {
 		if now.Sub(publishedAt) < defaultRespawnGracePeriod {
 			glog.V(2).Infof(
 				"event=park_awaiting_write_back task=%s elapsed=%.0fs",
@@ -276,6 +273,6 @@ func (h *taskEventHandler) parkSucceededWithoutPhaseMove(
 	// went out. The time is load-bearing: until the controller applies the write
 	// the task still reads this phase, and only the window distinguishes that lag
 	// from an operator re-arming the task to the same phase.
-	h.taskStore.MarkParkPublished(task.TaskIdentifier, succeeded.CompletedAt, now)
+	h.markParkPublished(ctx, task.TaskIdentifier, succeeded.Phase, succeeded.CompletedAt, now)
 	return true
 }

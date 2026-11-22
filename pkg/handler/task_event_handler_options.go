@@ -46,6 +46,16 @@ func WithSuccessStore(store claim.SuccessStore) HandlerOption {
 	}
 }
 
+// WithParkStore supplies the durable park marker directly, bypassing the
+// claim-ref-client factory. It exists for tests that need a fake — the store's
+// error paths have no other way in, since the factory is a boot-time
+// constructor with no failure mode to provoke.
+func WithParkStore(store claim.ParkStore) HandlerOption {
+	return func(h *taskEventHandler) {
+		h.parkRecordStore = store
+	}
+}
+
 // WithVaultAliases replaces the accepted vault names for this executor. It is how
 // VAULT_ALIASES reaches the matcher without every call site carrying the value,
 // and it is per handler by construction: two executors built in one process each
