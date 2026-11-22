@@ -1699,7 +1699,11 @@ func (h *taskEventHandler) reconcileTask(
 	// re-drive cap is charged against, and sits ABOVE resolveConfigForReconcile
 	// because that call counts a skipped_unknown_assignee — the floor's half of
 	// the same defect.
-	if IsTerminalStatus(task.Frontmatter.Status()) {
+	// A terminal VIEW status is refused unless the vault index reports the same
+	// task non-terminal: the vault is the authority (the view is a projection),
+	// so a re-armed task whose view has not replayed yet must be evaluated, not
+	// refused. See terminal_gate_divergence.go.
+	if h.terminalStatusRefuses(ctx, task) {
 		return h.refuseReconcile(task, metrics.ReconcileRefusedGateTerminalStatus)
 	}
 

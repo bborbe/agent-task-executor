@@ -1,8 +1,13 @@
 ---
-status: approved
+status: completed
 spec: [025-bug-rearm-clobbered-by-stale-park-reemission]
+summary: Made the reconcile terminal_status gate consult the pass-cached vault index, evaluating a terminal view over a non-terminal vault and logging event=terminal_gate_divergence with decision_source=vault, with six focused specs and CHANGELOG updated.
+execution_id: 5f9bfd78-31e8-5f03-be25-0d5a3c166713-exec-070-spec-025-vault-terminal-gate
+dark-factory-version: dev
 created: "2026-11-22T09:30:00Z"
 queued: "2026-11-22T09:47:51Z"
+started: "2026-11-22T10:02:41Z"
+completed: "2026-11-22T10:07:26Z"
 branch: dark-factory/bug-rearm-clobbered-by-stale-park-reemission
 ---
 
