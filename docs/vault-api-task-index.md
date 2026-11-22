@@ -206,6 +206,45 @@ outcomes above.
   gate vocabulary, and no task id, cluster, vault or assignee is ever a label
   value.
 
+### Refusal gate: `terminal_status`
+
+A second gate sits above config resolution in the reconcile floor. It refuses a
+task whose **view** status is terminal, because a terminal status is never a
+candidate — but the view is a projection and the vault is the authority, so the
+gate consults the same pass's index before refusing.
+
+- **Rule:** when the view status is terminal and the same pass's vault index
+  reports the same task **non-terminal**, the task is evaluated rather than
+  refused. This is the re-armed task whose view has not replayed yet: the vault
+  already says `in_progress` while the view still says `completed`. Every
+  non-terminal view is admitted exactly as before, without a read.
+- **Log contract:** each override emits exactly one
+  `event=terminal_gate_divergence task=<id> view_status=<s> vault_status=<s> decision_source=vault`
+  line at V(2), naming the view value, the vault value and the source that
+  decided.
+- **When it still refuses:** an index status that is itself terminal, an id the
+  index does not carry, or a failed read all keep today's view-only refusal and
+  emit no divergence line.
+- **Fail direction:** a failed read falls back to the view-only decision and
+  logs `event=terminal_gate_index_unavailable gate=terminal_status`; a
+  deployment with no vault-api client makes no call and emits nothing. A stale
+  index that wrongly reports a completed task as non-terminal costs at most one
+  evaluation — the spawn path's own status and phase filters still refuse it.
+- **Read budget:** the gate consumes the pass's single shared index read
+  (`vaultIndexFor`), the same one the divergence check and `index_terminal` use,
+  so it adds no second request.
+- **Distinctness from `index_terminal`:** `terminal_status` refuses on **view**
+  evidence and lets the vault override it; `index_terminal` suppresses on
+  **index** evidence and fails open. They read the same index and the same
+  terminal vocabulary but act in opposite directions on a read failure, so they
+  stay separate and must not be conflated.
+- **Not repaired:** the gate does not converge or back-fill the view. The
+  disagreement keeps being reported by `event=view_divergence` on the same pass.
+- **No new metric:** the existing
+  `executor_reconcile_refused_total{gate="terminal_status"}` counter carries the
+  refusal count and the divergence line carries the override; neither adds a
+  series.
+
 ## Source
 
 The envelope above is pinned from the served response of `GET /api/v1/tasks`

@@ -1,8 +1,13 @@
 ---
-status: approved
+status: completed
 spec: [025-bug-rearm-clobbered-by-stale-park-reemission]
+summary: Documented the durable park marker and vault-authoritative terminal_status gate, and consolidated the CHANGELOG Unreleased entry with measured evidence.
+execution_id: 5f9bfd78-31e8-5f03-be25-0d5a3c166713-exec-071-spec-025-docs-changelog
+dark-factory-version: dev
 created: "2026-11-22T09:30:00Z"
 queued: "2026-11-22T09:49:41Z"
+started: "2026-11-22T10:07:27Z"
+completed: "2026-11-22T10:13:23Z"
 branch: dark-factory/bug-rearm-clobbered-by-stale-park-reemission
 ---
 
