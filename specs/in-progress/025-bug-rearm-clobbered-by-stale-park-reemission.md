@@ -1,6 +1,7 @@
 ---
-status: draft
-kind: bug
+status: approved
+approved: "2026-11-22T01:17:43Z"
+branch: dark-factory/bug-rearm-clobbered-by-stale-park-reemission
 ---
 
 ## Summary
