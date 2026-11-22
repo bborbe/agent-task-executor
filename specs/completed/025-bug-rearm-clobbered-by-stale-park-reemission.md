@@ -1,8 +1,10 @@
 ---
-status: prompted
+status: completed
 approved: "2026-11-22T01:17:43Z"
 generating: "2026-11-22T09:18:19Z"
 prompted: "2026-11-22T09:39:02Z"
+verifying: "2026-11-22T10:13:23Z"
+completed: "2026-11-22T10:13:30Z"
 branch: dark-factory/bug-rearm-clobbered-by-stale-park-reemission
 ---
 
