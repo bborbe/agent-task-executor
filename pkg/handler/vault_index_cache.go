@@ -9,6 +9,7 @@ import (
 	"sync"
 
 	"github.com/bborbe/vault-cli/pkg/domain"
+	"github.com/golang/glog"
 
 	"github.com/bborbe/agent-task-executor/pkg/claim"
 )
@@ -25,6 +26,19 @@ type passVaultIndexCache struct {
 	index    *claim.TaskIndex
 	err      error
 	terminal map[string]struct{}
+	// unavailableLogged caps the terminal gate's index-unavailable line to one
+	// per pass, so an unreadable index does not emit one line per task.
+	unavailableLogged bool
+}
+
+// logUnavailableOnce records that the terminal gate reported an unreadable index
+// for this pass and emits the line only the first time.
+func (c *passVaultIndexCache) logUnavailableOnce() {
+	if c.unavailableLogged {
+		return
+	}
+	c.unavailableLogged = true
+	glog.V(2).Infof("event=terminal_gate_index_unavailable gate=terminal_status")
 }
 
 // withVaultIndexCache returns a context carrying a fresh per-pass vault-index
