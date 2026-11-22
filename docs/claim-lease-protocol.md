@@ -400,6 +400,60 @@ Both paths share one publish helper, so the phase change and the reason are
 never split across two commands; a retried publish replaces the section rather
 than duplicating it, because a body section write is keyed by its heading.
 
+## Park markers
+
+A park marker records that a park was published for one successful Job
+completion. It lives in the same git-rest ref store as claims and streak refs
+but is not a claim, and no lease-manager path treats it as one. Its purpose is
+to suppress a **second** publish of the same park after a pod restart or from a
+peer cluster: the success record a park dedups against is shared, so the record
+that says "this park already went out" must be shared too. The per-pod map
+(`TaskStore.parked`) remains as a floor, never as the authority.
+
+- **Ref shape:** `claims/park/<taskid>/<phase>/<completed unix seconds>`, where
+  `<phase>` is normalised with `RedriveStreakPhaseComponent` — an empty phase
+  becomes the literal `none`. The completion time rides in the key because the
+  git-rest ref API carries no free-text payload; it is also the dedup key, so a
+  later genuine completion of the same task gets its own marker and its own
+  park.
+- **Cluster sentinel:** `cluster` is always `park-record`, which must never
+  equal a real executor cluster name. Restart recovery lists `claims/` and
+  keeps only entries whose `cluster` is its own, so it never adopts, fences or
+  releases a park ref — the same mechanism that keeps `claims/redrive/` inert.
+- **Publish time encoding:** `lease_until` is `publishedAt + retention`, and the
+  publish time is recovered as `lease_until − retention`. Writer and reader use
+  the one retention value the store was built with, so the recovery is exact;
+  it is the success record's retention, because a marker is only useful while
+  the success it names can still be read. An expired marker is ignored by
+  `PublishedAt`, so expiry is a release path even if a delete is ever missed.
+- **Bound — one ref per task.** `Record` deletes the task's **strictly older**
+  completions on write, so the store never accumulates one ref per run. The
+  delete is strictly older, not older-or-equal, because two clusters recording
+  the same completion must not delete each other's ref and a stale writer must
+  not wipe the live one. This bound is sound only through its coupling with the
+  success store: the success store also deletes a superseded completion's
+  record on write, so a stale completion can no longer re-emit a park and its
+  deleted marker is never needed. A marker that recorded only that the task was
+  parked, with no completion value, would fail to let a later completion park,
+  which is why the completion is part of the key rather than a boolean.
+- **Cross-cluster semantics.** The key is the completion, not the cluster, so
+  two clusters publishing a park for the same completion write the identical
+  key: the first wins and the second is a `409` that `Record` treats as
+  "already recorded", a no-op. Neither cluster can suppress the other's
+  legitimate first park, and a marker written by one is read by the other.
+- **Failure direction.** A failed read falls back to the per-pod map and logs
+  `event=park_marker_read_failed task=<id>`; a pod that already published
+  still suppresses the repeat, and a pod that has not still publishes the
+  first. A failed write leaves the park standing and the marker missing, so a
+  later pass may re-publish once, and logs
+  `event=park_marker_write_failed task=<id>`; the marker failure never
+  re-enables the task-file write-back — the publish is what the caller already
+  decided, and the write-back is the irreversible step. Neither failure is
+  propagated.
+- **Claim mode off.** With no shared claim store there is no ref client, so no
+  marker is built and the dedup is in-memory only — that configuration's stated
+  limitation, unchanged.
+
 ## Restart recovery
 
 On start the manager lists `claims/` and keeps only entries whose `cluster`

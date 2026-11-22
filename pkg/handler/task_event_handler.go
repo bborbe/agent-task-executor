@@ -352,6 +352,10 @@ type taskEventHandler struct {
 	// a pod restart; nil leaves the guard on the in-memory record.
 	successRecordStore claim.SuccessStore
 	successStoreOnce   sync.Once
+	// parkRecordStore is the durable, per-completion park marker; parkStoreOnce
+	// builds it lazily from the claim-ref factory, or an injected fake wins.
+	parkRecordStore claim.ParkStore
+	parkStoreOnce   sync.Once
 	// spawnGens counts Jobs created by this executor per assignee, on any path.
 	// A pass cache entry read at an older generation is refetched, so a Job
 	// spawned by the Kafka consumer or the deferred loop mid-pass is never
