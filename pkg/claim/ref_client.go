@@ -34,12 +34,19 @@ var ErrRefNotFound = stderrors.New("ref not found")
 // ClaimRef is one entry of GET /api/v1/refs. Ref is the full ref name
 // ("refs/claims/..."), not the key. LeaseUntil is the raw RFC3339 string the
 // server returned; callers parse it and never trust it without validation.
+//
+// SpawnedAt mirrors the field git-rest added to the claim-ref contract in
+// v0.46.0. It is the previous holder's spawn marker, and a takeover reads it to
+// tell a holder that ran the task from one that only held the key. Claim carries
+// the same value on the typed vault-api path; this mirror keeps the ref-client
+// path from silently dropping it.
 type ClaimRef struct {
 	Ref        string `json:"ref"`
 	Sha        string `json:"sha"`
 	Cluster    string `json:"cluster"`
 	TaskID     string `json:"task_id"`
 	LeaseUntil string `json:"lease_until"`
+	SpawnedAt  string `json:"spawned_at"`
 }
 
 //counterfeiter:generate -o ../../mocks/claim_ref_client.go --fake-name FakeClaimRefClient . ClaimRefClient
