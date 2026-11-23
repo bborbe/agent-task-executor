@@ -2,7 +2,7 @@
 
 All notable changes to this project will be documented in this file.
 
-## Unreleased
+## v0.71.0
 
 - test: **the lost-claim park branch is proven to fire on the spawn marker alone, not only on the task's own prior-run evidence.** The existing park spec exercises the `taskShowsPriorRun` fallback (`current_job` / `job_started_at`), and `TestAttributablePriorRun` pins the decision function — neither shows the handler acting when the *only* evidence is the displaced claim's `spawned_at`. The new spec `AC6: parks on the displaced claim's spawn marker alone` builds a takeover whose claim carries a marker and a task with neither fallback field, then asserts no Job is created and `PublishParkLostClaim` is called once with reason `parked_lost_claim`; blanking the marker to `""` makes the same spec fail, so the pass is carried by the marker. Supporting change is additive: `claim.ClaimRef` gained `SpawnedAt` (mirroring the field git-rest added to the claim-ref contract in v0.46.0) and `claimtest.claimFromRef` copies it onto `Claim.SpawnedAt` — without it the ref-client harness structurally could not express a marker-carrying claim, because the adapter dropped the field. No production behaviour changes. Change set: `pkg/claim/ref_client.go`, `pkg/claim/claimtest/client.go`, `pkg/handler/task_event_handler_claim_test.go`, `CHANGELOG.md`.
 
