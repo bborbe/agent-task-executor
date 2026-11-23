@@ -272,6 +272,20 @@ func listedClaimRef(key, sha string, leaseUntil time.Time) claim.ClaimRef {
 	}
 }
 
+// listedClaimRefSpawnedAt is listedClaimRef with the displaced claim's spawn
+// marker set. It exists so a spec can prove the marker limb of the park guard
+// fires on its own, with no current_job / job_started_at on this cluster's copy
+// to fall back on.
+func listedClaimRefSpawnedAt(
+	key, sha string,
+	leaseUntil time.Time,
+	spawnedAt string,
+) claim.ClaimRef {
+	ref := listedClaimRef(key, sha, leaseUntil)
+	ref.SpawnedAt = spawnedAt
+	return ref
+}
+
 // claimKeyFor returns the claim key DeriveClaimKey produces for task.
 func claimKeyFor(task lib.Task) string {
 	return "claims/task/" + string(task.TaskIdentifier)
@@ -523,6 +537,53 @@ var _ = Describe("claim gate", func() {
 		Expect(parkedTask.TaskIdentifier).To(Equal(task.TaskIdentifier))
 		// The publisher test cannot catch a swapped or wrong-field argument at
 		// this call site, so pin all three pieces of park evidence here.
+		Expect(reason).To(Equal("parked_lost_claim"))
+		Expect(claimKey).To(Equal(key))
+		Expect(previousHolder).To(Equal("previous-task"))
+		expectClaimDelta(before, snapshotClaims(), map[string]float64{
+			"conflict":   1,
+			"taken_over": 1,
+		})
+	})
+
+	It("AC6: parks on the displaced claim's spawn marker alone", func() {
+		harness := newClaimHarness(pkg.ClaimModeOn)
+		harness.resolver.ResolveReturns(pkg.AgentConfiguration{
+			Assignee:         "claude",
+			Image:            "img",
+			RerunOnLostClaim: claimBoolPtr(false),
+		}, nil)
+		task := qualifyingClaimTask()
+		// This is the discriminating case the marker exists for: this cluster's
+		// own copy shows NO prior run — no current_job, no job_started_at — so
+		// taskShowsPriorRun is false and the park can only be justified by the
+		// displaced claim's spawned_at. A claim-time write would also satisfy the
+		// marker limb, which is why SC1 pins the writer to the post-SpawnJob path.
+		_, hasJob := task.Frontmatter["current_job"]
+		_, hasStarted := task.Frontmatter["job_started_at"]
+		Expect(hasJob).To(BeFalse())
+		Expect(hasStarted).To(BeFalse())
+		key := claimKeyFor(task)
+		harness.client.PutStub = conflictOnCreate()
+		harness.client.ListReturns([]claim.ClaimRef{
+			listedClaimRefSpawnedAt(
+				key,
+				"expired-sha",
+				time.Now().UTC().Add(-31*time.Second),
+				"2026-11-20T10:00:00Z",
+			),
+		}, nil)
+		before := snapshotClaims()
+
+		Expect(harness.consume(task)).To(Succeed())
+
+		// The takeover succeeded and the Config forbids a second run: no Job is
+		// created, and the task is parked on the marker alone.
+		Expect(harness.spawner.SpawnJobCallCount()).To(Equal(0))
+		Expect(harness.publisher.PublishParkLostClaimCallCount()).To(Equal(1))
+		_, parkedTask, reason, claimKey, previousHolder := harness.publisher.
+			PublishParkLostClaimArgsForCall(0)
+		Expect(parkedTask.TaskIdentifier).To(Equal(task.TaskIdentifier))
 		Expect(reason).To(Equal("parked_lost_claim"))
 		Expect(claimKey).To(Equal(key))
 		Expect(previousHolder).To(Equal("previous-task"))

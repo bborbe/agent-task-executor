@@ -259,6 +259,7 @@ func claimFromRef(ref claim.ClaimRef, target claim.ClaimTarget) (*claim.Claim, e
 		Holder:     ref.Cluster,
 		TaskID:     ref.TaskID,
 		LeaseToken: ref.Sha,
+		SpawnedAt:  ref.SpawnedAt,
 	}
 	until, err := libtime.ParseDateTime(context.Background(), ref.LeaseUntil)
 	if err != nil {
