@@ -68,6 +68,18 @@ type ParkStore interface {
 		taskID string,
 		completedAt libtime.DateTime,
 	) (libtime.DateTime, bool, error)
+	// LatestPublishedAt returns when the task's most recent park was published,
+	// and whether any marker is recorded.
+	//
+	// The completion is deliberately not part of the question: a caller holding a
+	// grace after a park needs WHEN the last park went out, not which success it
+	// named. That is what makes the hold survive the one-behind lag — the park is
+	// keyed to the completion it acted on, while a re-drive can record a newer
+	// completion the key does not cover.
+	LatestPublishedAt(
+		ctx context.Context,
+		taskID string,
+	) (libtime.DateTime, bool, error)
 }
 
 // NewParkStore creates a ParkStore over refClient. retention is how long a
@@ -197,6 +209,57 @@ func (s *parkStore) PublishedAt(
 		return libtime.DateTime(leaseUntil.Time().Add(-s.retention.Duration())), true, nil
 	}
 	return libtime.DateTime{}, false, nil
+}
+
+// LatestPublishedAt returns when the task's most recent park was published.
+//
+// It reads the same refs as PublishedAt but keys on the task alone, not the
+// completion: the caller wants the park's age, which is what a grace is measured
+// against. Record prunes a task to one marker, so this is normally a single ref;
+// the maximum is taken anyway so a missed prune cannot make the park read older
+// than it is and release a grace early.
+func (s *parkStore) LatestPublishedAt(
+	ctx context.Context,
+	taskID string,
+) (libtime.DateTime, bool, error) {
+	if err := validateClaimComponent(ctx, "task id", taskID); err != nil {
+		return libtime.DateTime{}, false, err
+	}
+	refs, err := redriveListForTask(ctx, s.refClient, ParkRecordPrefix, taskID)
+	if err != nil {
+		return libtime.DateTime{}, false, errors.Wrapf(
+			ctx, err, "list park records for task %s", taskID,
+		)
+	}
+	now := s.currentDateTime.Now()
+	var latest libtime.DateTime
+	found := false
+	for _, ref := range refs {
+		refTaskID, refPhase, _, ok := parseParkRef(ref.Ref)
+		if !ok || refTaskID != taskID {
+			continue
+		}
+		leaseUntil, parseErr := libtime.ParseDateTime(ctx, ref.LeaseUntil)
+		if parseErr != nil {
+			glog.Warningf(
+				"event=park_record_lease_unparsed ref=%s phase=%s lease_until=%q error=%v",
+				ref.Ref,
+				refPhase,
+				ref.LeaseUntil,
+				parseErr,
+			)
+			continue
+		}
+		if !now.Time().Before(leaseUntil.Time()) {
+			continue
+		}
+		published := leaseUntil.Time().Add(-s.retention.Duration())
+		if !found || published.After(latest.Time()) {
+			latest = libtime.DateTime(published)
+			found = true
+		}
+	}
+	return latest, found, nil
 }
 
 // keepOnly removes the park markers of taskID whose completion is strictly

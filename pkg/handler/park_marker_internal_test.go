@@ -98,6 +98,31 @@ func (s *fakeParkStore) PublishedAt(
 	return libtime.DateTime(at), true, nil
 }
 
+// LatestPublishedAt returns the newest publish time recorded for the task,
+// regardless of completion, mirroring the real store's task-keyed read.
+func (s *fakeParkStore) LatestPublishedAt(
+	_ context.Context,
+	taskID string,
+) (libtime.DateTime, bool, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.readErr != nil {
+		return libtime.DateTime{}, false, s.readErr
+	}
+	var latest time.Time
+	found := false
+	for _, publishedAt := range s.records[taskID] {
+		if !found || publishedAt.After(latest) {
+			latest = publishedAt
+			found = true
+		}
+	}
+	if !found {
+		return libtime.DateTime{}, false, nil
+	}
+	return libtime.DateTime(latest), true, nil
+}
+
 // newParkMarkerHandler builds a real handler in claim mode off — so the shared
 // success store is absent and lastSuccess reads memory — with an injected park
 // store. The clock is fixed, so every completed/published time is relative to a

@@ -407,6 +407,96 @@ func TestParkSucceededWithoutPhaseMoveLetsAReArmSpawnOnceTheWindowHasPassed(t *t
 	}
 }
 
+// The SILVER regression: the park writes the terminal phase, the view catches it
+// before the vault index replays the re-arm, and the non-terminal phase the spawn
+// is actually for survives only on the caller's task (rewritten by the terminal
+// gate). The phase-scoped success lookup at the view's phase then misses, so the
+// completion-keyed marker is never consulted and the spawn slips through inside
+// the grace. The hold must key on the park's publish time instead.
+//
+// Measured 2026-11-24 on nuke dev (c35d9c7d…): park 20:12:24Z, view caught done
+// 20:12:38Z, admit 20:12:39Z — 15 s into a 900 s grace.
+func TestParkSucceededWithoutPhaseMoveHoldsTheGraceWhenTheViewShowsTheParkedPhase(t *testing.T) {
+	h, publisher, _, now := parkFixture(t, "execution")
+	const id = lib.TaskIdentifier("task-park")
+	// The view is the projection: it has caught the terminal pair the park wrote.
+	viewTask := lib.Task{
+		TaskIdentifier: id,
+		Frontmatter: lib.TaskFrontmatter{
+			"phase":              "done",
+			"status":             "completed",
+			"assignee":           "claude",
+			"current_job":        "agent-task-park",
+			"last_result_status": string(lib.AgentStatusDone),
+		},
+	}
+	h.view = &fakeTaskView{tasks: map[lib.TaskIdentifier]lib.Task{id: viewTask}}
+	// The success the re-arm is actually about was recorded at the non-terminal
+	// phase, and the park for it went out 15 s ago.
+	completedAt := now.Add(-longAgo)
+	h.taskStore.MarkSucceeded(id, "execution", completedAt)
+	h.taskStore.MarkParkPublished(id, completedAt, now.Add(-15*time.Second))
+	// The caller carries the vault's authoritative, re-armed phase.
+	caller := lib.Task{
+		TaskIdentifier: id,
+		Frontmatter: lib.TaskFrontmatter{
+			"phase":              "execution",
+			"status":             "in_progress",
+			"assignee":           "claude",
+			"current_job":        "agent-task-park",
+			"last_result_status": string(lib.AgentStatusDone),
+		},
+	}
+
+	if !h.parkSucceededWithoutPhaseMove(context.Background(), caller) {
+		t.Fatal(
+			"a park inside its grace did not hold the spawn when the view showed the parked phase",
+		)
+	}
+	if got := len(publisher.parkedSucceeded); got != 0 {
+		t.Fatalf("park count = %d; want 0 (the grace holds, no second park)", got)
+	}
+}
+
+// Past the grace the hold releases: the re-armed task spawns (no park) so the
+// operator's re-arm is not stranded. This is the far side of the SILVER spec.
+func TestParkSucceededWithoutPhaseMoveReleasesTheGraceWhenTheParkIsOlderThanTheGrace(t *testing.T) {
+	h, publisher, _, now := parkFixture(t, "execution")
+	const id = lib.TaskIdentifier("task-park")
+	viewTask := lib.Task{
+		TaskIdentifier: id,
+		Frontmatter: lib.TaskFrontmatter{
+			"phase":              "done",
+			"status":             "completed",
+			"assignee":           "claude",
+			"current_job":        "agent-task-park",
+			"last_result_status": string(lib.AgentStatusDone),
+		},
+	}
+	h.view = &fakeTaskView{tasks: map[lib.TaskIdentifier]lib.Task{id: viewTask}}
+	completedAt := now.Add(-longAgo)
+	h.taskStore.MarkSucceeded(id, "execution", completedAt)
+	// The park went out longer ago than the grace, so it no longer holds.
+	h.taskStore.MarkParkPublished(id, completedAt, now.Add(-longAgo))
+	caller := lib.Task{
+		TaskIdentifier: id,
+		Frontmatter: lib.TaskFrontmatter{
+			"phase":              "execution",
+			"status":             "in_progress",
+			"assignee":           "claude",
+			"current_job":        "agent-task-park",
+			"last_result_status": string(lib.AgentStatusDone),
+		},
+	}
+
+	if h.parkSucceededWithoutPhaseMove(context.Background(), caller) {
+		t.Fatal("the hold did not release past the grace")
+	}
+	if got := len(publisher.parkedSucceeded); got != 0 {
+		t.Fatalf("park count = %d; want 0", got)
+	}
+}
+
 // A genuinely later success is a different unit of work and may park again.
 func TestParkSucceededWithoutPhaseMoveParksAgainForALaterSuccess(t *testing.T) {
 	h, publisher, task, now := parkFixture(t, "execution")

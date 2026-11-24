@@ -108,6 +108,23 @@ func (s *TaskStore) ParkPublishedAt(
 	return record.PublishedAt, true
 }
 
+// LatestParkPublishedAt returns when the task's most recent park went out,
+// regardless of which success it acted on, and whether one is recorded.
+//
+// MarkParkPublished keeps one record per task, so this is that record's publish
+// time. The completion-keyed ParkPublishedAt stays for the branch that must
+// match a specific success; this answers the grace question, which is about the
+// park's age, not its subject.
+func (s *TaskStore) LatestParkPublishedAt(id lib.TaskIdentifier) (time.Time, bool) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	record, ok := s.parked[id]
+	if !ok {
+		return time.Time{}, false
+	}
+	return record.PublishedAt, true
+}
+
 // LastSucceeded returns the task's latest successful Job, if one is recorded.
 func (s *TaskStore) LastSucceeded(id lib.TaskIdentifier) (SucceededJob, bool) {
 	s.mu.RLock()

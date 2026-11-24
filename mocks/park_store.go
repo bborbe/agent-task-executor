@@ -10,6 +10,22 @@ import (
 )
 
 type FakeParkStore struct {
+	LatestPublishedAtStub        func(context.Context, string) (time.DateTime, bool, error)
+	latestPublishedAtMutex       sync.RWMutex
+	latestPublishedAtArgsForCall []struct {
+		arg1 context.Context
+		arg2 string
+	}
+	latestPublishedAtReturns struct {
+		result1 time.DateTime
+		result2 bool
+		result3 error
+	}
+	latestPublishedAtReturnsOnCall map[int]struct {
+		result1 time.DateTime
+		result2 bool
+		result3 error
+	}
 	PublishedAtStub        func(context.Context, string, time.DateTime) (time.DateTime, bool, error)
 	publishedAtMutex       sync.RWMutex
 	publishedAtArgsForCall []struct {
@@ -44,6 +60,74 @@ type FakeParkStore struct {
 	}
 	invocations      map[string][][]interface{}
 	invocationsMutex sync.RWMutex
+}
+
+func (fake *FakeParkStore) LatestPublishedAt(arg1 context.Context, arg2 string) (time.DateTime, bool, error) {
+	fake.latestPublishedAtMutex.Lock()
+	ret, specificReturn := fake.latestPublishedAtReturnsOnCall[len(fake.latestPublishedAtArgsForCall)]
+	fake.latestPublishedAtArgsForCall = append(fake.latestPublishedAtArgsForCall, struct {
+		arg1 context.Context
+		arg2 string
+	}{arg1, arg2})
+	stub := fake.LatestPublishedAtStub
+	fakeReturns := fake.latestPublishedAtReturns
+	fake.recordInvocation("LatestPublishedAt", []interface{}{arg1, arg2})
+	fake.latestPublishedAtMutex.Unlock()
+	if stub != nil {
+		return stub(arg1, arg2)
+	}
+	if specificReturn {
+		return ret.result1, ret.result2, ret.result3
+	}
+	return fakeReturns.result1, fakeReturns.result2, fakeReturns.result3
+}
+
+func (fake *FakeParkStore) LatestPublishedAtCallCount() int {
+	fake.latestPublishedAtMutex.RLock()
+	defer fake.latestPublishedAtMutex.RUnlock()
+	return len(fake.latestPublishedAtArgsForCall)
+}
+
+func (fake *FakeParkStore) LatestPublishedAtCalls(stub func(context.Context, string) (time.DateTime, bool, error)) {
+	fake.latestPublishedAtMutex.Lock()
+	defer fake.latestPublishedAtMutex.Unlock()
+	fake.LatestPublishedAtStub = stub
+}
+
+func (fake *FakeParkStore) LatestPublishedAtArgsForCall(i int) (context.Context, string) {
+	fake.latestPublishedAtMutex.RLock()
+	defer fake.latestPublishedAtMutex.RUnlock()
+	argsForCall := fake.latestPublishedAtArgsForCall[i]
+	return argsForCall.arg1, argsForCall.arg2
+}
+
+func (fake *FakeParkStore) LatestPublishedAtReturns(result1 time.DateTime, result2 bool, result3 error) {
+	fake.latestPublishedAtMutex.Lock()
+	defer fake.latestPublishedAtMutex.Unlock()
+	fake.LatestPublishedAtStub = nil
+	fake.latestPublishedAtReturns = struct {
+		result1 time.DateTime
+		result2 bool
+		result3 error
+	}{result1, result2, result3}
+}
+
+func (fake *FakeParkStore) LatestPublishedAtReturnsOnCall(i int, result1 time.DateTime, result2 bool, result3 error) {
+	fake.latestPublishedAtMutex.Lock()
+	defer fake.latestPublishedAtMutex.Unlock()
+	fake.LatestPublishedAtStub = nil
+	if fake.latestPublishedAtReturnsOnCall == nil {
+		fake.latestPublishedAtReturnsOnCall = make(map[int]struct {
+			result1 time.DateTime
+			result2 bool
+			result3 error
+		})
+	}
+	fake.latestPublishedAtReturnsOnCall[i] = struct {
+		result1 time.DateTime
+		result2 bool
+		result3 error
+	}{result1, result2, result3}
 }
 
 func (fake *FakeParkStore) PublishedAt(arg1 context.Context, arg2 string, arg3 time.DateTime) (time.DateTime, bool, error) {

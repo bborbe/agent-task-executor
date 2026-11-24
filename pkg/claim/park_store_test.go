@@ -240,4 +240,41 @@ var _ = Describe("ParkStore", func() {
 			Expect(ok).To(BeFalse())
 		})
 	})
+
+	Describe("LatestPublishedAt", func() {
+		It("returns the publish time of the task's marker regardless of completion", func() {
+			completed := leaseTestT0.Add(-2 * libtime.Hour).Time()
+			published := leaseTestT0.Add(-1 * libtime.Hour).Time()
+			Expect(store.Record(
+				ctx,
+				"tid-a",
+				"execution",
+				libtime.DateTime(completed),
+				libtime.DateTime(published),
+			)).To(Succeed())
+
+			got, ok, err := store.LatestPublishedAt(ctx, "tid-a")
+			Expect(err).ToNot(HaveOccurred())
+			Expect(ok).To(BeTrue())
+			Expect(got.Time().Equal(published)).To(BeTrue())
+		})
+
+		It("returns the newest marker when more than one is present", func() {
+			older := leaseTestT0.Add(-3 * libtime.Hour).Time()
+			newer := leaseTestT0.Add(-1 * libtime.Hour).Time()
+			seedPark("tid-a", "execution", older, leaseTestT0.Add(retention))
+			seedPark("tid-a", "execution", newer, leaseTestT0.Add(retention+libtime.Hour))
+
+			got, ok, err := store.LatestPublishedAt(ctx, "tid-a")
+			Expect(err).ToNot(HaveOccurred())
+			Expect(ok).To(BeTrue())
+			Expect(got.Time().Equal(leaseTestT0.Add(libtime.Hour).Time())).To(BeTrue())
+		})
+
+		It("reports no marker for a task that was never parked", func() {
+			_, ok, err := store.LatestPublishedAt(ctx, "tid-unknown")
+			Expect(err).ToNot(HaveOccurred())
+			Expect(ok).To(BeFalse())
+		})
+	})
 })
