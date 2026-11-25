@@ -6,8 +6,10 @@ package handler
 
 import (
 	"context"
+	"time"
 
 	lib "github.com/bborbe/agent"
+	"github.com/bborbe/vault-cli/pkg/domain"
 	"github.com/golang/glog"
 
 	"github.com/bborbe/agent-task-executor/pkg/metrics"
@@ -161,6 +163,14 @@ func (h *taskEventHandler) parkSucceededWithoutPhaseMove(
 	if !taskShowsPriorRun(current) {
 		return false
 	}
+	now := h.currentDateTime.Now().Time()
+	// A park published for this task inside the grace holds the spawn even when
+	// the phase-scoped lookup below cannot see the success it acted on. See
+	// holdParkGrace: this is the terminal-view divergence the SILVER incident
+	// measured, where the completion-keyed marker was never reached.
+	if h.holdParkGrace(ctx, task, current, now) {
+		return true
+	}
 	// The success comes from the shared record, not the pod's own memory: the pod
 	// that ran the Job may be gone, and a restart must not turn a record that was
 	// due to be parked back into an eligible one. lastSuccess is phase-scoped, so
@@ -215,7 +225,6 @@ func (h *taskEventHandler) parkSucceededWithoutPhaseMove(
 		metrics.TaskEventsTotal.WithLabelValues("park_redrive_cap").Inc()
 		parkedAtCap = true
 	}
-	now := h.currentDateTime.Now().Time()
 	elapsed := now.Sub(succeeded.CompletedAt)
 	if elapsed < 0 {
 		// CompletedAt is stamped by the API server, "now" by this pod; a small
@@ -274,5 +283,65 @@ func (h *taskEventHandler) parkSucceededWithoutPhaseMove(
 	// the task still reads this phase, and only the window distinguishes that lag
 	// from an operator re-arming the task to the same phase.
 	h.markParkPublished(ctx, task.TaskIdentifier, succeeded.Phase, succeeded.CompletedAt, now)
+	return true
+}
+
+// holdParkGrace reports whether a park published for this task inside the
+// success grace must suppress the spawn even though the phase-scoped success
+// lookup cannot see the success the re-armed task is actually at.
+//
+// The park writes the terminal pair (status completed / phase done). The view is
+// a projection fed from the controller, so it can catch that terminal phase
+// before the vault index has replayed an operator's re-arm. In that window the
+// task passed to the funnel carries the vault's NON-terminal phase (the terminal
+// gate rewrote it — see applyTerminalStatusGate), while the view reads the
+// terminal phase the park wrote. The success the re-arm is about was recorded at
+// the non-terminal phase, so lastSuccess at the view's phase misses, the
+// completion-keyed marker in the caller is never consulted, and the spawn slips
+// through inside the grace.
+//
+// Measured 2026-11-24 on nuke dev (Prototype SILVER Donchian Breakout Daily,
+// c35d9c7d-e32c-4d37-9ef7-a664e44eff4b): park published 20:12:24Z, the view
+// caught done by 20:12:38Z, and the reconcile admitted the task at 20:12:39Z —
+// 15 s into a 900 s grace — which spawned a Job whose success recorded a NEWER
+// completion the park's marker did not cover.
+//
+// The hold is keyed on the park's publish time, not a completion: the grace is
+// about how long ago the park went out, which is exactly the fact the one-behind
+// completion key loses. It is scoped to the terminal-view divergence so the
+// ordinary path (view and caller agree) pays no extra store read, and it only
+// ever suppresses — the spawn resumes once the grace has elapsed.
+func (h *taskEventHandler) holdParkGrace(
+	ctx context.Context,
+	task lib.Task,
+	current lib.Task,
+	now time.Time,
+) bool {
+	viewPhase := domain.TaskPhase(taskPhase(current))
+	if !IsTerminal(viewPhase) {
+		return false
+	}
+	if IsTerminal(domain.TaskPhase(taskPhase(task))) {
+		return false
+	}
+	publishedAt, ok := h.latestParkPublishedAt(ctx, task.TaskIdentifier)
+	if !ok {
+		return false
+	}
+	since := now.Sub(publishedAt)
+	if since < 0 {
+		since = 0
+	}
+	if since >= defaultRespawnGracePeriod {
+		return false
+	}
+	glog.V(2).Infof(
+		"event=park_grace_hold task=%s view_phase=%s task_phase=%s since_park=%.0fs",
+		task.TaskIdentifier,
+		viewPhase,
+		taskPhase(task),
+		since.Seconds(),
+	)
+	metrics.TaskEventsTotal.WithLabelValues("park_grace_hold").Inc()
 	return true
 }

@@ -72,6 +72,53 @@ func (h *taskEventHandler) parkPublishedAt(
 	return h.taskStore.ParkPublishedAt(taskID, completedAt)
 }
 
+// latestParkPublishedAt returns when the task's most recent park went out, from
+// the shared marker and the per-pod floor, taking the LATER of the two.
+//
+// It is parkPublishedAt's sibling with one difference that matters: it keys on
+// the task alone, not on a completion. A caller that must hold a grace after a
+// park needs the park's AGE, and the completion-keyed lookup misses exactly when
+// the view has caught the terminal phase the park wrote while the re-armed task
+// is at a non-terminal one.
+//
+// The later-of-two rule is load-bearing, not defensive. markParkPublished writes
+// memory first and the shared store best-effort, so a failed shared write for a
+// second park leaves the shared store holding only the OLDER marker while memory
+// holds the newer one. Returning the shared hit alone would then release the
+// grace early and re-admit the spawn — the exact fail-open this guard exists to
+// close. A peer's newer shared marker wins the same way, so the later value is
+// the honest answer either way. A read failure is logged and contributes
+// nothing, never re-enabling a spawn this pod already parked.
+func (h *taskEventHandler) latestParkPublishedAt(
+	ctx context.Context,
+	taskID lib.TaskIdentifier,
+) (time.Time, bool) {
+	var shared time.Time
+	sharedOK := false
+	if store := h.parkStore(); store != nil {
+		at, ok, err := store.LatestPublishedAt(ctx, string(taskID))
+		if err != nil {
+			glog.Warningf("event=park_marker_read_failed task=%s error=%v", taskID, err)
+		} else if ok {
+			shared = at.Time()
+			sharedOK = true
+		}
+	}
+	memory, memoryOK := h.taskStore.LatestParkPublishedAt(taskID)
+	switch {
+	case sharedOK && memoryOK:
+		if memory.After(shared) {
+			return memory, true
+		}
+		return shared, true
+	case sharedOK:
+		return shared, true
+	case memoryOK:
+		return memory, true
+	}
+	return time.Time{}, false
+}
+
 // markParkPublished records that a park went out, in memory first and then in
 // the shared store.
 //
