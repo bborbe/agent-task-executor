@@ -497,6 +497,87 @@ func TestParkSucceededWithoutPhaseMoveReleasesTheGraceWhenTheParkIsOlderThanTheG
 	}
 }
 
+// The hold is marker-driven, not phase-driven: with the same terminal-view
+// divergence but no park marker, the guard must not fire and the task spawns.
+// Paired with the HOLD spec above, this proves the marker is what changes the
+// outcome (the HOLD spec fails without the guard; this one is its control).
+func TestParkSucceededWithoutPhaseMoveDoesNotHoldWithoutAParkMarker(t *testing.T) {
+	h, publisher, _, now := parkFixture(t, "execution")
+	const id = lib.TaskIdentifier("task-park")
+	viewTask := lib.Task{
+		TaskIdentifier: id,
+		Frontmatter: lib.TaskFrontmatter{
+			"phase":              "done",
+			"status":             "completed",
+			"assignee":           "claude",
+			"current_job":        "agent-task-park",
+			"last_result_status": string(lib.AgentStatusDone),
+		},
+	}
+	h.view = &fakeTaskView{tasks: map[lib.TaskIdentifier]lib.Task{id: viewTask}}
+	// A success exists but NO park was ever published for it.
+	h.taskStore.MarkSucceeded(id, "execution", now.Add(-longAgo))
+	caller := lib.Task{
+		TaskIdentifier: id,
+		Frontmatter: lib.TaskFrontmatter{
+			"phase":              "execution",
+			"status":             "in_progress",
+			"assignee":           "claude",
+			"current_job":        "agent-task-park",
+			"last_result_status": string(lib.AgentStatusDone),
+		},
+	}
+
+	if h.parkSucceededWithoutPhaseMove(context.Background(), caller) {
+		t.Fatal("held the spawn with no park marker; the hold must be marker-driven")
+	}
+	if got := len(publisher.parkedSucceeded); got != 0 {
+		t.Fatalf("park count = %d; want 0", got)
+	}
+}
+
+// The shared marker is the authority across a restart and a peer cluster; the
+// hold must read it when the per-pod floor is empty. This exercises the
+// shared-store branch of latestParkPublishedAt (the other specs hit memory).
+func TestParkSucceededWithoutPhaseMoveHoldsTheGraceFromTheSharedMarker(t *testing.T) {
+	h, publisher, _, now := parkFixture(t, "execution")
+	const id = lib.TaskIdentifier("task-park")
+	// Inject the shared store before the first parkStore() call, and seed it
+	// alone: the memory floor carries no marker, so only the shared read can hold.
+	store := newFakeParkStore()
+	store.seed(string(id), now.Add(-longAgo), now.Add(-15*time.Second))
+	h.parkRecordStore = store
+	viewTask := lib.Task{
+		TaskIdentifier: id,
+		Frontmatter: lib.TaskFrontmatter{
+			"phase":              "done",
+			"status":             "completed",
+			"assignee":           "claude",
+			"current_job":        "agent-task-park",
+			"last_result_status": string(lib.AgentStatusDone),
+		},
+	}
+	h.view = &fakeTaskView{tasks: map[lib.TaskIdentifier]lib.Task{id: viewTask}}
+	h.taskStore.MarkSucceeded(id, "execution", now.Add(-longAgo))
+	caller := lib.Task{
+		TaskIdentifier: id,
+		Frontmatter: lib.TaskFrontmatter{
+			"phase":              "execution",
+			"status":             "in_progress",
+			"assignee":           "claude",
+			"current_job":        "agent-task-park",
+			"last_result_status": string(lib.AgentStatusDone),
+		},
+	}
+
+	if !h.parkSucceededWithoutPhaseMove(context.Background(), caller) {
+		t.Fatal("the shared marker did not hold the grace when the memory floor was empty")
+	}
+	if got := len(publisher.parkedSucceeded); got != 0 {
+		t.Fatalf("park count = %d; want 0", got)
+	}
+}
+
 // A genuinely later success is a different unit of work and may park again.
 func TestParkSucceededWithoutPhaseMoveParksAgainForALaterSuccess(t *testing.T) {
 	h, publisher, task, now := parkFixture(t, "execution")
