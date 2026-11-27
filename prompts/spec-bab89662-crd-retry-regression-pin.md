@@ -1,7 +1,7 @@
 ---
 spec: ["bug-bab89662fe73a8bf4a0014d6f78791b3"]
 status: draft
-created: "2026-11-19T09:21:48Z"
+created: "2026-11-27T07:14:03Z"
 ---
 
 # Pin the CRD conflict retry's re-Get contract
@@ -35,9 +35,9 @@ Read `pkg/k8s_connector_internal_test.go` for the adjacent `crdSpecEqual` specs 
 
 Read `/home/node/.claude/plugins/marketplaces/coding/docs/go-testing-guide.md` for the external-test-package and Ginkgo conventions this repo follows, and `/home/node/.claude/plugins/marketplaces/coding/docs/changelog-guide.md` for the entry shape, the `test:` conventional prefix, and the `## Unreleased` placement rule.
 
-The fix itself is already recorded in `CHANGELOG.md` under the released heading `## v0.18.12` (the bullet beginning "a concurrent rollout of the executors no longer kills the losers…"). This prompt adds test coverage only; it must not restate or re-implement that fix. The current changelog has no `## Unreleased` section — the top version heading is `## v0.67.0` — so requirement 3 creates one directly above it.
+The fix itself is already recorded in `CHANGELOG.md` under the released heading `## v0.18.12` (the bullet beginning "a concurrent rollout of the executors no longer kills the losers…"), and has shipped in every release since; the current HEAD is `## v0.71.2`. This prompt adds test coverage only; it must not restate or re-implement that fix. The current changelog has no `## Unreleased` section — the top version heading is `## v0.71.2` — so requirement 3 creates one directly above it.
 
-Note on scope (open question for the human reviewer): the spec's Recommended Fix says "Deploy commit 9c9b454 … to nuke-dev". Deployment is an operator action against a live cluster and cannot be performed by this container agent, so it is deliberately excluded here. This prompt covers the only agent-executable residual: the regression pin.
+Note on scope (open question for the human reviewer): the spec's Recommended Fix says "Deploy commit 9c9b454 … to nuke-dev". That commit is already an ancestor of HEAD and released since v0.18.12, so the only remaining deployment action is upgrading the nuke-dev cluster to a version that contains it. Deployment is an operator action against a live cluster and cannot be performed by this container agent, so it is deliberately excluded here. This prompt covers the only agent-executable residual: the regression pin. A separate, deliberately out-of-scope observation: the create path (`crds.Create` on `IsNotFound`) still fails with `AlreadyExists` rather than a conflict if two instances race a fresh install, which `retry.RetryOnConflict` does not retry; that is a different failure mode from this spec's Get→Update race and is intentionally not addressed here.
 </context>
 
 <requirements>
@@ -88,7 +88,7 @@ Note on scope (open question for the human reviewer): the spec's Recommended Fix
 
    `ctx` is set by the outer `Describe("K8sConnector")` `BeforeEach`. Every identifier used (`fake`, `rest`, `k8stesting`, `runtime`, `apierrors`, `stderrors`, `pkg`, `differingCRD`, `fakeBuilder`, `ctx`) is already imported or declared in this file — add no imports. The `"update CRD"` substring matches the wrap in `ensureCRD` (`errors.Wrapf(ctx, err, "update CRD")`).
 
-3. Add a `## Unreleased` section to `CHANGELOG.md` directly above the first `## v` heading. The preamble is `# Changelog`, a blank line, then the "All notable changes…" line; the first version heading is `## v0.67.0`. Do not create a second `## Unreleased` (there is none today), and do not touch any released heading. Put exactly one bullet in it, in the file's existing voice (`- <prefix>: **bold summary.** prose`), using the `test:` prefix from the changelog guide:
+3. Add a `## Unreleased` section to `CHANGELOG.md` directly above the first `## v` heading. The preamble is `# Changelog`, a blank line, then the "All notable changes…" line; the first version heading is `## v0.71.2`. Do not create a second `## Unreleased` (there is none today), and do not touch any released heading. Put exactly one bullet in it, in the file's existing voice (`- <prefix>: **bold summary.** prose`), using the `test:` prefix from the changelog guide:
 
    ```
    - test: **the CRD install path's conflict retry is pinned at the interleaving, not just the write count.** A retry only helps because each attempt re-reads `configs.agent.benjamin-borbe.de` and therefore writes a fresh `resourceVersion`; the previous assertion counted two `Update` actions, which a retry that replayed the object fetched before the loop would also satisfy. The spec now asserts `get, update, get, update`, and a second spec pins that an `Update` failing for a non-conflict reason surfaces as a wrapped `update CRD` error after exactly one attempt instead of being retried. No behaviour change.

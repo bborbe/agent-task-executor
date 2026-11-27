@@ -1,24 +1,24 @@
 ---
 status: completed
-approved: "2026-11-14T16:12:42.834344826Z"
-generating: "2026-11-15T11:22:03Z"
-prompted: "2026-11-15T11:26:19Z"
-verifying: "2026-11-15T11:37:03Z"
-completed: "2026-11-15T11:37:11Z"
+approved: "2026-11-27T06:43:27.047110482Z"
+generating: "2026-11-27T07:23:17Z"
+prompted: "2026-11-27T07:28:57Z"
+verifying: "2026-11-27T07:29:41Z"
+completed: "2026-11-27T07:44:19Z"
 ---
 
 ## Summary
 
-Sentry issue `NUKE-DEV-FM` is a real bug in `bborbe/agent-task-executor` at `main.go:315`, filed automatically by the sentry-fix-agent from the High/High real bug deep verdict — that verdict is the approval gate, so this spec is approved rather than drafted.
+Sentry issue `NUKE-DEV-FM` is a real bug in `bborbe/agent-task-executor` at `main.go:317`, filed automatically by the sentry-fix-agent from the High/High real bug deep verdict — that verdict is the approval gate, so this spec is approved rather than drafted.
 
 ## Problem
 
-The nuke-dev agent-task-executor Deployment uses the in-cluster Kafka default 10.43.21.228:9092 (a k3s ClusterIP with no ready endpoints) instead of the external nodeport brokers, so libkafka.NewSyncProducerFromSaramaClient fails at startup (main.go:315) with Sarama ErrOutOfBrokers and the pod crash-loops.
+The live nuke-dev agent-task-executor Deployment still sets KAFKA_BROKERS to the dangling in-cluster Strimzi bootstrap Service (10.43.21.228:9092, zero ready endpoints), so Sarama returns ErrOutOfBrokers and the binary exits at startup; committed config is already correct and the documented operator fix was never applied.
 
 ## Reproduction
 
-The implicated source location from the deep verdict is `main.go:315` in `bborbe/agent-task-executor` (resolution rule: `candidate position 3 (bborbe/agent-task-executor)`), Sentry issue `NUKE-DEV-FM`.
+The implicated source location from the deep verdict is `main.go:317` in `bborbe/agent-task-executor` (resolution rule: `candidate position 3 (bborbe/agent-task-executor)`), Sentry issue `NUKE-DEV-FM`.
 
 ## Recommended Fix
 
-Set the nuke-dev executor Deployment's KAFKA_BROKERS to 192.168.178.41:32159,192.168.178.42:32159,192.168.178.43:32159 (per bborbe/trading/nuke-dev.env), redeploy, and remove the dangling strimzi Service after confirming the current env value.
+Set KAFKA_BROKERS to the external nodeport list (192.168.178.41:32159,192.168.178.42:32159,192.168.178.43:32159) in bborbe/trading-lib/nuke-dev.env (mirrored by nuke/agent/values-dev.yaml), re-render/roll the Deployment and verify Ready with no ErrOutOfBrokers, then remove the dangling Strimzi Service last.
