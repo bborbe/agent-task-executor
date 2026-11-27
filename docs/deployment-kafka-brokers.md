@@ -2,8 +2,8 @@
 
 This repository publishes the `bborbe/agent-task-executor` image. It does not
 own the executor Deployment: runtime configuration and the Deployment itself
-live in the quant config repository (`bborbe/trading`) and are rendered by the
-`agent` Helm chart. This document records where the executor's Kafka broker
+live in the quant config repository (`bborbe/trading-lib`) and are rendered by
+the `agent` Helm chart. This document records where the executor's Kafka broker
 list comes from and how to remediate a Deployment that points at an
 unreachable broker set.
 
@@ -32,7 +32,11 @@ The nuke-dev executor was observed pointing at the in-cluster Kafka ClusterIP
 `10.43.21.228:9092`, a k3s ClusterIP with no ready endpoints, and
 crash-looping on `ErrOutOfBrokers`. The correct value for nuke-dev is the
 external nodeport broker list, whose source of truth is
-`bborbe/trading/nuke-dev.env`:
+`bborbe/trading-lib/nuke-dev.env` and which is mirrored into
+`nuke/agent/values-dev.yaml`. The committed value is already correct; the
+recurring failure is that the live Deployment was never re-rendered after the
+config was corrected, so it keeps the old in-cluster address until the next
+deploy.
 
 ```
 192.168.178.41:32159,192.168.178.42:32159,192.168.178.43:32159
@@ -47,13 +51,17 @@ external nodeport broker list, whose source of truth is
      -o jsonpath='{.spec.template.spec.containers[0].env[?(@.name=="KAFKA_BROKERS")].value}'
    ```
 
-2. Change the value in its source of truth (`bborbe/trading`
-   `nuke-dev.env`), not only on the live Deployment. A `kubectl set env` is
-   overwritten by the next Helm render, so a live-only edit reappears as the
-   same crash-loop after the next deploy.
+2. Change the value in its source of truth — `bborbe/trading-lib/nuke-dev.env`
+   and its mirror `nuke/agent/values-dev.yaml` — not only on the live
+   Deployment. The two files must carry the same value: a change made in only
+   one is reverted by the next render, and a `kubectl set env` is overwritten
+   by the next Helm render, so a live-only edit reappears as the same
+   crash-loop after the next deploy.
 
-3. Redeploy or roll the executor Deployment and confirm the pod reaches
-   Ready.
+3. Re-render and roll the executor Deployment, then confirm the pod reaches
+   Ready. This is the step that recurringly goes unapplied: correcting the
+   committed config without re-rendering leaves the live Deployment on the old
+   value and the pod keeps crash-looping.
 
 4. Confirm the startup log no longer reports `ErrOutOfBrokers` or
    `create kafka sync producer`.
