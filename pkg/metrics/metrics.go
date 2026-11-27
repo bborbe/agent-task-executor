@@ -509,6 +509,16 @@ var TaskViewSkippedTotal = promauto.NewCounter(prometheus.CounterOpts{
 	Help: "Total number of task event messages the task view could not decode.",
 })
 
+// TokenCeilingReadFailedTotal counts window-token reads that failed and were
+// failed open: the ceiling could not be enforced for that spawn, so the spawn
+// was admitted and the reconcile loop re-evaluates it. Without this counter
+// the fail-open is silent, and a persistently unreadable vault-api looks like
+// a fleet that simply never reaches its ceiling.
+var TokenCeilingReadFailedTotal = promauto.NewCounter(prometheus.CounterOpts{
+	Name: "agent_executor_token_ceiling_read_failed_total",
+	Help: "Total number of token-ceiling spend reads that failed and were failed open.",
+})
+
 // seedDeferredAndRefusalOutcomes pre-initialises the closed set of deferred-respawn
 // and refusal-write outcomes. Same reason as the blocks in init: an absent series
 // makes a `rate(...) == 0` alert skip silently instead of firing on a fleet where

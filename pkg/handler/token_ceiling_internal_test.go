@@ -6,23 +6,36 @@ package handler
 
 import (
 	"context"
+	stderrors "errors"
 	"strings"
 	"testing"
 	"time"
 
+	lib "github.com/bborbe/agent"
+	libtime "github.com/bborbe/time"
+	"github.com/prometheus/client_golang/prometheus/testutil"
+
+	agentv1 "github.com/bborbe/agent-task-executor/k8s/apis/agent.benjamin-borbe.de/v1"
+	pkg "github.com/bborbe/agent-task-executor/pkg"
 	"github.com/bborbe/agent-task-executor/pkg/claim"
+	"github.com/bborbe/agent-task-executor/pkg/metrics"
 )
 
 // tokenSpendStubReader is a minimal claim.TokenSpendReader over fixed fixtures.
 type tokenSpendStubReader struct {
-	items []claim.TaskIndexItem
-	docs  map[string]*claim.TaskDocumentItem
+	items   []claim.TaskIndexItem
+	docs    map[string]*claim.TaskDocumentItem
+	readErr error // returned by ReadForAssignee when set
+	docErr  error // returned by ReadDocument when set
 }
 
 func (r tokenSpendStubReader) ReadForAssignee(
 	context.Context,
 	string,
 ) ([]claim.TaskIndexItem, error) {
+	if r.readErr != nil {
+		return nil, r.readErr
+	}
 	return r.items, nil
 }
 
@@ -30,6 +43,9 @@ func (r tokenSpendStubReader) ReadDocument(
 	_ context.Context,
 	id string,
 ) (*claim.TaskDocumentItem, error) {
+	if r.docErr != nil {
+		return nil, r.docErr
+	}
 	return r.docs[id], nil
 }
 
@@ -265,5 +281,127 @@ func TestTokenSpendSince_LogsNineValueDiagnostic(t *testing.T) {
 		if !strings.Contains(out, want) {
 			t.Fatalf("diagnostic missing %q\n%s", want, out)
 		}
+	}
+}
+
+// tokenCeilingFailOpenConfig is the shared config for the fail-open specs: an
+// open weekday window at the pinned clock (2026-11-18 is a Wednesday) and a
+// positive ceiling, so the ceiling gate actually reaches tokenSpendSince.
+func tokenCeilingFailOpenConfig(ceiling int64) *pkg.AgentConfiguration {
+	return &pkg.AgentConfiguration{
+		Assignee:     "proto-agent",
+		TokenCeiling: &ceiling,
+		RunWindow: &agentv1.RunWindow{
+			WeekdayStart: "00:00",
+			WeekdayEnd:   "23:59",
+		},
+	}
+}
+
+// TestDeferIfOverTokenCeiling_FailsOpenOnAssigneeReadError pins the fail-open
+// for the listing read: a vault-api dial failure must admit the spawn rather
+// than return the error that exits ConsumeMessage (Sentry NUKE-DEV-H1).
+func TestDeferIfOverTokenCeiling_FailsOpenOnAssigneeReadError(t *testing.T) {
+	clock := libtime.NewCurrentDateTime()
+	clock.SetNow(libtime.DateTime(time.Date(2026, 11, 18, 12, 0, 0, 0, time.UTC)))
+	h := &taskEventHandler{
+		tokenSpendReader: tokenSpendStubReader{
+			readErr: stderrors.New("dial tcp: connection refused"),
+		},
+		currentDateTime: clock,
+	}
+	ceiling := int64(1)
+	config := tokenCeilingFailOpenConfig(ceiling)
+
+	before := testutil.ToFloat64(metrics.TokenCeilingReadFailedTotal)
+	over, err := h.deferIfOverTokenCeiling(
+		context.Background(),
+		lib.Task{TaskIdentifier: "tid-ceiling-read-fail"},
+		config,
+	)
+	if err != nil {
+		t.Fatalf("deferIfOverTokenCeiling returned error: %v", err)
+	}
+	if over {
+		t.Fatalf("over = true, want false (fail open)")
+	}
+	if got := testutil.ToFloat64(metrics.TokenCeilingReadFailedTotal) - before; got != 1 {
+		t.Fatalf("read_failed delta = %v, want 1", got)
+	}
+}
+
+// TestDeferIfOverTokenCeiling_FailsOpenOnDocumentReadError pins the fail-open
+// for the per-document read: a 503 on one task's document must also admit the
+// spawn rather than exit ConsumeMessage.
+func TestDeferIfOverTokenCeiling_FailsOpenOnDocumentReadError(t *testing.T) {
+	clock := libtime.NewCurrentDateTime()
+	clock.SetNow(libtime.DateTime(time.Date(2026, 11, 18, 12, 0, 0, 0, time.UTC)))
+	h := &taskEventHandler{
+		tokenSpendReader: tokenSpendStubReader{
+			items:  []claim.TaskIndexItem{{ID: "id-a"}},
+			docErr: stderrors.New("read vault-api task document: 503"),
+		},
+		currentDateTime: clock,
+	}
+	ceiling := int64(1)
+	config := tokenCeilingFailOpenConfig(ceiling)
+
+	before := testutil.ToFloat64(metrics.TokenCeilingReadFailedTotal)
+	over, err := h.deferIfOverTokenCeiling(
+		context.Background(),
+		lib.Task{TaskIdentifier: "tid-ceiling-doc-fail"},
+		config,
+	)
+	if err != nil {
+		t.Fatalf("deferIfOverTokenCeiling returned error: %v", err)
+	}
+	if over {
+		t.Fatalf("over = true, want false (fail open)")
+	}
+	if got := testutil.ToFloat64(metrics.TokenCeilingReadFailedTotal) - before; got != 1 {
+		t.Fatalf("read_failed delta = %v, want 1", got)
+	}
+}
+
+// TestDeferIfOverTokenCeiling_DefersWhenSpendMeetsCeiling is the control: the
+// healthy path is unchanged, so a readable spend at or above the ceiling still
+// defers, and the fail-open counter does not move.
+func TestDeferIfOverTokenCeiling_DefersWhenSpendMeetsCeiling(t *testing.T) {
+	clock := libtime.NewCurrentDateTime()
+	clock.SetNow(libtime.DateTime(time.Date(2026, 11, 18, 12, 0, 0, 0, time.UTC)))
+	h := &taskEventHandler{
+		tokenSpendReader: tokenSpendStubReader{
+			items: []claim.TaskIndexItem{{ID: "id-a"}},
+			docs: map[string]*claim.TaskDocumentItem{
+				"id-a": {ID: "id-a", Frontmatter: map[string]any{
+					"metrics_runs": []any{
+						map[string]any{
+							"completed_at": "2026-11-18T13:00:00Z",
+							"input_tokens": int64(150),
+						},
+					},
+				}},
+			},
+		},
+		currentDateTime:  clock,
+		deferredRespawns: make(map[lib.TaskIdentifier]deferredEntry),
+	}
+	ceiling := int64(150)
+	config := tokenCeilingFailOpenConfig(ceiling)
+
+	before := testutil.ToFloat64(metrics.TokenCeilingReadFailedTotal)
+	over, err := h.deferIfOverTokenCeiling(
+		context.Background(),
+		lib.Task{TaskIdentifier: "tid-ceiling-at-limit"},
+		config,
+	)
+	if err != nil {
+		t.Fatalf("deferIfOverTokenCeiling returned error: %v", err)
+	}
+	if !over {
+		t.Fatalf("over = false, want true (spend meets ceiling)")
+	}
+	if got := testutil.ToFloat64(metrics.TokenCeilingReadFailedTotal) - before; got != 0 {
+		t.Fatalf("read_failed delta = %v, want 0", got)
 	}
 }

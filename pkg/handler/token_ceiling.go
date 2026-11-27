@@ -30,7 +30,7 @@ func (h *taskEventHandler) deferIfOverTokenCeiling(
 	ctx context.Context,
 	task lib.Task,
 	config *pkg.AgentConfiguration,
-) (bool, error) {
+) (bool, error) { //nolint:unparam // fail-open returns nil today; the shape is kept for callers
 	if config == nil || config.TokenCeiling == nil || *config.TokenCeiling <= 0 ||
 		config.RunWindow == nil || h.tokenSpendReader == nil {
 		return false, nil
@@ -42,7 +42,20 @@ func (h *taskEventHandler) deferIfOverTokenCeiling(
 	}
 	spent, err := h.tokenSpendSince(ctx, config.Assignee, since)
 	if err != nil {
-		return false, err
+		// The window budget is advisory: an unreadable spend must not stop the
+		// spawn, or a vault-api dial failure would exit ConsumeMessage and
+		// restart the executor for every assignee at once (Sentry NUKE-DEV-H1).
+		// Fail open, admit the spawn, and let the reconcile loop re-evaluate
+		// once the read recovers. Logged and counted so the failure is not
+		// silent.
+		glog.Warningf(
+			"event=token_ceiling_read_failed task=%s assignee=%s err=%v: failing open, spawn admitted",
+			task.TaskIdentifier,
+			config.Assignee,
+			err,
+		)
+		metrics.TokenCeilingReadFailedTotal.Inc()
+		return false, nil
 	}
 	if spent < *config.TokenCeiling {
 		return false, nil
