@@ -112,31 +112,11 @@ func (h *taskEventHandler) evalDeferredRespawns(ctx context.Context) error {
 		outcome, err := h.spawnIfNeededClaimed(ctx, entry.task, &entry.config, &replay.claim)
 		spawned := outcome.spawned()
 		if err != nil {
-			// A single failed Job create (e.g. a Job the API server rejects) must
-			// not exit the process and starve every other due entry. The entry is
-			// not re-parked; the reconcile floor re-drives the task. Every other
-			// error stays fatal.
-			var refusalErr *triggerRefusalWriteError
-			if stderrors.As(err, &refusalErr) {
-				glog.Warningf(
-					"event=deferred_respawn_refusal_write_failed task=%s err=%v",
-					entry.task.TaskIdentifier, err,
-				)
-				metrics.TaskEventsTotal.WithLabelValues("deferred_respawn_refusal_write_failed").
-					Inc()
-				h.clearQueuedAtStampIfNotDeferred(entry.task.TaskIdentifier)
-				continue
-			}
-			var spawnErr *spawnJobError
-			if stderrors.As(err, &spawnErr) {
-				glog.Warningf(
-					"event=deferred_respawn_spawn_failed task=%s err=%v",
-					entry.task.TaskIdentifier, err,
-				)
-				metrics.TaskEventsTotal.WithLabelValues("deferred_respawn_spawn_failed").Inc()
-				// The entry was removed during collection and no spawn replaced
-				// it, so the queued_at record must not outlive the deferral.
-				h.clearQueuedAtStampIfNotDeferred(entry.task.TaskIdentifier)
+			// A single failed spawn attempt must not exit the process and starve
+			// every other due entry. handleDeferredReplayError carves out the
+			// errors a bad entry may produce (a failed refusal write, a failed Job
+			// create, a transient API-server read); any other error stays fatal.
+			if h.handleDeferredReplayError(entry.task, err) {
 				continue
 			}
 			return errors.Wrapf(
@@ -164,6 +144,45 @@ func (h *taskEventHandler) evalDeferredRespawns(ctx context.Context) error {
 		metrics.TaskEventsTotal.WithLabelValues("respawn_after_grace_window").Inc()
 	}
 	return nil
+}
+
+// handleDeferredReplayError classifies a failed spawn attempt for one deferred
+// entry and reports whether the loop must skip the entry rather than return the
+// error. The three carve-outs are the ones a single bad entry must not turn into
+// a process restart: a failed refusal write, a failed Job create, and a transient
+// API-server read failure. In every case the entry was already removed from the
+// map and is not re-parked; the reconcile floor re-drives the task.
+func (h *taskEventHandler) handleDeferredReplayError(task lib.Task, err error) bool {
+	var refusalErr *triggerRefusalWriteError
+	if stderrors.As(err, &refusalErr) {
+		glog.Warningf(
+			"event=deferred_respawn_refusal_write_failed task=%s err=%v",
+			task.TaskIdentifier, err,
+		)
+		metrics.TaskEventsTotal.WithLabelValues("deferred_respawn_refusal_write_failed").Inc()
+		h.clearQueuedAtStampIfNotDeferred(task.TaskIdentifier)
+		return true
+	}
+	var spawnErr *spawnJobError
+	if stderrors.As(err, &spawnErr) {
+		glog.Warningf(
+			"event=deferred_respawn_spawn_failed task=%s err=%v",
+			task.TaskIdentifier, err,
+		)
+		metrics.TaskEventsTotal.WithLabelValues("deferred_respawn_spawn_failed").Inc()
+		h.clearQueuedAtStampIfNotDeferred(task.TaskIdentifier)
+		return true
+	}
+	var transientErr *jobLookupTransientError
+	if stderrors.As(err, &transientErr) {
+		glog.Warningf(
+			"event=deferred_respawn_transient_error task=%s err=%v",
+			task.TaskIdentifier, err,
+		)
+		h.clearQueuedAtStampIfNotDeferred(task.TaskIdentifier)
+		return true
+	}
+	return false
 }
 
 // removeDeferredEntry removes any pending deferred-respawn entry for the given
@@ -353,8 +372,23 @@ func (h *taskEventHandler) RunDeferredRespawnLoop(ctx context.Context) error {
 			return nil
 		case <-ticker.C:
 			if err := h.evalDeferredRespawns(ctx); err != nil {
-				return errors.Wrapf(ctx, err, "deferred respawn loop tick")
+				if handleDeferredTickError(ctx, err) {
+					return nil
+				}
 			}
 		}
 	}
+}
+
+// handleDeferredTickError decides what a failed deferred-respawn tick does to the
+// loop. A cancelled context stops it gracefully; any other error is logged and
+// the loop continues, so one bad tick cannot end service.Run and restart the
+// executor pod. The reconcile floor re-drives whatever the failed tick skipped.
+// Defence in depth behind evalDeferredRespawns' own typed carve-outs.
+func handleDeferredTickError(ctx context.Context, err error) (stop bool) {
+	if ctx.Err() != nil {
+		return true
+	}
+	glog.Warningf("event=deferred_respawn_loop_tick_error err=%v; continuing", err)
+	return false
 }

@@ -51,15 +51,17 @@ func (e *jobLookupDeniedError) Unwrap() error { return e.err }
 
 // isJobLookupDenied reports whether err is a read the API server refused on
 // identity grounds. It matches only Unauthorized and Forbidden: a 404 means the
-// resource resolved and the grant is fine, a 429 is worth retrying, and a 500
-// is a real fault that must stay fatal.
+// resource resolved and the grant is fine, and a 429 or 5xx is transient — see
+// isJobLookupTransient.
 func isJobLookupDenied(err error) bool {
 	return apierrors.IsUnauthorized(err) || apierrors.IsForbidden(err)
 }
 
 // wrapJobLookupError wraps a failed active-job read. A denial becomes a
-// jobLookupDeniedError so the caller can defer instead of failing the message;
-// every other error keeps its existing wrapped form and stays fatal.
+// jobLookupDeniedError so the caller can defer instead of failing the message; a
+// transient failure becomes a jobLookupTransientError so the deferred-respawn
+// loop can log and skip it; every other error keeps its existing wrapped form
+// and stays fatal.
 func wrapJobLookupError(
 	ctx context.Context,
 	err error,
@@ -68,15 +70,18 @@ func wrapJobLookupError(
 	format string,
 	args ...any,
 ) error {
-	if !isJobLookupDenied(err) {
-		return errors.Wrapf(ctx, err, format, args...)
+	if isJobLookupDenied(err) {
+		return errors.Wrapf(
+			ctx,
+			&jobLookupDeniedError{err: err, assignee: assignee, namespace: namespace},
+			format,
+			args...,
+		)
 	}
-	return errors.Wrapf(
-		ctx,
-		&jobLookupDeniedError{err: err, assignee: assignee, namespace: namespace},
-		format,
-		args...,
-	)
+	if isJobLookupTransient(err) {
+		return errors.Wrapf(ctx, &jobLookupTransientError{err: err}, format, args...)
+	}
+	return errors.Wrapf(ctx, err, format, args...)
 }
 
 // assigneeOf returns the Config's assignee, or the empty string for a nil

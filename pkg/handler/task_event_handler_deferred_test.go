@@ -22,6 +22,8 @@ import (
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 	"github.com/prometheus/client_golang/prometheus/testutil"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	"k8s.io/apimachinery/pkg/runtime/schema"
 
 	agentv1 "github.com/bborbe/agent-task-executor/k8s/apis/agent.benjamin-borbe.de/v1"
 	"github.com/bborbe/agent-task-executor/mocks"
@@ -400,6 +402,51 @@ var _ = Describe("TaskEventHandler", func() {
 						),
 					) - before,
 				).To(Equal(float64(1)))
+			})
+
+			It(
+				"skips a deferred entry whose job lookup fails transiently instead of returning the error",
+				func() {
+					currentDateTime.SetNow(libtimetest.ParseDateTime(insideGrace))
+					task := buildGraceTask(domain.TaskPhaseExecution, 0, 3)
+					Expect(h.ConsumeMessage(ctx, buildMsg(task))).To(Succeed())
+					Expect(fakeSpawner.SpawnJobCallCount()).To(Equal(0))
+
+					// The API server is now transiently unavailable. Before the fix this 503
+					// propagated out of evalDeferredRespawns, RunDeferredRespawnLoop returned
+					// the tick error, service.Run ended and the executor pod restarted
+					// (NUKE-DEV-GT).
+					fakeSpawner.IsJobActiveReturns(
+						false,
+						apierrors.NewServiceUnavailable("apiserver not ready"),
+					)
+					currentDateTime.SetNow(libtimetest.ParseDateTime(graceExpiredR))
+
+					var evalErr error
+					out := deferredGateCaptureStderr(
+						func() { evalErr = h.EvalDeferredRespawns(ctx) },
+					)
+					Expect(evalErr).To(BeNil())
+					Expect(fakeSpawner.SpawnJobCallCount()).To(Equal(0))
+					Expect(out).To(ContainSubstring("event=deferred_respawn_transient_error"))
+					Expect(out).To(ContainSubstring("task=tid-deferred-037"))
+				},
+			)
+
+			It("still returns a non-transient job lookup error from evalDeferredRespawns", func() {
+				currentDateTime.SetNow(libtimetest.ParseDateTime(insideGrace))
+				task := buildGraceTask(domain.TaskPhaseExecution, 0, 3)
+				Expect(h.ConsumeMessage(ctx, buildMsg(task))).To(Succeed())
+				Expect(fakeSpawner.SpawnJobCallCount()).To(Equal(0))
+
+				// A 404 is neither a denial nor transient, so it must stay fatal.
+				fakeSpawner.IsJobActiveReturns(
+					false,
+					apierrors.NewNotFound(schema.GroupResource{Resource: "jobs"}, "missing"),
+				)
+				currentDateTime.SetNow(libtimetest.ParseDateTime(graceExpiredR))
+
+				Expect(h.EvalDeferredRespawns(ctx)).NotTo(Succeed())
 			})
 
 			It("deferred re-eval bound: no spawn before grace+R, spawn at grace+60s", func() {
