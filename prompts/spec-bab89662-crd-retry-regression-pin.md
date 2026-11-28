@@ -1,7 +1,7 @@
 ---
 spec: ["bug-bab89662fe73a8bf4a0014d6f78791b3"]
 status: draft
-created: "2026-11-19T09:21:48Z"
+created: "2026-11-28T00:27:55Z"
 ---
 
 # Pin the CRD conflict retry's re-Get contract
@@ -28,20 +28,27 @@ Read `pkg/k8s_connector_test.go` (package `pkg_test`, Ginkgo):
 - `differingCRD()` — a stored CRD whose spec deliberately differs, so the update path is taken.
 - `crdResource` — the `schema.GroupResource` used to construct an `apierrors.NewConflict`.
 - `countVerb(actions, verb)` — the helper that counts actions by verb.
+- `fakeBuilder(cs)` — the `pkg.CRDClientBuilder` that returns the fake clientset.
 - the spec `"retries the update when the CRD was modified concurrently"` — the test to extend. It currently asserts only `conflicts == 1` and `countVerb(..., "update") == 2`, which a stale-object retry also satisfies.
 - the spec `"returns a wrapped error when Get fails with a non-NotFound error"` — the existing precedent for a reactor returning a non-conflict API error and asserting the wrapped message.
 
 Read `pkg/k8s_connector_internal_test.go` for the adjacent `crdSpecEqual` specs (do not duplicate them). The Ginkgo suite bootstrap lives in `pkg/suite_test.go` (`TestPkg`, package `pkg_test`) and serves both `package pkg` and `package pkg_test` test files in this directory — do not add another `RunSpecs`.
 
-Read `/home/node/.claude/plugins/marketplaces/coding/docs/go-testing-guide.md` for the external-test-package and Ginkgo conventions this repo follows, and `/home/node/.claude/plugins/marketplaces/coding/docs/changelog-guide.md` for the entry shape, the `test:` conventional prefix, and the `## Unreleased` placement rule.
+Read these coding-plugin guides at `/home/node/.claude/plugins/marketplaces/coding/docs/`:
+- `go-testing-guide.md` — the external-test-package and Ginkgo v2/Gomega conventions this repo follows.
+- `changelog-guide.md` — the entry shape, the `test:` conventional prefix, and the `## Unreleased` placement rule (it goes directly above the highest `## v` heading; the existing preamble is frozen).
 
-The fix itself is already recorded in `CHANGELOG.md` under the released heading `## v0.18.12` (the bullet beginning "a concurrent rollout of the executors no longer kills the losers…"). This prompt adds test coverage only; it must not restate or re-implement that fix. The current changelog has no `## Unreleased` section — the top version heading is `## v0.67.0` — so requirement 3 creates one directly above it.
+Verified facts (do not re-derive):
+- The fix is already at repo HEAD (commit `9c9b454`, "fix: retry the Config CRD update on conflict, skip the no-op write") and is recorded in `CHANGELOG.md` under the released heading `## v0.18.12` (the bullet beginning "a concurrent rollout of the executors no longer kills the losers…"). This prompt adds test coverage only; it must not restate or re-implement that fix.
+- The current changelog has no `## Unreleased` section. Its preamble is `# Changelog`, a blank line, the "All notable changes…" line, a blank line, then the first version heading `## v0.71.2`. Requirement 3 creates `## Unreleased` directly above `## v0.71.2`.
+- The fake clientset records an action even when a `PrependReactor` handles it: the existing passing assertion that two `update` actions are recorded already proves the first (reactor-handled) update is still counted. So the action sequence for the conflict test is exactly `get, update, get, update`.
+- The wrap in `ensureCRD` is `errors.Wrapf(ctx, err, "update CRD")`, so a wrapped `update CRD` message is what `SetupCustomResourceDefinition` returns when the update fails.
 
 Note on scope (open question for the human reviewer): the spec's Recommended Fix says "Deploy commit 9c9b454 … to nuke-dev". Deployment is an operator action against a live cluster and cannot be performed by this container agent, so it is deliberately excluded here. This prompt covers the only agent-executable residual: the regression pin.
 </context>
 
 <requirements>
-1. In `pkg/k8s_connector_test.go`, extend the existing spec `"retries the update when the CRD was modified concurrently"` (inside `Describe("SetupCustomResourceDefinition")`) with an assertion on the recorded action sequence, appended immediately after the existing `Expect(countVerb(cs.Actions(), "update")).To(Equal(2))` line. The fake clientset records an action even when a `PrependReactor` handles it (the existing passing assertion that two `update` actions are recorded already proves this: the first update is reactor-handled and still counted), so the sequence is exactly `get`, `update`, `get`, `update`.
+1. In `pkg/k8s_connector_test.go`, extend the existing spec `"retries the update when the CRD was modified concurrently"` (inside `Describe("SetupCustomResourceDefinition")`) with an assertion on the recorded action sequence, appended immediately after the existing `Expect(countVerb(cs.Actions(), "update")).To(Equal(2))` line.
 
    Add, with a comment stating the mutation it catches (a `Get` hoisted out of the `RetryOnConflict` closure and retried only on the `Update` would keep the same two update actions and still pass without this):
 
@@ -88,7 +95,7 @@ Note on scope (open question for the human reviewer): the spec's Recommended Fix
 
    `ctx` is set by the outer `Describe("K8sConnector")` `BeforeEach`. Every identifier used (`fake`, `rest`, `k8stesting`, `runtime`, `apierrors`, `stderrors`, `pkg`, `differingCRD`, `fakeBuilder`, `ctx`) is already imported or declared in this file — add no imports. The `"update CRD"` substring matches the wrap in `ensureCRD` (`errors.Wrapf(ctx, err, "update CRD")`).
 
-3. Add a `## Unreleased` section to `CHANGELOG.md` directly above the first `## v` heading. The preamble is `# Changelog`, a blank line, then the "All notable changes…" line; the first version heading is `## v0.67.0`. Do not create a second `## Unreleased` (there is none today), and do not touch any released heading. Put exactly one bullet in it, in the file's existing voice (`- <prefix>: **bold summary.** prose`), using the `test:` prefix from the changelog guide:
+3. Add a `## Unreleased` section to `CHANGELOG.md` directly above the first `## v` heading. The preamble is `# Changelog`, a blank line, then the "All notable changes…" line; the first version heading is `## v0.71.2`. Do not create a second `## Unreleased` (there is none today), do not touch the frozen preamble, and do not touch any released heading. Put exactly one bullet in it, in the file's existing voice (`- <prefix>: **bold summary.** prose`), using the `test:` prefix from the changelog guide:
 
    ```
    - test: **the CRD install path's conflict retry is pinned at the interleaving, not just the write count.** A retry only helps because each attempt re-reads `configs.agent.benjamin-borbe.de` and therefore writes a fresh `resourceVersion`; the previous assertion counted two `Update` actions, which a retry that replayed the object fetched before the loop would also satisfy. The spec now asserts `get, update, get, update`, and a second spec pins that an `Update` failing for a non-conflict reason surfaces as a wrapped `update CRD` error after exactly one attempt instead of being retried. No behaviour change.
@@ -98,7 +105,7 @@ Note on scope (open question for the human reviewer): the spec's Recommended Fix
 </requirements>
 
 <constraints>
-- This prompt is test-and-changelog only. Do NOT leave any modification to `pkg/k8s_connector.go` or any other production file. The temporary mutation in `<verification>` is the only permitted edit to a production file and MUST be reverted; the final test run is the proof it was reverted.
+- This prompt is test-and-changelog only. Do NOT modify `pkg/k8s_connector.go` or any other production file.
 - Do NOT add handling for a concurrent `Create` (an `AlreadyExists` on the create path) and do NOT broaden the retry to non-conflict errors. Those would be behaviour changes outside this prompt's scope.
 - Do NOT add a new test file and do NOT add another `RunSpecs`; the suite bootstrap is `pkg/suite_test.go`.
 - Do NOT duplicate the `crdSpecEqual` specs in `pkg/k8s_connector_internal_test.go`.
@@ -114,11 +121,10 @@ Run from the repository root:
 ```bash
 go test -mod=mod -count=1 ./pkg/
 make precommit
-grep -c '^## Unreleased$' CHANGELOG.md
-awk '/^## /{sec=$0} /conflict retry is pinned at the interleaving/{print sec}' CHANGELOG.md
+grep -q '^## Unreleased$' CHANGELOG.md && echo UNRELEASED_HEADER_OK
+grep -q 'conflict retry is pinned at the interleaving' CHANGELOG.md && echo BULLET_PRESENT_OK
+awk '/^## /{sec=$0} /conflict retry is pinned at the interleaving/{print sec; exit}' CHANGELOG.md
 ```
 
-`make precommit` must pass. `grep -c '^## Unreleased$' CHANGELOG.md` must print `1`, and the `awk` line must print `## Unreleased` — together these prove the bullet landed in the unreleased section rather than under a released version.
-
-Then confirm the pin is real by mutating `ensureCRD` temporarily: move the `crds.Get(ctx, crdName, metav1.GetOptions{})` call outside the `retry.RetryOnConflict` closure (capture its result and error before the call and reuse them inside the closure), run `go test -mod=mod -count=1 ./pkg/`, and confirm the extended conflict spec fails (the `get` count is 1, not 2, and the recorded verbs are `get, update, update`). Revert the mutation and re-run `go test -mod=mod -count=1 ./pkg/` to green. Run the final `make precommit` only after the revert — a forgotten mutation makes the extended spec fail, so a green `make precommit` is itself the proof that the production file was restored.
+`go test -mod=mod -count=1 ./pkg/` and `make precommit` must pass. The two `grep -q` lines must each print their `_OK` sentinel. The `awk` line must print `## Unreleased` — that proves the bullet landed in the unreleased section rather than under a released version.
 </verification>
